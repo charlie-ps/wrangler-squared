@@ -8,9 +8,9 @@ import { JobRunner, IDLE_RECEIPT_GRACE_MS } from './job-runner.js';
 import { jobPrompt } from './job-prompts.js';
 import { JobGithub, prSummary } from './job-github.js';
 import { normaliseComments, commentsBlockMerge } from './job-comments.js';
-import { jobReportTool, getJobContextTool } from './mcp/tools/job-report.js';
-import { allowedToolsArg } from './mcp/client-config.js';
-import { routeControlMessage } from './control/router.js';
+import { jobCreateHandler, jobActionHandler, jobSettingsHandler } from './handlers.js';
+import { _resetForTests, runnerFor } from './jobs.js';
+import { jobReportTool, getJobContextTool } from './tools.js';
 
 const input = { title: 'Reliable sign-in', intent: 'Customers can sign in reliably', repos: ['/repo'], reviewMerge: true };
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', after, brief: `Implement ${id}`, ...extra });
@@ -988,50 +988,82 @@ test('with session review off a completed session goes straight to done; request
 
 // --- MCP and control ---
 
-test('MCP receipts and context are caller-bound, launch-allowlisted, and carry the job and run only', async (t) => {
+// Both halves in the EXTENSION signatures: a tool is `handler({ host, caller }, args)`
+// and a control handler is `handler(msg, host)`, so core's `deps` and `ctx.reply`
+// are gone — `host.stores.jobs`, `host.rebuild()` and `host.broadcast()` stand in
+// (server/tools.js, server/handlers.js). The launch allowlist assertions went with
+// them: an extension tool is registered and granted in the argv from one list, so
+// there is no second place left to drift.
+function fakeHost(f) {
+  const host = { stores: { jobs: f.store }, rebuilds: 0, broadcasts: [], log: () => {},
+    rebuild: async () => { host.rebuilds++; }, broadcast: (p) => host.broadcasts.push(p) };
+  return host;
+}
+// The runner is a per-process singleton built from the first façade it sees, and a
+// handler kicks it; stub its tick so a control test never reaches a real launch.
+function stubRunner(t, host) {
+  _resetForTests();
+  t.after(_resetForTests);
+  let ticks = 0;
+  runnerFor(host).tick = async () => { ticks++; };
+  return () => ticks;
+}
+
+test('MCP receipts and context are caller-bound and carry the job and run only', async (t) => {
   const f = fixture(t); await f.approve(); const w = f.last();
-  const deps = { jobStore: f.store };
-  assert.equal((await getJobContextTool.handler({ deps, caller: 'other' })).structuredContent.job, null);
-  const ctx = (await getJobContextTool.handler({ deps, caller: w.sid })).structuredContent;
+  const host = fakeHost(f);
+  assert.equal((await getJobContextTool.handler({ host, caller: 'other' }, {})).structuredContent.job, null);
+  const ctx = (await getJobContextTool.handler({ host, caller: w.sid }, {})).structuredContent;
   assert.deepEqual(Object.keys(ctx).sort(), ['job', 'run']);
   assert.equal(ctx.run.id, w.run.id); assert.equal(ctx.job.plan.context, plan().context);
   const report = { kind: 'published', url: PR_URL };
-  assert.equal((await jobReportTool.handler({ deps, caller: 'other' }, { runId: w.run.id, report })).isError, true);
-  const amended = await jobReportTool.handler({ deps, caller: w.sid }, { runId: w.run.id, report: { kind: 'blocked', summary: 's', amendment: { reason: 'r', ops: [] } } });
+  assert.equal((await jobReportTool.handler({ host, caller: 'other' }, { runId: w.run.id, report })).isError, true);
+  const amended = await jobReportTool.handler({ host, caller: w.sid }, { runId: w.run.id, report: { kind: 'blocked', summary: 's', amendment: { reason: 'r', ops: [] } } });
   assert.equal(amended.isError, true); assert.match(amended.content[0].text, /amendment/);
-  assert.equal((await jobReportTool.handler({ deps, caller: w.sid }, { runId: w.run.id, report })).structuredContent.accepted, true);
+  assert.equal((await jobReportTool.handler({ host, caller: w.sid }, { runId: w.run.id, report })).structuredContent.accepted, true);
   assert.equal(f.sub().stage, 'pr');
+  assert.equal(host.rebuilds, 1, 'only an accepted receipt rebuilds the board');
   const suggested = fixture(t);
   await suggested.approve();
   const s = suggested.last();
-  await jobReportTool.handler({ deps: { jobStore: suggested.store }, caller: s.sid },
+  await jobReportTool.handler({ host: fakeHost(suggested), caller: s.sid },
     { runId: s.run.id, report: { kind: 'blocked', summary: 'The proto is out of date', move: 'split-out' } });
   assert.equal(suggested.sub().blocked.move, 'split-out');
-  assert.match(allowedToolsArg({ checklist: false }), /job_report/); assert.match(allowedToolsArg(), /get_job_context/);
 });
 
-test('job control routes validate input and return a concrete creation acknowledgement', async (t) => {
-  const f = fixture(t), sent = [];
-  const ctx = { jobStore: f.store, rebuild: async () => {}, reply: (x) => sent.push(x) };
-  await routeControlMessage(JSON.stringify({ type: 'job-create', job: input }), ctx);
-  assert.equal(sent[0].type, 'job-created'); assert.equal(sent[0].started, false);
-  assert.equal(f.store.get(sent[0].jobId).stage, 'backlog');
-  let ticks = 0;
-  await routeControlMessage(JSON.stringify({ type: 'job-create', start: true, job: input }), { ...ctx, runJobs: async () => { ticks++; } });
-  assert.equal(sent[1].type, 'job-created'); assert.equal(sent[1].started, true);
-  assert.equal(f.store.get(sent[1].jobId).stage, 'planning', 'the main action skips the backlog');
-  assert.equal(ticks, 1, 'the runner is kicked so planning launches without waiting for the next tick');
-  await routeControlMessage(JSON.stringify({ type: 'job-settings', patch: { concurrency: 0 } }), ctx);
-  assert.equal(sent[2].type, 'error'); assert.equal(f.store.snapshot().settings.concurrency, 2);
+test('job-create acknowledges the creation by broadcast and kicks the runner when it starts one', async (t) => {
+  const f = fixture(t);
+  const host = fakeHost(f);
+  const ticks = stubRunner(t, host);
+  await jobCreateHandler.handler({ job: input }, host);
+  assert.equal(host.broadcasts[0].event, 'job-created'); assert.equal(host.broadcasts[0].started, false);
+  assert.equal(f.store.get(host.broadcasts[0].jobId).stage, 'backlog');
+  assert.equal(ticks(), 0, 'a backlogged job waits for a human');
+  await jobCreateHandler.handler({ job: input, start: true }, host);
+  assert.equal(host.broadcasts[1].event, 'job-created'); assert.equal(host.broadcasts[1].started, true);
+  assert.equal(f.store.get(host.broadcasts[1].jobId).stage, 'planning', 'the main action skips the backlog');
+  assert.equal(ticks(), 1, 'the runner is kicked so planning launches without waiting for the next sweep');
+});
+
+test('an invalid job-settings patch is refused and leaves the settings alone', async (t) => {
+  const f = fixture(t);
+  const host = fakeHost(f);
+  // Core replied `{type:'error'}`; with no reply channel a throw is the whole
+  // answer, and the wrangler's router is what reports it.
+  await assert.rejects(jobSettingsHandler.handler({ patch: { concurrency: 0 } }, host));
+  assert.equal(f.store.snapshot().settings.concurrency, 2);
+  assert.equal(host.rebuilds, 0, 'a refused patch does not rebuild');
+  await jobSettingsHandler.handler({ patch: { concurrency: 4 } }, host);
+  assert.equal(f.store.snapshot().settings.concurrency, 4);
 });
 
 test('a move arrives as a job-action with its own fields and reaches the store whole', async (t) => {
   const f = fixture(t); await f.approve(); f.alive.clear(); await f.tick();
-  const sent = [];
-  const ctx = { jobStore: f.store, rebuild: async () => {}, runJobs: async () => {}, reply: (x) => sent.push(x) };
-  await routeControlMessage(JSON.stringify({ type: 'job-action', id: f.job.id, subJobId: 'api', action: 'split-out',
-    title: 'Sync the proto', brief: 'Regenerate the proto', position: 'after', note: 'small one' }), ctx);
-  assert.equal(sent[0].type, 'job-action-complete');
+  const host = fakeHost(f);
+  stubRunner(t, host);
+  await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'split-out',
+    title: 'Sync the proto', brief: 'Regenerate the proto', position: 'after', note: 'small one' }, host);
+  assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id }]);
   assert.deepEqual(f.store.get(f.job.id).subJobs.map((s) => s.id), ['api', 'api-2']);
 });
 
