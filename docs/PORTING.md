@@ -54,7 +54,8 @@ shape, new body · **new** · **stub** = compiles, does nothing, marked.
 | `public/util.js`, `public/icons.js` | `public/util.js` (esc, tildify), `public/icons.js` (ROBOT_ICON, PULL_REQUEST_ICON) | vendored | |
 | `skills/job-worker/` | `agent-skills/skills/job-worker/` | verbatim | **inert** until the API can load an extension's skills (gap below) |
 | `server/*.test.js` (moves, deploys, comments, spend) | same | verbatim | pass |
-| `legacy-tests/*.test.mjs` | `server/jobs.test.js`, `job-runtime.test.js`, `jobs-integration.test.js`, `public/jobs-view.test.js` | copied, **not run** | import wrangler core (`session-manager`, `mcp/server`, `control/router`, `client-config`); see Tests |
+| `server/jobs.test.js`, `public/jobs-view.test.js` | `server/jobs.test.js`, `public/jobs-view.test.js` | ported | the view suite verbatim; the store/runner suite verbatim bar its MCP/control region, rewired onto `./tools.js` + `./handlers.js` |
+| `legacy-tests/*.test.mjs` | `server/job-runtime.test.js`, `jobs-integration.test.js` | copied, **not run** | still import wrangler core (`session-manager`, `mcp/server`); see Tests |
 
 Not ported (core-side by nature — see "Core PRs" below): `tmux-scraper.js`
 `trustDialogState` + the `classify()` needs-you rule, `session-manager.js`
@@ -116,11 +117,11 @@ on and that belong on `main` as their own small PRs:
 
 ## Tests
 
-`npm test` runs `server/*.test.js` and `public/*.test.js` (46 tests, all green
-at hand-off). The four pure suites (moves, deploys, comments, spend) pass
-unchanged; `server/manifest.test.js` is the fake-host pattern to copy (handler
-and tool signatures, the `onBeforeDispatch` binding, gates, graph contributor),
-and `public/index.test.js` mounts the client module under happy-dom the way
+`npm test` runs `server/*.test.js` and `public/*.test.js` (168 tests, all
+green). The four pure suites (moves, deploys, comments, spend) pass unchanged;
+`server/manifest.test.js` is the fake-host pattern to copy (handler and tool
+signatures, the `onBeforeDispatch` binding, gates, graph contributor), and
+`public/index.test.js` mounts the client module under happy-dom the way
 `public/slots.js` does.
 
 Verified against a real wrangler (API worktree, isolated `AW_DATA_DIR`, extension
@@ -138,20 +139,23 @@ session).
 as-is (kept as `.mjs` so the wrangler's own-file import scan never sees them —
 see the README there). Porting them:
 
-- `jobs.test.js` — mostly store/runner/prompt tests that only need import paths
-  changed (`./mcp/tools/job-report.js` → `./tools.js`, tool handlers now take
-  `{ host, caller }` with `host.stores.jobs`/`host.rebuild`). Drop the
-  `allowedToolsArg` assertions — the two-place rule is derived for extension tools.
+- `jobs.test.js` — **ported** to `server/jobs.test.js`. Everything outside its
+  "MCP and control" region moved verbatim; that region now builds a fake `host`
+  (`{ stores: { jobs }, rebuild, broadcast, log }`) and drives `./tools.js` and
+  `./handlers.js` directly. `ctx.reply({type})` became `host.broadcast({event})`,
+  the invalid-settings reply became a throw, and the `allowedToolsArg` assertions
+  are gone — the two-place rule is derived for extension tools. The runner
+  singleton a handler kicks is stubbed via `_resetForTests()` + `runnerFor(host)`
+  so no control test reaches a real launch.
 - `job-runtime.test.js` — drove a real `SessionManager`; rewrite against a fake
   `host` (`{ sessions: { spawn, get, archive, wake }, tasks: { assign }, stores, rebuild, log }`).
   The trust-dialog cases go away with gap 7.
 - `jobs-integration.test.js` — spun up the wrangler's HTTP/WS/MCP stack; replace
   with a manifest-level test that drives tools/handlers with a fake host, plus one
   test that `validateManifest` (from the API worktree) accepts the manifest.
-- `jobs-view.test.js` (happy-dom) — should run once moved to `public/` and its
-  `initJobsView` call is given the same `onSession`/`onDiff`/`onBoard` stubs
-  `public/index.js` passes; `document.getElementById('jobs')`/`job-dialog` must
-  exist in the happy-dom document first.
+- `jobs-view.test.js` (happy-dom) — **ported** to `public/jobs-view.test.js`,
+  verbatim: it builds its own happy-dom document and `initJobsView` stubs, so the
+  move alone was enough once `./jobs-view.js` and `./jobs.js` resolved as siblings.
 
 ## Running it for real
 
@@ -174,8 +178,9 @@ see the README there). Porting them:
 1. `AW_REPO=~/IdeaProjects/agent-wrangler-worktree-ext-api node scripts/validate-manifest.mjs`
    runs discovery, `validateManifest`, `loadExtensions` and `buildHostApi` against
    the real loader; keep it green. Then the scanner by hand: `grep -rn "from '\.\./index\.js'\|/host-api/\|session-manager\.js\|state-reader\.js\|tmux-scraper\.js" --include=*.js . | grep -v node_modules` must be empty.
-2. Port `legacy-tests/jobs.test.js` and `jobs-view.test.js` (cheap, high
-   coverage); rewrite `job-runtime.test.js` over a fake host.
+2. ~~Port `legacy-tests/jobs.test.js` and `jobs-view.test.js`~~ (done — 168
+   tests); rewrite `job-runtime.test.js` over a fake host, and replace
+   `jobs-integration.test.mjs` with manifest-level tests.
 3. Boot a dev wrangler with the extension copied in (`scripts/dev-smoke.mjs`
    covers the wire; open the Jobs view in a browser for the CSS), start planning
    on a real job and watch a `plan` receipt land via `job_report` — the first
