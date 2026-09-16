@@ -1,0 +1,33 @@
+{
+  "name": "wrangler-squared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Automated jobs for Agent Wrangler, as an installable extension",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test --import ./test-setup.js 'server/*.test.js' 'public/*.test.js'"
+  },
+  "wranglerExtension": {
+    "id": "jobs",
+    "label": "Automated jobs (Wrangler²)",
+    "description": "Plan a goal into Jira stories and PRs, run each step as its own bounded agent session in a dedicated worktree, and gate the risky moments (plan, code, merge) on a human.",
+    "author": "PortSwigger",
+    "homepage": "https://github.com/charlie-ps/wrangler-squared",
+    "requires": [
+      "sessions:read", "sessions:spawn", "sessions:archive", "sessions:wake",
+      "tasks:write",
+      "board:rebuild", "board:broadcast"
+    ]
+  },
+  "dependencies": {
+    "yaml": "^2.9.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.14.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
