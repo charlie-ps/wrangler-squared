@@ -1,0 +1,207 @@
+
+/* Automated jobs: decisions and receipts stay separate from session transcripts. */
+#jobs { flex:1; min-width:0; overflow:auto; padding:28px 24px 18px; background:var(--bg); }
+#jobs.hidden { display:none; }
+.jobs-header { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:22px; }
+.jobs-kicker { font-size:10px; font-weight:700; letter-spacing:.16em; color:var(--cyan); }
+.jobs-header h1 { font-size:32px; letter-spacing:-.04em; margin:5px 0; }
+.jobs-header p { color:var(--fg-muted); margin:0; font-size:13px; }
+.jobs-toolbar,.jobs-filters { display:flex; align-items:center; flex-wrap:wrap; gap:12px; font-size:12px; }
+.jobs-toolbar { padding:12px 14px; background:var(--surface); border:1px solid var(--border-muted); border-radius:10px; }
+.jobs-toolbar label,.jobs-filters label { display:flex; align-items:center; gap:7px; }
+.jobs-toolbar input[type=number] { width:56px; }
+.jobs-cost-note { margin-left:auto; color:var(--fg-muted); font-size:11px; }
+.jobs-filters { margin:18px 0; }
+.jobs-filters select { max-width:280px; }
+#jobs-active-count { margin-left:auto; color:var(--fg-muted); font-variant-numeric:tabular-nums; }
+#jobs-review-count { background:var(--pill-needs-bg); color:var(--red-fg); border-radius:5px; padding:1px 5px; font-size:10px; }
+.jobs-boards { display:flex; flex-direction:column; gap:22px; padding-bottom:12px; }
+.job-board { border:1px solid var(--border-muted); border-radius:14px; padding:16px; background:var(--surface-2); }
+.job-board-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:14px; }
+.job-board-title { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.job-board-open { display:block; padding:0; border:0; background:transparent; color:var(--fg); font-family:inherit; text-align:left; cursor:pointer; }
+.job-board-open h2 { font-size:17px; font-weight:650; letter-spacing:-.02em; line-height:1.35; margin:0; overflow-wrap:anywhere; }
+.job-board-open:hover h2 { color:var(--blue-fg); }
+.job-board-open:focus-visible { outline:2px solid var(--blue); outline-offset:3px; border-radius:4px; }
+.job-board-meta { font-size:11px; color:var(--fg-muted); }
+.job-board-side { display:flex; align-items:center; gap:12px; flex-shrink:0; font-size:11px; }
+.job-board-needs { background:var(--pill-needs-bg); color:var(--red-fg); border-radius:5px; padding:2px 7px; font-size:10px; font-weight:600; }
+/* The total price of a job, the one number a human scans a board for: sized up to
+   read as a headline figure rather than another muted pill, tabular so digits don't
+   jitter as it ticks up on the ~4s graph. */
+.job-board-cost { font-size:15px; font-weight:650; color:var(--fg); letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+.job-detail-cost { font-size:11px; color:var(--fg-muted); font-variant-numeric:tabular-nums; margin-left:12px; }
+.job-board-columns { display:grid; grid-template-columns:repeat(var(--job-columns,8),minmax(200px,1fr)); gap:12px; overflow-x:auto; }
+.job-board-lane { font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--fg-subtle); margin:0 0 8px; }
+.job-board-columns+.job-board-lane { margin-top:16px; }
+.job-board-sessions { grid-template-columns:repeat(4,minmax(200px,1fr)); }
+.job-plan-kind { display:block; line-height:1.5; color:var(--fg-muted); }
+.job-column { background:var(--surface); border:1px solid var(--border-muted); border-radius:12px; padding:12px; min-width:0; }
+.job-column>header { display:flex; align-items:flex-start; gap:7px; min-height:35px; }
+.job-column h2 { font-size:12px; font-weight:650; line-height:1.45; margin:0; }
+.job-column-number { font-size:10px; color:var(--fg-subtle); padding-top:2px; font-variant-numeric:tabular-nums; }
+.job-column-count { font-size:10px; color:var(--fg-muted); margin-left:auto; border:1px solid var(--border-muted); border-radius:5px; padding:1px 5px; }
+.job-column>p { color:var(--fg-subtle); font-size:10px; margin:6px 0 15px; }
+.job-column-cards { display:flex; flex-direction:column; gap:10px; }
+.job-card { display:flex; flex-direction:column; width:100%; text-align:left; gap:10px; padding:15px 13px; background:var(--bg); border:1px solid var(--border-muted); border-radius:9px; color:var(--fg); cursor:pointer; font-family:inherit; box-shadow:0 2px 5px var(--shadow); transition:border-color .15s,transform .15s; }
+.job-card:hover { border-color:var(--blue); transform:translateY(-1px); }
+.job-card:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
+.job-card-review { border-left:3px solid var(--snooze); }
+/* A card carrying an event is the one to look at first, so red wins over the
+   amber "needs you" edge — this rule follows it deliberately. */
+.job-card-event { border-left:3px solid var(--red); }
+.job-card-done { opacity:.7; }
+.job-card>strong { font-size:13px; line-height:1.5; overflow-wrap:anywhere; font-weight:600; }
+.job-card-eyebrow { display:flex; align-items:center; gap:7px; font-size:9px; color:var(--fg-subtle); letter-spacing:.06em; text-transform:uppercase; max-width:100%; }
+.job-card-eyebrow>span:not(.job-kind) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.job-card-meta,.job-card-deps,.job-card-deploys,.job-card-note,.job-card-cost { font-size:10px; line-height:1.5; color:var(--fg-muted); }
+.job-card-note { color:var(--fg); }
+.job-card-cost { font-variant-numeric:tabular-nums; }
+.job-card-deps { border-top:1px solid var(--border-muted); padding-top:9px; }
+.job-status { display:inline-flex; align-items:center; gap:6px; font-size:10px; line-height:1.4; color:var(--fg-muted); }
+.job-status i { display:block; flex-shrink:0; width:5px; height:5px; border-radius:50%; background:currentColor; }
+.job-status.needs { color:var(--snooze-fg); }
+.job-status.working,.job-status.done { color:var(--green-fg); }
+.job-empty { padding:35px 8px; text-align:center; font-size:11px; line-height:1.8; color:var(--fg-subtle); border:1px dashed var(--border-muted); border-radius:8px; }
+.job-empty-quiet { padding:22px 8px; }
+.jobs-empty { padding:60px 20px; font-size:13px; }
+.job-dialog { position:fixed; inset:0; margin:auto; width:min(920px,90vw); max-height:88vh; overflow:auto; box-sizing:border-box; background:var(--surface); color:var(--fg); border:1px solid var(--border); border-radius:14px; padding:28px; box-shadow:0 20px 70px var(--shadow); font-family:var(--font); }
+.job-dialog::backdrop { background:var(--overlay); backdrop-filter:blur(3px); }
+.job-dialog-close { position:absolute; top:12px; right:12px; font-size:23px; border:0; background:transparent; color:var(--fg-muted); cursor:pointer; }
+.job-dialog h2 { font-size:24px; line-height:1.35; margin:8px 30px 12px 0; }
+.job-dialog h3 { margin:24px 0 10px; font-size:12px; font-weight:650; }
+.job-dialog h3 small { color:var(--fg-muted); font-weight:400; margin-left:8px; }
+.job-dialog p { font-size:12px; line-height:1.6; color:var(--fg-muted); overflow-wrap:anywhere; }
+.job-dialog a { color:var(--blue-fg); text-decoration:none; }
+.job-dialog input:not([type=checkbox]),.job-dialog textarea,.job-dialog select,#jobs input[type=number],#jobs select { font:inherit; background:var(--field-bg); color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:8px; box-sizing:border-box; }
+.job-dialog form>label,.job-form-row>label { display:flex; flex-direction:column; gap:7px; font-size:12px; margin:16px 0; }
+.job-dialog textarea { width:100%; resize:vertical; }
+.job-dialog label small { color:var(--fg-muted); }
+.job-dialog fieldset { border:1px solid var(--border-muted); border-radius:8px; margin:18px 0; padding:12px; font-size:12px; }
+.job-dialog fieldset label { display:flex; align-items:center; gap:8px; margin:10px 0; }
+.job-form-row { display:flex; gap:16px; }
+.job-form-row>label { flex:1; min-width:0; }
+.job-stories { display:grid; gap:8px; }
+.job-stories>div { background:var(--surface-2); border-radius:7px; padding:12px; font-size:12px; }
+.job-stories p { margin:5px 0 0; }
+.job-stories label { display:flex; align-items:center; gap:10px; }
+.job-stories label input { flex:1; min-width:0; font-size:12px; font-weight:650; }
+.job-story-key { flex:none; color:var(--blue-fg); font-size:11px; font-variant-numeric:tabular-nums; }
+.job-story-key.job-story-new { color:var(--fg-muted); border:1px dashed var(--border-muted); border-radius:5px; padding:1px 6px; }
+/* Sub-job kind chip — one vocabulary for the two kinds wherever a sub-job appears:
+   PR (blue, pull-request glyph) or an agent session on this machine (purple, robot).
+   --kind is the single hue each surface reads, so a box's edge, its chip and the
+   legend can never disagree. */
+.job-kind { --kind:var(--blue-fg); display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border-radius:4px; font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; color:var(--kind); background:color-mix(in srgb, var(--kind) 14%, transparent); border:1px solid color-mix(in srgb, var(--kind) 40%, transparent); }
+.job-kind.session { --kind:var(--purple); }
+.job-kind .icon { width:11px; height:11px; }
+.job-detail-meta .job-kind { vertical-align:middle; margin-right:2px; }
+/* The plan graph: a column per wave, a box per sub-job, arrows traced by
+   job-graph.js layoutGraphEdges over the boxes' rendered rectangles. The SVG is
+   inside the scrolling canvas so arrows scroll with their boxes. */
+.job-graph-legend { display:flex; flex-wrap:wrap; align-items:center; gap:6px 18px; margin:0 0 14px; font-size:11px; color:var(--fg-muted); }
+.job-graph-legend .job-kind { margin-right:5px; }
+.job-graph-scroll { overflow-x:auto; padding-bottom:6px; }
+/* The canvas's floor is exactly the grid's own minimum (200px columns, 60px gaps) so the
+   SVG that fills it always reaches the last column's right edge. */
+.job-graph-canvas { position:relative; min-width:calc(var(--waves,1) * 260px - 60px); }
+.job-graph-columns { display:grid; grid-template-columns:repeat(var(--waves,1), minmax(200px,1fr)); gap:60px; align-items:start; }
+.job-graph-col { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.job-graph-col>h4 { margin:0 0 2px; font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--fg-subtle); }
+.job-graph-edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+.job-graph-edges path { fill:none; stroke:var(--fg-subtle); stroke-width:1.5; }
+.job-graph-edges marker path { fill:var(--fg-subtle); stroke:none; }
+.job-node { --kind:var(--blue-fg); position:relative; display:flex; flex-direction:column; gap:8px; width:100%; box-sizing:border-box; padding:12px 12px 12px 14px; background:var(--bg); border:1px solid var(--border-muted); border-left:3px solid var(--kind); border-radius:9px; color:var(--fg); font:inherit; font-size:12px; text-align:left; }
+.job-node.session { --kind:var(--purple); }
+.job-node.done { opacity:.7; }
+button.job-node { cursor:pointer; transition:border-color .15s; }
+button.job-node:hover { border-color:var(--blue); border-left-color:var(--kind); }
+button.job-node:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.job-node-head { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.job-node-head .job-plan-story { margin:0; color:var(--fg-muted); }
+.job-node>strong { font-size:12px; line-height:1.45; font-weight:600; overflow-wrap:anywhere; }
+.job-node input:not([type=checkbox]) { width:100%; font-size:12px; font-weight:600; }
+.job-node .job-plan-kind,.job-node .job-plan-repo,.job-node-line { font-size:11px; line-height:1.5; color:var(--fg-muted); }
+.job-plan-branch { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; line-height:1.5; color:var(--fg-muted); overflow-wrap:anywhere; }
+.job-node-deps { font-size:11px; color:var(--fg-muted); }
+.job-node-deps summary { line-height:1.5; }
+.job-node-deps label { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; margin:8px 0 0; color:var(--fg); }
+.job-node-deps label>span:last-child { flex-basis:100%; line-height:1.4; }
+.job-node-deps>span { display:block; margin-top:8px; }
+.job-receipt,.job-checks { list-style:none; padding:0; margin:8px 0; font-size:12px; line-height:1.7; }
+.job-receipt li,.job-checks li { padding:3px 0; overflow-wrap:anywhere; }
+.job-receipt li>span { color:var(--green-fg); margin-right:5px; }
+.job-checks small { color:var(--fg-muted); margin-left:6px; }
+.job-note,.job-context { color:var(--fg) !important; background:var(--field-bg); padding:12px; border:1px solid var(--border-muted); border-radius:6px; }
+.job-deploys { margin:8px 0 0; }
+.job-actions { display:flex; flex-wrap:wrap; gap:8px; margin:22px 0 12px; }
+.job-more { margin:18px 0; padding:12px; border:1px solid var(--border-muted); border-radius:7px; font-size:12px; color:var(--fg-muted); }
+.job-more summary,.job-dialog summary { cursor:pointer; }
+.job-more code { display:block; overflow-wrap:anywhere; margin-top:14px; }
+.job-more label { display:block; margin:14px 0 0; }
+.job-dependency-list { display:flex; flex-direction:column; gap:5px; font-size:12px; margin-top:15px; color:var(--fg-muted); }
+.job-error { color:var(--red-fg) !important; background:var(--danger-bg); border:1px solid var(--danger-border); padding:12px; border-radius:7px; }
+.job-repair { border-left:2px solid var(--snooze); padding:0 12px; font-size:12px; margin-bottom:15px; }
+.job-repair details { color:var(--fg-muted); }
+.job-detail-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:25px; padding-top:15px; border-top:1px solid var(--border-muted); }
+.job-detail-footer>span { color:var(--fg-subtle); font-size:10px; }
+.job-footer-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.job-intent { white-space:pre-wrap; }
+.job-pipeline-status { font-size:12px; color:var(--fg-muted); }
+@media(max-width:700px) { #jobs { padding:20px 12px; } .job-board-header { flex-direction:column; } .jobs-cost-note { margin-left:0; } .job-dialog { padding:20px; width:95vw; } .jobs-header h1 { font-size:26px; } .job-form-row { flex-direction:column; gap:0; } .job-moves { grid-template-columns:repeat(2,1fr); } }
+@media(prefers-reduced-motion:reduce) { .job-card,button.job-node { transition:none; } }
+.layouts button[data-view=jobs] { position:relative; }
+.jobs-nav-badge { position:absolute; top:0; right:0; min-width:13px; padding:1px 3px; border-radius:5px; background:var(--snooze); color:var(--bar-on); font-size:9px; font-weight:700; line-height:1.3; }
+.jobs-nav-badge[hidden] { display:none; }
+.job-plan-repo,.job-plan-story { display:block; line-height:1.5; overflow-wrap:anywhere; }
+.job-plan-story { margin-top:6px; color:var(--blue-fg); font-size:11px; }
+.job-checks .passed,.job-pipeline-status.passed { color:var(--green-fg); }
+.job-checks .failed,.job-pipeline-status.failed { color:var(--red-fg); }
+/* PR comment triage shading: the three verdicts reuse the shared status hues
+   (--green all good / --snooze amber needs attention / --red blocks merging). */
+.job-comment-summary { --verdict:var(--fg-muted); font-size:12px; line-height:1.6; padding:12px; border-radius:7px; overflow-wrap:anywhere; color:var(--fg); background:color-mix(in srgb, var(--verdict) 12%, transparent); border:1px solid color-mix(in srgb, var(--verdict) 35%, transparent); }
+.job-comment-summary b { color:var(--verdict); margin-right:6px; }
+.job-comment-summary.green { --verdict:var(--green-fg); }
+.job-comment-summary.amber { --verdict:var(--snooze-fg); }
+.job-comment-summary.red { --verdict:var(--red-fg); }
+.job-comment-summary.pending { color:var(--fg-muted); }
+.job-comments-none { margin:8px 0; }
+/* Workflow-trigger findings and a stalled deployment reuse the amber verdict box: same "needs a human, not blocking" register. */
+.job-comments { list-style:none; padding:0; margin:10px 0 0; max-height:320px; overflow:auto; border:1px solid var(--border-muted); border-radius:7px; }
+.job-comments li { padding:10px 12px; border-top:1px solid var(--border-muted); font-size:12px; }
+.job-comments li:first-child { border-top:0; }
+.job-comments li.resolved { opacity:.6; }
+.job-comment-meta { display:block; font-size:10px; color:var(--fg-muted); margin-bottom:4px; overflow-wrap:anywhere; }
+/* Each row is meta plus a disclosure; the body only exists while expanded, so
+   the list stays scannable however long a review comment is. */
+.job-comment-toggle { padding:2px 7px; font-size:10px; background:transparent; color:var(--fg-muted); }
+.job-comment-toggle:hover { background:var(--border-muted); color:var(--fg); }
+.job-comments p { margin:8px 0 0; white-space:pre-wrap; color:var(--fg); }
+.job-card-comments { font-size:10px; line-height:1.5; color:var(--fg-muted); }
+.job-card-comments.green { color:var(--green-fg); }
+.job-card-comments.amber { color:var(--snooze-fg); }
+.job-card-comments.red { color:var(--red-fg); }
+/* An event is what went wrong, in the same danger register as .job-error: a dot,
+   the short title, the agent's own sentence, and the move it named. */
+.job-event { display:grid; grid-template-columns:auto 1fr; gap:11px; align-items:start; margin:18px 0; padding:12px; border-radius:7px; background:var(--danger-bg); border:1px solid var(--danger-border); font-size:12px; }
+.job-event>i { display:block; width:7px; height:7px; margin-top:5px; border-radius:50%; background:var(--red-fg); }
+.job-event b { color:var(--red-fg); }
+.job-event p { margin:6px 0 0; color:var(--fg); }
+.job-event-move { display:inline-block; margin-top:9px; font-size:11px; color:var(--fg-muted); }
+/* The moves as one grid of equal choices: the human picks, so no move is
+   pre-selected — the one the agent suggested is merely outlined. */
+.job-moves { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:8px 0 4px; }
+.job-move { display:flex; flex-direction:column; align-items:flex-start; gap:5px; width:100%; box-sizing:border-box; padding:11px 12px; text-align:left; background:var(--bg); border:1px solid var(--border-muted); border-radius:8px; color:var(--fg); font:inherit; font-size:12px; cursor:pointer; }
+.job-move:hover { border-color:var(--blue); }
+.job-move:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.job-move b { font-weight:650; }
+.job-move span { font-size:11px; line-height:1.5; color:var(--fg-muted); }
+.job-move.hot { border-color:var(--blue); box-shadow:inset 0 0 0 1px var(--blue); }
+.job-move-deps label>span:last-child { color:var(--fg); }
+/* Every human intervention in the job, newest first, folded away until asked for. */
+.job-moves-history summary { font-size:12px; }
+.job-move-log { list-style:none; padding:0; margin:12px 0 0; font-size:12px; }
+.job-move-log li { display:flex; justify-content:space-between; align-items:baseline; gap:14px; padding:7px 0; border-top:1px solid var(--border-muted); line-height:1.5; overflow-wrap:anywhere; }
+.job-move-log li:first-child { border-top:0; }
+.job-move-log small { flex:none; color:var(--fg-subtle); font-size:10px; }
+.job-dialog .job-error[hidden] { display:none; }
