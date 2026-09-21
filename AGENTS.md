@@ -85,8 +85,11 @@ which host-API gaps block which feature).
 
 - `npm test` — `node --test` over `server/*.test.js` and `public/*.test.js`, with
   `test-setup.js` redirecting `AW_DATA_DIR` so no test touches
-  `~/.agent-wrangler/jobs.json`. `legacy-tests/` is deliberately OUTSIDE the glob
-  (see `docs/PORTING.md`, "Tests").
+  `~/.agent-wrangler/jobs.json`. `server/test-helpers.js` holds the one fake host
+  every server suite builds on; it is not `*.test.js`, so the glob does not run
+  it as an empty suite. One test (`server/integration.test.js`) runs the real
+  loader's `validateManifest` and SKIPS unless `AW_REPO` is set (see
+  `docs/PORTING.md`, "Tests").
 - Dev install without git: **copy** (never symlink — discovery only sees real
   directories) this checkout, `node_modules` included, to
   `<AW_DATA_DIR>/extensions/jobs` of a run-dev wrangler instance and restart it

@@ -1,51 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import manifest from './manifest.js';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { JobStore } from './job-store.js';
 import { placeholderBranch } from './job-prompts.js';
 import { _resetForTests, runnerFor, statusOf } from './jobs.js';
-
-// The fake-host pattern every ported suite should use (docs/PORTING.md, Tests):
-// a JobStore on its own temp file (the manifest's factory would share one
-// jobs.json across every test in the process), plus the façade keys the manifest
-// declares in `requires` — and nothing else, so a test fails the moment code
-// reaches for a capability the manifest did not ask for.
-function fakeHost() {
-  const spawned = [];
-  const broadcasts = [];
-  const archived = [];
-  const sessions = new Map();
-  const host = {
-    id: 'jobs', version: '1.0.0', log: () => {},
-    stores: { jobs: new JobStore(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wsq-')), 'jobs.json')) },
-    rebuild: async () => { host.rebuilds++; },
-    rebuilds: 0,
-    broadcast: (p) => broadcasts.push(p),
-    sessions: {
-      spawn: async (opts) => {
-        const sessionId = `s_${spawned.length + 1}`;
-        spawned.push({ sessionId, ...opts });
-        // What the wrangler settles on: the branch it was asked for, in the
-        // folder beside the repo (session-manager.js resolveWorktree).
-        const worktree = opts.worktree
-          ? { branch: opts.worktree.branch, path: `${opts.cwd}-worktree-${opts.worktree.branch}`, repoRoot: opts.cwd }
-          : null;
-        sessions.set(sessionId, { sessionId, archived: false, worktree });
-        // What the wrangler does inside dispatch(): fire onBeforeDispatch with the
-        // settled id and the worktree it just cut, before any pane starts.
-        manifest.session.onBeforeDispatch({ sessionId, cwd: opts.cwd, worktree, host });
-        return { sessionId, worktree };
-      },
-      get: (id) => sessions.get(id) ?? null,
-      archive: async (id) => { archived.push(id); const s = sessions.get(id); if (s) s.archived = true; },
-      wake: async () => {},
-    },
-  };
-  return { host, spawned, broadcasts, archived, sessions };
-}
+import { fakeHost } from './test-helpers.js';
 
 const tool = (name) => manifest.tools.find((t) => t.name === name);
 const handler = (type) => manifest.handlers.find((h) => h.type === type);
