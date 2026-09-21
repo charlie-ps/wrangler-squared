@@ -114,6 +114,10 @@ export class JobRuntime {
   // `sessions:archive` capability is archiveCascade — it kills the pane and
   // archives in one — so stop() is one call plus the same confirm-before-release
   // rule: a slot is never freed on a session that might still be running.
+  // TODO(host-api sessions:archive review:false): core's archive() skipped the
+  // paid memory review for an automationRun session; neither archive call here
+  // (stop, cleanup) can ask for that, so a retired step may bill a Haiku review
+  // whenever archiveReviewEnabled is on.
   async stop(run) {
     if (!run.sessionId) return;
     const before = this.host.sessions.get(run.sessionId);

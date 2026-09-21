@@ -2,9 +2,10 @@
 
 Developer notes for Wrangler² — the Agent Wrangler automated-jobs system as an
 installable extension. Only the non-obvious, durable things; point at code rather
-than re-deriving it. **Read `docs/PORTING.md` first**: this repo is a port in
-progress, and that file is the map (what came from where, what is stubbed, and
-which host-API gaps block which feature).
+than re-deriving it. **Read `docs/PORTING.md` first**: the port is functionally
+complete on host API 1.4.0, and that file is the map (what came from where, what
+stands in for what, and which of the eight open host-API gaps block which
+feature).
 
 ## What this is
 
@@ -48,8 +49,9 @@ which host-API gaps block which feature).
   The client's `api.send` is bound to THIS extension's handler types only; a frame
   of any other type (a core `resume`, say) is dropped browser-side.
 - **The runner is a per-process singleton built lazily from the first façade it
-  sees** (`server/jobs.js` `runnerFor`). A store factory gets only `{ id, log }`,
-  so the runner cannot be built where the store is; every tool/handler/sweep is
+  sees** (`server/jobs.js` `runnerFor`). A store factory gets
+  `{ id, extId, settings, log }` and no façade, so the runner cannot be built
+  where the store is; every tool/handler/sweep is
   handed the same façade object, so building on first use is safe.
 - **`onBeforeDispatch` ↔ launch correlation is positional** (`pendingLaunch`,
   `server/job-runtime.js`). The hook fires inside `host.sessions.spawn()` with the
