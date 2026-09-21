@@ -16,3 +16,17 @@ function expandTilde(p) {
 export const DATA_DIR = process.env.AW_DATA_DIR
   ? path.resolve(expandTilde(process.env.AW_DATA_DIR))
   : path.join(os.homedir(), '.agent-wrangler');
+
+// Where repositories are checked out on this machine: planning clones missing
+// repos here and workers treat it as read-only reference, so the prompts and the
+// planning launch's `addDirs` must agree on the one path. The default is the
+// author's layout; AW_CHECKOUTS_DIR overrides it.
+export const CHECKOUTS_DIR = process.env.AW_CHECKOUTS_DIR
+  ? path.resolve(expandTilde(process.env.AW_CHECKOUTS_DIR))
+  : path.join(os.homedir(), 'IdeaProjects');
+
+// The prompts show `~/…` where they can: shorter, and not the human's login name.
+export const displayPath = (p) => {
+  const home = os.homedir();
+  return p === home ? '~' : p.startsWith(home + path.sep) ? '~' + p.slice(home.length) : p;
+};

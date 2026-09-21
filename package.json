@@ -12,7 +12,7 @@
     "id": "jobs",
     "label": "Automated jobs (Wrangler²)",
     "description": "Plan a goal into Jira stories and PRs, run each step as its own bounded agent session in a dedicated worktree, and gate the risky moments (plan, code, merge) on a human.",
-    "author": "PortSwigger",
+    "author": "Charlie Goldstraw",
     "homepage": "https://github.com/charlie-ps/wrangler-squared",
     "requires": [
       "sessions:read", "sessions:spawn", "sessions:archive", "sessions:wake",

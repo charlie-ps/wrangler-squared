@@ -103,8 +103,8 @@ simply the absence of an option on them.
 
 | # | gap | closed by | note |
 |---|---|---|---|
-| 1 | spawn worktree options | agent-wrangler #169 (host API 1.4), adopted here in `8d4fd5b` | `spawn({ worktree: { branch, base, auto } })` cuts it, stamps `entry.worktree` and returns the record; the hook carries it too. **Residual**: spawn has no `adopt`, so a retry into an EXISTING `sub.worktree` launches with `cwd: existing.path` and no `worktree` option — the wrangler cuts nothing, the card gets no worktree record and `prepared` is called with `undefined` |
-| 2 | spawn `addDirs` | #169 | only the planning run passes `addDirs` (its `~/IdeaProjects`); a Codex worker's own worktree git dir is granted by the wrangler (`session-manager.js withCodexWorktreeAddDir`) |
+| 1 | spawn worktree options | agent-wrangler #169 (host API 1.4), adopted here in `c38b57d` | `spawn({ worktree: { branch, base, auto } })` cuts it, stamps `entry.worktree` and returns the record; the hook carries it too. **Residual**: spawn has no `adopt`, so a retry into an EXISTING `sub.worktree` launches with `cwd: existing.path` and no `worktree` option — the wrangler cuts nothing, the card gets no worktree record and `prepared` is called with `undefined` |
+| 2 | spawn `addDirs` | #169 | only the planning run passes `addDirs` (`CHECKOUTS_DIR`, `~/IdeaProjects` unless `AW_CHECKOUTS_DIR` says otherwise); a Codex worker's own worktree git dir is granted by the wrangler (`session-manager.js withCodexWorktreeAddDir`) |
 | 4 | pre-launch task/memory bind | #169 | `spawn({ taskId })` binds before the pane starts, which is the only ordering Codex honours. `tasks:write` left `requires`: the assign is spawn's own, not an escalation |
 | 6 | suspend | — | none was ever needed: `sessions:archive(sid, {cascade:false})` is archiveCascade, so it kills the pane and archives in one call |
 | 11 | client broadcast delivery | #167 (host API 1.2) | `api.onMessage` delivers this extension's `ext:jobs` frames, so the New-job dialog closes on the reply and toasts instead of waiting a graph tick |

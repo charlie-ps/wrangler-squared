@@ -1,5 +1,8 @@
 import path from 'node:path';
 import { reviewCode } from './jobs-schema.js';
+import { CHECKOUTS_DIR, displayPath } from './data-dir.js';
+
+const checkouts = displayPath(CHECKOUTS_DIR);
 
 
 // The worktree starts on a placeholder branch (job-runtime.js). The session
@@ -99,9 +102,9 @@ export function jobPrompt(job, sub, run) {
       '',
       'Split the goal into Jira stories and the sub-jobs that deliver them. A "pr" sub-job is one repository, one PR, one session: it works, commits, pushes and opens the PR. A "session" sub-job is work on this machine that is not a repository change (a one-off script or migration run, a console change, a spike whose findings later PRs need): no repo, a scratch workspace, a short receipt. Prefer a PR for anything that changes a repository.',
       'Search Jira READ-ONLY with your own tools and authenticated setup — do not infer Jira is unavailable because no Jira tool is listed. Reference an existing story by its real key; propose a new one with no key and, where you can tell, its project (the key prefix). Never invent keys or print credentials, and create, edit or transition NOTHING: the human approves the titles first and a separate step creates them.',
-      'Discover the repositories yourself: task memory, Jira references and local checkouts. Reuse a matching checkout; if one is missing, verify the GitHub owner and origin and clone it into ~/IdeaProjects/<repository-name> — never into this workspace, never over an existing directory. Leave every checkout unchanged (no reset, clean or branch switch). Report the verified absolute path so implementation can cut its own worktree beside it.',
+      `Discover the repositories yourself: task memory, Jira references and local checkouts. Reuse a matching checkout; if one is missing, verify the GitHub owner and origin and clone it into ${checkouts}/<repository-name> — never into this workspace, never over an existing directory. Leave every checkout unchanged (no reset, clean or branch switch). Report the verified absolute path so implementation can cut its own worktree beside it.`,
       'Write `context` ONCE for the whole job (≤2000 chars), the way a human writes a dispatch: the shared background, conventions and constraints every worker needs. Write each `brief` like a dispatch intent (≤500 chars) that refers to the context rather than repeating it.',
-      'Never describe deployments or verification steps: Wrangler reads the repository\'s own workflows to decide whether a merge deploys, and watches whatever GitHub starts. Give `check` (one line) ONLY when the pipeline cannot prove the change works where it lands, e.g. "helm list shows <chart> in dev and prod". A session sub-job has no check — its receipt is its check.',
+      'Never describe deployments or verification steps: Wrangler reads the repository\'s own workflows to decide whether a merge deploys, and watches whatever GitHub starts. Give `check` (one line) ONLY when the pipeline cannot prove the change works where it lands, e.g. "helm shows the release in dev and prod". A session sub-job has no check — its receipt is its check.',
       '`after` on a PR means DEPLOY AFTER; `after` on a session means START AFTER (its output is an input). Minimise both dependencies and PRs while keeping each piece independently deliverable. Do not propose branch names: the implementing session names its own.',
       job.plan || job.previousPlan || job.feedback ? `Previous plan / feedback: ${JSON.stringify({ plan: job.plan || job.previousPlan, feedback: job.feedback })}` : '',
       '',
@@ -176,7 +179,7 @@ export function jobPrompt(job, sub, run) {
       afterLine(job, sub),
       historyBlock(job, sub, run),
       '',
-      'Do it on this machine in this scratch workspace; no repository changes (report blocked if one is needed); checkouts under ~/IdeaProjects are read-only reference. Never modify production data. Record findings later work needs in task memory.',
+      `Do it on this machine in this scratch workspace; no repository changes (report blocked if one is needed); checkouts under ${checkouts} are read-only reference. Never modify production data. Record findings later work needs in task memory.`,
       '',
       report('kind:"completed", checks:["what you did and how you know"]'),
     ),

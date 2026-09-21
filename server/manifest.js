@@ -32,7 +32,7 @@ export default {
   label: 'Automated jobs (Wrangler²)',
   description: 'Plan a goal into Jira stories and PRs, run each step as its own bounded agent session in a dedicated worktree, and gate the risky moments (plan, code, merge) on a human.',
   help: 'Adds the Jobs view, the job_report and get_job_context tools and the job-worker skill. Jobs and their history stay in jobs.json across toggles.',
-  author: 'PortSwigger',
+  author: 'Charlie Goldstraw',
   homepage: 'https://github.com/charlie-ps/wrangler-squared',
   defaultEnabled: true,
   dir,
