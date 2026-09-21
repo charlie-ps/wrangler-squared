@@ -8,19 +8,20 @@ which host-API gaps block which feature).
 
 ## What this is
 
-- An **external extension** for agent-wrangler's extensions API. The API lives on
-  agent-wrangler's `claude/stack-127-pr-consolidation-2417e5` branch (PR #139,
-  with the HostApi façade PR #140 merged into it) plus PR #145
-  (`claude/third-party-extensions`) for installing from a git URL. Spec:
+- An **external extension** for agent-wrangler's extensions API, which is on
+  agent-wrangler `main` (host API 1.4.0). Spec:
   `docs/superpowers/specs/2026-09-11-extensions-api-design.md` in that repo.
-  Neither is on agent-wrangler `main` yet.
 - The wrangler clones this repo into `<DATA_DIR>/extensions/jobs/`, runs
   `npm ci --ignore-scripts`, and imports `index.js`. **The manifest `id` (`jobs`)
   MUST equal that directory name** or the asset route, provenance record and
   uninstall path disagree. `package.json`'s `wranglerExtension` block is what the
   human consents to BEFORE any code runs, so it and `server/manifest.js` are
   duplicated by design and must agree (`id`, and `requires` in the manifest may
-  not be WIDER than the block's).
+  not be WIDER than the block's). `requires` is the four `sessions:*` plus
+  `board:rebuild`/`board:broadcast` — **not** `tasks:write`: spawn's `taskId`
+  binds task memory and assigns the card itself, and it is documented as not an
+  escalation. `engines.wranglerApi` is `^1.4.0`, the release that added the
+  worktree/`addDirs`/`taskId`/PR-automation spawn options this repo depends on.
 - **`package-lock.json` is mandatory** — the wrangler refuses to install without
   one. Regenerate it after any dependency change.
 
@@ -28,7 +29,7 @@ which host-API gaps block which feature).
 
 - **Nothing here may import agent-wrangler.** The extension runs in the wrangler's
   process but reaches it ONLY through the per-extension `host` façade it is handed
-  (`host.sessions.*`, `host.tasks.*`, `host.rebuild()`, `host.broadcast()`,
+  (`host.sessions.*`, `host.rebuild()`, `host.broadcast()`,
   `host.stores.jobs`, `host.log`). Anything the façade lacks is a
   `TODO(host-api …)` comment at the call site AND a row in `docs/PORTING.md`.
   `grep -rn 'TODO(host-api' server public` is the live list.
@@ -55,10 +56,19 @@ which host-API gaps block which feature).
   card id but no tag saying which spawn it belongs to; one launch at a time
   (the runner's `busy` guard) is what makes the single pending slot correct.
   Don't add a second concurrent spawn path without a real tag.
-- **A job session has NO worktree record on its wrangler entry** (spawn has no
-  worktree options), so core's `name_branch` refuses it and `job_name_branch`
-  (`server/tools.js`) stands in, keeping `sub.worktree.branch` in step via
-  `noteBranchRename`. Prompts and the skill must name `job_name_branch`.
+- **The WRANGLER cuts a job's worktree**, not this extension:
+  `spawn({ worktree: { branch, base, auto } })` (host API 1.4) stamps
+  `entry.worktree` and returns the record, `onBeforeDispatch` carries it too, and
+  `server/job-runtime.js` only picks the base and merges its own `cleanupHead`
+  onto the record (nothing the host returns carries the commit a branch was cut
+  from, and cleanup's compare-and-delete needs it). So core's `name_branch`
+  applies to a job session and prompts and the skill must name it. There is no
+  rename hook, so `sub.worktree.branch` is kept in step by READING
+  `host.sessions.get(caller).worktree.branch` back in `server/tools.js`
+  (`syncBranch`, on both tools) and calling `noteBranchRename`. Residual: a retry
+  into an EXISTING worktree launches with `cwd: existing.path` and no `worktree`
+  option — spawn has no adopt — so the wrangler cuts nothing, the card gets no
+  worktree record and `prepared` is called with `undefined`.
 - **Client modules import their leaves RELATIVELY** (`./util.js`, `./icons.js`,
   vendored) rather than from the board by absolute URL, so the same files load
   under node for `public/*.test.js`. Don't switch them to `/util.js`.

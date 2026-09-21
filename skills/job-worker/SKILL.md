@@ -52,7 +52,7 @@ the `runId` from your prompt and the receipt kind it names.
   repository's* convention: read its CLAUDE.md / AGENTS.md / CONTRIBUTING for a
   stated rule, and look at existing remote branches and recently merged PRs
   (`git branch -r`, `gh pr list --state merged`) for the pattern actually in
-  use. Rename it **only** with the `job_name_branch` tool — never `git branch -m`,
+  use. Rename it **only** with the `name_branch` tool — never `git branch -m`,
   which leaves Wrangler's record (and the PR observer matching on it) behind.
   Never reuse an existing branch name, and never work on main/master.
 - Fetch before editing. Commit with the repo's own convention, prefixed with the

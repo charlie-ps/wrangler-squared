@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runFile } from './job-github.js';
 import { jobPrompt, placeholderBranch } from './job-prompts.js';
-import { createWorktree, removeWorktree, gitRepoRoot } from './git.js';
+import { removeWorktree, gitRepoRoot } from './git.js';
 
 // The one module that touches sessions — and therefore the one that had to be
 // REWRITTEN for the extension port rather than copied. In core (agent-wrangler
@@ -12,6 +12,11 @@ import { createWorktree, removeWorktree, gitRepoRoot } from './git.js';
 // façade (agent-wrangler server/host-api/v1.js) and nothing else. Every place the
 // façade is narrower than what core reached for is marked `TODO(host-api …)` and
 // listed in docs/PORTING.md with the capability that would close it.
+//
+// Host API 1.4: spawn takes the worktree, addDirs, task binding and PR-automation
+// options core's dispatch took, so the wrangler cuts the sub-job's worktree and
+// stamps the entry again — this module only decides the base and keeps the
+// cleanup head, which is the one fact no host projection carries.
 //
 // Same shape as core so job-runner.js is a verbatim copy: launch / stop / isAlive /
 // acceptTrustDialog / attributeSpend / cleanup / cleanupPlanning, plus
@@ -35,67 +40,72 @@ export class JobRuntime {
     const repo = planning ? '' : expandRepo(sub.repo);
     const existing = sub?.worktree;
     if (existing && !fs.existsSync(existing.path)) throw new Error('Worktree is missing; restore it before retrying');
-    let worktree = existing || null;
+    // A retry into an EXISTING worktree launches into it as a plain cwd: spawn
+    // has no adopt option, so the wrangler cuts nothing, the hook reports no
+    // worktree and `prepared` is called with undefined — the store's copy (with
+    // its cleanupHead and any rename) is already the record and must not be
+    // overwritten by a second, thinner one.
+    let worktree;
+    let cleanupHead;
     if (!planning && !existing) {
       await this.run('git', ['fetch', 'origin'], repo);
       const remote = JSON.parse(await this.run('gh', ['repo', 'view', '--json', 'defaultBranchRef'], repo));
+      // A ref name, never the main checkout's possibly-local HEAD: the wrangler
+      // hands it straight to `git worktree add -b` as the commit-ish.
       const base = `refs/remotes/origin/${remote.defaultBranchRef.name}`;
-      const cleanupHead = await this.run('git', ['rev-parse', '--verify', base], repo);
-      // TODO(host-api sessions:spawn worktree options): core passed
-      // `worktree: true, worktreeAuto: true, worktreeBase: base, worktreeBranch`
-      // to dispatch and the wrangler cut the worktree and stamped entry.worktree.
-      // spawn() has none of that, so the extension cuts it here and launches into
-      // it as a plain cwd. Consequences, all documented in docs/PORTING.md: no
-      // worktree guardrail prompt, no worktree record on the card, core's
-      // `name_branch` refuses the session (job_name_branch stands in), and the
-      // archive-time worktree cleanup offer never appears (cleanup() below owns it).
-      worktree = { ...(await createWorktree({ cwd: repo, branch: placeholderBranch(job, sub), baseRef: base })), cleanupHead };
+      // The commit the branch is cut from. cleanup()'s compare-and-delete needs
+      // it and neither the spawn result nor the hook payload carries it, so it
+      // is read here and merged onto the record the wrangler settles on.
+      cleanupHead = await this.run('git', ['rev-parse', '--verify', base], repo);
+      worktree = { branch: placeholderBranch(job, sub), base, auto: true };
     }
-    // TODO(host-api sessions:spawn addDirs): core granted a Codex worker its
-    // linked worktree's git metadata dirs (git.js gitMetadataDirs) and a planning
-    // run ~/IdeaProjects; spawn() cannot. A Codex PR sub-job will fail to
-    // fetch/commit until this lands.
-    //
     // Correlating the dispatch to this run: core stamped `automationRun` onto the
     // entry and called `onAutomationPrepared(sessionId, worktree)` BEFORE the pane
     // started, so a fast job_report always found its run bound. The extension's
     // equivalent is the `onBeforeDispatch` session hook (server/manifest.js),
-    // which fires inside spawn() with the settled card id — but carries no tag
-    // saying WHICH spawn it is for. `pendingLaunch` is that correlation: one
-    // launch at a time (job-runner.js's tick is serialised by `busy`), set before
-    // spawn, consumed by noteDispatch() from the hook.
+    // which fires inside spawn() with the settled card id and the worktree the
+    // wrangler cut — but carries no tag saying WHICH spawn it is for.
+    // `pendingLaunch` is that correlation: one launch at a time (job-runner.js's
+    // tick is serialised by `busy`), set before spawn, consumed by noteDispatch().
     // TODO(host-api sessions:spawn tag): a `tag` option echoed to onBeforeDispatch
     // would make this explicit rather than positional.
-    this.pendingLaunch = { prepared, worktree: existing ? null : worktree };
+    this.pendingLaunch = { prepared, cleanupHead };
     try {
       const result = await this.host.sessions.spawn({
-        cwd: worktree?.path || repo,
+        cwd: existing?.path || repo,
         agent: job.agent,
         model: job.model || undefined,
         intent: jobPrompt(job, sub, run),
+        ...(worktree ? { worktree } : {}),
+        // Planning discovers and clones checkouts, so it needs the parent of the
+        // repos it will find; a Codex worker's own worktree git dir is granted by
+        // the wrangler (session-manager.js withCodexWorktreeAddDir).
+        ...(planning ? { addDirs: [path.join(os.homedir(), 'IdeaProjects')] } : {}),
+        // Binds task memory before the pane starts, which is the only ordering a
+        // Codex session honours (it resolves its writable root once, at launch).
+        taskId: job.taskId || undefined,
+        // The runner drives this PR: core's nudge and auto-merge would be a
+        // second driver on the same branch.
+        autoMergeOnPass: false,
+        autoFixPrChecks: false,
       });
       // The hook did not fire (an older host, or a spawn that never reached
       // dispatch's hook site): bind late rather than not at all.
-      if (this.pendingLaunch) this.noteDispatch({ sessionId: result.sessionId });
-      // TODO(host-api memory bind): core bound task memory BEFORE launch
-      // (`bindMemory: (sid) => memoryStore.bindSession(sid, taskId)`), so
-      // AW_TASK_MEMORY pointed at the task from the first tool call. tasks.assign
-      // after spawn repoints the per-session symlink, which a running Claude
-      // follows and a running Codex does not (it reads the resolved dir at launch).
-      if (job.taskId) this.host.tasks.assign(result.sessionId, job.taskId);
+      if (this.pendingLaunch) this.noteDispatch({ sessionId: result.sessionId, worktree: result.worktree });
       return result;
     } finally {
       this.pendingLaunch = null;
     }
   }
 
-  // Called by the manifest's onBeforeDispatch hook with the settled card id.
+  // Called by the manifest's onBeforeDispatch hook with the settled card id and
+  // the worktree the wrangler cut for it (null when it cut none).
   // Returns false when no launch of ours is pending (an ordinary board dispatch).
-  noteDispatch({ sessionId }) {
+  noteDispatch({ sessionId, worktree }) {
     const p = this.pendingLaunch;
     if (!p) return false;
     this.pendingLaunch = null;
-    p.prepared(sessionId, p.worktree || undefined);
+    p.prepared(sessionId, worktree ? { ...worktree, cleanupHead: p.cleanupHead } : undefined);
     return true;
   }
 

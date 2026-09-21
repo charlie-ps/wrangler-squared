@@ -52,7 +52,7 @@ const mcp = async (body) => {
 };
 const list = await mcp({ method: 'tools/list', params: {} });
 const names = (list.result?.tools || []).map((t) => t.name);
-console.log('mcp tools/list has:', ['job_report', 'get_job_context', 'job_name_branch', 'spawn_session'].map((n) => `${n}=${names.includes(n)}`).join(' '));
+console.log('mcp tools/list has:', ['job_report', 'get_job_context', 'spawn_session'].map((n) => `${n}=${names.includes(n)}`).join(' '));
 const ctx = await mcp({ method: 'tools/call', params: { name: 'get_job_context', arguments: {} } });
 console.log('get_job_context:', JSON.stringify(ctx.result?.structuredContent ?? ctx.error));
 const bad = await mcp({ method: 'tools/call', params: { name: 'job_report', arguments: { runId: 'run_nope', report: { kind: 'blocked' } } } });

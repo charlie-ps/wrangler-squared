@@ -4,11 +4,16 @@ import { reviewCode } from './jobs-schema.js';
 
 // The worktree starts on a placeholder branch (job-runtime.js). The session
 // working inside the repository is the one that can read its convention, so
-// the rename is its job, through job_name_branch — never `git branch -m`, which
+// the rename is its job, through name_branch — never `git branch -m`, which
 // would leave Wrangler's record (and the PR observer matching on it) behind.
-export const placeholderBranch = (job, sub) => `job-${job.id.slice(-8)}-${sub?.id || 'plan'}`;
-const branchNaming = (job, sub) => (!sub?.worktree?.branch || sub.worktree.branch === placeholderBranch(job, sub))
-  ? `Your worktree branch${sub?.worktree?.branch ? ` (${sub.worktree.branch})` : ''} is a placeholder. Before pushing, rename it with the job_name_branch MCP tool (never git branch -m) in THIS repository's own branch-naming convention — read its CLAUDE.md, AGENTS.md or CONTRIBUTING and the names of recently merged PRs; this sub-job's Jira key is ${sub?.jiraKey}. Never reuse an existing branch name, and never main/master.`
+//
+// Minted in the charset the wrangler's own worktree branch sanitiser keeps
+// ([A-Za-z0-9-], session-manager.js resolveWorktree), so what the spawn asks for
+// is what it gets; `auto: true` may still append -2, -3… on collision, which is
+// why "is this still the placeholder" is a prefix test and not an equality.
+export const placeholderBranch = (job, sub) => `job-${job.id.slice(-8)}-${sub?.id || 'plan'}`.replace(/[^A-Za-z0-9-]/g, '-');
+const branchNaming = (job, sub) => (!sub?.worktree?.branch || sub.worktree.branch.startsWith(placeholderBranch(job, sub)))
+  ? `Your worktree branch${sub?.worktree?.branch ? ` (${sub.worktree.branch})` : ''} is a placeholder. Before pushing, rename it with the name_branch MCP tool (never git branch -m) in THIS repository's own branch-naming convention — read its CLAUDE.md, AGENTS.md or CONTRIBUTING and the names of recently merged PRs; this sub-job's Jira key is ${sub?.jiraKey}. Never reuse an existing branch name, and never main/master.`
   : `Your worktree branch is ${sub.worktree.branch}; keep it.`;
 
 // The receipt is the only thing that advances a job, so every prompt ends with

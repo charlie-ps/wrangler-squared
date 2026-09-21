@@ -23,11 +23,6 @@ export const dir = fileURLToPath(new URL('..', import.meta.url));
 // `automation` boolean threaded through both agent adapters. Runs AFTER
 // onBeforeDispatch by design, so at `phase: 'dispatch'` the run is already bound
 // and `sessionId` answers. Returning the full list keeps; `[]` suppresses.
-//
-// TODO(host-api extension skills): `skills: ['job-worker']` names a directory
-// under agent-wrangler's OWN agent-skills/skills/. An installed extension cannot
-// ship a skill today, so this repo's skills/job-worker/ is inert until either the
-// API grows a per-extension skills dir or the skill is copied into core.
 function skillsFor({ sessionId, skills, host }) {
   return isAutomated(host.stores.jobs, sessionId) ? skills : [];
 }
@@ -36,17 +31,16 @@ export default {
   id: 'jobs',
   label: 'Automated jobs (Wrangler²)',
   description: 'Plan a goal into Jira stories and PRs, run each step as its own bounded agent session in a dedicated worktree, and gate the risky moments (plan, code, merge) on a human.',
-  help: 'Adds the Jobs view, the job_report / get_job_context / job_name_branch tools and the job-worker skill. Jobs and their history stay in jobs.json across toggles.',
+  help: 'Adds the Jobs view, the job_report and get_job_context tools and the job-worker skill. Jobs and their history stay in jobs.json across toggles.',
   author: 'PortSwigger',
   homepage: 'https://github.com/charlie-ps/wrangler-squared',
   defaultEnabled: true,
   dir,
   requires: [
     'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:wake',
-    'tasks:write',
     'board:rebuild', 'board:broadcast',
   ],
-  engines: { wranglerApi: '^1.0.0' },
+  engines: { wranglerApi: '^1.4.0' },
 
   // Instantiated once by the wrangler with `{ id, log }`; the file path is the
   // extension's own choice (server/data-dir.js).
@@ -69,9 +63,10 @@ export default {
   },
 
   session: {
-    // Fires inside spawn() with the card id settled and no pane started — the one
-    // window in which the run can be bound before the agent's first job_report.
-    onBeforeDispatch: ({ sessionId, host }) => { runnerFor(host).runtime.noteDispatch({ sessionId }); },
+    // Fires inside spawn() with the card id settled, the worktree already cut and
+    // no pane started — the one window in which the run can be bound (and its
+    // worktree recorded) before the agent's first job_report.
+    onBeforeDispatch: ({ sessionId, worktree, host }) => { runnerFor(host).runtime.noteDispatch({ sessionId, worktree }); },
   },
 
   // The runner owns its own re-entry guard (`busy`) and only rebuilds after a

@@ -8,9 +8,9 @@ import { initJobsView } from './jobs-view.js';
 // What core's app.js did around the view and what stands in for it here:
 //  - `jobsView.update(graph.jobs)` on every graph  → update(el, session, graph).
 //  - `job-created` / `job-action-complete` replies closed the dialog and toasted
-//    → the server's `ext:jobs` broadcast is not routed to a client module yet
-//    (TODO(host-api client broadcast)), so the dialog is closed when the next
-//    graph shows the new job, and there is no toast.
+//    → the server's `host.broadcast` reaches us as an `ext:jobs` frame through
+//    the registrar's `onMessage`, so the dialog closes on the reply again; the
+//    toast is drawn in the view's own host because the board's is app.js-private.
 //  - "Open session" / "Review code in Wrangler" switched view, selected the card
 //    or opened the diff panel → the api has no navigation, so both send
 //    `job-open-session` (wakes a dormant card server-side) and the human picks
@@ -35,11 +35,49 @@ const AGENTS = [
 
 const ICON = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16M5 8h2M11 11h2M17 8h2"/></svg>';
 
+const TOAST_MS = 3000;
+
 export default {
   register(slots) {
     let view = null;
     let dialog = null;
-    let knownJobs = null;
+    let viewHost = null;
+    let toastTimer = null;
+
+    // One toast element at a time, inside the view's own host: the board exposes
+    // no toast to an extension, and a host that is display:none while another
+    // view is active hides it for free. textContent, never innerHTML — anything
+    // a frame carries is agent-written.
+    function toast(text) {
+      if (!viewHost) return;
+      clearTimeout(toastTimer);
+      viewHost.querySelector('.jobs-toast')?.remove();
+      const el = document.createElement('div');
+      el.className = 'jobs-toast';
+      el.setAttribute('role', 'status');
+      el.textContent = text;
+      viewHost.appendChild(el);
+      toastTimer = setTimeout(() => el.remove(), TOAST_MS);
+    }
+
+    // Subscribed on the REGISTRAR, not in mount(): a subscription taken here is
+    // taken exactly once per module load, so it can neither double up nor be
+    // lost while the view is unmounted (the board tears a view's host down when
+    // another view is active, and a frame that arrives then should still close
+    // the dialog). Optional because the manifest accepts host api ^1.0.0 while
+    // `onMessage` landed in 1.4 — an older board simply never delivers.
+    // The redraw is left to the next graph tick: the server rebuilt before it
+    // broadcast, and the frame carries only ids, not the new snapshot.
+    slots.onMessage?.((msg) => {
+      if (msg.event === 'job-created') {
+        view?.created();
+        toast(msg.started ? 'Job started — planning' : 'Job added to backlog');
+      } else if (msg.event === 'job-action-complete') {
+        view?.created();
+        toast('Job updated');
+      }
+    });
+
     slots.register('view', {
       id: 'board',
       label: 'Jobs',
@@ -50,6 +88,7 @@ export default {
         // ancestor cannot showModal(), and the host is hidden whenever another
         // view is active.
         el.innerHTML = '<section id="jobs" aria-label="Automated jobs"></section>';
+        viewHost = el;
         dialog = document.createElement('dialog');
         dialog.id = 'job-dialog';
         dialog.className = 'job-dialog';
@@ -69,18 +108,14 @@ export default {
       },
       update(el, session, graph) {
         if (!view || !graph?.jobs) return;
-        // Stand-in for the `job-created` reply: a job that was not in the last
-        // snapshot has just been created from the open form, so close it.
-        const ids = new Set((graph.jobs.jobs || []).map((j) => j.id));
-        if (knownJobs && [...ids].some((id) => !knownJobs.has(id))) view.created();
-        knownJobs = ids;
         view.update(graph.jobs);
       },
       unmount() {
+        clearTimeout(toastTimer);
         dialog?.remove();
         dialog = null;
         view = null;
-        knownJobs = null;
+        viewHost = null;
       },
     });
   },

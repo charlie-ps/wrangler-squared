@@ -3,10 +3,10 @@ import { kick } from './tools.js';
 // Control-WS handlers in the EXTENSION signature: `handler(msg, host)` — no
 // `ctx`, and therefore no `ctx.reply`. Core's control/handlers/jobs.js replied
 // `job-created` / `job-action-complete` so the board could close its dialog and
-// toast; the façade's `board:broadcast` is the only outbound channel and its
-// `type` is forced to `ext:jobs`, which the board does not yet route to an
-// extension's client (docs/PORTING.md, "client-side broadcast delivery"). The
-// client therefore reacts to the next graph instead (public/index.js).
+// toast; the façade's `board:broadcast` is the only outbound channel here, and
+// its `type` is forced to `ext:jobs`, which the board hands to this extension's
+// own client module (`onMessage`, public/index.js) — same dialog close and
+// toast, addressed by the forced type rather than by a reply.
 //
 // The types below are what `graph.extensions[].handlerTypes` announces, and what
 // the client façade's `send` is bound to — a frame of any other type is dropped

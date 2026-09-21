@@ -995,7 +995,7 @@ test('with session review off a completed session goes straight to done; request
 // them: an extension tool is registered and granted in the argv from one list, so
 // there is no second place left to drift.
 function fakeHost(f) {
-  const host = { stores: { jobs: f.store }, rebuilds: 0, broadcasts: [], log: () => {},
+  const host = { stores: { jobs: f.store }, sessions: { get: () => null }, rebuilds: 0, broadcasts: [], log: () => {},
     rebuild: async () => { host.rebuilds++; }, broadcast: (p) => host.broadcasts.push(p) };
   return host;
 }

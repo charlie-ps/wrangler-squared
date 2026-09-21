@@ -205,3 +205,7 @@ button.job-node:focus-visible { outline:2px solid var(--blue); outline-offset:2p
 .job-move-log li:first-child { border-top:0; }
 .job-move-log small { flex:none; color:var(--fg-subtle); font-size:10px; }
 .job-dialog .job-error[hidden] { display:none; }
+/* This extension's own toast: the board's is app.js-private and the client api
+   exposes none. Fixed to the viewport but parented to the view's host, so it is
+   hidden along with it whenever another view is on screen. */
+.jobs-toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:40; max-width:min(520px,90vw); padding:9px 16px; background:var(--surface); color:var(--fg); border:1px solid var(--border); border-radius:8px; box-shadow:0 4px 16px var(--shadow); font-family:var(--font); font-size:13px; }
