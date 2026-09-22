@@ -56,10 +56,11 @@ façade exposes nothing equivalent.
 | `server/job-prompts.js` | same | verbatim minus `adapterFor` | `modelLabel` prints the raw model value (gap 10); prompts name core's `name_branch` |
 | `server/headless-claude.js` | same | verbatim | the comment-triage one-shot; `cleanClaudeEnv` from local `clean-claude-env.js` |
 | `server/data-dir.js`, `atomic-json.js`, `log.js`, `clean-claude-env.js` | `server/data-dir.js`, `atomic-json.js`, `log.js`, `agents/claude.js` | copies | leaves the store and triage need before a façade exists |
-| `public/index.js` | `public/app.js` (jobs bits), `public/index.html` | new | the `view` contribution; mounts `#jobs` + `<dialog id=job-dialog>` on `<body>`; subscribes to its own `ext:jobs` frames via `api.onMessage` |
-| `public/jobs.js`, `jobs-view.js`, `job-graph.js` | same | verbatim | import `./util.js` / `./icons.js` (vendored) |
+| `public/index.js` | `public/app.js` (jobs bits), `public/index.html` | new | the `view` contribution; mounts `#jobs` + `<dialog id=job-dialog>` on `<body>`; subscribes to its own `ext:jobs` frames via `api.onMessage`; `badge()` gives the rail button the needs-you count (gap 16) |
+| `public/jobs.js`, `job-graph.js` | same | verbatim | import `./util.js` / `./icons.js` (vendored) |
+| `public/jobs-view.js` | same | verbatim minus the rail badge | `render()` no longer writes `#jobs-nav-badge`: that element was core's `index.html`, and the count is the `view` contribution's `badge()` now (gap 16). The in-view `#jobs-review-count` beside the Needs me filter is unchanged |
 | `public/diff-return.js` | same | verbatim, **unused** | the diff round trip needs client navigation (gap 12) |
-| `public/jobs.css` | `public/styles.css` diff | extracted | `#jobs.hidden` and `.jobs-nav-badge` rules are dead here (no rail badge element); adds this extension's own toast |
+| `public/jobs.css` | `public/styles.css` diff | extracted | the `#jobs.hidden` rule is dead here (core hides the view's HOST, not `#jobs`); the `.jobs-nav-badge` / `button[data-view=jobs]` rules went with gap 16, since the span and its positioning are core's now; adds this extension's own toast |
 | `public/util.js`, `public/icons.js` | `public/util.js` (esc, tildify), `public/icons.js` (ROBOT_ICON, PULL_REQUEST_ICON) | vendored | |
 | `skills/job-worker/` | `agent-skills/skills/job-worker/` | verbatim | **live** since agent-wrangler #170: the loader publishes `<dir>/skills/*`, `skillsFor` gates it per launch |
 | `server/test-helpers.js` | — | new | the one fake `host` every server suite builds on; deliberately not a `*.test.js` name |
@@ -112,6 +113,7 @@ simply the absence of an option on them.
 | 11 | client broadcast delivery | #167 (host API 1.2) | `api.onMessage` delivers this extension's `ext:jobs` frames, so the New-job dialog closes on the reply and toasts instead of waiting a graph tick |
 | 13 | extension skills | #170 | the loader publishes an installed extension's `skills/*` through `skill-catalog.js`; `skills: ['job-worker']` + `skillsFor` were already correct and simply started working |
 | 14 | PR automation off a job PR | #169 | `autoMergeOnPass: false` / `autoFixPrChecks: false` on spawn, so core's nudge and auto-merge are not a second driver on the runner's branch |
+| 16 | **rail-button count** | agent-wrangler `view` badge (host API 1.6) | core owned `<span id="jobs-nav-badge">` in `index.html` and jobs-view.js filled it, so the needs-you count showed from any view; the port lost the element with the file. A `view` contribution now carries `badge`, a function core calls where views already tick (`app.js updateExtViews` → `slots.syncHosts`, under the same try/catch-and-drop discipline as mount/update) and renders into a span it owns on the rail button it built — falsy or absent draws nothing. Smuggling a badge into `icon` markup was the alternative and was rejected: the rail is core's chrome, `#nav-rail button` has no `position`, and the next extension would re-invent it. Adopted here as `badge: () => needsMe` in `public/index.js`, counted off `graph.jobs` on every tick. `engines.wranglerApi` stays `^1.4.0`: an older board spreads the unknown key and ignores it, so it only loses the count |
 
 ### Also worth knowing
 

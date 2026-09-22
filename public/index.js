@@ -1,4 +1,5 @@
 import { initJobsView } from './jobs-view.js';
+import { jobCards, jobNeedsReview } from './jobs.js';
 
 // The client half: one `view` slot contribution (agent-wrangler public/slots.js),
 // which the board draws a rail button, a `#view=ext:jobs:board` route and a
@@ -43,6 +44,7 @@ export default {
     let dialog = null;
     let viewHost = null;
     let toastTimer = null;
+    let needsMe = 0;
 
     // One toast element at a time, inside the view's own host: the board exposes
     // no toast to an extension, and a host that is display:none while another
@@ -111,15 +113,33 @@ export default {
         });
       },
       update(el, session, graph) {
-        if (!view || !graph?.jobs) return;
+        if (!graph?.jobs) return;
+        // The rail count is every job that needs a human, NOT the subset the
+        // view is currently drawing: its filter, Needs me and Show finished are
+        // one human's view of the board, while the badge is what is waiting
+        // from any view. Counted here rather than inside badge() because this
+        // is the only place the graph is handed to us, and core reads the badge
+        // in the same syncHosts pass that has just called update.
+        needsMe = jobCards(graph.jobs.jobs).filter((c) => jobNeedsReview(c.job, c.sub)).length;
+        if (!view) return;
         view.update(graph.jobs);
       },
+      // What core's `<span id="jobs-nav-badge">` in index.html did when core
+      // owned Jobs: the needs-you count on the rail button, visible from any
+      // view. Core evaluates this on every graph tick and draws or hides its own
+      // span (agent-wrangler public/slots.js syncHosts); 0 draws nothing. The
+      // manifest's `^1.4.0` is deliberately NOT bumped for it — a board older
+      // than the badge simply spreads an unknown contribution key and ignores
+      // it, so the only thing lost is the count, and refusing to boot the whole
+      // extension over a rail decoration is the worse trade.
+      badge: () => needsMe,
       unmount() {
         clearTimeout(toastTimer);
         dialog?.remove();
         dialog = null;
         view = null;
         viewHost = null;
+        needsMe = 0;
       },
     });
   },

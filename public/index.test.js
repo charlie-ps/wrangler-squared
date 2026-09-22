@@ -52,6 +52,21 @@ test('a graph tick draws the job boards', () => {
   assert.match(el.querySelector('#jobs-boards').textContent, /Ship it/);
 });
 
+test('the rail badge counts every job that needs a human, whatever the view is drawing', () => {
+  const { el, c } = mountClient();
+  assert.equal(c.badge(), 0, 'before the first graph the rail draws nothing');
+  c.update(el, null, graphWith([job()]));
+  assert.equal(c.badge(), 0, 'a backlog job waiting on the runner is not waiting on a human');
+  // The second job is finished, so the view hides it behind Show finished — the
+  // badge still owes the human its count, which is the whole reason it is taken
+  // from graph.jobs rather than off the rendered board.
+  c.update(el, null, graphWith([job({ error: 'plan failed' }), job({ id: 'job_2', title: 'Old one', stage: 'done', error: 'cleanup failed' })]));
+  assert.equal(c.badge(), 2);
+  assert.doesNotMatch(el.querySelector('#jobs-boards').textContent, /Old one/, 'the finished job is filtered out of the view it is still counted in');
+  c.unmount(el);
+  assert.equal(c.badge(), 0, 'an unloaded extension leaves no stale count behind');
+});
+
 test('the toolbar sends only this extension\'s own handler types', () => {
   const { window, el, c, sent } = mountClient();
   c.update(el, null, graphWith([]));
