@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { line, id, jira, jiraProject, briefSchema, prUrlSchema, planSchema, isSessionSub, reviewCode } from './jobs-schema.js';
+import { line, id, jira, jiraProject, briefSchema, prUrlSchema, planSchema, isHumanSub, isPrSub, reviewCode } from './jobs-schema.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 
 // The seven moves a human would make by hand when a job goes wrong. Agents never
@@ -23,7 +23,7 @@ export const MOVE_ACTIONS = new Set(Object.keys(moveSchemas));
 // cannot land under a session that is working to the old one. Drop is allowed
 // live exactly as the cancel it renames was.
 const REFUSED_WHILE_LIVE = new Set(['split-out', 'new-ticket', 'reorder', 'mark', 'accept-red']);
-const UNMERGED = ['implementation', 'review', 'pr', 'session'];
+const UNMERGED = ['implementation', 'review', 'pr', 'session', 'human'];
 const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.subJobId === subId);
 const quoted = (title) => `“${title}”`;
 const both = (job, subId, fn) => {
@@ -47,7 +47,7 @@ function validatePlan(plan) {
 // The PR sub-job Split out and New ticket both add, validated against the plan
 // it would produce (edges included) before anything is committed.
 function addPrSubJob(job, sub, data, { storyId, jiraKey, story, position, buildSubJob }) {
-  if (isSessionSub(sub)) throw new Error('A session sub-job has no repository to open a PR in');
+  if (!isPrSub(sub)) throw new Error('This sub-job has no repository to open a PR in');
   const taken = new Set(job.plan.subJobs.map((s) => s.id));
   const spec = { id: freeId(taken, (n) => `${sub.id}-${n}`), title: data.title, kind: 'pr', repo: sub.repo,
     ...(storyId ? { storyId } : {}), after: [], brief: data.brief, ...(data.check ? { check: data.check } : {}), ...(jiraKey ? { jiraKey } : {}) };
@@ -106,6 +106,7 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
       sub.repairAllowance = (sub.repairAllowance || 0) + 1;
       return { detail: `Asked for a new commit on ${quoted(sub.title)}` };
     }
+    if (isHumanSub(sub)) throw new Error('Nothing runs this one, so there is nothing to run again');
     if (sub.stage === 'implementation' || sub.stage === 'session') {
       sub.note = data.note || null;
       sub.error = null; sub.blocked = null; sub.state = 'queued';
@@ -125,7 +126,7 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
   }
 
   if (move === 'split-out') {
-    if (isSessionSub(sub)) throw new Error('A session sub-job has no repository to open a PR in');
+    if (!isPrSub(sub)) throw new Error('This sub-job has no repository to open a PR in');
     if (!['implementation', 'review', 'pr', 'deployment'].includes(sub.stage)) throw new Error('Nothing left to split out of this sub-job');
     const merged = sub.stage === 'deployment';
     // A merged sub-job cannot wait for anything, and the dependants already wait
@@ -189,7 +190,7 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
     }
     if (sub.stage === 'cleanup') throw new Error('Sub-job has already finished');
     const checks = [data.note || 'Marked done by hand'];
-    if (isSessionSub(sub)) sub.result = { checks, at: now, receiptId: null };
+    if (!isPrSub(sub)) sub.result = { checks, at: now, receiptId: null };
     else sub.deployed = { at: now, checks, commit: sub.pr?.mergeCommit || null };
     sub.error = null; sub.blocked = null; sub.stage = 'cleanup'; sub.state = 'queued';
     return { detail: `Marked done: ${checks[0]}` };
@@ -200,7 +201,7 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
   // commit it was accepted at, so a later push or a different merge is judged
   // afresh — the acceptance never outlives the diff it was given for.
   if (move === 'accept-red') {
-    if (isSessionSub(sub)) throw new Error('A session sub-job has no pipeline to accept');
+    if (!isPrSub(sub)) throw new Error('This sub-job has no pipeline to accept');
     if (sub.stage === 'pr') {
       if (sub.pr?.checkStatus !== 'failing') throw new Error('The checks on this PR are not red');
       if (sub.pr.dirty) throw new Error('This PR has merge conflicts, which no override can merge through');

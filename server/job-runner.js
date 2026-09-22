@@ -1,4 +1,4 @@
-import { runnable, dependencySatisfied, dependenciesSatisfied, sessionDependenciesDone, MERGE_IS_DELIVERY } from './job-store.js';
+import { runnable, dependencySatisfied, dependenciesSatisfied, startDependenciesDone, MERGE_IS_DELIVERY } from './job-store.js';
 import { summariseComments, commentsBlockMerge } from './job-comments.js';
 import { awaitsTicket } from './jobs-schema.js';
 import { logWarn } from './log.js';
@@ -151,11 +151,16 @@ export class JobRunner {
       try {
         if (sub.stage === 'session') {
           if (dependenciesSatisfied(job, sub)) await this.launch(job, sub, 'session');
+        } else if (sub.stage === 'human') {
+          // The one stage this runner never launches anything for. A human task
+          // moves only when the human marks it (job-store.js start-human /
+          // finish-human), which is also why no clock or dependency gate applies:
+          // the board shows it, and passing it by is the whole behaviour.
         } else if (sub.stage === 'implementation') {
           // One session per PR: work, commit, push, open the PR. PR
           // prerequisites gate the MERGE, not the start, so building can happen
-          // in parallel; only a session prerequisite's output is an input.
-          if (!awaitsTicket(sub) && sessionDependenciesDone(job, sub)) await this.launch(job, sub, 'implementation');
+          // in parallel; only an agentless prerequisite's output is an input.
+          if (!awaitsTicket(sub) && startDependenciesDone(job, sub)) await this.launch(job, sub, 'implementation');
         } else if (sub.stage === 'review') {
           // The human's approval of the uncommitted working tree is what starts
           // the session that commits, pushes and opens the PR; until then the

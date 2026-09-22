@@ -2,7 +2,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR } from './data-dir.js';
 import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
-import { jobInputSchema, settingsSchema, planSchema, reportSchema, isSessionSub, storiesKeyed } from './jobs-schema.js';
+import { jobInputSchema, settingsSchema, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, storiesKeyed } from './jobs-schema.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { applyMove, dropSub, MOVE_ACTIONS } from './job-moves.js';
 
@@ -19,14 +19,15 @@ const quoted = (title) => `“${title}”`;
 // anywhere else would be invisible to the agent it most concerns.
 const record = (j, s, move, note, detail) => (j.moves ||= []).push({ id: uid('mv'), at: Date.now(), subJobId: s?.id || null, move, note: note || null, detail });
 export const runnable = (run) => run && !run.stopped;
-// A PR dependency is satisfied once deployed; a session dependency once its
-// receipt was accepted through to done (a cancelled one never satisfies).
-export const dependencySatisfied = (dep) => isSessionSub(dep) ? dep.stage === 'done' && !dep.cancelledAt : !!dep?.deployed;
+// A PR dependency is satisfied once deployed; a session or human dependency once
+// it reached done (a cancelled one never satisfies) — an approved receipt for the
+// one, the human's own mark for the other.
+export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : dep.stage === 'done' && !dep.cancelledAt;
 export const dependenciesSatisfied = (job, sub) => sub.after.every((id) => dependencySatisfied(job.subJobs.find((s) => s.id === id)));
-// Session prerequisites gate the START of a dependent; PR prerequisites only gate merging.
-export const sessionDependenciesDone = (job, sub) => sub.after.every((id) => { const d = job.subJobs.find((s) => s.id === id); return !isSessionSub(d) || dependencySatisfied(d); });
+// Agentless prerequisites gate the START of a dependent; PR prerequisites only gate merging.
+export const startDependenciesDone = (job, sub) => sub.after.every((id) => { const d = job.subJobs.find((s) => s.id === id); return isPrSub(d) || dependencySatisfied(d); });
 const reviewSessions = (job) => job.reviewSessions ?? true;
-const planRepos = (plan) => [...new Set(plan.subJobs.filter((s) => !isSessionSub(s)).map((s) => s.repo))];
+const planRepos = (plan) => [...new Set(plan.subJobs.filter(isPrSub).map((s) => s.repo))];
 // The one place a plan entry becomes a live sub-job, so one approved with the
 // plan and one added later by a move are indistinguishable to the runner. A
 // keyless story leaves `jiraKey` null: New ticket's Jira step fills it in, and
@@ -34,7 +35,7 @@ const planRepos = (plan) => [...new Set(plan.subJobs.filter((s) => !isSessionSub
 // ticketless by design and starts as soon as its dependencies allow.
 export function buildSubJob(plan, s) {
   const jiraKey = s.jiraKey || (s.storyId && plan.stories.find((t) => t.id === s.storyId)?.key) || null;
-  return { ...s, stage: isSessionSub(s) ? 'session' : 'implementation', state: 'queued', jiraKey,
+  return { ...s, stage: isSessionSub(s) ? 'session' : isHumanSub(s) ? 'human' : 'implementation', state: 'queued', jiraKey,
     repairs: [], sessions: [], pr: null, prComments: null, commentSummary: null, deploys: null,
     deploymentResult: null, result: null, ready: null, note: null, fixRequested: null, blocked: null };
 }
@@ -213,12 +214,29 @@ export class JobStore {
         s.sessionApprovedAt = Date.now(); s.stage = 'cleanup'; s.state = 'queued';
         record(j, s, 'approve-session', null, `Approved the result of ${quoted(s.title)}`); return;
       }
+      // The two marks that are the whole engine of a human task: no agent is ever
+      // launched for one, so nothing but a human click moves it. Done releases
+      // whatever waits on it exactly as an approved session does — cleanup has no
+      // session to archive and no worktree to remove, so the next tick lands it
+      // in done. Marking done straight from waiting is allowed: a step done
+      // before anyone thought to mark it started is the common case.
+      if (action === 'start-human') {
+        if (!isHumanSub(s) || s.stage !== 'human' || s.state === 'doing') throw new Error('This is not a human task waiting to be started');
+        s.state = 'doing'; s.error = null; s.blocked = null;
+        record(j, s, 'start-human', note, `Started ${quoted(s.title)} by hand`); return;
+      }
+      if (action === 'finish-human') {
+        if (!isHumanSub(s) || s.stage !== 'human') throw new Error('This human task is no longer yours to mark');
+        s.result = { checks: [note || 'Done by hand'], at: Date.now(), receiptId: null };
+        s.stage = 'cleanup'; s.state = 'queued'; s.error = null; s.blocked = null;
+        record(j, s, 'finish-human', note, `Marked ${quoted(s.title)} done by hand`); return;
+      }
       // Pinned to the receipt the human read, like approve-session: a board that
       // is a tick behind cannot approve a working tree a later run has changed.
       // The runner's claim refuses a launch while the reporting run is still
       // stopping, so no live-run check is needed here.
       if (action === 'approve-code') {
-        if (!s || isSessionSub(s) || s.stage !== 'review' || s.state !== 'verified' || !s.ready || s.ready.receiptId !== readyReceiptId || s.error) throw new Error('The code is not ready to approve');
+        if (!s || !isPrSub(s) || s.stage !== 'review' || s.state !== 'verified' || !s.ready || s.ready.receiptId !== readyReceiptId || s.error) throw new Error('The code is not ready to approve');
         s.ready = { ...s.ready, approvedAt: Date.now() }; s.state = 'approved';
         record(j, s, 'approve-code', null, `Approved the working tree of ${quoted(s.title)}`); return;
       }

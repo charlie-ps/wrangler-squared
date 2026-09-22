@@ -1,5 +1,5 @@
 import { esc, tildify } from './util.js';
-import { SESSION_COLUMNS, jobColumns, reviewCode, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, hasSessionSubs, kindChipHtml, kindCountLabel, dependencySatisfied, jobCards, jobCardHtml, jobBoardHeaderHtml, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, reviewFlagsLabel, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions } from './jobs.js';
+import { SESSION_COLUMNS, HUMAN_COLUMNS, jobColumns, reviewCode, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, hasHumanSubs, kindChipHtml, kindCountLabel, dependencySatisfied, jobCards, jobCardHtml, jobBoardHeaderHtml, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, reviewFlagsLabel, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml } from './job-graph.js';
 const checkTone = (state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED', 'passing'].includes(state) ? 'passed' : ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'failing'].includes(state) ? 'failed' : '';
 const checkMark = (state) => checkTone(state) === 'passed' ? '✓' : checkTone(state) === 'failed' ? '×' : '○';
@@ -96,10 +96,15 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
     }).join('');
   }
   function boardHtml(job, cards) {
-    const split = hasSessionSubs(job);
+    // Extra lanes only for the kinds this job actually has, so a PR-only job is
+    // one unlabelled grid exactly as before and a lane is never drawn empty.
+    const extra = [
+      ...(hasSessionSubs(job) ? [['sessions', 'Agent sessions', SESSION_COLUMNS, 'job-board-sessions']] : []),
+      ...(hasHumanSubs(job) ? [['human', 'Your tasks', HUMAN_COLUMNS, 'job-board-human']] : []),
+    ];
     const columns = jobColumns(job);
-    const lanes = `${split ? '<h3 class="job-board-lane">Pull requests</h3>' : ''}<div class="job-board-columns" style="--job-columns:${columns.length}">${columnsHtml(columns, cards.filter((c) => c.board !== 'sessions'))}</div>
-      ${split ? `<h3 class="job-board-lane">Agent sessions</h3><div class="job-board-columns job-board-sessions">${columnsHtml(SESSION_COLUMNS, cards.filter((c) => c.board === 'sessions'))}</div>` : ''}`;
+    const lanes = `${extra.length ? '<h3 class="job-board-lane">Pull requests</h3>' : ''}<div class="job-board-columns" style="--job-columns:${columns.length}">${columnsHtml(columns, cards.filter((c) => c.board === 'prs'))}</div>
+      ${extra.map(([board, title, spec, cls]) => `<h3 class="job-board-lane">${esc(title)}</h3><div class="job-board-columns ${cls}">${columnsHtml(spec, cards.filter((c) => c.board === board))}</div>`).join('')}`;
     return `<section class="job-board" data-board="${esc(job.id)}" aria-label="${esc(job.title)}">${jobBoardHeaderHtml(job)}${lanes}</section>`;
   }
   function render() {
@@ -190,12 +195,13 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
     let body = '';
     if (planDraft) {
       const sessions = planDraft.subJobs.some(isSessionSub);
+      const humans = planDraft.subJobs.some(isHumanSub);
       const newStories = planDraft.stories.filter((s) => !s.key).length;
       body = `${planDraft.stories.length ? `<h3>Stories <small>${newStories ? `${newStories} new Jira stor${newStories === 1 ? 'y' : 'ies'} · created only after you approve` : 'Existing Jira stories'}</small></h3>` : '<h3>Stories <small>None · this work has no Jira ticket</small></h3>'}<div class="job-stories">${planDraft.stories.map((s, i) => `<div><label><span class="job-story-key ${s.key ? '' : 'job-story-new'}">${esc(storyLabel(s, planDraft.stories))}</span><input aria-label="Story title ${i + 1}" data-story="${i}" maxlength="180" value="${esc(s.title)}"></label></div>`).join('')}</div>
         ${contextHtml(planDraft)}
-        <h3>Landing order <small>${sessions ? 'Same wave can land independently · a PR deploys after its dependencies, a session starts after them' : 'Same wave can land independently'}</small></h3>${planGraphHtml(planDraft, { editable: true, openDeps })}
-        <details class="job-more"><summary>What each sub-job is asked to do</summary>${planDraft.subJobs.map((s) => `<h4>${esc(s.title)}</h4><p>${esc(s.brief)}</p>${s.check ? `<p>Check after it lands: ${esc(s.check)}</p>` : ''}${isSessionSub(s) ? '<p>Runs as an agent session in a scratch workspace; no PR.</p>' : ''}`).join('')}</details>
-        <p class="job-authority">${newStories ? `Approve creates the ${newStories === 1 ? 'new Jira story' : `${newStories} new Jira stories`} with these titles, then starts` : 'Approve starts'} work in dedicated worktrees. ${reviewCode(job) ? 'You review each PR’s code before it is committed. ' : ''}${job.reviewMerge ? 'You approve each merge.' : 'Green PRs merge automatically.'}${sessions ? ((job.reviewSessions ?? true) ? ' You approve each agent session’s result.' : ' Agent sessions count as done once they report.') : ''}</p>
+        <h3>Landing order <small>${sessions || humans ? 'Same wave can land independently · a PR deploys after its dependencies, everything else starts after them' : 'Same wave can land independently'}</small></h3>${planGraphHtml(planDraft, { editable: true, openDeps })}
+        <details class="job-more"><summary>What each sub-job is asked to do</summary>${planDraft.subJobs.map((s) => `<h4>${esc(s.title)}</h4><p>${esc(s.brief)}</p>${s.check ? `<p>Check after it lands: ${esc(s.check)}</p>` : ''}${isSessionSub(s) ? '<p>Runs as an agent session in a scratch workspace; no PR.</p>' : ''}${isHumanSub(s) ? '<p>Yours to do by hand; no agent ever runs it and no PR.</p>' : ''}`).join('')}</details>
+        <p class="job-authority">${newStories ? `Approve creates the ${newStories === 1 ? 'new Jira story' : `${newStories} new Jira stories`} with these titles, then starts` : 'Approve starts'} work in dedicated worktrees. ${reviewCode(job) ? 'You review each PR’s code before it is committed. ' : ''}${job.reviewMerge ? 'You approve each merge.' : 'Green PRs merge automatically.'}${sessions ? ((job.reviewSessions ?? true) ? ' You approve each agent session’s result.' : ' Agent sessions count as done once they report.') : ''}${humans ? ' Nothing starts a human task: you mark it done, and that releases whatever waits on it.' : ''}</p>
         <div class="job-actions"><button class="primary" data-action="approve-plan" ${job.runs.some((r) => !r.stopped) ? 'disabled' : ''}>Approve ${planDraft.subJobs.length} sub-job${planDraft.subJobs.length === 1 ? '' : 's'}</button><button id="job-refine">Request changes</button></div>`;
     } else if (sub && isSessionSub(sub)) {
       const deps = sub.after.map((id) => job.subJobs.find((s) => s.id === id));
@@ -209,11 +215,26 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
         ${sub.stage === 'review' ? '<p class="job-authority">Approving marks the session done and lets the work depending on it start.</p>' : ''}
         <div class="job-actions">${sub.stage === 'review' && !sub.error ? '<button class="primary" data-action="approve-session">Approve</button><button id="job-revise-session">Request changes</button>' : ''}${sub.sessions.length ? `<button id="job-session">${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>` : ''}${sub.error || job.error ? '<button id="job-retry">Retry</button>' : ''}</div>
         <details class="job-more"><summary>Brief</summary><p>${esc(sub.brief)}</p></details>`;
+    } else if (sub && isHumanSub(sub)) {
+      const deps = sub.after.map((id) => job.subJobs.find((s) => s.id === id));
+      const yours = sub.stage === 'human';
+      const doing = sub.state === 'doing';
+      // The brief is the instruction here, not background for an agent, so it is
+      // the body of the dialog rather than a folded detail at the bottom.
+      body = `<p class="job-detail-meta">${kindChipHtml(sub)} ${esc(sub.jiraKey || (sub.storyId ? 'Ticket pending' : 'No ticket'))} · Only you can do this one</p>${deps.length ? `<div class="job-dependency-list">${deps.map((d) => `<span>${dependencySatisfied(d) ? '✓' : d?.cancelledAt ? '×' : '↳'} After ${esc(d?.title)}${d?.cancelledAt ? ' (dropped)' : ''}</span>`).join('')}</div>` : ''}
+        ${sub.cancelledAt ? '<p class="job-authority">Dropped. Nothing ever ran for it, so there is nothing to clean up.</p>' : ''}
+        ${!sub.cancelledAt && sub.stage !== 'done' && cancelledDependencies(job, sub).length ? '<p class="job-authority">A prerequisite was dropped, so this task’s turn will never come. Drop it too, or add the remaining work with New ticket.</p>' : ''}
+        ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub)}${movesGridHtml(job, sub)}
+        <h3>What to do</h3><p>${esc(sub.brief)}</p>
+        ${sub.result ? `<h3>Recorded</h3>${receiptHtml(sub.result.checks)}` : ''}
+        ${noteFor(sub)}
+        ${yours ? `<p class="job-authority">No agent will ever run this one${doing ? '; you marked it in progress' : ''}. Marking it done is what releases the work waiting on it.</p>` : ''}
+        <div class="job-actions">${yours ? `${doing ? '' : '<button class="primary" data-action="start-human">Mark in progress</button>'}<button class="${doing ? 'primary' : ''}" data-action="finish-human">Mark done</button>` : ''}</div>`;
     } else if (sub) {
       const deps = sub.after.map((id) => job.subJobs.find((s) => s.id === id));
       const deploys = deploysLine(sub);
       const workflows = sub.deploys?.workflows || [];
-      body = `<p class="job-detail-meta">${kindChipHtml(sub)} ${esc(sub.jiraKey || (sub.storyId ? 'Ticket pending' : 'No ticket'))} · ${esc(tildify(sub.repo))}${sub.worktree?.branch ? ` · <span class="job-plan-branch" title="Branch">${esc(sub.worktree.branch)}</span>` : ''}</p>${deps.length ? `<div class="job-dependency-list">${deps.map((d) => `<span>${dependencySatisfied(d) ? '✓' : d?.cancelledAt ? '×' : '↳'} ${isSessionSub(d) ? 'Start after' : 'Deploy after'} ${esc(d?.title)}${d?.cancelledAt ? ' (dropped)' : ''}</span>`).join('')}</div>` : ''}
+      body = `<p class="job-detail-meta">${kindChipHtml(sub)} ${esc(sub.jiraKey || (sub.storyId ? 'Ticket pending' : 'No ticket'))} · ${esc(tildify(sub.repo))}${sub.worktree?.branch ? ` · <span class="job-plan-branch" title="Branch">${esc(sub.worktree.branch)}</span>` : ''}</p>${deps.length ? `<div class="job-dependency-list">${deps.map((d) => `<span>${dependencySatisfied(d) ? '✓' : d?.cancelledAt ? '×' : '↳'} ${isPrSub(d) ? 'Deploy after' : 'Start after'} ${esc(d?.title)}${d?.cancelledAt ? ' (dropped)' : ''}</span>`).join('')}</div>` : ''}
         ${sub.cancelledAt ? '<p class="job-authority">Dropped. Nothing was merged. Cleanup archives its sessions and removes the worktree only if every commit is already on GitHub or the branch is unchanged.</p>' : ''}
         ${!sub.cancelledAt && sub.stage !== 'done' && cancelledDependencies(job, sub).length ? '<p class="job-authority">A prerequisite was dropped, so this sub-job can never land. Drop it too, or add the remaining work with New ticket.</p>' : ''}
         ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub)}${movesGridHtml(job, sub)}
@@ -315,7 +336,7 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
     const merged = sub.stage === 'deployment';
     if (id === 'drop') {
       const live = job.runs.some((r) => !r.stopped && r.subJobId === sub.id);
-      show(`<h2>Drop ${esc(sub.title)}?</h2><p>This skips straight to cleanup. ${live ? 'The running step is stopped and its receipt is ignored. ' : ''}${sub.pr ? 'The pull request stays open on GitHub for you to close. ' : ''}${isSessionSub(sub) ? 'Its session is archived; nothing on disk is removed.' : 'Sessions are archived; the worktree is removed only if its commits are already pushed or the branch is unchanged.'} Sub-jobs that ${isSessionSub(sub) ? 'start' : 'land'} after this one will need dropping too.</p><form id="job-drop-form"><div class="job-actions"><button type="button" class="danger" data-drop="1">Drop sub-job</button><button type="button" id="job-move-back">Keep working</button></div></form>`);
+      show(`<h2>Drop ${esc(sub.title)}?</h2><p>This skips straight to cleanup. ${live ? 'The running step is stopped and its receipt is ignored. ' : ''}${sub.pr ? 'The pull request stays open on GitHub for you to close. ' : ''}${isHumanSub(sub) ? 'Nothing ever ran for it, so there is nothing to stop or clean up.' : isSessionSub(sub) ? 'Its session is archived; nothing on disk is removed.' : 'Sessions are archived; the worktree is removed only if its commits are already pushed or the branch is unchanged.'} Sub-jobs that ${isPrSub(sub) ? 'land' : 'start'} after this one will need dropping too.</p><form id="job-drop-form"><div class="job-actions"><button type="button" class="danger" data-drop="1">Drop sub-job</button><button type="button" id="job-move-back">Keep working</button></div></form>`);
       dialog.querySelector('[data-drop]').onclick = () => action('drop');
       dialog.querySelector('#job-move-back').onclick = () => renderDetail();
       return;
@@ -337,7 +358,7 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
     }
     if (id === 'reorder') {
       const others = job.subJobs.filter((d) => d.id !== sub.id && !d.cancelledAt);
-      const form = moveForm(job, sub, id, `<fieldset class="job-move-deps"><legend>${isSessionSub(sub) ? 'Starts after' : 'Deploys after'}</legend>${dependencyEditorHtml(sub, others, sub.id)}</fieldset><p class="job-authority">A prerequisite that is already merged or done stays ticked and simply counts as satisfied.</p>`, 'Save the order');
+      const form = moveForm(job, sub, id, `<fieldset class="job-move-deps"><legend>${isPrSub(sub) ? 'Deploys after' : 'Starts after'}</legend>${dependencyEditorHtml(sub, others, sub.id)}</fieldset><p class="job-authority">A prerequisite that is already merged or done stays ticked and simply counts as satisfied.</p>`, 'Save the order');
       return submit(form, () => action('reorder', { after: [...form.querySelectorAll('[data-dep]')].filter((c) => c.checked).map((c) => c.value) }));
     }
     if (id === 'accept-red') {

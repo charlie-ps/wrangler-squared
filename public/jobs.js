@@ -1,5 +1,5 @@
 import { esc, tildify } from './util.js';
-import { PULL_REQUEST_ICON, ROBOT_ICON } from './icons.js';
+import { PERSON_ICON, PULL_REQUEST_ICON, ROBOT_ICON } from './icons.js';
 export const JOB_COLUMNS = [
   ['backlog', 'Backlog', 'Ideas ready to shape'],
   ['planning', 'Planning', 'Tickets, PRs and order'],
@@ -19,28 +19,52 @@ export const SESSION_COLUMNS = [
   ['review', 'Review', 'Read the receipt, then approve'],
   ['done', 'Done', 'Finished on this machine'],
 ];
+// A job's third board: the steps no agent will ever run. Waiting/In progress are
+// one stored stage ('human') split by the mark the human made on it.
+export const HUMAN_COLUMNS = [
+  ['waiting', 'Waiting', 'Yours to do — nothing automatic will'],
+  ['doing', 'In progress', 'You said you had started'],
+  ['done', 'Done', 'You marked it done by hand'],
+];
 export const isSessionSub = (sub) => sub?.kind === 'session';
+export const isHumanSub = (sub) => sub?.kind === 'human';
+// Mirrors server/jobs-schema.js isPrSub: a PR is the only kind with a repository,
+// a pipeline and a deploy-after edge, so "not a PR" is what those rules turn on.
+export const isPrSub = (sub) => !isSessionSub(sub) && !isHumanSub(sub);
 export const hasSessionSubs = (job) => job.subJobs.some(isSessionSub);
+export const hasHumanSubs = (job) => job.subJobs.some(isHumanSub);
 // Mirrors server/jobs-schema.js reviewCode: a job from before the flag reviews.
 export const reviewCode = (job) => job.reviewCode ?? true;
 // The Code review column is only drawn for a job that reviews — or that still
 // holds a card there, so turning review off can never make a card vanish.
-export const jobColumns = (job) => JOB_COLUMNS.filter(([stage]) => stage !== 'review' || reviewCode(job) || job.subJobs.some((s) => !isSessionSub(s) && s.stage === 'review'));
-// A sub-job is one of exactly two kinds, and the same chip names it everywhere one
-// appears (board card, plan graph, detail heading) so the kinds are never told
-// apart by wording alone: a PR (blue, pull-request glyph) or an agent session on
-// this machine (purple, robot glyph, no PR).
-export const kindLabel = (sub) => isSessionSub(sub) ? 'Session' : 'PR';
-export const kindClass = (sub) => isSessionSub(sub) ? 'session' : 'pr';
-export const kindChipHtml = (sub) => `<span class="job-kind ${kindClass(sub)}" title="${isSessionSub(sub) ? 'An agent session on this machine — no pull request' : 'A pull request in a repository'}">${isSessionSub(sub) ? ROBOT_ICON : PULL_REQUEST_ICON}${kindLabel(sub)}</span>`;
-// "2 PRs · 1 session" rather than "3 sub-jobs": the count is where a reader first learns the mix.
+export const jobColumns = (job) => JOB_COLUMNS.filter(([stage]) => stage !== 'review' || reviewCode(job) || job.subJobs.some((s) => isPrSub(s) && s.stage === 'review'));
+// A sub-job is one of exactly three kinds, and the same chip names it everywhere
+// one appears (board card, plan graph, detail heading) so the kinds are never
+// told apart by wording alone: a PR (blue, pull-request glyph), an agent session
+// on this machine (purple, robot glyph, no PR), or a human task (amber, person
+// glyph, nothing runs it).
+export const kindClass = (sub) => isSessionSub(sub) ? 'session' : isHumanSub(sub) ? 'human' : 'pr';
+const KIND_LABEL = { pr: 'PR', session: 'Session', human: 'Human' };
+const KIND_ICON = { pr: PULL_REQUEST_ICON, session: ROBOT_ICON, human: PERSON_ICON };
+const KIND_TITLE = { pr: 'A pull request in a repository', session: 'An agent session on this machine — no pull request',
+  human: 'Only you can do this one — no agent, no pull request' };
+// What each chip means, for the plan graph's legend on a job that mixes kinds.
+export const KIND_BLURB = { pr: 'opens a pull request', session: 'runs as an agent session here, no PR', human: 'is yours to do by hand' };
+export const kindLabel = (sub) => KIND_LABEL[kindClass(sub)];
+export const kindChipHtml = (sub) => `<span class="job-kind ${kindClass(sub)}" title="${KIND_TITLE[kindClass(sub)]}">${KIND_ICON[kindClass(sub)]}${kindLabel(sub)}</span>`;
+// "2 PRs · 1 session · 1 human task" rather than "4 sub-jobs": the count is where
+// a reader first learns the mix.
 export function kindCountLabel(subJobs) {
-  const prs = subJobs.filter((s) => !isSessionSub(s)).length, sessions = subJobs.length - prs;
-  return [prs ? `${prs} PR${prs === 1 ? '' : 's'}` : '', sessions ? `${sessions} session${sessions === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+  const count = (test, one, many = `${one}s`) => {
+    const n = subJobs.filter(test).length;
+    return n ? `${n} ${n === 1 ? one : many}` : '';
+  };
+  return [count(isPrSub, 'PR'), count(isSessionSub, 'session'), count(isHumanSub, 'human task')].filter(Boolean).join(' · ');
 }
 export const cancelledDependencies = (job, sub) => sub.after.filter((id) => job.subJobs.find((s) => s.id === id)?.cancelledAt);
-// Mirrors server/job-store.js dependencySatisfied: a PR counts once deployed, a session once done.
-export const dependencySatisfied = (dep) => isSessionSub(dep) ? dep.stage === 'done' && !dep.cancelledAt : !!dep?.deployed;
+// Mirrors server/job-store.js dependencySatisfied: a PR counts once deployed, a
+// session or human task once it reached done.
+export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : dep.stage === 'done' && !dep.cancelledAt;
 export const pendingDependencies = (job, sub) => sub.after.map((id) => job.subJobs.find((s) => s.id === id)).filter((d) => !dependencySatisfied(d));
 const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null));
 // The live run's own card status, enriched onto the run server-side each graph
@@ -48,6 +72,11 @@ const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === 
 // an automated step stuck on a prompt is nobody's but the human's.
 export const runStatus = (job, sub) => liveRun(job, sub)?.status ?? null;
 export const sessionColumn = (job, sub) => sub.stage === 'session' ? (liveRun(job, sub) ? 'running' : 'queued') : sub.stage === 'review' ? 'review' : 'done';
+export const humanColumn = (sub) => sub.stage !== 'human' ? 'done' : sub.state === 'doing' ? 'doing' : 'waiting';
+// Nothing automatic will ever move a waiting human task whose prerequisites are
+// satisfied: it is the human's, in the same sense a receipt awaiting approval is.
+// One still waiting on a prerequisite is just waiting.
+export const humanTaskWaiting = (job, sub) => isHumanSub(sub) && sub.stage === 'human' && sub.state !== 'doing' && !pendingDependencies(job, sub).length;
 // undefined: no comments on the PR; null: comments read, verdict still being
 // written (or stale after new comments); otherwise the summary for exactly the
 // comment set on display. Mirrors server/job-comments.js commentsBlockMerge.
@@ -68,7 +97,7 @@ export const sessionReviewLabel = (job) => (job.reviewSessions ?? true) ? 'Sessi
 export const reviewFlagsLabel = (job) => `${reviewCode(job) ? 'Code review' : 'No code review'} · ${job.reviewMerge ? 'Manual merge' : 'Automatic merge'}${hasSessionSubs(job) ? ` · ${sessionReviewLabel(job)}` : ''}`;
 // The uncommitted working tree awaits the human: nothing is committed and no
 // agent runs until approve-code (server/job-store.js) releases the publish session.
-export const codeAwaitingReview = (sub) => !isSessionSub(sub) && sub?.stage === 'review' && sub.state === 'verified';
+export const codeAwaitingReview = (sub) => isPrSub(sub) && sub?.stage === 'review' && sub.state === 'verified';
 // What the merge inference found for this PR's head (server job-deploys.js), in
 // the words the human reads on the card and in the detail: "Deploys on merge · …"
 // or "Merge completes it · …". Absent until the PR exists.
@@ -100,7 +129,7 @@ export function moveCopy(job, sub, move) {
   if (move.id !== 'fix-here') return move;
   // An open PR under code review: the fix takes the same road as the first cut,
   // so the copy must not promise a commit the human has not yet reviewed.
-  if (!isSessionSub(sub) && sub?.stage === 'pr') return reviewCode(job) ? { ...move, blurb: 'Back to work on this PR. You review the diff before it is pushed.' } : move;
+  if (isPrSub(sub) && sub?.stage === 'pr') return reviewCode(job) ? { ...move, blurb: 'Back to work on this PR. You review the diff before it is pushed.' } : move;
   if (sub?.stage === 'review') return { ...move, label: 'Request changes', blurb: 'Back to work in the same worktree, with your note.' };
   return { ...move, label: 'Retry with a note', blurb: isSessionSub(sub) ? 'Run this session again, with your note.' : 'Start the work again, with your note.' };
 }
@@ -108,7 +137,7 @@ export function moveCopy(job, sub, move) {
 // server's gates so the form never offers a position the move would refuse.
 export function markOptions(sub) {
   if (!sub || sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage)) return [];
-  const pr = !isSessionSub(sub);
+  const pr = isPrSub(sub);
   return [
     ...(pr && ['implementation', 'review'].includes(sub.stage) && !sub.pr ? [{ value: 'pr', label: 'A PR is already open for this work' }] : []),
     ...(pr && sub.stage === 'pr' ? [{ value: 'merged', label: 'Merged by hand' }] : []),
@@ -120,7 +149,7 @@ export function markOptions(sub) {
 // server's gates (job-moves.js). Already accepted at this exact head or merge
 // commit means there is nothing left to accept.
 export function redPipeline(sub) {
-  if (!sub || isSessionSub(sub)) return null;
+  if (!sub || !isPrSub(sub)) return null;
   if (sub.stage === 'pr' && sub.pr?.checkStatus === 'failing' && !sub.pr.dirty && sub.acceptedRed?.ref !== sub.pr.head) return 'checks';
   if (sub.stage === 'deployment' && !sub.recoveredBy && sub.deploymentResult?.status === 'failing' && sub.acceptedRed?.ref !== sub.pr?.mergeCommit) return 'post-merge';
   return null;
@@ -130,12 +159,12 @@ export const redAccepted = (sub) => !!sub?.acceptedRed && sub.acceptedRed.ref ==
 // Nothing at all once the sub-job is finished, dropped, or already cleaning up.
 export function movesFor(job, sub) {
   if (!sub || sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage)) return [];
-  const pr = !isSessionSub(sub);
+  const pr = isPrSub(sub);
   const allowed = {
     'fix-here': ['pr', 'implementation', 'review', 'session'].includes(sub.stage),
     'split-out': pr && ['implementation', 'review', 'pr', 'deployment'].includes(sub.stage),
-    'new-ticket': true,
-    reorder: ['implementation', 'review', 'pr', 'session'].includes(sub.stage),
+    'new-ticket': pr,
+    reorder: ['implementation', 'review', 'pr', 'session', 'human'].includes(sub.stage),
     drop: true,
     mark: markOptions(sub).length > 0,
     'accept-red': pr && redPipeline(sub),
@@ -173,11 +202,14 @@ export function jobNeedsReview(job, sub) {
   if (sub && mergeHeldByComments(job, sub)) return true;
   if (!sub) return !job.cancelledAt && job.stage === 'planning' && job.plan && !job.runs.some((r) => !r.stopped);
   if (!sub.cancelledAt && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return true;
+  if (isHumanSub(sub)) return humanTaskWaiting(job, sub);
   if (isSessionSub(sub)) return sub.stage === 'review';
   if (codeAwaitingReview(sub)) return true;
   if (deploymentStalled(sub)) return true;
   return sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && job.reviewMerge && sub.mergeApprovedHead !== sub.pr.head;
 }
+// One kind of prerequisite names itself; a mix is only ever "prerequisites".
+const waitingNoun = (list) => list.every(isSessionSub) ? 'session' : list.every(isHumanSub) ? 'human task' : list.every(isPrSub) ? 'deployment' : 'prerequisite';
 export function jobStatus(job, sub) {
   if (job.error || sub?.error) return { tone: 'needs', text: 'Needs attention' };
   if (sub?.cancelledAt) return { tone: sub.stage === 'done' ? 'done' : 'muted', text: sub.stage === 'done' ? 'Dropped' : 'Dropped · cleaning up' };
@@ -189,18 +221,21 @@ export function jobStatus(job, sub) {
     if (run.status === 'needs-you') return { tone: 'needs', text: 'Waiting on a prompt' };
     return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: 'Planning', jira: 'Creating Jira tickets', implementation: reviewCode(job) ? 'Working' : 'Working on the PR', publish: 'Committing & opening the PR', repair: 'Fixing the PR', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };
   }
+  // The human said they had started; no agent and no clock runs against it, so
+  // this outranks the prerequisite line a waiting one would show.
+  if (isHumanSub(sub) && sub.stage === 'human' && sub.state === 'doing') return { tone: 'working', text: 'In progress' };
   // A requested fix is a repair the runner picks up on its next tick, so it outranks
   // whatever the checks currently say.
   if (sub?.stage === 'pr' && sub.fixRequested) return { tone: 'working', text: 'Fix requested' };
   if (deploymentStalled(sub)) return { tone: 'needs', text: 'No deployment run' };
-  if (jobNeedsReview(job, sub)) return { tone: 'needs', text: sub ? isSessionSub(sub) || codeAwaitingReview(sub) ? 'Ready to review' : sub.stage === 'pr' ? mergeHeldByComments(job, sub) ? 'Comments block merging' : 'Ready to merge' : 'Needs you' : 'Plan ready to review' };
+  if (jobNeedsReview(job, sub)) return { tone: 'needs', text: sub ? isHumanSub(sub) ? 'Needs you' : isSessionSub(sub) || codeAwaitingReview(sub) ? 'Ready to review' : sub.stage === 'pr' ? mergeHeldByComments(job, sub) ? 'Comments block merging' : 'Ready to merge' : 'Needs you' : 'Plan ready to review' };
   // Approved: the publish session starts on the runner's next tick.
-  if (sub?.stage === 'review' && !isSessionSub(sub)) return { tone: 'working', text: 'Approved · committing next' };
+  if (sub?.stage === 'review' && isPrSub(sub)) return { tone: 'working', text: 'Approved · committing next' };
   if (!sub) return { tone: 'muted', text: job.stage === 'backlog' ? 'Ready when you are' : job.stage === 'done' ? 'Delivered' : job.stage === 'jira' ? 'Tickets queued' : 'Queued' };
-  // A session prerequisite blocks the work from starting; a PR prerequisite only blocks its merge.
+  // A session or human prerequisite blocks the work from starting; a PR prerequisite only blocks its merge.
   const waiting = pendingDependencies(job, sub);
-  const blocked = sub.stage === 'session' ? waiting : sub.stage === 'implementation' ? waiting.filter(isSessionSub) : [];
-  if (blocked.length) return { tone: 'muted', text: `Waiting for ${blocked.length} ${blocked.every(isSessionSub) ? 'session' : blocked.some(isSessionSub) ? 'prerequisite' : 'deployment'}${blocked.length === 1 ? '' : 's'}` };
+  const blocked = ['session', 'human'].includes(sub.stage) ? waiting : sub.stage === 'implementation' ? waiting.filter((d) => !isPrSub(d)) : [];
+  if (blocked.length) return { tone: 'muted', text: `Waiting for ${blocked.length} ${waitingNoun(blocked)}${blocked.length === 1 ? '' : 's'}` };
   // A story added by New ticket has no key until the jira phase runs, and a
   // sub-job that names a story cannot start without one; a storyless sub-job
   // is ticketless by design and never waits.
@@ -212,7 +247,7 @@ export function jobStatus(job, sub) {
   if (sub.stage === 'deployment') return sub.recoveredBy ? { tone: 'muted', text: 'Awaiting fix' } : { tone: 'muted', text: 'Watching post-merge runs' };
   // Fix here on an open PR under code review: the work restarts on the next tick.
   if (sub.stage === 'implementation' && sub.pr) return { tone: 'working', text: 'Fix queued' };
-  if (sub.stage === 'done') return { tone: 'done', text: isSessionSub(sub) ? 'Completed' : 'Delivered' };
+  if (sub.stage === 'done') return { tone: 'done', text: isPrSub(sub) ? 'Delivered' : isSessionSub(sub) ? 'Completed' : 'Done' };
   return { tone: 'muted', text: 'Queued' };
 }
 // A job card joins the sub-job cards when the job itself needs attention, and
@@ -220,16 +255,19 @@ export function jobStatus(job, sub) {
 // job would have no card at all and its board would never be drawn.
 export function jobCards(jobs) {
   return jobs.flatMap((job) => job.stage === 'active' || job.stage === 'done'
-    ? [...job.subJobs.map((sub) => isSessionSub(sub) ? { job, sub, board: 'sessions', stage: sessionColumn(job, sub) } : { job, sub, board: 'prs', stage: sub.stage === 'done' ? 'cleanup' : sub.stage }), ...(job.error || !job.subJobs.length ? [{ job, sub: null, board: 'prs', stage: 'cleanup' }] : [])]
+    ? [...job.subJobs.map((sub) => isSessionSub(sub) ? { job, sub, board: 'sessions', stage: sessionColumn(job, sub) }
+      : isHumanSub(sub) ? { job, sub, board: 'human', stage: humanColumn(sub) }
+      : { job, sub, board: 'prs', stage: sub.stage === 'done' ? 'cleanup' : sub.stage }), ...(job.error || !job.subJobs.length ? [{ job, sub: null, board: 'prs', stage: 'cleanup' }] : [])]
     : [{ job, sub: null, board: 'prs', stage: job.stage }]);
 }
-// "Deploy after" a PR, "after" a session (which must finish before this even starts).
+// "Deploy after" a PR, "after" a session or human task (either must finish before
+// this even starts).
 export function dependencyLine(job, sub) {
   const deps = sub.after.map((id) => job.subJobs.find((s) => s.id === id) || { id, title: id });
   const names = (list) => list.map((d) => d.title).join(' + ');
-  if (isSessionSub(sub)) return deps.length ? `After ${names(deps)}` : '';
-  const sessions = deps.filter(isSessionSub), prs = deps.filter((d) => !isSessionSub(d));
-  return [sessions.length ? `Start after ${names(sessions)}` : '', prs.length ? `Deploy after ${names(prs)}` : ''].filter(Boolean).join(' · ');
+  if (!isPrSub(sub)) return deps.length ? `After ${names(deps)}` : '';
+  const starts = deps.filter((d) => !isPrSub(d)), prs = deps.filter(isPrSub);
+  return [starts.length ? `Start after ${names(starts)}` : '', prs.length ? `Deploy after ${names(prs)}` : ''].filter(Boolean).join(' · ');
 }
 // What a job (or one sub-job) cost: planning, every step, CI repairs and the
 // headless comment triage, summed server-side (server/job-spend.js) from every
@@ -259,7 +297,7 @@ export function jobCardHtml({ job, sub }) {
   return `<button class="job-card ${jobNeedsReview(job, sub) ? 'job-card-review' : ''} ${eventFor(job, sub) ? 'job-card-event' : ''} ${sub?.stage === 'done' ? 'job-card-done' : ''}" data-job="${esc(job.id)}" data-sub="${esc(sub?.id || '')}">
     <span class="job-card-eyebrow">${sub ? `${kindChipHtml(sub)}${sub.jiraKey ? `<span>${esc(sub.jiraKey)}</span>` : ''}` : 'JOB'}</span>
     <strong>${esc(sub?.title || job.title)}</strong>
-    ${sub ? `<span class="job-card-meta">${isSessionSub(sub) ? 'Agent session on this machine' : esc(tildify(sub.repo).split('/').pop())}</span>` : `<span class="job-card-meta">${job.repos.length ? `${job.repos.length} repositor${job.repos.length === 1 ? 'y' : 'ies'}` : 'Repositories to discover'}</span>`}
+    ${sub ? `<span class="job-card-meta">${isSessionSub(sub) ? 'Agent session on this machine' : isHumanSub(sub) ? 'Only you can do this one' : esc(tildify(sub.repo).split('/').pop())}</span>` : `<span class="job-card-meta">${job.repos.length ? `${job.repos.length} repositor${job.repos.length === 1 ? 'y' : 'ies'}` : 'Repositories to discover'}</span>`}
     ${deps ? `<span class="job-card-deps">↳ ${esc(deps)}</span>` : ''}
     ${deploys ? `<span class="job-card-deploys">${esc(deploys)}</span>` : ''}
     ${sub?.note ? `<span class="job-card-note">Note: ${esc(sub.note)}</span>` : ''}

@@ -12,15 +12,19 @@ const repoPath = z.string().trim().min(1).max(1000).refine(
 );
 export const checksSchema = z.array(line).min(1).max(8);
 export const briefSchema = z.string().trim().min(1).max(500);
-// A sub-job is either a PR to a repository or an agent session on this machine.
-// The session kind has no repo: it runs in a scratch workspace and is finished
-// when its receipt is accepted, so a dependency on it gates the dependent's
-// START (its output is an input), unlike a PR's deploy-after.
+// A sub-job is one of three kinds. A PR changes a repository. An agent session
+// runs on this machine in a scratch workspace and is finished when its receipt
+// is accepted. A human task is the rare step no agent can take at all (a click
+// in somebody's console, a vendor, a signature): no repo, no receipt, no agent
+// ever launched for it — it waits on the board until the human marks it done.
+// Neither of the agentless kinds has a repo, and a dependency on either gates
+// the dependent's START (its output is an input), unlike a PR's deploy-after.
 //
 // Nothing here describes deployment or verification: the runner infers whether a
 // merge deploys from the repository's own workflows (job-deploys.js) and watches
 // whatever GitHub starts. `check` is the one line a pipeline cannot prove — and
-// only on a PR, because a session's receipt IS its check.
+// only on a PR, because a session's receipt IS its check and a human task has
+// no pipeline to outlast.
 //
 // A PR sub-job names no branch: the plan cannot know a repository's convention
 // as well as the session working inside it, so the worktree starts on a
@@ -32,11 +36,15 @@ export const briefSchema = z.string().trim().min(1).max(500);
 // and commits carry no key. Only a sub-job that NAMES a story is held until
 // that story has a key (`awaitsTicket`).
 export const subJobSchema = z.object({
-  id, title: line, kind: z.enum(['pr', 'session']).default('pr'), repo: repoPath.optional(),
+  id, title: line, kind: z.enum(['pr', 'session', 'human']).default('pr'), repo: repoPath.optional(),
   storyId: id.optional(), jiraKey: jira.optional(), after: z.array(id).max(30).default([]),
   brief: briefSchema, check: line.optional(),
 });
 export const isSessionSub = (sub) => sub?.kind === 'session';
+export const isHumanSub = (sub) => sub?.kind === 'human';
+// A PR is the only kind with a repository, a pipeline and a deploy-after edge,
+// so "not a PR" — not "is a session" — is what every one of those rules turns on.
+export const isPrSub = (sub) => !isSessionSub(sub) && !isHumanSub(sub);
 export const awaitsTicket = (sub) => !!sub?.storyId && !sub?.jiraKey;
 // With code review on, a PR sub-job's implementation session leaves the working
 // tree UNCOMMITTED and reports `ready`; the human reads the diff on the board
@@ -66,7 +74,9 @@ export const planSchema = z.object({
   for (const s of plan.subJobs) {
     if (isSessionSub(s) && s.repo) issue(`${s.id}: a session sub-job has no repo`);
     if (isSessionSub(s) && s.check) issue(`${s.id}: a session sub-job's receipt is its own check`);
-    if (!isSessionSub(s) && !s.repo) issue(`${s.id}: a PR sub-job needs repo`);
+    if (isHumanSub(s) && s.repo) issue(`${s.id}: a human sub-job has no repo`);
+    if (isHumanSub(s) && s.check) issue(`${s.id}: a human sub-job has nothing to check after it lands`);
+    if (isPrSub(s) && !s.repo) issue(`${s.id}: a PR sub-job needs repo`);
   }
   const visiting = new Set(), visited = new Set();
   function visit(s) {

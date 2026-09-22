@@ -35,6 +35,7 @@
 .job-board-lane { font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--fg-subtle); margin:0 0 8px; }
 .job-board-columns+.job-board-lane { margin-top:16px; }
 .job-board-sessions { grid-template-columns:repeat(4,minmax(200px,1fr)); }
+.job-board-human { grid-template-columns:repeat(3,minmax(200px,1fr)); }
 .job-plan-kind { display:block; line-height:1.5; color:var(--fg-muted); }
 .job-column { background:var(--surface); border:1px solid var(--border-muted); border-radius:12px; padding:12px; min-width:0; }
 .job-column>header { display:flex; align-items:flex-start; gap:7px; min-height:35px; }
@@ -94,6 +95,7 @@
    legend can never disagree. */
 .job-kind { --kind:var(--blue-fg); display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border-radius:4px; font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; color:var(--kind); background:color-mix(in srgb, var(--kind) 14%, transparent); border:1px solid color-mix(in srgb, var(--kind) 40%, transparent); }
 .job-kind.session { --kind:var(--purple); }
+.job-kind.human { --kind:var(--snooze-fg); }
 .job-kind .icon { width:11px; height:11px; }
 .job-detail-meta .job-kind { vertical-align:middle; margin-right:2px; }
 /* The plan graph: a column per wave, a box per sub-job, arrows traced by
@@ -113,6 +115,7 @@
 .job-graph-edges marker path { fill:var(--fg-subtle); stroke:none; }
 .job-node { --kind:var(--blue-fg); position:relative; display:flex; flex-direction:column; gap:8px; width:100%; box-sizing:border-box; padding:12px 12px 12px 14px; background:var(--bg); border:1px solid var(--border-muted); border-left:3px solid var(--kind); border-radius:9px; color:var(--fg); font:inherit; font-size:12px; text-align:left; }
 .job-node.session { --kind:var(--purple); }
+.job-node.human { --kind:var(--snooze-fg); }
 .job-node.done { opacity:.7; }
 button.job-node { cursor:pointer; transition:border-color .15s; }
 button.job-node:hover { border-color:var(--blue); border-left-color:var(--kind); }
