@@ -18,6 +18,8 @@ export function fakeHost() {
   const broadcasts = [];
   const archived = [];
   const woken = [];
+  const billed = [];
+  const usage = []; // what host.usage.byCard() resolves to: [{ cardId, usd, estimatedUsd }]
   const sessions = new Map();
   const host = {
     id: 'jobs', version: '1.0.0', log: () => {},
@@ -44,7 +46,17 @@ export function fakeHost() {
       get: (id) => sessions.get(id) ?? null,
       archive: async (id) => { archived.push(id); const s = sessions.get(id); if (s) s.archived = true; },
       wake: async (id) => { woken.push(id); const s = sessions.get(id); if (s) s.archived = false; },
+      // recordPriorLiveSessionId's contract: false for an unknown card or a live
+      // id that IS the card's own; the set of prior ids grows otherwise.
+      bill: (id, liveSessionId) => {
+        const s = sessions.get(id);
+        if (!s || !liveSessionId || s.liveSessionId === liveSessionId) return false;
+        billed.push({ sessionId: id, liveSessionId });
+        s.priorLiveSessionIds = [...new Set([...(s.priorLiveSessionIds || []), liveSessionId])];
+        return true;
+      },
     },
+    usage: { byCard: async () => usage.map((r) => ({ ...r })) },
   };
-  return { host, spawned, broadcasts, archived, woken, sessions };
+  return { host, spawned, broadcasts, archived, woken, billed, usage, sessions };
 }

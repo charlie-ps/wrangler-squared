@@ -4,7 +4,7 @@ import manifest from './manifest.js';
 import os from 'node:os';
 import path from 'node:path';
 import { placeholderBranch } from './job-prompts.js';
-import { _resetForTests, runnerFor, statusOf } from './jobs.js';
+import { _resetForTests, runnerFor, spendFor, statusOf } from './jobs.js';
 import { fakeHost } from './test-helpers.js';
 
 const tool = (name) => manifest.tools.find((t) => t.name === name);
@@ -19,7 +19,7 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   // spawn's `taskId` binds the memory and assigns the card itself, and is
   // documented as NOT a tasks:write escalation — so the capability is not asked for.
   assert.ok(!manifest.requires.includes('tasks:write'));
-  assert.equal(manifest.engines.wranglerApi, '^1.4.0');
+  assert.equal(manifest.engines.wranglerApi, '^1.6.0', 'usage:read and sessions:bill arrived in 1.6');
   assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context']);
   assert.deepEqual(Object.keys(manifest.session), ['onBeforeDispatch']);
   assert.equal(manifest.client, 'public/index.js');
@@ -82,7 +82,29 @@ test('the graph contributor carries jobs under its own key and stamps live runs 
   assert.deepEqual(Object.keys(out), ['jobs']);
   assert.equal(out.jobs.jobs[0].runs[0].status, 'needs-you');
   assert.equal(statusOf(spawned[0].sessionId), 'needs-you', 'the runner reads the same cache');
-  assert.equal(out.jobs.jobs[0].usd, null, 'no spend until the host exposes the usage scan');
+});
+
+test('the graph contributor prices a job off the host\'s usage rows, one refresh behind and never awaited', async () => {
+  _resetForTests();
+  const { host, spawned, usage } = fakeHost();
+  const job = host.stores.jobs.create(newJob);
+  const graph = { sessions: [] };
+  let reads = 0;
+  const byCard = host.usage.byCard;
+  host.usage.byCard = () => { reads++; return byCard(); };
+
+  assert.equal(manifest.graph({ host, graph }).jobs.jobs[0].usd, null, 'a backlog job has no card, so nothing is read');
+  assert.equal(reads, 0);
+  host.stores.jobs.action(job.id, 'start', {});
+  await runnerFor(host).tick();
+  usage.push({ cardId: spawned[0].sessionId, usd: 0.75, estimatedUsd: 0.75 }, { cardId: 'someone-else', usd: 40, estimatedUsd: 0 });
+  assert.equal(manifest.graph({ host, graph }).jobs.jobs[0].usd, null, 'the tick that kicks the read serves the map before it');
+  assert.equal(reads, 1);
+  await spendFor(host).settled();
+  const priced = manifest.graph({ host, graph }).jobs.jobs[0];
+  assert.equal(priced.usd, 0.75);
+  assert.equal(priced.usdEstimated, true);
+  assert.equal(reads, 1, 'the next tick is inside the 60s window');
 });
 
 // The store state a PR sub-job reaches once its plan is approved and a session

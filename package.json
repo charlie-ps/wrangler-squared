@@ -15,8 +15,8 @@
     "author": "Charlie Goldstraw",
     "homepage": "https://github.com/charlie-ps/wrangler-squared",
     "requires": [
-      "sessions:read", "sessions:spawn", "sessions:archive", "sessions:wake",
-      "board:rebuild", "board:broadcast"
+      "sessions:read", "sessions:spawn", "sessions:archive", "sessions:wake", "sessions:bill",
+      "usage:read", "board:rebuild", "board:broadcast"
     ]
   },
   "dependencies": {

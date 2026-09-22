@@ -2,30 +2,25 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { usdByCard, withJobSpend, withRunStatus } from './job-spend.js';
 
-// The scan row shape scanAllDaily returns: one row per costed transcript, tagged
-// with the card it was resolved from. estimatedUsd is a dollar slice (Codex), not a flag.
-const row = (cardId, days) => ({ file: `/t/${cardId}.jsonl`, cardId, owner: true, task: { key: 'adhoc' }, days });
-const day = (usd, estimatedUsd = 0) => ({ usd, estimatedUsd });
+// The row shape host.usage.byCard() resolves to (host API 1.6 `usage:read`): one
+// row per card, summed over every transcript and day it owned. estimatedUsd is a
+// dollar slice (Codex), not a flag.
+const row = (cardId, usd, estimatedUsd = 0) => ({ cardId, usd, estimatedUsd });
 
-test('usdByCard sums every row a card owns and flags a Codex estimate', () => {
-  const map = usdByCard({ sessions: [
-    row('plan', { '2026-07-10': day(1.5), '2026-07-11': day(0.5) }),
-    row('plan', { '2026-07-12': day(1) }), // a /clear leaves a second transcript on the same card
-    row('cx', { '2026-07-10': day(2, 2) }),
-    { file: null, days: { '2026-07-10': day(9) } }, // no cardId: nothing to attribute it to
-  ] });
+test('usdByCard keys every row by card, accumulates a repeated card and flags a Codex estimate', () => {
+  const map = usdByCard([
+    row('plan', 2),
+    row('plan', 1), // a host emitting one row per transcript: a /clear leaves a second on the same card
+    row('cx', 2, 2),
+    { cardId: null, usd: 9, estimatedUsd: 0 }, // no cardId: nothing to attribute it to
+  ]);
   assert.deepEqual(map.get('plan'), { usd: 3, estimated: false });
   assert.deepEqual(map.get('cx'), { usd: 2, estimated: true });
   assert.equal(map.size, 2);
 });
 
 test('a job total covers planning as well as every sub-job, each card counted once', () => {
-  const byCard = usdByCard({ sessions: [
-    row('planCard', { d: day(2) }),
-    row('apiCard', { d: day(3) }),
-    row('apiRepair', { d: day(0.25) }),
-    row('webCard', { d: day(4) }),
-  ] });
+  const byCard = usdByCard([row('planCard', 2), row('apiCard', 3), row('apiRepair', 0.25), row('webCard', 4)]);
   const { jobs: [job] } = withJobSpend({ jobs: [{
     id: 'job1',
     // Planning/ticketing runs carry a null subJobId, so no sub-job holds their card.
@@ -45,7 +40,7 @@ test('a job total covers planning as well as every sub-job, each card counted on
 });
 
 test('a Codex step marks its sub-job and the whole job as an estimate', () => {
-  const byCard = usdByCard({ sessions: [row('a', { d: day(1) }), row('b', { d: day(2, 2) })] });
+  const byCard = usdByCard([row('a', 1), row('b', 2, 2)]);
   const { jobs: [job] } = withJobSpend({ jobs: [{
     runs: [{ subJobId: 'x', sessionId: 'a' }, { subJobId: 'y', sessionId: 'b' }],
     subJobs: [{ id: 'x', sessions: ['a'] }, { id: 'y', sessions: ['b'] }],
@@ -71,7 +66,7 @@ test('an empty map or a snapshot with no jobs is enriched without throwing', () 
   assert.equal(usdByCard(undefined).size, 0);
   // A card in the map that belongs to no job is simply never asked for.
   const { jobs: [job] } = withJobSpend({ jobs: [{ runs: [{ sessionId: 'mine' }], subJobs: [] }] },
-    usdByCard({ sessions: [row('mine', { d: day(1) }), row('someone-else', { d: day(50) })] }));
+    usdByCard([row('mine', 1), row('someone-else', 50)]));
   assert.equal(job.usd, 1);
 });
 
