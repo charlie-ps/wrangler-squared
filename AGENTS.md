@@ -3,14 +3,14 @@
 Developer notes for Wrangler² — the Agent Wrangler automated-jobs system as an
 installable extension. Only the non-obvious, durable things; point at code rather
 than re-deriving it. **Read `docs/PORTING.md` first**: the port is functionally
-complete on host API 1.6.0, and that file is the map (what came from where, what
+complete on host API 1.8.0, and that file is the map (what came from where, what
 stands in for what, and which of the six open host-API gaps block which
 feature).
 
 ## What this is
 
 - An **external extension** for agent-wrangler's extensions API, which is on
-  agent-wrangler `main` (host API 1.6.0). Spec:
+  agent-wrangler `main` (host API 1.8.0). Spec:
   `docs/superpowers/specs/2026-09-11-extensions-api-design.md` in that repo.
 - The wrangler clones this repo into `<DATA_DIR>/extensions/jobs/`, runs
   `npm ci --ignore-scripts`, and imports `index.js`. **The manifest `id` (`jobs`)
@@ -18,13 +18,16 @@ feature).
   uninstall path disagree. `package.json`'s `wranglerExtension` block is what the
   human consents to BEFORE any code runs, so it and `server/manifest.js` are
   duplicated by design and must agree (`id`, and `requires` in the manifest may
-  not be WIDER than the block's). `requires` is the five `sessions:*` (read, spawn,
-  archive, wake, bill) plus `usage:read` and `board:rebuild`/`board:broadcast` —
+  not be WIDER than the block's). `requires` is the four `sessions:*` (read, spawn,
+  archive, bill) plus `usage:read` and `board:rebuild`/`board:broadcast` —
   **not** `tasks:write`: spawn's `taskId` binds task memory and assigns the card
   itself, and it is documented as not an escalation. `engines.wranglerApi` is
-  `^1.6.0`: 1.4 added the worktree/`addDirs`/`taskId`/PR-automation spawn
+  `^1.8.0`: 1.4 added the worktree/`addDirs`/`taskId`/PR-automation spawn
   options this repo depends on, 1.6 the `usage:read`/`sessions:bill` pair the
-  Jobs board's prices and triage billing depend on.
+  Jobs board's prices and triage billing depend on, 1.8 the client
+  `api.openSession(sid)` behind the sub-job dialog's Open/Restore session button
+  (there is no `sessions:wake` any more: the board resumes the card itself), and
+  1.7 the `view` `badge()` core draws the needs-you count from.
 - **`package-lock.json` is mandatory** — the wrangler refuses to install without
   one. Regenerate it after any dependency change.
 

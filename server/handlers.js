@@ -43,23 +43,6 @@ export const jobSettingsHandler = {
   },
 };
 
-// "Open session" / "Restore session" from the Jobs view. Core's client did this
-// itself — `setView('grid')`, `selectSession(sid)` or `send({type:'resume'})` —
-// but an extension's client `send` is bound to ITS OWN handler types, so it
-// cannot send the core `resume` frame, and the client api has no navigation. The
-// server half can at least wake a dormant card (`sessions:wake`, logged as
-// reason=ext:jobs); selecting it on the board is left to the human.
-// TODO(host-api client navigation): an `api.openSession(sid)` / `api.openDiff(sid)`
-// on the client façade would restore the round trip core had (diff-return.js).
-export const jobOpenSessionHandler = {
-  type: 'job-open-session',
-  async handler(msg, host) {
-    const s = host.sessions.get(msg.sessionId);
-    if (!s) throw new Error('Session not found');
-    if (s.archived) await host.sessions.wake(msg.sessionId);
-  },
-};
-
 // "Review code in <IDE>" from the sub-job dialog: hand the worktree to the
 // desktop IDE as a project, so the review surface is its Git tool window (the
 // branch's changes against main, uncommitted work included). macOS `open -na`
@@ -92,4 +75,4 @@ export function makeOpenIdeHandler({ execFile = defaultExecFile, access = defaul
 }
 export const jobOpenIdeHandler = makeOpenIdeHandler();
 
-export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenSessionHandler, jobOpenIdeHandler];
+export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler];
