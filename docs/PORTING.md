@@ -2,9 +2,9 @@
 
 This repo is the automated-jobs system from agent-wrangler's `job-system` branch
 (18 commits ahead of `main`, never merged), re-homed as an **installable
-extension**. The port is functionally complete against host API **1.4.0**: every
+extension**. The port is functionally complete against host API **1.6.0**: every
 feature the in-core system had is either wired through the `host` façade or is
-one of the eight open gaps below. This document stays the map — what came from
+one of the six open gaps below. This document stays the map — what came from
 where, what stands in for what, and what has to change in agent-wrangler before
 a gap closes.
 
@@ -43,14 +43,16 @@ façade exposes nothing equivalent.
 |---|---|---|---|
 | `index.js` | — | new | re-exports `server/manifest.js`; see AGENTS.md for why nothing imports it |
 | `server/manifest.js` | `server/index.js` wiring + `agent-skills.js` `AUTOMATION_ONLY` + `mcp/server.js` spawning filter | new | stores, tools, handlers, `skills`/`skillsFor`, `hideTool`, `graph`, `onBeforeDispatch`, 4s sweep, client, styles. Declares no manifest `settings` (see below) |
-| `server/jobs.js` | `server/index.js` (JobRunner construction, `statusOf`) | new | `runnerFor(host)` singleton; graph status cache; `runForSession` replaces `entry.automationRun` |
+| `server/jobs.js` | `server/index.js` (JobRunner construction, `statusOf`) | new | `runnerFor(host)` and `spendFor(host)` singletons; graph status cache; `runForSession` replaces `entry.automationRun` |
+| `server/job-spend-refresh.js` | `server/index.js` (`refreshJobSpendIfStale`) | rewritten | the 60s per-card price refresh over `host.usage.byCard()`; `byCard(jobs)` serves the last map and kicks the next read, never awaited on the graph tick |
 | `server/tools.js` | `server/mcp/tools/job-report.js` | rewritten | two tools (`job_report`, `get_job_context`) in the extension signature `({host, caller}, args)`; `syncBranch` reads a `name_branch` rename back off the projection; `hideTool` |
 | `server/handlers.js` | `server/control/handlers/jobs.js` | rewritten | `(msg, host)`; no `ctx.reply` → `host.broadcast`; adds `job-open-session` and `job-open-ide` (macOS `open -na <ideApp>` on a sub-job's worktree, result broadcast as `job-ide-opened` / `job-ide-failed`); `job-settings` keeps job settings in this extension's own store |
-| `server/job-runtime.js` | `server/job-runtime.js` | **rewritten** | the only session-facing module: spawns through the façade with 1.4's `worktree`/`addDirs`/`taskId`/PR-automation options. Most open gaps are marked here |
+| `server/job-runtime.js` | `server/job-runtime.js` | **rewritten** | the only session-facing module: spawns through the façade with 1.4's `worktree`/`addDirs`/`taskId`/PR-automation options, bills a triage with 1.6's `sessions:bill`. Most open gaps are marked here |
 | `server/git.js` | `server/worktree.js` (subset) | new | down to `gitRepoRoot` + `removeWorktree --force`: the wrangler cuts and renames worktrees now, cleanup's compare-and-delete is still ours |
 | `server/job-store.js` | same | verbatim | `./data-dir.js`, `./atomic-json.js` are local copies |
 | `server/job-runner.js` | same | verbatim | `./log.js` is a local leaf |
-| `server/jobs-schema.js`, `job-moves.js`, `job-comments.js`, `job-deploys.js`, `job-github.js`, `job-spend.js` | same | verbatim | |
+| `server/jobs-schema.js`, `job-moves.js`, `job-comments.js`, `job-deploys.js`, `job-github.js` | same | verbatim | |
+| `server/job-spend.js` | same | verbatim minus the scan walk | `usdByCard` reads the façade's `[{ cardId, usd, estimatedUsd }]` rows instead of `scanAllDaily`'s per-transcript day bags; `withJobSpend`/`withRunStatus` untouched |
 | `server/job-prompts.js` | same | verbatim minus `adapterFor` | `modelLabel` prints the raw model value (gap 10); prompts name core's `name_branch` |
 | `server/headless-claude.js` | same | verbatim | the comment-triage one-shot; `cleanClaudeEnv` from local `clean-claude-env.js` |
 | `server/data-dir.js`, `atomic-json.js`, `log.js`, `clean-claude-env.js` | `server/data-dir.js`, `atomic-json.js`, `log.js`, `agents/claude.js` | copies | leaves the store and triage need before a façade exists |
@@ -89,8 +91,6 @@ keep their numbers.
 | 3 | **spawn correlation tag** | stamped `automationRun` on the entry and called `onAutomationPrepared(sid, wt)` before the pane started | positional `pendingLaunch`, set before `spawn()` and consumed by `noteDispatch()` (`job-runtime.js`); the hook carries the card id but nothing saying which spawn it is for | `sessions:spawn({ tag })` echoed on the `onBeforeDispatch` payload | nothing today — the runner's `busy` guard means one launch at a time; correctness the moment a second concurrent spawn path exists |
 | 5 | **session status / liveness** | `lastGraph.sessions[].status` plus a fresh tmux `list-panes` probe (`SessionManager.isSessionAlive`) | the graph status the contributor cached (`jobs.js noteGraph` → `job-runtime.js isAlive`): up to one tick (~4s) stale, and reads a DORMANT card as idle | `projectSession` carries `status` (and `dormant`/`alive`), or a `sessions:probe` capability | precision of the idle-receipt grace timer; `stop()`'s "still running, keep the slot" guard is weaker than core's |
 | 7 | **pane read/keys** | answered Claude's first-launch "do you trust this folder" dialog by reading the pane and pressing Down/Enter (`tmux-scraper.js trustDialogState`) | `acceptTrustDialog()` returns false; a worker parked on the dialog waits for a human, visible as needs-you thanks to #156 | the spec says an extension never reaches a pane, so the realistic ask is a core `autoAcceptTrust` option on `sessions:spawn`, not `pane:read`/`pane:keys` | first launch in a repo Claude has never trusted |
-| 8 | **bill a headless run to a card** | `recordPriorLiveSessionId(sid, liveId)` after comment triage, so the cost scanners billed it | `attributeSpend()` is a no-op; the triage's spend is unattributed | `sessions:bill(sid, liveSessionId)` — the `headless-claude.js` prerequisite is already on main (#159) | triage spend in Usage, and the per-job price being complete |
-| 9 | **usage read** | `cachedScan(scanAllDaily)` → `usdByCard` on its own 60s cadence | the graph contributor passes an empty spend map (`manifest.js`), so no prices are shown | `usage:read` → `host.usage.byCard()`, cached, never on the rebuild path — the memo + `cardId` prerequisite is on main (#163) | job / sub-job price on the board |
 | 10 | **agents/models vocabulary** | client read the connect-time `agents` list; prompts pretty-printed through `adapterFor(agent).models` | hard-coded `AGENTS` in `public/index.js` (it WILL drift); `modelLabel` prints the raw value, so a history line reads `· opus` where core read `· Opus 5` | `agents:read` → `host.agents.list()`, and carry it on the graph for the client half | correctness of the New-job form's model dropdown; readable model names in prompts |
 | 12 | **client navigation** | `setView('grid')`, `selectSession(sid)`, `openDiffPanel(sid)`, `send({type:'resume'})`, `onDiffPanelClosed` round trip | `job-open-session` wakes a dormant card server-side and the human picks it on the board; `public/diff-return.js` is dead code | `api.openSession(sid)` and `api.openDiff(sid, {onClose})` beside today's `send` / `selectedSessionId` / `requestPanelRender` / `version` / `storage` / `onMessage` | "Open session", "Review code in Wrangler", the diff round trip |
 | 15 | **archive review skip** | `archive()` skipped the paid memory review for an `automationRun` session | none — every retired step may trigger a Haiku review when `archiveReviewEnabled` is on | `sessions:archive(sid, { review: false })` | wasted spend per retired step when that flag is on |
@@ -107,6 +107,8 @@ simply the absence of an option on them.
 | 2 | spawn `addDirs` | #169 | only the planning run passes `addDirs` (`CHECKOUTS_DIR`, `~/IdeaProjects` unless `AW_CHECKOUTS_DIR` says otherwise); a Codex worker's own worktree git dir is granted by the wrangler (`session-manager.js withCodexWorktreeAddDir`) |
 | 4 | pre-launch task/memory bind | #169 | `spawn({ taskId })` binds before the pane starts, which is the only ordering Codex honours. `tasks:write` left `requires`: the assign is spawn's own, not an escalation |
 | 6 | suspend | — | none was ever needed: `sessions:archive(sid, {cascade:false})` is archiveCascade, so it kills the pane and archives in one call |
+| 8 | bill a headless run to a card | host API 1.6 `sessions:bill` | `attributeSpend(sub, liveId)` calls `host.sessions.bill(sub.sessions.at(-1), liveId)`, the façade's bind over `recordPriorLiveSessionId`, so a comment triage's `claude -p` lands on the sub-job's latest card's `priorLiveSessionIds` and the usage scan bills it |
+| 9 | usage read | host API 1.6 `usage:read` | `host.usage.byCard()` resolves to one `{ cardId, usd, estimatedUsd }` row per card through the wrangler's own usage memo (#163). `server/job-spend-refresh.js` reads it on core's 60s cadence — only once some run has bound a card, never awaited by the graph contributor, a failed read keeping the previous map — and `withJobSpend` prices jobs and sub-jobs off the map the last refresh produced |
 | 11 | client broadcast delivery | #167 (host API 1.2) | `api.onMessage` delivers this extension's `ext:jobs` frames, so the New-job dialog closes on the reply and toasts instead of waiting a graph tick |
 | 13 | extension skills | #170 | the loader publishes an installed extension's `skills/*` through `skill-catalog.js`; `skills: ['job-worker']` + `skillsFor` were already correct and simply started working |
 | 14 | PR automation off a job PR | #169 | `autoMergeOnPass: false` / `autoFixPrChecks: false` on spawn, so core's nudge and auto-merge are not a second driver on the runner's branch |
@@ -145,14 +147,16 @@ on `main` as their own small PRs. All are resolved.
 ## Tests
 
 `npm test` runs `node --test` over `server/*.test.js` and `public/*.test.js`:
-**199 tests, 198 pass, 1 skipped** (the `AW_REPO` guard); with
-`AW_REPO=~/IdeaProjects/agent-wrangler-worktree-ext-api` set, 199 pass. Per file:
-jobs 74, jobs-view 48, deploys 16, job-runtime 12, moves 10, prompts 9, manifest
-8, spend 7, comments 6, index 6, integration 3.
+**212 tests, 211 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
+a checkout serving host API 1.6, 212 pass. Per file: jobs 76, jobs-view 49,
+deploys 16, job-runtime 13, moves 10, prompts 10, manifest 9, spend 7, index 7,
+comments 6, spend-refresh 4, integration 3, handlers 2.
 
 `server/test-helpers.js` holds the single fake `host`
-(`{ sessions: { spawn, get, archive, wake }, stores.jobs, rebuild, broadcast, log }`,
-whose `spawn` fires `onBeforeDispatch` the way the wrangler's dispatch does); it
+(`{ sessions: { spawn, get, archive, wake, bill }, usage: { byCard }, stores.jobs, rebuild, broadcast, log }`,
+whose `spawn` fires `onBeforeDispatch` the way the wrangler's dispatch does,
+whose `bill` keeps `recordPriorLiveSessionId`'s contract, and whose `byCard`
+resolves to whatever rows a test pushed onto the returned `usage` array); it
 is deliberately not a `*.test.js` name, and everything it writes goes under the
 redirected `DATA_DIR`. `server/manifest.test.js` is the pattern to copy for
 signatures, the `onBeforeDispatch` binding, the gates and the graph contributor;
@@ -170,7 +174,12 @@ files, so the `.mjs` dodge was obsolete and both remaining suites are ported.
   `SessionManager.refreshAlive` races, the tmux `list-panes` probe and its error
   taxonomy, `automationRun`/`SESSIONS_DIR`/`resumeEntry` stamping, the Codex
   git-metadata `addDirs` (wrangler-side since 1.4), the `acceptTrustDialog` cases
-  (gap 7) and the memory-bind / `recordPriorLiveSessionId` assertions (gap 8).
+  (gap 7) and the memory-bind assertions. The `recordPriorLiveSessionId` one is
+  back as `attributeSpend` over the fake host's `sessions.bill`.
+- `server/job-spend-refresh.test.js` — the 60s price refresh with an injected
+  clock: first tick empty, a read only once a run has bound a card, one read per
+  window and one in flight, a failed read keeping the previous map and backing
+  off. `manifest.test.js` drives the same through the graph contributor.
 - `server/job-prompts.test.js` — the prompt half (`jobPrompt`, `historyLines`),
   unchanged apart from the model label printing raw (`· opus`) — gap 10.
 - `server/integration.test.js` — replaces `jobs-integration.test.js`: the
@@ -223,9 +232,8 @@ happy-dom), and a real planning launch (it bills a session).
    `onBeforeDispatch`, and the first time the wrangler cuts a job's worktree for
    real. Open the Jobs view in a browser while it runs, for the CSS.
 3. Propose the remaining host-API additions in blocking order: **12** (client
-   navigation), **10** (agents vocabulary), **5** (session status), **9** (usage
-   read), **8** (bill a headless run), then **15** (archive review skip), **3**
-   (spawn tag), **7** (`autoAcceptTrust`). Each is one capability + one builder +
+   navigation), **10** (agents vocabulary), **5** (session status), then **15**
+   (archive review skip), **3** (spawn tag), **7** (`autoAcceptTrust`). Each is one capability + one builder +
    a minor bump + a row in the spec's table; the extension side is deleting a
    `TODO(host-api …)`.
 4. Consider moving job settings from the `job-settings` handler and this

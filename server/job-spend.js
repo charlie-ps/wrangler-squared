@@ -1,29 +1,29 @@
-// What a job cost, for the Jobs board. Pure over a usage scan (usage-report.js
-// scanAllDaily) plus a jobs snapshot: the expensive half stays in the scanner, and
-// this module only ever SUMS dollars it was handed — never a fourth token-pricing
-// scanner beside transcript-reader / usage-report / cost-report.mjs.
+// What a job cost, for the Jobs board. Pure over the host's per-card usage rows
+// (`host.usage.byCard()`, host API 1.6 `usage:read`) plus a jobs snapshot: the
+// expensive half stays in the wrangler's scanner, and this module only ever SUMS
+// dollars it was handed — never a token-pricing scanner of its own.
 //
-// Why the scan rather than graph.sessions, which already carries a per-card `usd`:
-// a job step is archived the instant it stops (job-runtime retire) and an archived
-// entry is transcript-free by design, while a headless comment triage has no card
-// of its own and is billed onto the sub-job's latest card as a priorLiveSessionId —
-// which the live enrichment never reads. scanAllDaily resolves every transcript a
-// card has owned (priorLiveSessionIds included), applies the fork bound and
-// estimates Codex, so it is the only source that sees a finished job's whole bill.
+// Why the usage rows rather than graph.sessions, which already carries a per-card
+// `usd`: a job step is archived the instant it stops (job-runtime retire) and an
+// archived entry is transcript-free by design, while a headless comment triage has
+// no card of its own and is billed onto the sub-job's latest card as a
+// priorLiveSessionId (`sessions:bill`) — which the live enrichment never reads.
+// The host's scan resolves every transcript a card has owned (priorLiveSessionIds
+// included), applies the fork bound and estimates Codex, so it is the only source
+// that sees a finished job's whole bill.
 
-// cardId -> { usd, estimated }. Two rows can share a card (a `/clear` leaves an
-// earlier transcript behind, and each is its own row), so they accumulate. A row's
-// `estimatedUsd` is a dollar SLICE, not a flag: any of it means the card's total
-// carries a Codex estimate and must be shown with `~`.
-export function usdByCard(scan) {
+// cardId -> { usd, estimated }. A row is one card's total over every transcript and
+// day it owned; rows are still accumulated rather than assigned so a host that
+// emits one row per transcript (two share a card after a `/clear`) sums the same.
+// A row's `estimatedUsd` is a dollar SLICE, not a flag: any of it means the card's
+// total carries a Codex estimate and must be shown with `~`.
+export function usdByCard(rows) {
   const out = new Map();
-  for (const row of scan?.sessions || []) {
-    if (!row.cardId) continue;
+  for (const row of rows || []) {
+    if (!row?.cardId) continue;
     const cur = out.get(row.cardId) || { usd: 0, estimated: false };
-    for (const bag of Object.values(row.days || {})) {
-      cur.usd += bag.usd || 0;
-      if ((bag.estimatedUsd || 0) > 0) cur.estimated = true;
-    }
+    cur.usd += row.usd || 0;
+    if ((row.estimatedUsd || 0) > 0) cur.estimated = true;
     out.set(row.cardId, cur);
   }
   return out;

@@ -3,7 +3,7 @@ import { JobStore } from './job-store.js';
 import { withJobSpend, withRunStatus } from './job-spend.js';
 import { TOOLS, hideTool } from './tools.js';
 import { HANDLERS } from './handlers.js';
-import { runnerFor, noteGraph, isAutomated } from './jobs.js';
+import { runnerFor, spendFor, noteGraph, isAutomated } from './jobs.js';
 
 // The extension manifest (agent-wrangler docs/superpowers/specs/
 // 2026-09-11-extensions-api-design.md, "Manifest"). The repo root's index.js
@@ -37,10 +37,10 @@ export default {
   defaultEnabled: true,
   dir,
   requires: [
-    'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:wake',
-    'board:rebuild', 'board:broadcast',
+    'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:wake', 'sessions:bill',
+    'usage:read', 'board:rebuild', 'board:broadcast',
   ],
-  engines: { wranglerApi: '^1.4.0' },
+  engines: { wranglerApi: '^1.6.0' },
 
   // Instantiated once by the wrangler with `{ id, log }`; the file path is the
   // extension's own choice (server/data-dir.js).
@@ -54,12 +54,13 @@ export default {
 
   // Every ~4s graph tick. `graph.sessions` is what carries each live run's card
   // status onto the run (withRunStatus) and what the runner's `statusOf` reads;
-  // `jobs` is not a reserved key. Spend is empty until the host exposes the usage
-  // scan — TODO(host-api usage:read): core summed scanAllDaily rows per card
-  // (job-spend.js usdByCard) on its own 60s cadence.
+  // `jobs` is not a reserved key. The price is whatever map the last 60s spend
+  // refresh produced (job-spend-refresh.js) — `byCard` kicks the next one but is
+  // never awaited here, so the usage scan can never stall a rebuild.
   graph: ({ host, graph }) => {
     noteGraph(graph);
-    return { jobs: withRunStatus(withJobSpend(host.stores.jobs.snapshot(), new Map()), graph.sessions) };
+    const snapshot = host.stores.jobs.snapshot();
+    return { jobs: withRunStatus(withJobSpend(snapshot, spendFor(host).byCard(snapshot.jobs)), graph.sessions) };
   },
 
   session: {

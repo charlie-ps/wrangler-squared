@@ -1,6 +1,7 @@
 import { JobRunner } from './job-runner.js';
 import { JobRuntime } from './job-runtime.js';
 import { JobGithub } from './job-github.js';
+import { JobSpendRefresh } from './job-spend-refresh.js';
 
 // Composition root for the extension's server half — what agent-wrangler's
 // server/index.js did for the in-core job system (construct JobStore, JobRuntime,
@@ -27,6 +28,15 @@ export function runnerFor(host) {
     runner.runtime = runtime;
   }
   return runner;
+}
+
+// The per-card spend the graph contributor serves (server/manifest.js `graph`),
+// one per process for the same reason as the runner: it caches across ticks and
+// every tick is handed the same façade.
+let spend = null;
+export function spendFor(host) {
+  spend ??= new JobSpendRefresh({ host });
+  return spend;
 }
 
 // The card status of every session as of the last graph the contributor saw
@@ -56,4 +66,4 @@ export function runForSession(store, sessionId) {
 export const isAutomated = (store, sessionId) => Boolean(runForSession(store, sessionId));
 
 // Test seam.
-export function _resetForTests() { runner = null; lastStatus.clear(); }
+export function _resetForTests() { runner = null; spend = null; lastStatus.clear(); }

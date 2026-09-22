@@ -199,3 +199,17 @@ test('cleanupPlanning stops the planning and ticketing steps and removes the wor
   assert.deepEqual(archived, ['plan', 'jira'], 'a sub-job\'s own step is cleaned up with the sub-job, not with the plan');
   assert.deepEqual(f.calls.at(-1), ['update-ref', '-d', 'refs/heads/job-plan', 'base']);
 });
+
+test('attributeSpend bills a headless triage to the sub-job\'s latest card, and nothing when there is none', () => {
+  const { host, billed, sessions } = fakeHost();
+  sessions.set('s_old', { sessionId: 's_old', archived: true, worktree: null });
+  sessions.set('s_new', { sessionId: 's_new', archived: false, worktree: null });
+  const runtime = runtimeWith(host);
+  assert.equal(runtime.attributeSpend({ sessions: ['s_old', 's_new'] }, 'live-triage'), true);
+  assert.deepEqual(billed, [{ sessionId: 's_new', liveSessionId: 'live-triage' }]);
+  assert.deepEqual(sessions.get('s_new').priorLiveSessionIds, ['live-triage']);
+  assert.equal(runtime.attributeSpend({ sessions: [] }, 'live-triage'), false, 'a sub-job that never bound a card');
+  assert.equal(runtime.attributeSpend({ sessions: ['s_new'] }, null), false, 'a triage that reported no live id');
+  assert.equal(runtime.attributeSpend({ sessions: ['s_gone'] }, 'live-2'), false, 'a purged card is the host\'s false, not a throw');
+  assert.equal(billed.length, 1);
+});

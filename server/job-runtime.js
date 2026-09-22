@@ -159,10 +159,14 @@ export class JobRuntime {
     return false;
   }
 
-  // TODO(host-api sessions:bill): core pushed a headless triage's live id onto the
-  // sub-job's latest card (`recordPriorLiveSessionId`) so the cost scanners billed
-  // it. Nothing on the façade can; the triage's spend is currently unattributed.
-  attributeSpend() {}
+  // A headless comment triage has no card of its own; bill it to the sub-job's
+  // latest card so the usage scan sees it (`sessions:bill` pushes the live id onto
+  // the card's priorLiveSessionIds, what core's recordPriorLiveSessionId did).
+  attributeSpend(sub, liveSessionId) {
+    const sid = sub?.sessions?.at(-1);
+    if (!sid || !liveSessionId) return false;
+    return this.host.sessions.bill(sid, liveSessionId);
+  }
 
   async cleanup(job, sub) {
     // Backstop for a session bound to a run that never settled cleanly (an

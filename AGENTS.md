@@ -3,14 +3,14 @@
 Developer notes for Wrangler² — the Agent Wrangler automated-jobs system as an
 installable extension. Only the non-obvious, durable things; point at code rather
 than re-deriving it. **Read `docs/PORTING.md` first**: the port is functionally
-complete on host API 1.4.0, and that file is the map (what came from where, what
-stands in for what, and which of the eight open host-API gaps block which
+complete on host API 1.6.0, and that file is the map (what came from where, what
+stands in for what, and which of the six open host-API gaps block which
 feature).
 
 ## What this is
 
 - An **external extension** for agent-wrangler's extensions API, which is on
-  agent-wrangler `main` (host API 1.4.0). Spec:
+  agent-wrangler `main` (host API 1.6.0). Spec:
   `docs/superpowers/specs/2026-09-11-extensions-api-design.md` in that repo.
 - The wrangler clones this repo into `<DATA_DIR>/extensions/jobs/`, runs
   `npm ci --ignore-scripts`, and imports `index.js`. **The manifest `id` (`jobs`)
@@ -18,11 +18,13 @@ feature).
   uninstall path disagree. `package.json`'s `wranglerExtension` block is what the
   human consents to BEFORE any code runs, so it and `server/manifest.js` are
   duplicated by design and must agree (`id`, and `requires` in the manifest may
-  not be WIDER than the block's). `requires` is the four `sessions:*` plus
-  `board:rebuild`/`board:broadcast` — **not** `tasks:write`: spawn's `taskId`
-  binds task memory and assigns the card itself, and it is documented as not an
-  escalation. `engines.wranglerApi` is `^1.4.0`, the release that added the
-  worktree/`addDirs`/`taskId`/PR-automation spawn options this repo depends on.
+  not be WIDER than the block's). `requires` is the five `sessions:*` (read, spawn,
+  archive, wake, bill) plus `usage:read` and `board:rebuild`/`board:broadcast` —
+  **not** `tasks:write`: spawn's `taskId` binds task memory and assigns the card
+  itself, and it is documented as not an escalation. `engines.wranglerApi` is
+  `^1.6.0`: 1.4 added the worktree/`addDirs`/`taskId`/PR-automation spawn
+  options this repo depends on, 1.6 the `usage:read`/`sessions:bill` pair the
+  Jobs board's prices and triage billing depend on.
 - **`package-lock.json` is mandatory** — the wrangler refuses to install without
   one. Regenerate it after any dependency change.
 
@@ -52,7 +54,12 @@ feature).
   sees** (`server/jobs.js` `runnerFor`). A store factory gets
   `{ id, extId, settings, log }` and no façade, so the runner cannot be built
   where the store is; every tool/handler/sweep is
-  handed the same façade object, so building on first use is safe.
+  handed the same façade object, so building on first use is safe. The per-card
+  spend refresh (`spendFor`) is a singleton for the same reason.
+- **The graph contributor never awaits the usage read.** `host.usage.byCard()`
+  walks every transcript on disk, so `server/job-spend-refresh.js` serves the map
+  the last 60s refresh produced and only KICKS the next one; the first graph
+  after boot carries no price by design.
 - **`onBeforeDispatch` ↔ launch correlation is positional** (`pendingLaunch`,
   `server/job-runtime.js`). The hook fires inside `host.sessions.spawn()` with the
   card id but no tag saying which spawn it belongs to; one launch at a time
