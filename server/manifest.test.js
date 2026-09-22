@@ -19,7 +19,7 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   // spawn's `taskId` binds the memory and assigns the card itself, and is
   // documented as NOT a tasks:write escalation — so the capability is not asked for.
   assert.ok(!manifest.requires.includes('tasks:write'));
-  assert.equal(manifest.engines.wranglerApi, '^1.6.0', 'usage:read and sessions:bill arrived in 1.6');
+  assert.equal(manifest.engines.wranglerApi, '^1.8.0', 'the client api.openSession the Jobs view opens cards with arrived in 1.8 (1.7 was the rail badge)');
   assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context']);
   assert.deepEqual(Object.keys(manifest.session), ['onBeforeDispatch']);
   assert.equal(manifest.client, 'public/index.js');

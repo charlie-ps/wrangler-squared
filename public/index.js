@@ -12,10 +12,14 @@ import { jobCards, jobNeedsReview } from './jobs.js';
 //    → the server's `host.broadcast` reaches us as an `ext:jobs` frame through
 //    the registrar's `onMessage`, so the dialog closes on the reply again; the
 //    toast is drawn in the view's own host because the board's is app.js-private.
-//  - "Open session" / "Review code in Wrangler" switched view, selected the card
-//    or opened the diff panel → the api has no navigation, so both send
-//    `job-open-session` (wakes a dormant card server-side) and the human picks
-//    the card on the board. TODO(host-api client navigation).
+//  - "Open session" switched view and selected the card, or sent `resume` for
+//    an archived one → `api.openSession(sid)` (host api 1.8) does exactly that
+//    on our behalf; the card list `onBoard` reads for the button's label is the
+//    graph's `sessions`, kept from the last update(). "Review code in Wrangler"
+//    also opened the diff panel → nothing on the api opens it, so the button
+//    lands on the card and the human opens the panel there.
+//    TODO(host-api client navigation): `api.openDiff(sid, {onClose})` would
+//    restore the round trip core had (public/diff-return.js).
 //  - `getAgents()` read the board's connect-time `agents` list → not on the api;
 //    the two adapters' model vocabularies are mirrored below until
 //    TODO(host-api agents:read) — they WILL drift, which is exactly what the
@@ -45,6 +49,7 @@ export default {
     let viewHost = null;
     let toastTimer = null;
     let needsMe = 0;
+    let sessions = [];
 
     // One toast element at a time, inside the view's own host: the board exposes
     // no toast to an extension, and a host that is display:none while another
@@ -103,17 +108,17 @@ export default {
         view = initJobsView({
           send: api.send,
           getAgents: () => AGENTS,
-          // Core answered "is this card on the board right now" off its session
-          // list; the api exposes only the selected id, so every session reads as
-          // off-board and the button says Restore. Harmless: the handler wakes
-          // only an archived card.
-          onBoard: () => false,
-          onSession: (sid) => api.send({ type: 'job-open-session', sessionId: sid }),
-          onDiff: (sid) => api.send({ type: 'job-open-session', sessionId: sid }),
+          // Core answered "is this card on the board right now" off the graph's
+          // session list, and so do we: on it → "Open session" selects the card,
+          // off it → "Restore session" and openSession resumes it first.
+          onBoard: (sid) => sessions.some((s) => s.sessionId === sid),
+          onSession: (sid) => api.openSession(sid),
+          onDiff: (sid) => api.openSession(sid),
         });
       },
       update(el, session, graph) {
         if (!graph?.jobs) return;
+        sessions = graph.sessions || [];
         // The rail count is every job that needs a human, NOT the subset the
         // view is currently drawing: its filter, Needs me and Show finished are
         // one human's view of the board, while the badge is what is waiting
@@ -127,11 +132,10 @@ export default {
       // What core's `<span id="jobs-nav-badge">` in index.html did when core
       // owned Jobs: the needs-you count on the rail button, visible from any
       // view. Core evaluates this on every graph tick and draws or hides its own
-      // span (agent-wrangler public/slots.js syncHosts); 0 draws nothing. The
-      // manifest's `^1.4.0` is deliberately NOT bumped for it — a board older
-      // than the badge simply spreads an unknown contribution key and ignores
-      // it, so the only thing lost is the count, and refusing to boot the whole
-      // extension over a rail decoration is the worse trade.
+      // span (agent-wrangler public/slots.js syncHosts); 0 draws nothing. Host
+      // API 1.7 is where core started calling it; the manifest's `^1.8.0` is
+      // pinned for openSession below, not for this — a board that spreads the
+      // key without reading it only loses the count.
       badge: () => needsMe,
       unmount() {
         clearTimeout(toastTimer);
@@ -140,6 +144,7 @@ export default {
         view = null;
         viewHost = null;
         needsMe = 0;
+        sessions = [];
       },
     });
   },

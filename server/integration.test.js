@@ -97,17 +97,6 @@ test('a job runs from the create frame to a launched PR step through the manifes
   assert.equal(sessions.get(caller).worktree.branch, branch);
 });
 
-test('open session wakes a dormant job card and refuses one the board no longer has', async () => {
-  _resetForTests();
-  const { host, woken, sessions } = fakeHost();
-  sessions.set('dormant', { sessionId: 'dormant', archived: true });
-  sessions.set('live', { sessionId: 'live', archived: false });
-  await handler('job-open-session').handler({ sessionId: 'dormant' }, host);
-  await handler('job-open-session').handler({ sessionId: 'live' }, host);
-  assert.deepEqual(woken, ['dormant'], 'a live card needs nothing; selecting it is the human\'s move');
-  await assert.rejects(handler('job-open-session').handler({ sessionId: 'purged' }, host), /not found/);
-});
-
 test('the wrangler\'s own loader accepts this manifest', async (t) => {
   const repo = process.env.AW_REPO && path.resolve(process.env.AW_REPO.replace(/^~/, os.homedir()));
   const loader = repo && path.join(repo, 'server/extensions/index.js');

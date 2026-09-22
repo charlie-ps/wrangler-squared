@@ -37,10 +37,10 @@ export default {
   defaultEnabled: true,
   dir,
   requires: [
-    'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:wake', 'sessions:bill',
+    'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:bill',
     'usage:read', 'board:rebuild', 'board:broadcast',
   ],
-  engines: { wranglerApi: '^1.6.0' },
+  engines: { wranglerApi: '^1.8.0' },
 
   // Instantiated once by the wrangler with `{ id, log }`; the file path is the
   // extension's own choice (server/data-dir.js).

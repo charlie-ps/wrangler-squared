@@ -13,6 +13,7 @@ function mountClient() {
   const window = new Window();
   globalThis.document = window.document;
   const sent = [];
+  const opened = [];
   const contributions = [];
   const listeners = new Set();
   client.register({
@@ -24,14 +25,19 @@ function mountClient() {
   const el = window.document.createElement('div');
   host.appendChild(el);
   const c = contributions[0];
-  c.mount(el, { send: (f) => sent.push(f), selectedSessionId: () => null, requestPanelRender: () => {}, storage: null, version: '1.4.0' });
+  c.mount(el, { send: (f) => sent.push(f), openSession: (sid) => opened.push(sid), selectedSessionId: () => null, requestPanelRender: () => {}, storage: null, version: '1.8.0' });
   const dispatch = (frame) => { for (const fn of [...listeners]) fn({ type: 'ext:jobs', ...frame }); };
-  return { window, el, c, sent, contributions, dispatch, listeners };
+  return { window, el, c, sent, opened, contributions, dispatch, listeners };
 }
 
-const graphWith = (jobs) => ({ sessions: [], jobs: { jobs, settings: { concurrency: 2, maxRepairs: 2, deploymentStaleMinutes: 30, paused: false } } });
+const graphWith = (jobs, sessions = []) => ({ sessions, jobs: { jobs, settings: { concurrency: 2, maxRepairs: 2, deploymentStaleMinutes: 30, paused: false } } });
 const job = (over = {}) => ({ id: 'job_1', title: 'Ship it', intent: 'x', repos: [], agent: 'claude', model: '', stage: 'backlog', revision: 0,
   paused: false, plan: null, subJobs: [], runs: [], moves: [], reviewCode: true, reviewMerge: true, reviewSessions: true, ...over });
+const sub = (over = {}) => ({ id: 'api', title: 'Deliver api', repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after: [], brief: 'Implement it', sessions: ['s1', 's2'], repairs: [], stage: 'pr', ...over });
+const activeJob = (subOver = {}) => {
+  const s = sub(subOver);
+  return job({ stage: 'active', plan: { context: '', stories: [{ id: 'story', key: 'AUTH-1', title: 'Sign in' }], subJobs: [s] }, subJobs: [s] });
+};
 
 const toastText = (el) => el.querySelector('.jobs-toast')?.textContent ?? null;
 
@@ -126,4 +132,29 @@ test('the IDE handler answers with a broadcast either way, and both land as a to
   assert.equal(toastText(el), 'Opened in IntelliJ IDEA');
   dispatch({ event: 'job-ide-failed', jobId: 'job_1', subJobId: 'api', app: 'IntelliJ IDEA', error: 'Worktree no longer exists: /wt' });
   assert.equal(toastText(el), 'Worktree no longer exists: /wt');
+});
+
+// Core's onSession: select the card when the board has it, resume it first when
+// it does not. Both are api.openSession's job since host api 1.8; the view only
+// has to label the button right, off the graph's session list.
+test('Open/Restore session reads the board off the graph and hands the card to api.openSession', () => {
+  const { window, el, c, sent, opened } = mountClient();
+  c.update(el, null, graphWith([activeJob()], [{ sessionId: 's1', status: 'idle' }]));
+  el.querySelector('[data-sub="api"]').dispatchEvent(new window.Event('click', { bubbles: true }));
+  const dialog = window.document.getElementById('job-dialog');
+  assert.equal(dialog.querySelector('#job-session').textContent, 'Restore session', 'the latest run is archived; an earlier one on the board does not count');
+  c.update(el, null, graphWith([activeJob()], [{ sessionId: 's2', status: 'working' }]));
+  assert.equal(dialog.querySelector('#job-session').textContent, 'Open session', 'the open detail re-labels on the next graph');
+  dialog.querySelector('#job-session').dispatchEvent(new window.Event('click', { bubbles: true }));
+  assert.deepEqual(opened, ['s2'], 'the latest run, live or archived');
+  assert.equal(dialog.hasAttribute('open'), false);
+  assert.deepEqual(sent, [], 'no frame of our own: the board navigates');
+});
+
+test('Review code in Wrangler lands on the first run\'s card until the api can open a diff', () => {
+  const { window, el, c, opened } = mountClient();
+  c.update(el, null, graphWith([activeJob({ worktree: { path: '/wt/api', branch: 'fix/api' } })]));
+  el.querySelector('[data-sub="api"]').dispatchEvent(new window.Event('click', { bubbles: true }));
+  window.document.getElementById('job-dialog').querySelector('#job-diff').dispatchEvent(new window.Event('click', { bubbles: true }));
+  assert.deepEqual(opened, ['s1']);
 });

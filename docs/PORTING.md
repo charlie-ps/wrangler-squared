@@ -2,7 +2,7 @@
 
 This repo is the automated-jobs system from agent-wrangler's `job-system` branch
 (18 commits ahead of `main`, never merged), re-homed as an **installable
-extension**. The port is functionally complete against host API **1.6.0**: every
+extension**. The port is functionally complete against host API **1.8.0**: every
 feature the in-core system had is either wired through the `host` façade or is
 one of the six open gaps below. This document stays the map — what came from
 where, what stands in for what, and what has to change in agent-wrangler before
@@ -46,7 +46,7 @@ façade exposes nothing equivalent.
 | `server/jobs.js` | `server/index.js` (JobRunner construction, `statusOf`) | new | `runnerFor(host)` and `spendFor(host)` singletons; graph status cache; `runForSession` replaces `entry.automationRun` |
 | `server/job-spend-refresh.js` | `server/index.js` (`refreshJobSpendIfStale`) | rewritten | the 60s per-card price refresh over `host.usage.byCard()`; `byCard(jobs)` serves the last map and kicks the next read, never awaited on the graph tick |
 | `server/tools.js` | `server/mcp/tools/job-report.js` | rewritten | two tools (`job_report`, `get_job_context`) in the extension signature `({host, caller}, args)`; `syncBranch` reads a `name_branch` rename back off the projection; `hideTool` |
-| `server/handlers.js` | `server/control/handlers/jobs.js` | rewritten | `(msg, host)`; no `ctx.reply` → `host.broadcast`; adds `job-open-session` and `job-open-ide` (macOS `open -na <ideApp>` on a sub-job's worktree, result broadcast as `job-ide-opened` / `job-ide-failed`); `job-settings` keeps job settings in this extension's own store |
+| `server/handlers.js` | `server/control/handlers/jobs.js` | rewritten | `(msg, host)`; no `ctx.reply` → `host.broadcast`; adds `job-open-ide` (macOS `open -na <ideApp>` on a sub-job's worktree, result broadcast as `job-ide-opened` / `job-ide-failed`); `job-settings` keeps job settings in this extension's own store |
 | `server/job-runtime.js` | `server/job-runtime.js` | **rewritten** | the only session-facing module: spawns through the façade with 1.4's `worktree`/`addDirs`/`taskId`/PR-automation options, bills a triage with 1.6's `sessions:bill`. Most open gaps are marked here |
 | `server/git.js` | `server/worktree.js` (subset) | new | down to `gitRepoRoot` + `removeWorktree --force`: the wrangler cuts and renames worktrees now, cleanup's compare-and-delete is still ours |
 | `server/job-store.js` | same | verbatim | `./data-dir.js`, `./atomic-json.js` are local copies |
@@ -59,7 +59,7 @@ façade exposes nothing equivalent.
 | `public/index.js` | `public/app.js` (jobs bits), `public/index.html` | new | the `view` contribution; mounts `#jobs` + `<dialog id=job-dialog>` on `<body>`; subscribes to its own `ext:jobs` frames via `api.onMessage`; `badge()` gives the rail button the needs-you count (gap 16) |
 | `public/jobs.js`, `job-graph.js` | same | verbatim | import `./util.js` / `./icons.js` (vendored) |
 | `public/jobs-view.js` | same | verbatim minus the rail badge | `render()` no longer writes `#jobs-nav-badge`: that element was core's `index.html`, and the count is the `view` contribution's `badge()` now (gap 16). The in-view `#jobs-review-count` beside the Needs me filter is unchanged |
-| `public/diff-return.js` | same | verbatim, **unused** | the diff round trip needs client navigation (gap 12) |
+| `public/diff-return.js` | same | verbatim, **unused** | the diff round trip needs the diff half of client navigation (gap 12) |
 | `public/jobs.css` | `public/styles.css` diff | extracted | the `#jobs.hidden` rule is dead here (core hides the view's HOST, not `#jobs`); the `.jobs-nav-badge` / `button[data-view=jobs]` rules went with gap 16, since the span and its positioning are core's now; adds this extension's own toast |
 | `public/util.js`, `public/icons.js` | `public/util.js` (esc, tildify), `public/icons.js` (ROBOT_ICON, PULL_REQUEST_ICON) | vendored | |
 | `skills/job-worker/` | `agent-skills/skills/job-worker/` | verbatim | **live** since agent-wrangler #170: the loader publishes `<dir>/skills/*`, `skillsFor` gates it per launch |
@@ -93,7 +93,7 @@ keep their numbers.
 | 5 | **session status / liveness** | `lastGraph.sessions[].status` plus a fresh tmux `list-panes` probe (`SessionManager.isSessionAlive`) | the graph status the contributor cached (`jobs.js noteGraph` → `job-runtime.js isAlive`): up to one tick (~4s) stale, and reads a DORMANT card as idle | `projectSession` carries `status` (and `dormant`/`alive`), or a `sessions:probe` capability | precision of the idle-receipt grace timer; `stop()`'s "still running, keep the slot" guard is weaker than core's |
 | 7 | **pane read/keys** | answered Claude's first-launch "do you trust this folder" dialog by reading the pane and pressing Down/Enter (`tmux-scraper.js trustDialogState`) | `acceptTrustDialog()` returns false; a worker parked on the dialog waits for a human, visible as needs-you thanks to #156 | the spec says an extension never reaches a pane, so the realistic ask is a core `autoAcceptTrust` option on `sessions:spawn`, not `pane:read`/`pane:keys` | first launch in a repo Claude has never trusted |
 | 10 | **agents/models vocabulary** | client read the connect-time `agents` list; prompts pretty-printed through `adapterFor(agent).models` | hard-coded `AGENTS` in `public/index.js` (it WILL drift); `modelLabel` prints the raw value, so a history line reads `· opus` where core read `· Opus 5` | `agents:read` → `host.agents.list()`, and carry it on the graph for the client half | correctness of the New-job form's model dropdown; readable model names in prompts |
-| 12 | **client navigation** | `setView('grid')`, `selectSession(sid)`, `openDiffPanel(sid)`, `send({type:'resume'})`, `onDiffPanelClosed` round trip | `job-open-session` wakes a dormant card server-side and the human picks it on the board; `public/diff-return.js` is dead code | `api.openSession(sid)` and `api.openDiff(sid, {onClose})` beside today's `send` / `selectedSessionId` / `requestPanelRender` / `version` / `storage` / `onMessage` | "Open session", "Review code in Wrangler", the diff round trip |
+| 12 | **client navigation: the diff panel** | `openDiffPanel(sid)` and the `onDiffPanelClosed` round trip (`public/diff-return.js`) | "Review code in Wrangler" calls `api.openSession(sub.sessions[0])`, so it lands on the card and the human opens the panel there; `public/diff-return.js` is dead code | `api.openDiff(sid, {onClose})` beside 1.8's `openSession` | the diff round trip. The session half closed in 1.8 (below) |
 | 15 | **archive review skip** | `archive()` skipped the paid memory review for an `automationRun` session | none — every retired step may trigger a Haiku review when `archiveReviewEnabled` is on | `sessions:archive(sid, { review: false })` | wasted spend per retired step when that flag is on |
 
 Gap 15's marker sits above `stop()` in `job-runtime.js` and covers both
@@ -110,10 +110,11 @@ simply the absence of an option on them.
 | 6 | suspend | — | none was ever needed: `sessions:archive(sid, {cascade:false})` is archiveCascade, so it kills the pane and archives in one call |
 | 8 | bill a headless run to a card | host API 1.6 `sessions:bill` | `attributeSpend(sub, liveId)` calls `host.sessions.bill(sub.sessions.at(-1), liveId)`, the façade's bind over `recordPriorLiveSessionId`, so a comment triage's `claude -p` lands on the sub-job's latest card's `priorLiveSessionIds` and the usage scan bills it |
 | 9 | usage read | host API 1.6 `usage:read` | `host.usage.byCard()` resolves to one `{ cardId, usd, estimatedUsd }` row per card through the wrangler's own usage memo (#163). `server/job-spend-refresh.js` reads it on core's 60s cadence — only once some run has bound a card, never awaited by the graph contributor, a failed read keeping the previous map — and `withJobSpend` prices jobs and sub-jobs off the map the last refresh produced |
+| 12 | client navigation: open a session | host API 1.8 `api.openSession(sid)` | the client façade does what core's `onSession` did — `setView('grid')`, then `selectSession(sid)` for a card on the board or `send({type:'resume'})` + toast for one that is not — so `onSession` is the one call and the interim `job-open-session` handler (server-side `sessions:wake`, human picks the card) is gone, `sessions:wake` with it. `onBoard` reads `graph.sessions` off the view's `update(el, session, graph)`, which is what labels the button Open vs Restore. The diff half stays open above |
 | 11 | client broadcast delivery | #167 (host API 1.2) | `api.onMessage` delivers this extension's `ext:jobs` frames, so the New-job dialog closes on the reply and toasts instead of waiting a graph tick |
 | 13 | extension skills | #170 | the loader publishes an installed extension's `skills/*` through `skill-catalog.js`; `skills: ['job-worker']` + `skillsFor` were already correct and simply started working |
 | 14 | PR automation off a job PR | #169 | `autoMergeOnPass: false` / `autoFixPrChecks: false` on spawn, so core's nudge and auto-merge are not a second driver on the runner's branch |
-| 16 | **rail-button count** | agent-wrangler `view` badge (host API 1.6) | core owned `<span id="jobs-nav-badge">` in `index.html` and jobs-view.js filled it, so the needs-you count showed from any view; the port lost the element with the file. A `view` contribution now carries `badge`, a function core calls where views already tick (`app.js updateExtViews` → `slots.syncHosts`, under the same try/catch-and-drop discipline as mount/update) and renders into a span it owns on the rail button it built — falsy or absent draws nothing. Smuggling a badge into `icon` markup was the alternative and was rejected: the rail is core's chrome, `#nav-rail button` has no `position`, and the next extension would re-invent it. Adopted here as `badge: () => needsMe` in `public/index.js`, counted off `graph.jobs` on every tick. `engines.wranglerApi` stays `^1.4.0`: an older board spreads the unknown key and ignores it, so it only loses the count |
+| 16 | **rail-button count** | agent-wrangler `view` badge (host API 1.7) | core owned `<span id="jobs-nav-badge">` in `index.html` and jobs-view.js filled it, so the needs-you count showed from any view; the port lost the element with the file. A `view` contribution now carries `badge`, a function core calls where views already tick (`app.js updateExtViews` → `slots.syncHosts`, under the same try/catch-and-drop discipline as mount/update) and renders into a span it owns on the rail button it built — falsy or absent draws nothing. Smuggling a badge into `icon` markup was the alternative and was rejected: the rail is core's chrome, `#nav-rail button` has no `position`, and the next extension would re-invent it. Adopted here as `badge: () => needsMe` in `public/index.js`, counted off `graph.jobs` on every tick. The badge alone would not have moved `engines.wranglerApi` (an older board spreads the unknown key and ignores it, so it only loses the count); the `^1.8.0` pin is openSession's (gap 12 below) and covers it |
 
 ### Also worth knowing
 
@@ -149,13 +150,13 @@ on `main` as their own small PRs. All are resolved.
 ## Tests
 
 `npm test` runs `node --test` over `server/*.test.js` and `public/*.test.js`:
-**212 tests, 211 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
-a checkout serving host API 1.6, 212 pass. Per file: jobs 76, jobs-view 49,
-deploys 16, job-runtime 13, moves 10, prompts 10, manifest 9, spend 7, index 7,
-comments 6, spend-refresh 4, integration 3, handlers 2.
+**218 tests, 217 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
+a checkout serving host API 1.8, 218 pass. Per file: jobs 76, jobs-view 54,
+deploys 16, job-runtime 13, moves 10, prompts 10, manifest 9, index 9, spend 7,
+comments 6, spend-refresh 4, integration 2, handlers 2.
 
 `server/test-helpers.js` holds the single fake `host`
-(`{ sessions: { spawn, get, archive, wake, bill }, usage: { byCard }, stores.jobs, rebuild, broadcast, log }`,
+(`{ sessions: { spawn, get, archive, bill }, usage: { byCard }, stores.jobs, rebuild, broadcast, log }`,
 whose `spawn` fires `onBeforeDispatch` the way the wrangler's dispatch does,
 whose `bill` keeps `recordPriorLiveSessionId`'s contract, and whose `byCard`
 resolves to whatever rows a test pushed onto the returned `usage` array); it
@@ -233,8 +234,8 @@ happy-dom), and a real planning launch (it bills a session).
    this is the first billed check, the first real exercise of `pendingLaunch` ↔
    `onBeforeDispatch`, and the first time the wrangler cuts a job's worktree for
    real. Open the Jobs view in a browser while it runs, for the CSS.
-3. Propose the remaining host-API additions in blocking order: **12** (client
-   navigation), **10** (agents vocabulary), **5** (session status), then **15**
+3. Propose the remaining host-API additions in blocking order: **12** (the
+   diff half of client navigation), **10** (agents vocabulary), **5** (session status), then **15**
    (archive review skip), **3** (spawn tag), **7** (`autoAcceptTrust`). Each is one capability + one builder +
    a minor bump + a row in the spec's table; the extension side is deleting a
    `TODO(host-api …)`.
