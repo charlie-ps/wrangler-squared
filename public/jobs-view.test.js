@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { initJobsView } from './jobs-view.js';
+import { initJobsView, isPrimaryActionKey, primaryAction } from './jobs-view.js';
 import { jobCards, jobStatus, jobNeedsReview, dependencyLevels, jobCardHtml, jobBoardHeaderHtml, mergeHeldByComments, movesFor, eventFor } from './jobs.js';
 
 const sub = (id, after = []) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Implement it and open the PR', sessions: [], repairs: [] });
@@ -798,4 +798,69 @@ test('a requested fix reads as work about to happen, and the note rides on the c
   f.q('[data-sub="api"]').click();
   assert.match(f.q('#job-dialog').textContent, /Fix requested: Pin the client to v3/);
   assert.match(f.q('#job-dialog').textContent, /Note for the next session: Pin the client to v3/);
+});
+
+
+// The chord lands on the dialog, so it is dispatched from the field a human would
+// be typing in rather than from the dialog itself.
+const chord = (f, el, init = {}) => el.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true, ...init }));
+
+test('the dialog chord is the board\u2019s: plain Cmd or Ctrl with Enter, and nothing else', () => {
+  assert.equal(isPrimaryActionKey({ key: 'Enter', metaKey: true }), true);
+  assert.equal(isPrimaryActionKey({ key: 'Enter', ctrlKey: true }), true);
+  assert.equal(isPrimaryActionKey({ key: 'Enter', metaKey: false, ctrlKey: false }), false);
+  assert.equal(isPrimaryActionKey({ key: 'a', metaKey: true }), false);
+  assert.equal(isPrimaryActionKey({ key: 'Enter', metaKey: true, shiftKey: true }), false, 'Shift+Enter is still a newline');
+  assert.equal(isPrimaryActionKey({ key: 'Enter', ctrlKey: true, altKey: true }), false);
+});
+
+test('Cmd+Enter in a move form submits it, honouring required exactly as the button does', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'h1', checkStatus: 'failing', checks: [] } }];
+  f.view.update(f.data);
+  const form = openMove(f, 'api', 'fix-here');
+  chord(f, form.elements.note);
+  assert.equal(f.sent.length, 0, 'an empty required note holds the chord back');
+  form.elements.note.value = '  Pin the client to v3  ';
+  chord(f, form.elements.note, { shiftKey: true });
+  assert.equal(f.sent.length, 0);
+  chord(f, form.elements.note);
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'fix-here', note: 'Pin the client to v3' });
+});
+
+test('the chord carries the primary submitter, so a new job starts planning rather than parking', (t) => {
+  const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
+  form.elements.title.value = 'Reliable sign-in'; form.elements.intent.value = 'Customers can access their accounts';
+  chord(f, form.elements.intent);
+  assert.equal(f.sent.at(-1).type, 'job-create'); assert.equal(f.sent.at(-1).start, true, 'the primary button is the submitter, not Add to backlog');
+});
+
+test('the chord fires a detail\u2019s primary action, and stops at a disabled or destructive one', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'head1', checkStatus: 'passing', checks: [] } }];
+  f.view.update(f.data); f.q('[data-sub="api"]').click();
+  assert.ok(f.q('[data-action="approve-merge"]'), 'the primary is the only data-action primary on the detail');
+  chord(f, f.q('#job-dialog'), { altKey: true });
+  assert.equal(f.sent.length, 0);
+  chord(f, f.q('#job-dialog'));
+  assert.equal(f.sent.at(-1).action, 'approve-merge'); assert.equal(f.sent.at(-1).head, 'head1');
+  // Drop is a confirmation with nothing but destructive buttons: keyboard-inert.
+  const before = f.sent.length;
+  f.q('[data-sub="api"]').click(); f.q('.job-move[data-move="drop"]').click();
+  assert.equal(primaryAction(f.q('#job-dialog')), null);
+  chord(f, f.q('#job-drop-form'));
+  assert.equal(f.sent.length, before); assert.equal(f.q('#job-dialog').open, true, 'the chord neither submits nor closes it');
+});
+
+test('a disabled primary stays disabled to the keyboard', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0];
+  job.runs = [{ id: 'r1', phase: 'planning', stopped: false }]; f.view.update(f.data);
+  f.q('[data-job="job1"]').click();
+  assert.equal(f.q('[data-action="approve-plan"]').disabled, true);
+  assert.equal(primaryAction(f.q('#job-dialog')), null);
+  chord(f, f.q('#job-dialog'));
+  assert.equal(f.sent.length, 0);
+  job.runs = []; f.view.update(f.data); f.q('[data-job="job1"]').click();
+  chord(f, f.q('#job-dialog'));
+  assert.equal(f.sent.at(-1).action, 'approve-plan');
 });
