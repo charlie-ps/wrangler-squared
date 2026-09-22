@@ -67,10 +67,13 @@ feature).
   applies to a job session and prompts and the skill must name it. There is no
   rename hook, so `sub.worktree.branch` is kept in step by READING
   `host.sessions.get(caller).worktree.branch` back in `server/tools.js`
-  (`syncBranch`, on both tools) and calling `noteBranchRename`. Residual: a retry
-  into an EXISTING worktree launches with `cwd: existing.path` and no `worktree`
-  option — spawn has no adopt — so the wrangler cuts nothing, the card gets no
-  worktree record and `prepared` is called with `undefined`.
+  (`syncBranch`, on both tools) and calling `noteBranchRename`. Every LATER
+  phase (publish, repair, retry) spawns with `cwd: existing.repoRoot` and
+  `worktree: { branch, folderName: existing.path, auto: false }`: spawn has no
+  adopt option, but the wrangler's `createWorktree` classifies that pair as
+  `adopt` and stamps the record, which is what lets `name_branch` work on the
+  publish run (the one that pushes). `noteDispatch` discards the adopted record
+  (`pendingLaunch.adopt`) so the store's copy keeps its `cleanupHead` and rename.
 - **Client modules import their leaves RELATIVELY** (`./util.js`, `./icons.js`,
   vendored) rather than from the board by absolute URL, so the same files load
   under node for `public/*.test.js`. Don't switch them to `/util.js`.

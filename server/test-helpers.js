@@ -30,9 +30,10 @@ export function fakeHost() {
         const sessionId = `s_${spawned.length + 1}`;
         spawned.push({ sessionId, ...opts });
         // What the wrangler settles on: the branch it was asked for, in the
-        // folder beside the repo (session-manager.js resolveWorktree).
+        // folder beside the repo (session-manager.js resolveWorktree) — or, with
+        // an absolute folderName, that folder as-is (createWorktree's adopt).
         const worktree = opts.worktree
-          ? { branch: opts.worktree.branch, path: `${opts.cwd}-worktree-${opts.worktree.branch}`, repoRoot: opts.cwd }
+          ? { branch: opts.worktree.branch, path: opts.worktree.folderName || `${opts.cwd}-worktree-${opts.worktree.branch}`, repoRoot: opts.cwd }
           : null;
         sessions.set(sessionId, { sessionId, archived: false, worktree });
         // What the wrangler does inside dispatch(): fire onBeforeDispatch with the

@@ -41,14 +41,23 @@ export class JobRuntime {
     const repo = planning ? '' : expandRepo(sub.repo);
     const existing = sub?.worktree;
     if (existing && !fs.existsSync(existing.path)) throw new Error('Worktree is missing; restore it before retrying');
-    // A retry into an EXISTING worktree launches into it as a plain cwd: spawn
-    // has no adopt option, so the wrangler cuts nothing, the hook reports no
-    // worktree and `prepared` is called with undefined — the store's copy (with
-    // its cleanupHead and any rename) is already the record and must not be
-    // overwritten by a second, thinner one.
+    // Every later phase (publish, repair, a retry) launches into the EXISTING
+    // worktree and must still carry a worktree record on its card: core's
+    // name_branch refuses a card without one, and publish — the run the prompt
+    // tells to rename — is never the creating run. spawn has no adopt option,
+    // but dispatch's own createWorktree adopts when the folder is already this
+    // repo's worktree on that branch (classifyWorktreeTarget → 'adopt'), so the
+    // stored record is handed back as { branch, folderName } with auto off; a
+    // record that has drifted from the real checkout fails the launch loudly
+    // instead of launching a worker that cannot push. The hook then reports the
+    // adopted record, which noteDispatch() discards: the store's copy (with its
+    // cleanupHead and any rename) is already the record and must not be
+    // overwritten by a thinner launch snapshot.
     let worktree;
     let cleanupHead;
-    if (!planning && !existing) {
+    if (existing) {
+      worktree = { branch: existing.branch, folderName: existing.path, auto: false };
+    } else if (!planning) {
       await this.run('git', ['fetch', 'origin'], repo);
       const remote = JSON.parse(await this.run('gh', ['repo', 'view', '--json', 'defaultBranchRef'], repo));
       // A ref name, never the main checkout's possibly-local HEAD: the wrangler
@@ -70,10 +79,10 @@ export class JobRuntime {
     // tick is serialised by `busy`), set before spawn, consumed by noteDispatch().
     // TODO(host-api sessions:spawn tag): a `tag` option echoed to onBeforeDispatch
     // would make this explicit rather than positional.
-    this.pendingLaunch = { prepared, cleanupHead };
+    this.pendingLaunch = { prepared, cleanupHead, adopt: Boolean(existing) };
     try {
       const result = await this.host.sessions.spawn({
-        cwd: existing?.path || repo,
+        cwd: existing?.repoRoot || repo,
         agent: job.agent,
         model: job.model || undefined,
         intent: jobPrompt(job, sub, run),
@@ -100,13 +109,14 @@ export class JobRuntime {
   }
 
   // Called by the manifest's onBeforeDispatch hook with the settled card id and
-  // the worktree the wrangler cut for it (null when it cut none).
+  // the worktree the wrangler cut — or adopted — for it (null when neither).
+  // Only the creating run reports it to the store (see launch()).
   // Returns false when no launch of ours is pending (an ordinary board dispatch).
   noteDispatch({ sessionId, worktree }) {
     const p = this.pendingLaunch;
     if (!p) return false;
     this.pendingLaunch = null;
-    p.prepared(sessionId, worktree ? { ...worktree, cleanupHead: p.cleanupHead } : undefined);
+    p.prepared(sessionId, worktree && !p.adopt ? { ...worktree, cleanupHead: p.cleanupHead } : undefined);
     return true;
   }
 

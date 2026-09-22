@@ -125,17 +125,20 @@ test('a PR launch has the wrangler cut the worktree and keeps core off the job P
   }], 'the hook payload\'s worktree, plus the base commit no host projection carries');
 });
 
-test('a retry into an existing worktree adopts nothing and leaves the stored record alone', async () => {
+test('a later phase has the wrangler adopt the existing worktree and leaves the stored record alone', async () => {
   _resetForTests();
-  const { host, spawned } = fakeHost();
+  const { host, spawned, sessions } = fakeHost();
   const runtime = runnerFor(host).runtime;
   runtime.run = async () => assert.fail('an existing worktree is reused without fetching or branching');
   const worktree = { branch: 'AUTH-1-add-the-thing', path: os.tmpdir(), repoRoot: '/repos/thing', cleanupHead: 'basehead' };
   let prepared = 'unset';
   await runtime.launch({ id: 'job_00000000abcd1234', title: 'Ship it', agent: 'claude' }, { id: 'api', repo: '/repos/thing', brief: 'Do it', worktree },
     { id: 'run_2', phase: 'publish' }, (...v) => { prepared = v; });
-  assert.equal(spawned[0].cwd, os.tmpdir());
-  assert.equal(spawned[0].worktree, undefined, 'spawn has no adopt option');
+  assert.equal(spawned[0].cwd, '/repos/thing', 'adoption is asked of the repo the worktree belongs to');
+  assert.deepEqual(spawned[0].worktree, { branch: 'AUTH-1-add-the-thing', folderName: os.tmpdir(), auto: false },
+    'the stored record, handed back so createWorktree classifies it as adopt');
+  assert.deepEqual(sessions.get('s_1').worktree, { branch: 'AUTH-1-add-the-thing', path: os.tmpdir(), repoRoot: '/repos/thing' },
+    'the card carries the record, so name_branch works on the run that pushes');
   assert.deepEqual(prepared, ['s_1', undefined], 'the store already holds the record, with its cleanupHead and any rename');
 });
 
