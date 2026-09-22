@@ -91,6 +91,10 @@ export const settingsSchema = z.object({
   // on the merge commit before the board flags it (job-runner.js).
   deploymentStaleMinutes: z.number().int().min(5).max(1440).default(30),
   paused: z.boolean().default(false),
+  // The macOS application "Review code in …" hands a sub-job's worktree to
+  // (`open -na <ideApp> --args <path>`, server/handlers.js). An app NAME, not a
+  // command: nothing typed here ever reaches a shell.
+  ideApp: z.string().trim().min(1).max(120).default('IntelliJ IDEA'),
 });
 // A worker never changes the plan: `move` is a SUGGESTION on a blocked receipt,
 // which the board offers the human as the pre-selected button (job-moves.js).

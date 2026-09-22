@@ -60,6 +60,10 @@ test('code review is a stop before anything is committed: the card asks for a re
   assert.match(f.q('#job-dialog').textContent, /Ready for review/); assert.match(f.q('#job-dialog').textContent, /Nothing is committed yet/);
   assert.deepEqual([...f.q('#job-dialog').querySelectorAll('.job-receipt li')].map((li) => li.textContent.trim()), ['✓ Tests pass', '✓ Lint clean']);
   assert.ok(f.q('#job-diff'), 'the diff is the review surface');
+  assert.equal(f.q('#job-ide').textContent, 'Review code in IntelliJ IDEA', 'the desktop IDE is the other review surface, named after the setting');
+  f.q('#job-ide').click(); assert.deepEqual(f.sent.at(-1), { type: 'job-open-ide', id: 'job1', subJobId: 'api' }); assert.equal(f.q('#job-dialog').open, true, 'the dialog stays: approval happens here');
+  f.data.settings.ideApp = 'Rider'; f.view.update(f.data); assert.equal(f.q('#job-ide').textContent, 'Review code in Rider');
+  delete f.data.settings.ideApp; f.view.update(f.data);
   assert.deepEqual(movesFor(job, job.subJobs[0]).map((m) => [m.id, m.label]).filter(([id]) => id === 'fix-here'), [['fix-here', 'Request changes']]);
   f.q('[data-action="approve-code"]').click();
   assert.equal(f.sent.at(-1).action, 'approve-code'); assert.equal(f.sent.at(-1).readyReceiptId, 'run_1');
@@ -537,7 +541,7 @@ test('global concurrency, pause and repair limits are explicit controls, and no 
   f.q('#jobs-settings').click(); const form = f.q('#job-settings-form');
   assert.equal(form.elements.maxRunMinutes, undefined, 'a step ends with a receipt or an idle session, not a timeout');
   form.elements.maxRepairs.value = '1'; form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, deploymentStaleMinutes: 30 });
+  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA' });
 });
 
 test('dependency waves, session waits and escaped titles remain compact', () => {

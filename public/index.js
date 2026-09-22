@@ -75,6 +75,10 @@ export default {
       } else if (msg.event === 'job-action-complete') {
         view?.created();
         toast('Job updated');
+      } else if (msg.event === 'job-ide-opened') {
+        toast(`Opened in ${msg.app}`);
+      } else if (msg.event === 'job-ide-failed') {
+        toast(msg.error);
       }
     });
 

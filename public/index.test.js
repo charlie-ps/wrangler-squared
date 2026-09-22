@@ -103,3 +103,12 @@ test('a toast clears itself, and a frame arriving while no view is mounted is ha
   dispatch({ event: 'job-created', jobId: 'x', started: true });
   assert.equal(toastText(el), null);
 });
+
+test('the IDE handler answers with a broadcast either way, and both land as a toast', () => {
+  const { el, c, dispatch } = mountClient();
+  c.update(el, null, graphWith([job()]));
+  dispatch({ event: 'job-ide-opened', jobId: 'job_1', subJobId: 'api', app: 'IntelliJ IDEA' });
+  assert.equal(toastText(el), 'Opened in IntelliJ IDEA');
+  dispatch({ event: 'job-ide-failed', jobId: 'job_1', subJobId: 'api', app: 'IntelliJ IDEA', error: 'Worktree no longer exists: /wt' });
+  assert.equal(toastText(el), 'Worktree no longer exists: /wt');
+});
