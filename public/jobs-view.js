@@ -90,10 +90,7 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
     const cards = jobCards(data.jobs);
     const active = data.jobs.flatMap((j) => j.runs).filter((r) => !r.stopped).length;
     q('#jobs-active-count').textContent = `${active} / ${data.settings.concurrency} agents · ${cards.filter((c) => c.sub?.stage === 'done' && !c.sub.cancelledAt).length} delivered`;
-    const needsCount = cards.filter((c) => jobNeedsReview(c.job, c.sub)).length;
-    q('#jobs-review-count').textContent = needsCount;
-    const badge = document.getElementById('jobs-nav-badge');
-    if (badge) { badge.textContent = needsCount; badge.hidden = !needsCount; }
+    q('#jobs-review-count').textContent = cards.filter((c) => jobNeedsReview(c.job, c.sub)).length;
     if (document.activeElement !== q('#jobs-concurrency')) q('#jobs-concurrency').value = data.settings.concurrency;
     q('#jobs-pause').textContent = data.settings.paused ? 'Resume automation' : 'Pause new work';
     q('#jobs-filter').innerHTML = `<option value="">Every job</option>${data.jobs.map((j) => `<option value="${esc(j.id)}" ${filter === j.id ? 'selected' : ''}>${esc(j.title)}</option>`).join('')}`;
