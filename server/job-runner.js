@@ -1,5 +1,6 @@
 import { runnable, dependencySatisfied, dependenciesSatisfied, sessionDependenciesDone, MERGE_IS_DELIVERY } from './job-store.js';
 import { summariseComments, commentsBlockMerge } from './job-comments.js';
+import { awaitsTicket } from './jobs-schema.js';
 import { logWarn } from './log.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 export const acceptedRedLine = (sub) => `Post-merge run accepted red${sub.acceptedRed?.note ? `: ${sub.acceptedRed.note}` : ''}`;
@@ -154,7 +155,7 @@ export class JobRunner {
           // One session per PR: work, commit, push, open the PR. PR
           // prerequisites gate the MERGE, not the start, so building can happen
           // in parallel; only a session prerequisite's output is an input.
-          if (sub.jiraKey && sessionDependenciesDone(job, sub)) await this.launch(job, sub, 'implementation');
+          if (!awaitsTicket(sub) && sessionDependenciesDone(job, sub)) await this.launch(job, sub, 'implementation');
         } else if (sub.stage === 'review') {
           // The human's approval of the uncommitted working tree is what starts
           // the session that commits, pushes and opens the PR; until then the

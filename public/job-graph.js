@@ -24,7 +24,7 @@ export function planGraphHtml(plan, { editable = false, statusOf = null, openDep
   if (!subs.length) return '';
   const levels = dependencyLevels(plan);
   const waves = Math.max(...levels.values()) + 1;
-  const story = (s) => `<span class="job-plan-story">${esc(s.jiraKey || storyLabel(plan.stories?.find((t) => t.id === s.storyId), plan.stories))}</span>`;
+  const story = (s) => `<span class="job-plan-story">${esc(s.jiraKey || (s.storyId ? storyLabel(plan.stories?.find((t) => t.id === s.storyId), plan.stories) : 'No ticket'))}</span>`;
   const where = (s) => isSessionSub(s) ? '<span class="job-plan-kind">Agent session on this machine · no PR</span>' : `<span class="job-plan-repo" title="${esc(s.repo)}">${esc(tildify(s.repo))}</span>`;
   const node = (s, i) => {
     const deps = dependencyLine(plan, s);

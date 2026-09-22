@@ -875,6 +875,31 @@ test('approving a plan with proposed stories runs a Jira step whose keys, and on
   assert.ok(f.stopped.includes(f.launched[1].run.id), 'the ticketing session is released like planning');
 });
 
+test('a plan with no stories is ticketless: approval activates it and every sub-job starts without a key', async (t) => {
+  const f = fixture(t);
+  const ticketless = { ...spec('tool'), storyId: undefined };
+  delete ticketless.storyId;
+  await f.approve(plan([ticketless, { ...sessionSpec('spike'), storyId: undefined }], []));
+  const job = f.store.get(f.job.id);
+  assert.equal(job.stage, 'active'); assert.deepEqual(job.plan.stories, []);
+  assert.deepEqual(job.subJobs.map((s) => [s.id, s.jiraKey, s.storyId]), [['tool', null, undefined], ['spike', null, undefined]]);
+  assert.deepEqual(f.launched.map((w) => w.run.phase), ['planning', 'implementation', 'session'], 'nothing to write in Jira, nothing to wait for');
+  assert.throws(() => f.store.report(f.launched[0].sid, f.launched[0].run.id, { kind: 'plan', plan: plan([{ ...spec('a'), storyId: 'ghost' }], []) }), /Unknown story|not/);
+});
+
+test('a plan can mix ticketed and ticketless sub-jobs: only the one naming a keyless story waits for the Jira step', async (t) => {
+  const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
+  const tool = { ...spec('tool') }; delete tool.storyId;
+  f.report({ kind: 'plan', plan: plan([tool, { ...spec('web'), storyId: 'audit' }], [{ id: 'audit', project: 'SEC', title: 'Sign-ins are audited' }]) }); await f.tick();
+  f.store.approvePlan(f.job.id, f.store.get(f.job.id).revision); await f.tick();
+  let job = f.store.get(f.job.id);
+  assert.equal(job.stage, 'jira', 'a keyless story still routes through ticketing'); assert.deepEqual(job.subJobs, []);
+  f.report({ kind: 'jira', stories: [{ id: 'audit', key: 'SEC-42' }] }); await f.tick();
+  job = f.store.get(f.job.id);
+  assert.deepEqual(job.subJobs.map((s) => [s.id, s.jiraKey]), [['tool', null], ['web', 'SEC-42']]);
+  assert.deepEqual(f.launched.slice(2).map((w) => [w.run.phase, w.sub.id]), [['implementation', 'tool'], ['implementation', 'web']]);
+});
+
 test('a blocked Jira step is retryable from the same column and a fully keyed plan skips it', async (t) => {
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
   f.report({ kind: 'plan', plan: plan([spec('api')], [{ id: 'story', title: 'Reliable sign-in' }]) }); await f.tick();

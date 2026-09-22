@@ -201,8 +201,10 @@ export function jobStatus(job, sub) {
   const waiting = pendingDependencies(job, sub);
   const blocked = sub.stage === 'session' ? waiting : sub.stage === 'implementation' ? waiting.filter(isSessionSub) : [];
   if (blocked.length) return { tone: 'muted', text: `Waiting for ${blocked.length} ${blocked.every(isSessionSub) ? 'session' : blocked.some(isSessionSub) ? 'prerequisite' : 'deployment'}${blocked.length === 1 ? '' : 's'}` };
-  // A story added by New ticket has no key until the jira phase runs, and nothing starts without one.
-  if (sub.stage === 'implementation' && !sub.jiraKey) return { tone: 'muted', text: 'Waiting for a Jira ticket' };
+  // A story added by New ticket has no key until the jira phase runs, and a
+  // sub-job that names a story cannot start without one; a storyless sub-job
+  // is ticketless by design and never waits.
+  if (sub.stage === 'implementation' && sub.storyId && !sub.jiraKey) return { tone: 'muted', text: 'Waiting for a Jira ticket' };
   if (sub.observationError) return { tone: 'needs', text: 'Pipeline polling will retry' };
   // Accepted red: the runner merges, or finishes the landing, on its next tick.
   if (redAccepted(sub)) return { tone: 'working', text: sub.stage === 'pr' ? (sub.mergeRequestedHead ? 'Merge requested' : 'Merging with red checks') : 'Red run accepted · landing' };

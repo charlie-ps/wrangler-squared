@@ -162,7 +162,15 @@ test('the planner is told to write the context once and never to describe a depl
   assert.match(text, /kind:"pr"\|"session"/);
   assert.match(text, /kind:"plan", plan:\{context, stories:\[\{id,key\?,project\?,title\}\]/);
   assert.doesNotMatch(text, /deployment:\{|pendingChecks|value/);
-  assert.ok(text.split(/\s+/).length < 400, 'the protocol lives in the job-worker skill, not in every prompt');
+  assert.ok(text.split(/\s+/).length < 450, 'the protocol lives in the job-worker skill, not in every prompt');
+});
+
+test('the planner is told stories are optional, and a ticketless sub-job is told to name its branch without a key', () => {
+  const text = jobPrompt({ ...planned, plan: null }, null, { ...run, phase: 'planning' });
+  assert.match(text, /Stories are optional/); assert.match(text, /never an invented one/);
+  assert.match(text, /storyId\?,jiraKey\?/, 'the receipt shape marks both as optional');
+  const ticketless = jobPrompt({ ...job, reviewCode: false }, { ...briefed, jiraKey: undefined, worktree: { branch: 'job-12345678-api' } }, run);
+  assert.match(ticketless, /has no Jira ticket, so use the convention's ticketless form/); assert.doesNotMatch(ticketless, /Jira key is|undefined|null/);
 });
 
 test('the ticketing prompt creates exactly the approved titles', () => {

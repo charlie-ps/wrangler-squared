@@ -50,7 +50,7 @@ function addPrSubJob(job, sub, data, { storyId, jiraKey, story, position, buildS
   if (isSessionSub(sub)) throw new Error('A session sub-job has no repository to open a PR in');
   const taken = new Set(job.plan.subJobs.map((s) => s.id));
   const spec = { id: freeId(taken, (n) => `${sub.id}-${n}`), title: data.title, kind: 'pr', repo: sub.repo,
-    storyId, after: [], brief: data.brief, ...(data.check ? { check: data.check } : {}), ...(jiraKey ? { jiraKey } : {}) };
+    ...(storyId ? { storyId } : {}), after: [], brief: data.brief, ...(data.check ? { check: data.check } : {}), ...(jiraKey ? { jiraKey } : {}) };
   const projected = { ...job.plan, stories: [...job.plan.stories, ...(story ? [story] : [])],
     subJobs: [...job.plan.subJobs.map((s) => ({ ...s })), spec] };
   if (position === 'before') { const p = projected.subJobs.find((s) => s.id === sub.id); p.after = [...p.after, spec.id]; }

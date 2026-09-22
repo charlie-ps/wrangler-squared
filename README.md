@@ -3,9 +3,10 @@
 The Agent Wrangler **automated jobs** system as an installable
 [extension](https://github.com/PortSwigger/agent-wrangler).
 
-A job starts from an outcome. A planning session turns it into Jira stories and
-an ordered set of PRs (and, where a step is not a repository change, an agent
-session on this machine). Each step runs as its own short-lived agent session in
+A job starts from an outcome. A planning session turns it into an ordered set of
+PRs (and, where a step is not a repository change, an agent session on this
+machine), grouped under Jira stories where the work is tracked in Jira; work
+that has no ticket gets no story and never waits for one. Each step runs as its own short-lived agent session in
 a dedicated worktree, submits a `job_report` receipt and stops; the wrangler
 watches the PR, drives CI repairs, merges when the gates are satisfied, watches
 the post-merge runs and cleans up. Humans decide at the review points — plan,

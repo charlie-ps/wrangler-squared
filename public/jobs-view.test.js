@@ -646,6 +646,22 @@ test('a plan proposes story titles the human can edit, and approval of keyless s
   assert.equal(f.q('[data-action="approve-plan"]'), null);
 });
 
+test('a ticketless plan reviews with no stories, its sub-jobs carry No ticket and never wait for Jira', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs;
+  job.plan = structuredClone(plan); job.plan.stories = []; job.plan.subJobs.forEach((s) => { delete s.storyId; delete s.jiraKey; }); f.view.update(f.data);
+  f.q('[data-job="job1"]').click();
+  assert.match(f.q('h3').textContent, /None · this work has no Jira ticket/);
+  assert.equal(document.querySelectorAll('.job-story-key').length, 0);
+  assert.deepEqual([...document.querySelectorAll('.job-plan-story')].map((e) => e.textContent), ['No ticket', 'No ticket']);
+  assert.match(f.q('.job-authority').textContent, /^Approve starts work/);
+  f.q('#job-dialog').close();
+  job.stage = 'active'; job.subJobs = job.plan.subJobs.map((s) => ({ ...s, stage: 'implementation', sessions: [], repairs: [] })); f.view.update(f.data);
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'muted', text: 'Queued' });
+  assert.deepEqual(jobStatus(job, { ...job.subJobs[0], storyId: 'story' }), { tone: 'muted', text: 'Waiting for a Jira ticket' }, 'naming a keyless story is what waits');
+  f.q('[data-sub="api"]').click();
+  assert.match(f.q('.job-detail-meta').textContent, /No ticket/);
+});
+
 test('a plan whose stories all exist reads as existing and approval starts work directly', (t) => {
   const f = fixture(t); f.q('[data-job="job1"]').click();
   assert.match(f.q('h3').textContent, /Existing Jira stories/);

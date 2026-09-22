@@ -30,9 +30,10 @@ const planRepos = (plan) => [...new Set(plan.subJobs.filter((s) => !isSessionSub
 // The one place a plan entry becomes a live sub-job, so one approved with the
 // plan and one added later by a move are indistinguishable to the runner. A
 // keyless story leaves `jiraKey` null: New ticket's Jira step fills it in, and
-// the sub-job cannot start until it has one.
+// the sub-job cannot start until it has one. A sub-job with no story is
+// ticketless by design and starts as soon as its dependencies allow.
 export function buildSubJob(plan, s) {
-  const jiraKey = s.jiraKey || plan.stories.find((t) => t.id === s.storyId)?.key || null;
+  const jiraKey = s.jiraKey || (s.storyId && plan.stories.find((t) => t.id === s.storyId)?.key) || null;
   return { ...s, stage: isSessionSub(s) ? 'session' : 'implementation', state: 'queued', jiraKey,
     repairs: [], sessions: [], pr: null, prComments: null, commentSummary: null, deploys: null,
     deploymentResult: null, result: null, ready: null, note: null, fixRequested: null, blocked: null };
@@ -133,9 +134,9 @@ export class JobStore {
     return this.change((d) => { d.jobs.push(job); return job; });
   }
   // Approval authorises two things in order: the Jira changes (only if a story
-  // still needs a ticket; a fully-keyed plan has nothing to write) and then the
-  // implementation. Sub-jobs are only built once every story has its key, since a
-  // sub-job's card eyebrow and branch name are that key.
+  // still needs a ticket; a fully-keyed or storyless plan has nothing to write)
+  // and then the implementation. Sub-jobs are only built once every story has
+  // its key, since a sub-job's card eyebrow and branch name are that key.
   approvePlan(id, revision, editedPlan) {
     return this.update(id, (j) => {
       if (j.revision !== revision) throw new Error('The plan changed. Review the latest version before approving.');
@@ -317,7 +318,7 @@ export class JobStore {
         // A New ticket move on a running job: the sub-job waiting on that story
         // gets its key here, which is what releases it to start.
         for (const sub of [...j.subJobs, ...j.plan.subJobs]) {
-          if (sub.jiraKey) continue;
+          if (sub.jiraKey || !sub.storyId) continue;
           const key = j.plan.stories.find((t) => t.id === sub.storyId)?.key;
           if (key) sub.jiraKey = key;
         }

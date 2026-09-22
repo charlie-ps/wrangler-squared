@@ -56,8 +56,9 @@ the `runId` from your prompt and the receipt kind it names.
   which leaves Wrangler's record (and the PR observer matching on it) behind.
   Never reuse an existing branch name, and never work on main/master.
 - Fetch before editing. Commit with the repo's own convention, prefixed with the
-  sub-job's Jira key; no AI attribution. Exclude secrets and unrelated or
-  generated files.
+  sub-job's Jira key when it has one (a ticketless sub-job's prompt says so; then
+  follow the convention's ticketless form); no AI attribution. Exclude secrets
+  and unrelated or generated files.
 - Push explicitly to your worktree branch on origin; never rely on an inherited
   upstream.
 - **Look for an existing PR for the branch before creating one**, so a retried

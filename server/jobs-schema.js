@@ -26,12 +26,18 @@ export const briefSchema = z.string().trim().min(1).max(500);
 // as well as the session working inside it, so the worktree starts on a
 // placeholder (`job-runtime.js`) and the implementer renames it via
 // `name_branch` (`job-store.js` `noteBranchRename` keeps the record in step).
+//
+// `storyId` is optional: work nobody tracks in Jira (personal tooling, a repo
+// with no project) has no story, so it never waits for a ticket and its branch
+// and commits carry no key. Only a sub-job that NAMES a story is held until
+// that story has a key (`awaitsTicket`).
 export const subJobSchema = z.object({
   id, title: line, kind: z.enum(['pr', 'session']).default('pr'), repo: repoPath.optional(),
-  storyId: id, jiraKey: jira.optional(), after: z.array(id).max(30).default([]),
+  storyId: id.optional(), jiraKey: jira.optional(), after: z.array(id).max(30).default([]),
   brief: briefSchema, check: line.optional(),
 });
 export const isSessionSub = (sub) => sub?.kind === 'session';
+export const awaitsTicket = (sub) => !!sub?.storyId && !sub?.jiraKey;
 // With code review on, a PR sub-job's implementation session leaves the working
 // tree UNCOMMITTED and reports `ready`; the human reads the diff on the board
 // and approval launches a `publish` session that commits, pushes and opens the
@@ -41,6 +47,8 @@ export const reviewCode = (job) => job?.reviewCode ?? true;
 // A story either already exists in Jira (key) or is a proposal (no key, optional
 // project hint). Planning never writes to Jira: the human approves the titles and
 // their mapping to sub-jobs first, then the ticketing step creates the keyless ones.
+// A plan may have no stories at all: then nothing is written to Jira and
+// approval activates it directly (`storiesKeyed` is vacuously true).
 export const storySchema = z.object({ id, key: jira.optional(), project: jiraProject.optional(), title: line });
 export const storiesKeyed = (plan) => plan.stories.every((s) => s.key);
 export const planSchema = z.object({
@@ -48,7 +56,7 @@ export const planSchema = z.object({
   // brief refers to it rather than repeating the background, which is what keeps
   // a brief inside its 500 characters.
   context: z.string().trim().max(2000),
-  stories: z.array(storySchema).min(1).max(30),
+  stories: z.array(storySchema).max(30).default([]),
   subJobs: z.array(subJobSchema).min(1).max(50),
 }).superRefine((plan, ctx) => {
   const stories = new Set(plan.stories.map((s) => s.id));
@@ -72,7 +80,7 @@ export const planSchema = z.object({
     visiting.delete(s.id); visited.add(s.id);
   }
   for (const s of plan.subJobs) {
-    if (!stories.has(s.storyId)) issue(`Unknown story: ${s.storyId}`);
+    if (s.storyId && !stories.has(s.storyId)) issue(`Unknown story: ${s.storyId}`);
     visit(s);
   }
 });
