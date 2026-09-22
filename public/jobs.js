@@ -239,7 +239,15 @@ export const JOB_COST_TITLE = 'Total price of this job: planning, every implemen
 export const SUB_COST_TITLE = 'Price of this sub-job: every step it ran, its CI repairs and its comment triage';
 
 // A story is an existing ticket (key) or a proposal awaiting the ticketing step.
-export const storyLabel = (story) => story?.key || (story?.project ? `New in ${story.project}` : 'New story');
+// Proposals are numbered per project (ENT-NEW-1, BAE-NEW-1, BAE-NEW-2) so the
+// human can tell which goes where before Jira has minted the keys.
+export function storyLabel(story, stories = []) {
+  if (story?.key) return story.key;
+  const project = story?.project || '';
+  const peers = stories.filter((s) => !s.key && (s.project || '') === project);
+  const n = Math.max(peers.indexOf(story), 0) + 1;
+  return project ? `${project}-NEW-${n}` : `NEW-${n}`;
+}
 export const receiptHtml = (checks = []) => `<ul class="job-receipt">${checks.map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul>`;
 export function jobCardHtml({ job, sub }) {
   const status = jobStatus(job, sub);

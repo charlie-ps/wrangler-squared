@@ -624,13 +624,13 @@ test('plans show session rows without a repository and new jobs default to revie
 
 test('a plan proposes story titles the human can edit, and approval of keyless stories says tickets follow', (t) => {
   const f = fixture(t); const [job] = f.data.jobs;
-  job.plan = structuredClone(plan); job.plan.stories = [{ id: 'story', title: 'Customers can sign in' }, { id: 'audit', project: 'SEC', key: undefined, title: 'Sign-ins are audited' }, { id: 'old', key: 'AUTH-9', title: 'Existing work' }];
+  job.plan = structuredClone(plan); job.plan.stories = [{ id: 'story', title: 'Customers can sign in' }, { id: 'audit', project: 'SEC', key: undefined, title: 'Sign-ins are audited' }, { id: 'old', key: 'AUTH-9', title: 'Existing work' }, { id: 'events', project: 'SEC', title: 'Sign-in events are emitted' }];
   job.plan.subJobs[1].storyId = 'audit'; job.plan.subJobs.forEach((s) => delete s.jiraKey); f.view.update(f.data);
   f.q('[data-job="job1"]').click();
-  assert.deepEqual([...document.querySelectorAll('.job-story-key')].map((e) => e.textContent), ['New story', 'New in SEC', 'AUTH-9']);
-  assert.equal(document.querySelectorAll('.job-story-key.job-story-new').length, 2);
-  assert.deepEqual([...document.querySelectorAll('.job-plan-story')].map((e) => e.textContent), ['New story', 'New in SEC']);
-  assert.match(f.q('.job-authority').textContent, /creates the 2 new Jira stories with these titles, then starts work/);
+  assert.deepEqual([...document.querySelectorAll('.job-story-key')].map((e) => e.textContent), ['NEW-1', 'SEC-NEW-1', 'AUTH-9', 'SEC-NEW-2'], 'proposals are numbered per project');
+  assert.equal(document.querySelectorAll('.job-story-key.job-story-new').length, 3);
+  assert.deepEqual([...document.querySelectorAll('.job-plan-story')].map((e) => e.textContent), ['NEW-1', 'SEC-NEW-1']);
+  assert.match(f.q('.job-authority').textContent, /creates the 3 new Jira stories with these titles, then starts work/);
   const title = f.q('[data-story="0"]'); title.value = 'Customers sign in without lockouts'; title.dispatchEvent(f.event('input'));
   f.q('[data-action="approve-plan"]').click();
   assert.equal(f.sent[0].plan.stories[0].title, 'Customers sign in without lockouts');
