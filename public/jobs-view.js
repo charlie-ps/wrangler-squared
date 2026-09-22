@@ -52,6 +52,22 @@ function movesGridHtml(job, sub) {
   return `<h3>Moves <small>What you would do by hand</small></h3><div class="job-moves">${list.map((m) => `<button type="button" class="job-move ${m.id === suggested ? 'hot' : ''}" data-move="${esc(m.id)}"><b>${esc(m.label)}</b><span>${esc(m.blurb)}</span></button>`).join('')}</div>`;
 }
 
+// The board's own Cmd/Ctrl+Enter handlers only reach the elements they own, and
+// this dialog hangs off <body> outside every one of them, so the chord is matched
+// again here to the same rule: plain Cmd or Ctrl, inert once alt or shift is held.
+export const isPrimaryActionKey = (e) => (e.metaKey || e.ctrlKey) && e.key === 'Enter' && !e.altKey && !e.shiftKey;
+// A dialog's primary action is either its form's primary button — fired through
+// requestSubmit so `required` and the submitter (New job's start/backlog pair)
+// behave exactly as the click does — or, on a detail, the lone primary
+// [data-action]. A confirmation whose only buttons are destructive (Drop, Cancel
+// job) has neither and stays keyboard-inert: those are for the mouse to say.
+export function primaryAction(dialog) {
+  const form = dialog.querySelector('form');
+  const button = form ? form.querySelector('button.primary:not([type="button"])') : dialog.querySelector('button.primary[data-action]');
+  if (!button || button.disabled) return null;
+  return form ? () => form.requestSubmit(button) : () => button.click();
+}
+
 export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
@@ -375,6 +391,13 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
     show(`<h2>Automation settings</h2><form id="job-settings-form"><label>Automatic CI repair attempts per sub-job<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label>Minutes a merged PR may wait for a post-merge run to start before it is flagged<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label><label>Application for “Review code in…” <small>A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…</small><input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label><p>These limits apply across all automated jobs. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.</p><button class="primary">Save settings</button></form>`);
     dialog.querySelector('form').onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); send({ type: 'job-settings', patch: { maxRepairs: +f.get('maxRepairs'), deploymentStaleMinutes: +f.get('deploymentStaleMinutes'), ideApp: String(f.get('ideApp')).trim() } }); dialog.close(); };
   };
+  dialog.addEventListener('keydown', (e) => {
+    if (!isPrimaryActionKey(e)) return;
+    const run = primaryAction(dialog);
+    if (!run) return;
+    e.preventDefault();
+    run();
+  });
   dialog.addEventListener('close', () => { selected = null; planDraft = null; commentsShown.clear(); openDeps.clear(); });
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
