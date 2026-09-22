@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Automated jobs for Agent Wrangler, as an installable extension",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "scripts": {
     "test": "node --test --import ./test-setup.js 'server/*.test.js' 'public/*.test.js'"
   },

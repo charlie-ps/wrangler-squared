@@ -1,0 +1,10 @@
+Wrangler² — automated jobs for Agent Wrangler, as an installable extension
+Copyright 2026 Charlie Goldstraw
+
+This product includes software developed as part of Agent Wrangler
+(https://github.com/PortSwigger/agent-wrangler), Copyright PortSwigger Ltd,
+licensed under the Apache License, Version 2.0. The job-system modules under
+server/, the client modules under public/ and the skill under
+skills/job-worker/ were ported from that project's `job-system` branch; see
+docs/PORTING.md for the file-by-file map of what was copied verbatim and what
+was rewritten.
