@@ -151,8 +151,9 @@ test('a finished, dropped or cleaning-up sub-job offers no moves at all', (t) =>
   assert.deepEqual(movesFor(job, { ...sub('api'), stage: 'pr', cancelledAt: 1 }), []);
   // Merged: the fix is a new PR, not a new commit here, and the order is settled.
   assert.deepEqual(movesFor(job, { ...sub('api'), stage: 'deployment' }).map((m) => m.id), ['split-out', 'new-ticket', 'drop', 'mark']);
-  // A session has no repository to split a PR out of.
-  assert.deepEqual(movesFor(job, { ...sub('api'), kind: 'session', stage: 'session' }).map((m) => m.id), ['fix-here', 'new-ticket', 'reorder', 'drop', 'mark']);
+  // Neither agentless kind has a repository, so neither offers a move that adds a PR.
+  assert.deepEqual(movesFor(job, { ...sub('api'), kind: 'session', stage: 'session' }).map((m) => m.id), ['fix-here', 'reorder', 'drop', 'mark']);
+  assert.deepEqual(movesFor(job, { ...sub('api'), kind: 'human', stage: 'human' }).map((m) => m.id), ['reorder', 'drop', 'mark'], 'nothing runs a human task, so there is nothing to fix here');
 });
 
 test('Accept red appears only beside a red pipeline, says which side of the merge it acts on, and sends just the note', (t) => {
@@ -606,6 +607,73 @@ test('a job with agent sessions gets a second four-column lane, and a reported s
   f.q('#job-revise-session').click();
   const form = f.q('#job-dialog form'); form.elements.feedback.value = 'Check staging too'; form.dispatchEvent(f.event('submit'));
   assert.equal(f.sent.at(-1).action, 'revise-session'); assert.equal(f.sent.at(-1).feedback, 'Check staging too');
+});
+
+const humanSub = (id, after = []) => ({ id, kind: 'human', title: `Sign ${id}`, storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Click approve in the vendor console', sessions: [], repairs: [] });
+
+test('a job with human tasks gets a third three-column lane, and a waiting one needs you', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...humanSub('licence'), stage: 'human', state: 'queued' }, { ...sub('api', ['licence']), stage: 'implementation' }];
+  f.view.update(f.data);
+  assert.deepEqual([...document.querySelectorAll('.job-board-lane')].map((e) => e.textContent), ['Pull requests', 'Your tasks']);
+  assert.equal(document.querySelectorAll('.job-board-human .job-column').length, 3);
+  assert.deepEqual([...document.querySelectorAll('.job-board-human .job-column h2')].map((h) => h.textContent), ['Waiting', 'In progress', 'Done']);
+  assert.equal(f.q('.job-board-human .job-column[aria-label="Waiting"] .job-card').dataset.sub, 'licence');
+  assert.equal(f.q('.job-board-human .job-card .job-kind').textContent, 'Human');
+  assert.equal(f.q('.job-board-human .job-card-meta').textContent, 'Only you can do this one');
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'needs', text: 'Needs you' });
+  assert.equal(jobNeedsReview(job, job.subJobs[0]), true); assert.equal(f.q('#jobs-review-count').textContent, '1');
+  assert.equal(f.q('.job-board-columns:not(.job-board-human) [data-sub="api"] .job-card-deps').textContent, '↳ Start after Sign licence');
+  assert.equal(jobStatus(job, job.subJobs[1]).text, 'Waiting for 1 human task');
+  assert.match(f.q('.job-board-meta').textContent, /1 PR · 1 human task/);
+  // One a prerequisite still gates is just waiting, not the human's yet.
+  const behind = { ...humanSub('audit', ['api']), stage: 'human', state: 'queued' };
+  assert.deepEqual(jobStatus({ ...job, subJobs: [...job.subJobs, behind] }, behind), { tone: 'muted', text: 'Waiting for 1 deployment' });
+  assert.equal(jobNeedsReview({ ...job, subJobs: [...job.subJobs, behind] }, behind), false);
+});
+
+test('the human task dialog is the two marks, and each one moves the card to its own column', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...humanSub('licence'), stage: 'human', state: 'queued' }];
+  f.view.update(f.data);
+  f.q('[data-sub="licence"]').click();
+  const dialog = f.q('#job-dialog');
+  assert.match(dialog.textContent, /Click approve in the vendor console/, 'the brief is the instruction, not a folded detail');
+  assert.match(dialog.textContent, /No agent will ever run this one/);
+  assert.equal(dialog.querySelector('[data-action="start-human"]').className, 'primary');
+  f.q('[data-action="start-human"]').click();
+  assert.deepEqual(f.sent.at(-1).action, 'start-human'); assert.equal(f.sent.at(-1).subJobId, 'licence');
+
+  job.subJobs[0].state = 'doing'; f.view.update(f.data);
+  assert.equal(f.q('.job-board-human .job-column[aria-label="In progress"] .job-card').dataset.sub, 'licence');
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'In progress' });
+  assert.equal(jobNeedsReview(job, job.subJobs[0]), false);
+  assert.equal(dialog.querySelector('[data-action="start-human"]'), null, 'it is already started');
+  assert.equal(dialog.querySelector('[data-action="finish-human"]').className, 'primary');
+  f.q('[data-action="finish-human"]').click();
+  assert.deepEqual(f.sent.at(-1).action, 'finish-human');
+
+  job.subJobs[0] = { ...job.subJobs[0], stage: 'done', state: 'done', result: { checks: ['Licence key issued'], at: 1, receiptId: null } };
+  f.data.jobs[0] = { ...job }; f.q('#jobs-done').checked = true; f.q('#jobs-done').dispatchEvent(f.event('change'));
+  assert.equal(f.q('.job-board-human .job-column[aria-label="Done"] .job-card').dataset.sub, 'licence');
+  assert.deepEqual(jobStatus(f.data.jobs[0], f.data.jobs[0].subJobs[0]), { tone: 'done', text: 'Done' });
+  f.q('[data-sub="licence"]').click();
+  assert.match(dialog.textContent, /Licence key issued/);
+  assert.equal(dialog.querySelector('[data-action="finish-human"]'), null, 'a finished task has no marks left');
+  dialog.close();
+});
+
+test('a plan proposing a human task draws it as a third kind with no repository', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0];
+  job.plan = { ...plan, subJobs: [humanSub('licence'), sessionSub('spike', ['licence']), sub('api', ['spike'])] }; f.view.update(f.data);
+  f.q('[data-job="job1"]').click();
+  assert.deepEqual([...document.querySelectorAll('.job-node')].map((n) => n.querySelector('.job-kind').textContent), ['Human', 'Session', 'PR']);
+  assert.deepEqual([...document.querySelectorAll('.job-plan-kind')].map((e) => e.textContent), ['Yours to do by hand · no agent, no PR', 'Agent session on this machine · no PR']);
+  assert.equal(document.querySelectorAll('.job-plan-repo').length, 1);
+  assert.match(f.q('.job-graph-legend').textContent, /is yours to do by hand/);
+  assert.match(f.q('#job-dialog').textContent, /Yours to do by hand; no agent ever runs it and no PR/);
+  assert.match(f.q('.job-authority').textContent, /Nothing starts a human task: you mark it done/);
+  f.q('#job-dialog').close();
 });
 
 test('plans show session rows without a repository and new jobs default to reviewing session results', (t) => {

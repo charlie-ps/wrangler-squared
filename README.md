@@ -5,7 +5,8 @@ The Agent Wrangler **automated jobs** system as an installable
 
 A job starts from an outcome. A planning session turns it into an ordered set of
 PRs (and, where a step is not a repository change, an agent session on this
-machine), grouped under Jira stories where the work is tracked in Jira; work
+machine, or a human task where no agent can act at all), grouped under Jira
+stories where the work is tracked in Jira; work
 that has no ticket gets no story and never waits for one. Each step runs as its own short-lived agent session in
 a dedicated worktree, submits a `job_report` receipt and stops; the wrangler
 watches the PR, drives CI repairs, merges when the gates are satisfied, watches

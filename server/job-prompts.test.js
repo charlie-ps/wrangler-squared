@@ -159,10 +159,10 @@ test('the planner is told to write the context once and never to describe a depl
   assert.match(text, /Never describe deployments or verification steps/);
   assert.match(text, /`after` on a PR means DEPLOY AFTER/);
   assert.match(text, /Do not propose branch names/);
-  assert.match(text, /kind:"pr"\|"session"/);
+  assert.match(text, /kind:"pr"\|"session"\|"human"/);
   assert.match(text, /kind:"plan", plan:\{context, stories:\[\{id,key\?,project\?,title\}\]/);
   assert.doesNotMatch(text, /deployment:\{|pendingChecks|value/);
-  assert.ok(text.split(/\s+/).length < 450, 'the protocol lives in the job-worker skill, not in every prompt');
+  assert.ok(text.split(/\s+/).length < 500, 'the protocol lives in the job-worker skill, not in every prompt');
 });
 
 test('the planner is told stories are optional, and a ticketless sub-job is told to name its branch without a key', () => {

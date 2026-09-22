@@ -1,5 +1,5 @@
 import { esc, tildify } from './util.js';
-import { isSessionSub, kindChipHtml, kindLabel, kindClass, dependencyLevels, dependencyLine, storyLabel } from './jobs.js';
+import { isSessionSub, isHumanSub, KIND_BLURB, kindChipHtml, kindLabel, kindClass, dependencyLevels, dependencyLine, storyLabel } from './jobs.js';
 
 // A job's sub-jobs drawn as a dependency graph: one column per wave (a sub-job's
 // wave is one past its deepest prerequisite, `dependencyLevels`), a box per
@@ -25,7 +25,9 @@ export function planGraphHtml(plan, { editable = false, statusOf = null, openDep
   const levels = dependencyLevels(plan);
   const waves = Math.max(...levels.values()) + 1;
   const story = (s) => `<span class="job-plan-story">${esc(s.jiraKey || (s.storyId ? storyLabel(plan.stories?.find((t) => t.id === s.storyId), plan.stories) : 'No ticket'))}</span>`;
-  const where = (s) => isSessionSub(s) ? '<span class="job-plan-kind">Agent session on this machine · no PR</span>' : `<span class="job-plan-repo" title="${esc(s.repo)}">${esc(tildify(s.repo))}</span>`;
+  const where = (s) => isSessionSub(s) ? '<span class="job-plan-kind">Agent session on this machine · no PR</span>'
+    : isHumanSub(s) ? '<span class="job-plan-kind">Yours to do by hand · no agent, no PR</span>'
+      : `<span class="job-plan-repo" title="${esc(s.repo)}">${esc(tildify(s.repo))}</span>`;
   const node = (s, i) => {
     const deps = dependencyLine(plan, s);
     const head = `<span class="job-node-head">${kindChipHtml(s)}${story(s)}</span>`;
@@ -41,8 +43,11 @@ export function planGraphHtml(plan, { editable = false, statusOf = null, openDep
   };
   const columns = Array.from({ length: waves }, (_, w) => `<div class="job-graph-col"><h4>Wave ${w + 1}</h4>${subs.map((s, i) => levels.get(s.id) === w ? node(s, i) : '').join('')}</div>`).join('');
   const edges = subs.flatMap((s) => s.after.filter((id) => levels.has(id)).map((id) => `<path data-from="${esc(id)}" data-to="${esc(s.id)}" marker-end="url(#job-graph-arrow)"/>`)).join('');
-  const mixed = subs.some(isSessionSub) && subs.some((s) => !isSessionSub(s));
-  const legend = [mixed ? `${kindChipHtml({})} opens a pull request` : '', mixed ? `${kindChipHtml({ kind: 'session' })} runs as an agent session here, no PR` : '', edges ? '<span>Arrows point from a prerequisite to the work that waits on it</span>' : ''].filter(Boolean);
+  // One chip line per kind actually present, and only where the plan mixes them:
+  // a single-kind plan has nothing to tell apart.
+  const kinds = [...new Set(subs.map((s) => kindClass(s)))];
+  const legend = [...(kinds.length > 1 ? kinds.map((k) => `${kindChipHtml({ kind: k })} ${KIND_BLURB[k]}`) : []),
+    edges ? '<span>Arrows point from a prerequisite to the work that waits on it</span>' : ''].filter(Boolean);
   return `<div class="job-graph ${editable ? 'editable' : ''}">${legend.length ? `<p class="job-graph-legend">${legend.join('')}</p>` : ''}
     <div class="job-graph-scroll"><div class="job-graph-canvas" style="--waves:${waves}"><div class="job-graph-columns">${columns}</div>
     <svg class="job-graph-edges" aria-hidden="true"><defs><marker id="job-graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5 0 10z"/></marker></defs>${edges}</svg></div></div></div>`;

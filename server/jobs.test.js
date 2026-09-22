@@ -15,6 +15,7 @@ import { jobReportTool, getJobContextTool } from './tools.js';
 const input = { title: 'Reliable sign-in', intent: 'Customers can sign in reliably', repos: ['/repo'], reviewMerge: true };
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', after, brief: `Implement ${id}`, ...extra });
 const sessionSpec = (id, after = []) => ({ id, kind: 'session', title: `Run ${id}`, storyId: 'story', after, brief: `Do ${id} on this machine` });
+const humanSpec = (id, after = []) => ({ id, kind: 'human', title: `Do ${id} yourself`, storyId: 'story', after, brief: `Click ${id} in the vendor console` });
 const plan = (subs = [spec('api')], stories = [{ id: 'story', key: 'AUTH-123', title: 'Reliable sign-in' }]) =>
   ({ context: 'The sign-in service is Java; deploys are Helm.', stories, subJobs: subs });
 const PR_URL = 'https://github.com/org/repo/pull/1';
@@ -325,6 +326,63 @@ test('a session sub-job is a hard prerequisite: nothing behind it starts until i
   f.store.action(f.job.id, 'approve-session', { subJobId: 'spike', sessionReceiptId: f.sub().result.receiptId });
   await f.tick();
   assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'implementation']);
+});
+
+// --- Human tasks ---
+
+test('a human sub-job has no repo and no check, and lands in its own stage no runner ever launches', async (t) => {
+  const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
+  assert.throws(() => f.report({ kind: 'plan', plan: plan([{ ...humanSpec('sign'), repo: '/repo' }]) }), /human sub-job has no repo/);
+  assert.throws(() => f.report({ kind: 'plan', plan: plan([{ ...humanSpec('sign'), check: 'the licence shows' }]) }), /nothing to check after it lands/);
+  f.report({ kind: 'plan', plan: plan([humanSpec('sign')]) }); await f.tick();
+  f.store.approvePlan(f.job.id, f.store.get(f.job.id).revision); await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().state], ['human', 'queued']);
+  assert.deepEqual(f.store.get(f.job.id).repos, [], 'nothing in this plan touches a repository');
+  await f.tick(); await f.tick();
+  assert.deepEqual(f.launched.map((w) => w.run.phase), ['planning'], 'no agent is ever launched for a human task');
+});
+
+test('a human task is a hard prerequisite released by the human\'s own two marks', async (t) => {
+  const f = fixture(t);
+  await f.approve(plan([humanSpec('sign'), spec('api', ['sign'])]));
+  assert.deepEqual(f.launched.map((w) => w.run.phase), ['planning'], 'nothing behind a human task starts');
+  f.store.action(f.job.id, 'start-human', { subJobId: 'sign' });
+  await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().state], ['human', 'doing']);
+  assert.equal(f.launched.length, 1, 'in progress is not done');
+  assert.throws(() => f.store.action(f.job.id, 'start-human', { subJobId: 'sign' }), /waiting to be started/);
+  f.store.action(f.job.id, 'finish-human', { subJobId: 'sign', note: 'Licence key issued by the vendor' });
+  const marked = f.sub();
+  assert.deepEqual([marked.stage, marked.state], ['cleanup', 'queued']);
+  assert.deepEqual(marked.result, { checks: ['Licence key issued by the vendor'], at: marked.result.at, receiptId: null });
+  await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().state], ['done', 'done']);
+  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'implementation'], 'done is what releases the work behind it');
+  assert.throws(() => f.store.action(f.job.id, 'finish-human', { subJobId: 'sign' }), /no longer yours to mark/);
+  assert.deepEqual(f.store.get(f.job.id).moves.map((m) => [m.subJobId, m.move, m.note]),
+    [['sign', 'start-human', null], ['sign', 'finish-human', 'Licence key issued by the vendor']], 'both marks are on the same timeline as every other intervention');
+});
+
+test('the marks belong to human tasks alone, and Mark done still finishes one by hand', async (t) => {
+  const f = fixture(t); await f.approve(plan([humanSpec('sign'), sessionSpec('spike')]));
+  assert.throws(() => f.store.action(f.job.id, 'start-human', { subJobId: 'spike' }), /not a human task/);
+  assert.throws(() => f.store.action(f.job.id, 'finish-human', { subJobId: 'spike' }), /no longer yours to mark/);
+  assert.throws(() => f.store.action(f.job.id, 'fix-here', { subJobId: 'sign', note: 'again' }), /nothing to run again/);
+  assert.throws(() => f.store.action(f.job.id, 'accept-red', { subJobId: 'sign' }), /no pipeline to accept/);
+  assert.throws(() => f.store.action(f.job.id, 'split-out', { subJobId: 'sign', title: 'Follow-up', brief: 'Do the rest' }), /no repository to open a PR in/);
+  f.store.action(f.job.id, 'mark', { subJobId: 'sign', position: 'done', note: 'The vendor had already done it' });
+  const sign = f.sub();
+  assert.equal(sign.stage, 'cleanup');
+  assert.deepEqual(sign.result, { checks: ['The vendor had already done it'], at: sign.result.at, receiptId: null });
+  assert.equal(sign.deployed, undefined);
+});
+
+test('a dropped or cancelled human task never satisfies what waits on it', async (t) => {
+  const f = fixture(t); await f.approve(plan([humanSpec('sign'), spec('api', ['sign'])]));
+  f.store.action(f.job.id, 'drop', { subJobId: 'sign' });
+  await f.tick(); await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().state], ['done', 'cancelled']);
+  assert.deepEqual(f.launched.map((w) => w.run.phase), ['planning'], 'api can never start behind a dropped prerequisite');
 });
 
 // --- PR stage ---
