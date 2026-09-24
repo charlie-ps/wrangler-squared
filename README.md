@@ -14,6 +14,10 @@ the post-merge runs and cleans up. Humans decide at the review points — plan,
 code, merge — and make the seven **moves** when something goes wrong; agents
 never change the plan.
 
+When a Job is created it can stay Unassigned, use an active Task, or create a
+new Task. Every agent session launched for that Job uses the same Task and its
+shared memory.
+
 ## Status
 
 Functionally complete against host API **1.8.0**: 1.4 added the worktree,
@@ -31,8 +35,8 @@ Requires an agent-wrangler on `main` (host API `^1.8.0`). In the wrangler's
 Extensions tab, install from this repository's git URL, consent to the
 capabilities disclosed in `package.json`'s `wranglerExtension` block, then
 restart the wrangler. The extension asks for `sessions:read`, `sessions:spawn`,
-`sessions:archive`, `sessions:bill`, `usage:read`, `board:rebuild` and
-`board:broadcast`.
+`sessions:archive`, `sessions:bill`, `tasks:read`, `tasks:write`, `usage:read`,
+`board:rebuild` and `board:broadcast`.
 
 For development, **copy** (never symlink — discovery only sees real directories)
 a checkout, `node_modules` included, to `<AW_DATA_DIR>/extensions/jobs` of a

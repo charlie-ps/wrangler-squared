@@ -43,13 +43,14 @@ test('a job runs from the create frame to a launched PR step through the manifes
     return args[0] === 'rev-parse' ? 'basehead' : '';
   };
 
-  await handler('job-create').handler({ job: { title: 'Sign-in', intent: 'Reliable sign-in' }, start: true }, host);
+  await handler('job-create').handler({ job: { title: 'Sign-in', intent: 'Reliable sign-in' }, newTaskName: 'Sign-in delivery', start: true }, host);
   const [{ jobId }] = broadcasts;
   assert.deepEqual(broadcasts, [{ event: 'job-created', jobId, started: true }]);
   assert.deepEqual(host.stores.jobs.get(jobId).repos, [], 'a job with no repository hints discovers them');
   await settle();
   const planning = host.stores.jobs.get(jobId).runs[0];
   assert.deepEqual([spawned.length, planning.phase, planning.sessionId], [1, 'planning', spawned[0].sessionId]);
+  assert.equal(spawned[0].taskId, 't_1', 'planning starts in the job task');
 
   // The receipt: caller-bound, as the wrangler's /mcp route hands the tool the
   // calling card's id. Core's own test spent its HTTP work on the Origin and
@@ -71,6 +72,7 @@ test('a job runs from the create frame to a launched PR step through the manifes
   await settle();
   assert.equal(host.stores.jobs.get(jobId).stage, 'active');
   assert.equal(spawned.length, 2, 'approval is what launches the implementation');
+  assert.equal(spawned[1].taskId, 't_1', 'every later session stays in the same task');
   const branch = placeholderBranch({ id: jobId }, { id: 'api' });
   assert.deepEqual(spawned[1].worktree, { branch, base: 'refs/remotes/origin/main', auto: true });
   const [sub] = host.stores.jobs.get(jobId).subJobs;

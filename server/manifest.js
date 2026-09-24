@@ -38,6 +38,7 @@ export default {
   dir,
   requires: [
     'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:bill',
+    'tasks:read', 'tasks:write',
     'usage:read', 'board:rebuild', 'board:broadcast',
   ],
   engines: { wranglerApi: '^1.8.0' },

@@ -19,6 +19,7 @@ export function fakeHost() {
   const archived = [];
   const billed = [];
   const usage = []; // what host.usage.byCard() resolves to: [{ cardId, usd, estimatedUsd }]
+  const tasks = [];
   const sessions = new Map();
   const host = {
     id: 'jobs', version: '1.0.0', log: () => {},
@@ -26,6 +27,17 @@ export function fakeHost() {
     rebuild: async () => { host.rebuilds++; },
     rebuilds: 0,
     broadcast: (p) => broadcasts.push(p),
+    tasks: {
+      create: ({ name }) => {
+        const task = { id: `t_${tasks.length + 1}`, name, links: [] };
+        tasks.push(task);
+        return structuredClone(task);
+      },
+      get: (id) => {
+        const task = tasks.find((t) => t.id === id);
+        return task ? { taskId: task.id, name: task.name, archived: Boolean(task.archivedAt), archivedAt: task.archivedAt ?? null, createdAt: task.createdAt ?? null } : null;
+      },
+    },
     sessions: {
       spawn: async (opts) => {
         const sessionId = `s_${spawned.length + 1}`;
@@ -56,5 +68,5 @@ export function fakeHost() {
     },
     usage: { byCard: async () => usage.map((r) => ({ ...r })) },
   };
-  return { host, spawned, broadcasts, archived, billed, usage, sessions };
+  return { host, spawned, broadcasts, archived, billed, usage, sessions, tasks };
 }
