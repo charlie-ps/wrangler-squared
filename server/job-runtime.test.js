@@ -86,6 +86,15 @@ test('launch refuses a missing worktree instead of recreating it on the base che
   assert.deepEqual(spawned, []);
 });
 
+test('launch refuses an archived job task before preparing a workspace or spawning', async () => {
+  const { host, spawned, tasks } = fakeHost();
+  tasks.push({ id: 't_archived', name: 'Old work', links: [], archivedAt: Date.now() });
+  const runtime = runtimeWith(host, { run: async () => assert.fail('an archived task is rejected before repository setup') });
+  await assert.rejects(runtime.launch({ id: 'job_12345678', title: 'Sign-in', agent: 'claude', taskId: 't_archived' },
+    { id: 'api', repo: '/repo' }, { id: 'run_1', phase: 'implementation' }, () => {}), /Restore it before retrying/);
+  assert.deepEqual(spawned, []);
+});
+
 test('a jira or session step gets the same scratch workspace as planning: no repository, no branch', async () => {
   for (const phase of ['jira', 'session']) {
     const { host, spawned } = fakeHost();

@@ -22,6 +22,7 @@ export const jobCreateHandler = {
       const input = jobInputSchema.parse(msg.job);
       let taskId = input.taskId;
       if (msg.newTaskName !== undefined) {
+        if (taskId) throw new Error('Choose an existing task or create a new one, not both');
         if (typeof msg.newTaskName !== 'string') throw new Error('Enter a task name of up to 180 characters on one line');
         const name = msg.newTaskName.trim();
         if (!name) throw new Error('Enter a name for the new task');

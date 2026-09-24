@@ -109,6 +109,17 @@ test('job-create accepts only a short one-line string for a new task name', asyn
   }
 });
 
+test('job-create rejects selecting and creating a task at the same time', async () => {
+  _resetForTests();
+  const { host, broadcasts, tasks } = fakeHost();
+  tasks.push({ id: 't_existing', name: 'Existing work', links: [] });
+  runnerFor(host).tick = async () => {};
+  await handler('job-create').handler({ job: { ...newJob, taskId: 't_existing' }, newTaskName: 'Another task', start: false }, host);
+  assert.equal(tasks.length, 1);
+  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
+  assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'Choose an existing task or create a new one, not both' }]);
+});
+
 test('a launch binds its run to the card id via onBeforeDispatch, and job_report is caller-gated', async () => {
   _resetForTests();
   const { host, spawned } = fakeHost();
@@ -194,7 +205,8 @@ function activeSub(store, { branch = 'job-abcd1234-api', sessionId = 's_1' } = {
 
 test('a PR launch has the wrangler cut the worktree and keeps core off the job PR', async () => {
   _resetForTests();
-  const { host, spawned } = fakeHost();
+  const { host, spawned, tasks } = fakeHost();
+  tasks.push({ id: 'task_7', name: 'Ship it', links: [] });
   const runtime = runnerFor(host).runtime;
   runtime.run = async (bin, args) => {
     if (bin === 'gh') return JSON.stringify({ defaultBranchRef: { name: 'main' } });

@@ -16,7 +16,8 @@ never change the plan.
 
 When a Job is created it can stay Unassigned, use an active Task, or create a
 new Task. Every agent session launched for that Job uses the same Task and its
-shared memory.
+shared memory. Archiving that Task stops its active sessions; restore it before
+retrying the Job so later sessions do not lose the Task context.
 
 ## Status
 
@@ -37,6 +38,13 @@ capabilities disclosed in `package.json`'s `wranglerExtension` block, then
 restart the wrangler. The extension asks for `sessions:read`, `sessions:spawn`,
 `sessions:archive`, `sessions:bill`, `tasks:read`, `tasks:write`, `usage:read`,
 `board:rebuild` and `board:broadcast`.
+
+Adding Task support widens the extension's requested capabilities. Updating an
+existing installation therefore requires fresh consent in the Extensions tab;
+a development copy with older consent is quarantined until it is reinstalled.
+The host currently groups Task creation with rename and session assignment under
+the broad `tasks:write` capability, although this extension uses it only to
+create the Task requested in the New job form.
 
 For development, **copy** (never symlink — discovery only sees real directories)
 a checkout, `node_modules` included, to `<AW_DATA_DIR>/extensions/jobs` of a
