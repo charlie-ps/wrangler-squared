@@ -632,7 +632,7 @@ test('a job with human tasks gets a third three-column lane, and a waiting one n
   assert.equal(jobNeedsReview({ ...job, subJobs: [...job.subJobs, behind] }, behind), false);
 });
 
-test('the human task dialog is the two marks, and each one moves the card to its own column', (t) => {
+test('the human task dialog submits multiline output with Mark done and preserves a draft when work starts', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...humanSub('licence'), stage: 'human', state: 'queued' }];
   f.view.update(f.data);
@@ -641,7 +641,9 @@ test('the human task dialog is the two marks, and each one moves the card to its
   assert.match(dialog.textContent, /Click approve in the vendor console/, 'the brief is the instruction, not a folded detail');
   assert.match(dialog.textContent, /No agent will ever run this one/);
   assert.equal(dialog.querySelector('[data-action="start-human"]').className, 'primary');
-  f.q('[data-action="start-human"]').click();
+  const output = `ssh-ed25519 ${'A'.repeat(600)} user@host\nSecond line`;
+  dialog.querySelector('textarea[name="output"]').value = output;
+  primaryAction(dialog)();
   assert.deepEqual(f.sent.at(-1).action, 'start-human'); assert.equal(f.sent.at(-1).subJobId, 'licence');
 
   job.subJobs[0].state = 'doing'; f.view.update(f.data);
@@ -649,18 +651,29 @@ test('the human task dialog is the two marks, and each one moves the card to its
   assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'In progress' });
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false);
   assert.equal(dialog.querySelector('[data-action="start-human"]'), null, 'it is already started');
-  assert.equal(dialog.querySelector('[data-action="finish-human"]').className, 'primary');
-  f.q('[data-action="finish-human"]').click();
-  assert.deepEqual(f.sent.at(-1).action, 'finish-human');
+  assert.equal(dialog.querySelector('textarea[name="output"]').value, output);
+  assert.equal(dialog.querySelector('#job-human-form button.primary').textContent, 'Mark done');
+  dialog.querySelector('#job-human-form').dispatchEvent(f.event('submit'));
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'licence', action: 'finish-human', output });
 
-  job.subJobs[0] = { ...job.subJobs[0], stage: 'done', state: 'done', result: { checks: ['Licence key issued'], at: 1, receiptId: null } };
+  job.subJobs[0] = { ...job.subJobs[0], stage: 'done', state: 'done', result: { checks: ['Done by hand'], output: '<img src=x onerror=alert(1)>\nssh-ed25519 AAAA', at: 1, receiptId: null } };
   f.data.jobs[0] = { ...job }; f.q('#jobs-done').checked = true; f.q('#jobs-done').dispatchEvent(f.event('change'));
   assert.equal(f.q('.job-board-human .job-column[aria-label="Done"] .job-card').dataset.sub, 'licence');
   assert.deepEqual(jobStatus(f.data.jobs[0], f.data.jobs[0].subJobs[0]), { tone: 'done', text: 'Done' });
   f.q('[data-sub="licence"]').click();
-  assert.match(dialog.textContent, /Licence key issued/);
-  assert.equal(dialog.querySelector('[data-action="finish-human"]'), null, 'a finished task has no marks left');
+  assert.match(dialog.textContent, /ssh-ed25519 AAAA/);
+  assert.equal(dialog.querySelector('.job-human-output').textContent, '<img src=x onerror=alert(1)>\nssh-ed25519 AAAA');
+  assert.equal(dialog.querySelector('.job-human-output img'), null, 'output is escaped, not rendered as markup');
+  assert.equal(dialog.querySelector('#job-human-form'), null, 'a finished task has no marks left');
   dialog.close();
+});
+
+test('a human task can be finished directly with no output', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...humanSub('licence'), stage: 'human', state: 'queued' }]; f.view.update(f.data);
+  f.q('[data-sub="licence"]').click();
+  f.q('#job-human-form').dispatchEvent(f.event('submit'));
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'licence', action: 'finish-human' });
 });
 
 test('a plan proposing a human task draws it as a third kind with no repository', (t) => {

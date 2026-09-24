@@ -363,6 +363,24 @@ test('a human task is a hard prerequisite released by the human\'s own two marks
     [['sign', 'start-human', null], ['sign', 'finish-human', 'Licence key issued by the vendor']], 'both marks are on the same timeline as every other intervention');
 });
 
+test('finishing a human task stores multiline output without shortening it or exposing it as a move note', async (t) => {
+  const f = fixture(t); await f.approve(plan([humanSpec('sign')]));
+  const output = `ssh-ed25519 ${'A'.repeat(600)} user@example\nSecond line <literal>`;
+  f.store.action(f.job.id, 'finish-human', { subJobId: 'sign', output: `  ${output}\n` });
+  const saved = f.sub();
+  assert.equal(saved.result.output, output);
+  assert.equal(new JobStore(f.store.file).get(f.job.id).subJobs[0].result.output, output);
+  assert.equal(f.store.get(f.job.id).moves.at(-1).note, null);
+});
+
+test('human output is optional but rejected above its dedicated limit', async (t) => {
+  const f = fixture(t); await f.approve(plan([humanSpec('sign')]));
+  assert.throws(() => f.store.action(f.job.id, 'finish-human', { subJobId: 'sign', output: 'x'.repeat(8001) }), /8,000/);
+  assert.equal(f.sub().stage, 'human', 'the failed write cannot finish the task');
+  f.store.action(f.job.id, 'finish-human', { subJobId: 'sign', output: '  \n  ' });
+  assert.equal(f.sub().result.output, undefined);
+});
+
 test('the marks belong to human tasks alone, and Mark done still finishes one by hand', async (t) => {
   const f = fixture(t); await f.approve(plan([humanSpec('sign'), sessionSpec('spike')]));
   assert.throws(() => f.store.action(f.job.id, 'start-human', { subJobId: 'spike' }), /not a human task/);

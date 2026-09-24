@@ -63,9 +63,9 @@ export const isPrimaryActionKey = (e) => (e.metaKey || e.ctrlKey) && e.key === '
 // job) has neither and stays keyboard-inert: those are for the mouse to say.
 export function primaryAction(dialog) {
   const form = dialog.querySelector('form');
-  const button = form ? form.querySelector('button.primary:not([type="button"])') : dialog.querySelector('button.primary[data-action]');
+  const button = form ? form.querySelector('button.primary:not([type="button"])') || form.querySelector('button.primary[type="button"][data-action]') : dialog.querySelector('button.primary[data-action]');
   if (!button || button.disabled) return null;
-  return form ? () => form.requestSubmit(button) : () => button.click();
+  return form && button.type !== 'button' ? () => form.requestSubmit(button) : () => button.click();
 }
 
 export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
@@ -122,7 +122,14 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
     q('#jobs-boards').innerHTML = boards.map(([job, c]) => boardHtml(job, c)).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
     // Keep a human's plan edits and review snapshot intact across live graph ticks;
     // any open form (feedback, a move) is a human mid-edit and is left alone.
-    if (dialog.open && selected && !planDraft && !dialog.querySelector('form') && !dialog.contains(document.activeElement?.closest('input, textarea, select'))) renderDetail();
+    const humanForm = dialog.querySelector('#job-human-form');
+    const currentSub = humanForm && data.jobs.find((j) => j.id === selected?.jobId)?.subJobs.find((s) => s.id === selected?.subId);
+    if (dialog.open && selected && !planDraft && (!dialog.querySelector('form') && !dialog.contains(document.activeElement?.closest('input, textarea, select'))
+      || humanForm && currentSub && (currentSub.stage !== 'human' || humanForm.dataset.state !== currentSub.state))) {
+      const output = humanForm?.elements.output.value;
+      renderDetail();
+      if (output != null && dialog.querySelector('#job-human-form')) dialog.querySelector('#job-human-form').elements.output.value = output;
+    }
   }
   function show(html) {
     dialog.innerHTML = `<button class="job-dialog-close" aria-label="Close">×</button>${html}`;
@@ -224,9 +231,10 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
         ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub)}${movesGridHtml(job, sub)}
         <h3>What to do</h3><p>${esc(sub.brief)}</p>
         ${sub.result ? `<h3>Recorded</h3>${receiptHtml(sub.result.checks)}` : ''}
+        ${sub.result?.output ? `<h3>Result for dependent work</h3><pre class="job-human-output">${esc(sub.result.output)}</pre>` : ''}
         ${noteFor(sub)}
         ${yours ? `<p class="job-authority">No agent will ever run this one${doing ? '; you marked it in progress' : ''}. Marking it done is what releases the work waiting on it.</p>` : ''}
-        <div class="job-actions">${yours ? `${doing ? '' : '<button class="primary" data-action="start-human">Mark in progress</button>'}<button class="${doing ? 'primary' : ''}" data-action="finish-human">Mark done</button>` : ''}</div>`;
+        ${yours ? `<form id="job-human-form" data-state="${esc(sub.state)}"><label>Result for dependent work <small>Optional · up to 8,000 characters, passed to dependent agents</small><textarea name="output" maxlength="8000" rows="6"></textarea></label><div class="job-actions">${doing ? '' : '<button type="button" class="primary" data-action="start-human">Mark in progress</button>'}<button class="${doing ? 'primary' : ''}" type="submit">Mark done</button></div></form>` : ''}`;
     } else if (sub) {
       const deps = sub.after.map((id) => job.subJobs.find((s) => s.id === id));
       const deploys = deploysLine(sub);
@@ -266,6 +274,12 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
       action(name, name === 'approve-plan' ? { plan: planDraft, revision }
         : { head: sub?.pr?.head, sessionReceiptId: sub?.result?.receiptId, ...(sub?.ready ? { readyReceiptId: sub.ready.receiptId } : {}) });
     });
+    const humanForm = dialog.querySelector('#job-human-form');
+    if (humanForm) humanForm.onsubmit = (e) => {
+      e.preventDefault();
+      const output = String(new FormData(humanForm).get('output') || '').trim();
+      action('finish-human', output ? { output } : {});
+    };
     dialog.querySelectorAll('[data-comment-toggle]').forEach((b) => b.onclick = () => {
       const key = b.dataset.commentToggle;
       if (!commentsShown.delete(key)) commentsShown.add(key);
