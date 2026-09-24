@@ -108,6 +108,32 @@ test('a job-action-complete frame toasts, and an unknown event is ignored', () =
   assert.equal(dialog.hasAttribute('open'), true);
 });
 
+test('starting a HUMAN task keeps its output draft open through the board reply and next graph tick', () => {
+  const { window, el, c, sent, dispatch } = mountClient();
+  const human = { id: 'key', kind: 'human', title: 'Get key', brief: 'Request the key', after: [], sessions: [], repairs: [], stage: 'human', state: 'queued' };
+  const work = job({ stage: 'active', plan: { context: '', stories: [], subJobs: [human] }, subJobs: [human] });
+  c.update(el, null, graphWith([work]));
+  el.querySelector('[data-sub="key"]').click();
+  const dialog = window.document.getElementById('job-dialog');
+  dialog.querySelector('textarea[name="output"]').value = 'ssh-ed25519 AAAA\nuser@host';
+  dialog.querySelector('[data-action="start-human"]').click();
+  assert.equal(sent.at(-1).action, 'start-human');
+  dispatch({ event: 'job-action-complete', jobId: work.id, subJobId: 'key', action: 'start-human' });
+  assert.equal(dialog.open, true);
+  dispatch({ event: 'job-action-complete', jobId: 'another-job', action: 'pause' });
+  assert.equal(dialog.open, true, 'another client action must not discard a HUMAN draft');
+  human.state = 'doing'; c.update(el, null, graphWith([work]));
+  assert.equal(dialog.querySelector('textarea[name="output"]').value, 'ssh-ed25519 AAAA\nuser@host');
+  const originalFormData = globalThis.FormData;
+  globalThis.FormData = window.FormData;
+  try { dialog.querySelector('#job-human-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }
+  finally { globalThis.FormData = originalFormData; }
+  assert.equal(sent.at(-1).action, 'finish-human');
+  assert.equal(sent.at(-1).output, 'ssh-ed25519 AAAA\nuser@host');
+  dispatch({ event: 'job-action-complete', jobId: work.id, subJobId: 'key', action: 'finish-human' });
+  assert.equal(dialog.open, false);
+});
+
 test('a toast clears itself, and a frame arriving while no view is mounted is harmless', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { el, c, dispatch, listeners } = mountClient();

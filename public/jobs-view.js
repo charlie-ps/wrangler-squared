@@ -63,9 +63,9 @@ export const isPrimaryActionKey = (e) => (e.metaKey || e.ctrlKey) && e.key === '
 // job) has neither and stays keyboard-inert: those are for the mouse to say.
 export function primaryAction(dialog) {
   const form = dialog.querySelector('form');
-  const button = form ? form.querySelector('button.primary:not([type="button"])') || form.querySelector('button.primary[type="button"][data-action]') : dialog.querySelector('button.primary[data-action]');
+  const button = form ? form.querySelector('button.primary:not([type="button"])') : dialog.querySelector('button.primary[data-action]');
   if (!button || button.disabled) return null;
-  return form && button.type !== 'button' ? () => form.requestSubmit(button) : () => button.click();
+  return form ? () => form.requestSubmit(button) : () => button.click();
 }
 
 export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
@@ -234,7 +234,7 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
         ${sub.result?.output ? `<h3>Result for dependent work</h3><pre class="job-human-output">${esc(sub.result.output)}</pre>` : ''}
         ${noteFor(sub)}
         ${yours ? `<p class="job-authority">No agent will ever run this one${doing ? '; you marked it in progress' : ''}. Marking it done is what releases the work waiting on it.</p>` : ''}
-        ${yours ? `<form id="job-human-form" data-state="${esc(sub.state)}"><label>Result for dependent work <small>Optional · up to 8,000 characters, passed to dependent agents</small><textarea name="output" maxlength="8000" rows="6"></textarea></label><div class="job-actions">${doing ? '' : '<button type="button" class="primary" data-action="start-human">Mark in progress</button>'}<button class="${doing ? 'primary' : ''}" type="submit">Mark done</button></div></form>` : ''}`;
+        ${yours ? `<form id="job-human-form" data-state="${esc(sub.state)}"><label>Result for dependent work <small>Optional · up to 8,000 characters, passed to dependent agents</small><textarea name="output" maxlength="8000" rows="6"></textarea></label><div class="job-actions">${doing ? '' : '<button type="button" data-action="start-human">Mark in progress</button>'}<button class="primary" type="submit">Mark done</button></div></form>` : ''}`;
     } else if (sub) {
       const deps = sub.after.map((id) => job.subJobs.find((s) => s.id === id));
       const deploys = deploysLine(sub);
@@ -434,5 +434,8 @@ export function initJobsView({ send, getAgents, onSession, onDiff, onBoard }) {
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
   // the same dialog a board card's click does, from a job/sub id pair app.js kept.
-  return { update, created: () => dialog.close(), openDetail };
+  return { update, created: (msg) => {
+    if (dialog.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;
+    dialog.close();
+  }, openDetail };
 }

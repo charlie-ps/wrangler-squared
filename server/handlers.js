@@ -30,7 +30,7 @@ export const jobActionHandler = {
   async handler(msg, host) {
     host.stores.jobs.action(msg.id, msg.action, msg);
     await host.rebuild();
-    host.broadcast({ event: 'job-action-complete', jobId: msg.id });
+    host.broadcast({ event: 'job-action-complete', jobId: msg.id, action: msg.action, ...(msg.subJobId ? { subJobId: msg.subJobId } : {}) });
     kick(host).catch((e) => host.log('job-action tick failed', e));
   },
 };

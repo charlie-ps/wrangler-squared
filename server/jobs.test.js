@@ -1164,8 +1164,27 @@ test('a move arrives as a job-action with its own fields and reaches the store w
   stubRunner(t, host);
   await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'split-out',
     title: 'Sync the proto', brief: 'Regenerate the proto', position: 'after', note: 'small one' }, host);
-  assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id }]);
+  assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id, action: 'split-out', subJobId: 'api' }]);
   assert.deepEqual(f.store.get(f.job.id).subJobs.map((s) => s.id), ['api', 'api-2']);
+});
+
+test('starting a HUMAN task identifies its reply so the client can keep a draft open', async (t) => {
+  const f = fixture(t); await f.approve(plan([humanSpec('key')]));
+  const host = fakeHost(f); stubRunner(t, host);
+  await jobActionHandler.handler({ id: f.job.id, subJobId: 'key', action: 'start-human' }, host);
+  assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id, action: 'start-human', subJobId: 'key' }]);
+});
+
+test('get_job_context includes only completed direct HUMAN output for its assigned worker', async (t) => {
+  const f = fixture(t); await f.approve(plan([humanSpec('key'), humanSpec('other'), spec('api', ['key'])]));
+  f.store.action(f.job.id, 'finish-human', { subJobId: 'key', output: 'ssh-ed25519 AAAA' });
+  f.store.action(f.job.id, 'finish-human', { subJobId: 'other', output: 'unrelated-secret' });
+  await f.tick();
+  const worker = f.workerFor('api', 'implementation');
+  const ctx = (await getJobContextTool.handler({ host: fakeHost(f), caller: worker.sid }, {})).structuredContent;
+  assert.equal(ctx.job.subJobs.find((s) => s.id === 'key').result.output, 'ssh-ed25519 AAAA');
+  assert.equal(ctx.job.subJobs.find((s) => s.id === 'other').result.output, undefined);
+  assert.equal(f.store.get(f.job.id).subJobs.find((s) => s.id === 'other').result.output, 'unrelated-secret', 'projection must not rewrite the store');
 });
 
 // --- GitHub observation ---

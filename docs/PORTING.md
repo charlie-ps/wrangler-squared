@@ -45,7 +45,7 @@ façade exposes nothing equivalent.
 | `server/manifest.js` | `server/index.js` wiring + `agent-skills.js` `AUTOMATION_ONLY` + `mcp/server.js` spawning filter | new | stores, tools, handlers, `skills`/`skillsFor`, `hideTool`, `graph`, `onBeforeDispatch`, 4s sweep, client, styles. Declares no manifest `settings` (see below) |
 | `server/jobs.js` | `server/index.js` (JobRunner construction, `statusOf`) | new | `runnerFor(host)` and `spendFor(host)` singletons; graph status cache; `runForSession` replaces `entry.automationRun` |
 | `server/job-spend-refresh.js` | `server/index.js` (`refreshJobSpendIfStale`) | rewritten | the 60s per-card price refresh over `host.usage.byCard()`; `byCard(jobs)` serves the last map and kicks the next read, never awaited on the graph tick |
-| `server/tools.js` | `server/mcp/tools/job-report.js` | rewritten | two tools (`job_report`, `get_job_context`) in the extension signature `({host, caller}, args)`; `syncBranch` reads a `name_branch` rename back off the projection; `hideTool` |
+| `server/tools.js` | `server/mcp/tools/job-report.js` | rewritten | two tools (`job_report`, `get_job_context`) in the extension signature `({host, caller}, args)`; context omits unrelated HUMAN output; `syncBranch` reads a `name_branch` rename back off the projection; `hideTool` |
 | `server/handlers.js` | `server/control/handlers/jobs.js` | rewritten | `(msg, host)`; no `ctx.reply` → `host.broadcast`; adds `job-open-ide` (macOS `open -na <ideApp>` on a sub-job's worktree, result broadcast as `job-ide-opened` / `job-ide-failed`); `job-settings` keeps job settings in this extension's own store |
 | `server/job-runtime.js` | `server/job-runtime.js` | **rewritten** | the only session-facing module: spawns through the façade with 1.4's `worktree`/`addDirs`/`taskId`/PR-automation options, bills a triage with 1.6's `sessions:bill`. Most open gaps are marked here |
 | `server/git.js` | `server/worktree.js` (subset) | new | down to `gitRepoRoot` + `removeWorktree --force`: the wrangler cuts and renames worktrees now, cleanup's compare-and-delete is still ours |
@@ -150,9 +150,9 @@ on `main` as their own small PRs. All are resolved.
 ## Tests
 
 `npm test` runs `node --test` over `server/*.test.js` and `public/*.test.js`:
-**231 tests, 230 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
-a checkout serving host API 1.8 or later, all 231 pass. Per file: jobs 82, jobs-view 58,
-deploys 16, job-runtime 13, moves 10, prompts 12, manifest 9, index 10, spend 7,
+**234 tests, 233 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
+a checkout serving host API 1.8 or later, all 234 pass. Per file: jobs 84, jobs-view 58,
+deploys 16, job-runtime 13, moves 10, prompts 12, manifest 9, index 11, spend 7,
 comments 6, spend-refresh 4, integration 2, handlers 2.
 
 `server/test-helpers.js` holds the single fake `host`

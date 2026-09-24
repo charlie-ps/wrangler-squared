@@ -153,7 +153,7 @@ test('a finished, dropped or cleaning-up sub-job offers no moves at all', (t) =>
   assert.deepEqual(movesFor(job, { ...sub('api'), stage: 'deployment' }).map((m) => m.id), ['split-out', 'new-ticket', 'drop', 'mark']);
   // Neither agentless kind has a repository, so neither offers a move that adds a PR.
   assert.deepEqual(movesFor(job, { ...sub('api'), kind: 'session', stage: 'session' }).map((m) => m.id), ['fix-here', 'reorder', 'drop', 'mark']);
-  assert.deepEqual(movesFor(job, { ...sub('api'), kind: 'human', stage: 'human' }).map((m) => m.id), ['reorder', 'drop', 'mark'], 'nothing runs a human task, so there is nothing to fix here');
+  assert.deepEqual(movesFor(job, { ...sub('api'), kind: 'human', stage: 'human' }).map((m) => m.id), ['reorder', 'drop'], 'the HUMAN result form owns Mark done');
 });
 
 test('Accept red appears only beside a red pipeline, says which side of the merge it acts on, and sends just the note', (t) => {
@@ -640,10 +640,10 @@ test('the human task dialog submits multiline output with Mark done and preserve
   const dialog = f.q('#job-dialog');
   assert.match(dialog.textContent, /Click approve in the vendor console/, 'the brief is the instruction, not a folded detail');
   assert.match(dialog.textContent, /No agent will ever run this one/);
-  assert.equal(dialog.querySelector('[data-action="start-human"]').className, 'primary');
+  assert.equal(dialog.querySelector('[data-action="start-human"]').className, '');
   const output = `ssh-ed25519 ${'A'.repeat(600)} user@host\nSecond line`;
   dialog.querySelector('textarea[name="output"]').value = output;
-  primaryAction(dialog)();
+  f.q('[data-action="start-human"]').click();
   assert.deepEqual(f.sent.at(-1).action, 'start-human'); assert.equal(f.sent.at(-1).subJobId, 'licence');
 
   job.subJobs[0].state = 'doing'; f.view.update(f.data);
@@ -672,7 +672,8 @@ test('a human task can be finished directly with no output', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...humanSub('licence'), stage: 'human', state: 'queued' }]; f.view.update(f.data);
   f.q('[data-sub="licence"]').click();
-  f.q('#job-human-form').dispatchEvent(f.event('submit'));
+  assert.equal(f.q('#job-human-form button.primary').textContent, 'Mark done');
+  primaryAction(f.q('#job-dialog'))();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'licence', action: 'finish-human' });
 });
 

@@ -67,7 +67,7 @@ test('a job runs from the create frame to a launched PR step through the manifes
   assert.deepEqual(reviewing.repos, ['/repo'], 'the discovered repository is the job\'s before a human sees the plan');
 
   await handler('job-action').handler({ id: jobId, action: 'approve-plan', revision: reviewing.revision }, host);
-  assert.deepEqual(broadcasts.at(-1), { event: 'job-action-complete', jobId });
+  assert.deepEqual(broadcasts.at(-1), { event: 'job-action-complete', jobId, action: 'approve-plan' });
   await settle();
   assert.equal(host.stores.jobs.get(jobId).stage, 'active');
   assert.equal(spawned.length, 2, 'approval is what launches the implementation');
