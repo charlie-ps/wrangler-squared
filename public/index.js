@@ -77,10 +77,10 @@ export default {
     // broadcast, and the frame carries only ids, not the new snapshot.
     slots.onMessage?.((msg) => {
       if (msg.event === 'job-created') {
-        view?.created();
+        view?.created(msg);
         toast(msg.started ? 'Job started — planning' : 'Job added to backlog');
       } else if (msg.event === 'job-action-complete') {
-        view?.created();
+        view?.created(msg);
         toast('Job updated');
       } else if (msg.event === 'job-ide-opened') {
         toast(`Opened in ${msg.app}`);

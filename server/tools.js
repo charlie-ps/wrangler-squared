@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { reportSchema } from './jobs-schema.js';
+import { isHumanSub, reportSchema } from './jobs-schema.js';
 import { runnerFor, runForSession } from './jobs.js';
 
 // MCP tools in the EXTENSION signature: `handler({ host, caller }, args)` — no
@@ -42,13 +42,19 @@ export const jobReportTool = {
 
 export const getJobContextTool = {
   name: 'get_job_context',
-  description: 'Get the current automated job, approved plan and run assigned to your own session. No other session or job can be selected.',
+  description: 'Get the current automated job, approved plan and run assigned to your own session. HUMAN output is included only for completed direct dependencies. No other session or job can be selected.',
   inputSchema: {},
   async handler({ host, caller }) {
     syncBranch(host, caller);
     const hit = runForSession(host.stores.jobs, caller);
     if (!hit) return result({ job: null });
-    return result({ job: host.stores.jobs.get(hit.job.id), run: hit.run });
+    const job = host.stores.jobs.get(hit.job.id);
+    const sub = job.subJobs.find((s) => s.id === hit.run.subJobId);
+    const direct = new Set(sub?.after || []);
+    for (const s of job.subJobs) if (isHumanSub(s) && !(direct.has(s.id) && s.stage === 'done' && !s.cancelledAt)) {
+      if (s.result) delete s.result.output;
+    }
+    return result({ job, run: hit.run });
   },
 };
 

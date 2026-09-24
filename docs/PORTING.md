@@ -45,20 +45,20 @@ façade exposes nothing equivalent.
 | `server/manifest.js` | `server/index.js` wiring + `agent-skills.js` `AUTOMATION_ONLY` + `mcp/server.js` spawning filter | new | stores, tools, handlers, `skills`/`skillsFor`, `hideTool`, `graph`, `onBeforeDispatch`, 4s sweep, client, styles. Declares no manifest `settings` (see below) |
 | `server/jobs.js` | `server/index.js` (JobRunner construction, `statusOf`) | new | `runnerFor(host)` and `spendFor(host)` singletons; graph status cache; `runForSession` replaces `entry.automationRun` |
 | `server/job-spend-refresh.js` | `server/index.js` (`refreshJobSpendIfStale`) | rewritten | the 60s per-card price refresh over `host.usage.byCard()`; `byCard(jobs)` serves the last map and kicks the next read, never awaited on the graph tick |
-| `server/tools.js` | `server/mcp/tools/job-report.js` | rewritten | two tools (`job_report`, `get_job_context`) in the extension signature `({host, caller}, args)`; `syncBranch` reads a `name_branch` rename back off the projection; `hideTool` |
+| `server/tools.js` | `server/mcp/tools/job-report.js` | rewritten | two tools (`job_report`, `get_job_context`) in the extension signature `({host, caller}, args)`; context omits unrelated HUMAN output; `syncBranch` reads a `name_branch` rename back off the projection; `hideTool` |
 | `server/handlers.js` | `server/control/handlers/jobs.js` | rewritten | `(msg, host)`; no `ctx.reply` → `host.broadcast`; adds `job-open-ide` (macOS `open -na <ideApp>` on a sub-job's worktree, result broadcast as `job-ide-opened` / `job-ide-failed`); `job-settings` keeps job settings in this extension's own store |
 | `server/job-runtime.js` | `server/job-runtime.js` | **rewritten** | the only session-facing module: spawns through the façade with 1.4's `worktree`/`addDirs`/`taskId`/PR-automation options, bills a triage with 1.6's `sessions:bill`. Most open gaps are marked here |
 | `server/git.js` | `server/worktree.js` (subset) | new | down to `gitRepoRoot` + `removeWorktree --force`: the wrangler cuts and renames worktrees now, cleanup's compare-and-delete is still ours |
-| `server/job-store.js` | same | verbatim | `./data-dir.js`, `./atomic-json.js` are local copies |
+| `server/job-store.js` | same | modified | `./data-dir.js`, `./atomic-json.js` are local copies; HUMAN completion stores optional multiline `result.output` separately from the 180-character move note |
 | `server/job-runner.js` | same | verbatim | `./log.js` is a local leaf |
 | `server/jobs-schema.js`, `job-moves.js`, `job-comments.js`, `job-deploys.js`, `job-github.js` | same | verbatim | |
 | `server/job-spend.js` | same | verbatim minus the scan walk | `usdByCard` reads the façade's `[{ cardId, usd, estimatedUsd }]` rows instead of `scanAllDaily`'s per-transcript day bags; `withJobSpend`/`withRunStatus` untouched |
-| `server/job-prompts.js` | same | verbatim minus `adapterFor` | `modelLabel` prints the raw model value (gap 10); prompts name core's `name_branch` |
+| `server/job-prompts.js` | same | modified | `modelLabel` prints the raw model value (gap 10); prompts name core's `name_branch` and pass bounded direct HUMAN dependency output to workers |
 | `server/headless-claude.js` | same | verbatim | the comment-triage one-shot; `cleanClaudeEnv` from local `clean-claude-env.js` |
 | `server/data-dir.js`, `atomic-json.js`, `log.js`, `clean-claude-env.js` | `server/data-dir.js`, `atomic-json.js`, `log.js`, `agents/claude.js` | copies | leaves the store and triage need before a façade exists |
 | `public/index.js` | `public/app.js` (jobs bits), `public/index.html` | new | the `view` contribution; mounts `#jobs` + `<dialog id=job-dialog>` on `<body>`; subscribes to its own `ext:jobs` frames via `api.onMessage`; `badge()` gives the rail button the needs-you count (gap 16) |
 | `public/jobs.js`, `job-graph.js` | same | verbatim | import `./util.js` / `./icons.js` (vendored) |
-| `public/jobs-view.js` | same | verbatim minus the rail badge | `render()` no longer writes `#jobs-nav-badge`: that element was core's `index.html`, and the count is the `view` contribution's `badge()` now (gap 16). The in-view `#jobs-review-count` beside the Needs me filter is unchanged |
+| `public/jobs-view.js` | same | modified | `render()` no longer writes `#jobs-nav-badge`: that element was core's `index.html`, and the count is the `view` contribution's `badge()` now (gap 16). The in-view `#jobs-review-count` beside the Needs me filter is unchanged; HUMAN tasks have an optional result form |
 | `public/diff-return.js` | same | verbatim, **unused** | the diff round trip needs the diff half of client navigation (gap 12) |
 | `public/jobs.css` | `public/styles.css` diff | extracted | the `#jobs.hidden` rule is dead here (core hides the view's HOST, not `#jobs`); the `.jobs-nav-badge` / `button[data-view=jobs]` rules went with gap 16, since the span and its positioning are core's now; adds this extension's own toast |
 | `public/util.js`, `public/icons.js` | `public/util.js` (esc, tildify), `public/icons.js` (ROBOT_ICON, PULL_REQUEST_ICON) | vendored | |
@@ -150,9 +150,9 @@ on `main` as their own small PRs. All are resolved.
 ## Tests
 
 `npm test` runs `node --test` over `server/*.test.js` and `public/*.test.js`:
-**218 tests, 217 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
-a checkout serving host API 1.8, 218 pass. Per file: jobs 76, jobs-view 54,
-deploys 16, job-runtime 13, moves 10, prompts 10, manifest 9, index 9, spend 7,
+**234 tests, 233 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
+a checkout serving host API 1.8 or later, all 234 pass. Per file: jobs 84, jobs-view 58,
+deploys 16, job-runtime 13, moves 10, prompts 12, manifest 9, index 11, spend 7,
 comments 6, spend-refresh 4, integration 2, handlers 2.
 
 `server/test-helpers.js` holds the single fake `host`

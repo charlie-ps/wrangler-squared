@@ -152,6 +152,33 @@ test('the session prompt keeps its step out of every repository and carries a re
   assert.match(text, /kind:"completed"/);
 });
 
+test('PR and session workers receive only direct completed HUMAN dependency output', () => {
+  const human = { id: 'key', kind: 'human', title: 'Get public key', stage: 'done', result: { output: 'ssh-ed25519 AAAA user@host\nKeep this line' } };
+  const unrelated = { id: 'secret', kind: 'human', title: 'Unrelated', stage: 'done', result: { output: 'unrelated-secret' } };
+  const unfinished = { id: 'pending', kind: 'human', title: 'Pending', stage: 'human', result: { output: 'unfinished-secret' } };
+  const context = { ...planned, subJobs: [human, unrelated, unfinished] };
+  for (const phase of ['implementation', 'publish', 'repair', 'verify', 'session']) {
+    const worker = { ...briefed, kind: phase === 'session' ? 'session' : 'pr', after: ['key', 'pending'] };
+    const text = jobPrompt(context, worker, { ...run, phase });
+    assert.match(text, /Human dependency output/);
+    assert.match(text, /Get public key/);
+    assert.match(text, /ssh-ed25519 AAAA user@host\\nKeep this line/);
+    assert.doesNotMatch(text, /unrelated-secret|unfinished-secret/);
+  }
+  assert.doesNotMatch(jobPrompt(context, { ...briefed, after: [] }, run), /Human dependency output/);
+});
+
+test('human dependency output is bounded in the prompt with explicit truncation and omission', () => {
+  const deps = Array.from({ length: 5 }, (_, i) => ({ id: `key${i}`, kind: 'human', title: `Get key ${i}`, stage: 'done', result: { output: `${i}${'x'.repeat(7999)}` } }));
+  const text = jobPrompt({ ...planned, subJobs: deps }, { ...briefed, after: deps.map((d) => d.id) }, run);
+  assert.match(text, /Human dependency output/);
+  const block = text.split('Human dependency output')[1].split('Leave every change')[0];
+  assert.ok(block.length <= 24000, `output block grew to ${block.length} characters`);
+  assert.match(block, /truncated/);
+  assert.match(block, /omitted/);
+  assert.doesNotMatch(block, /Get key 4/, 'the size limit omits later dependencies explicitly');
+});
+
 test('the planner is told to write the context once and never to describe a deployment', () => {
   const text = jobPrompt({ ...planned, plan: null, previousPlan: { stories: [{ key: 'AUTH-1' }] }, feedback: 'Split by repo' }, null, { ...run, phase: 'planning' });
   assert.match(text, /AUTH-1/); assert.match(text, /Split by repo/);

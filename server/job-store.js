@@ -227,7 +227,10 @@ export class JobStore {
       }
       if (action === 'finish-human') {
         if (!isHumanSub(s) || s.stage !== 'human') throw new Error('This human task is no longer yours to mark');
-        s.result = { checks: [note || 'Done by hand'], at: Date.now(), receiptId: null };
+        if (payload.output != null && typeof payload.output !== 'string') throw new Error('Human output must be text');
+        const output = payload.output?.trim() || null;
+        if (output && output.length > 8000) throw new Error('Human output must be at most 8,000 characters');
+        s.result = { checks: [note || 'Done by hand'], ...(output ? { output } : {}), at: Date.now(), receiptId: null };
         s.stage = 'cleanup'; s.state = 'queued'; s.error = null; s.blocked = null;
         record(j, s, 'finish-human', note, `Marked ${quoted(s.title)} done by hand`); return;
       }

@@ -166,7 +166,7 @@ export function movesFor(job, sub) {
     'new-ticket': pr,
     reorder: ['implementation', 'review', 'pr', 'session', 'human'].includes(sub.stage),
     drop: true,
-    mark: markOptions(sub).length > 0,
+    mark: !isHumanSub(sub) && markOptions(sub).length > 0,
     'accept-red': pr && redPipeline(sub),
   };
   return MOVES.filter((m) => allowed[m.id]).map((m) => moveCopy(job, sub, m));

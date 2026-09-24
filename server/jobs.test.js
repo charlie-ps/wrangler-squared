@@ -363,6 +363,24 @@ test('a human task is a hard prerequisite released by the human\'s own two marks
     [['sign', 'start-human', null], ['sign', 'finish-human', 'Licence key issued by the vendor']], 'both marks are on the same timeline as every other intervention');
 });
 
+test('finishing a human task stores multiline output without shortening it or exposing it as a move note', async (t) => {
+  const f = fixture(t); await f.approve(plan([humanSpec('sign')]));
+  const output = `ssh-ed25519 ${'A'.repeat(600)} user@example\nSecond line <literal>`;
+  f.store.action(f.job.id, 'finish-human', { subJobId: 'sign', output: `  ${output}\n` });
+  const saved = f.sub();
+  assert.equal(saved.result.output, output);
+  assert.equal(new JobStore(f.store.file).get(f.job.id).subJobs[0].result.output, output);
+  assert.equal(f.store.get(f.job.id).moves.at(-1).note, null);
+});
+
+test('human output is optional but rejected above its dedicated limit', async (t) => {
+  const f = fixture(t); await f.approve(plan([humanSpec('sign')]));
+  assert.throws(() => f.store.action(f.job.id, 'finish-human', { subJobId: 'sign', output: 'x'.repeat(8001) }), /8,000/);
+  assert.equal(f.sub().stage, 'human', 'the failed write cannot finish the task');
+  f.store.action(f.job.id, 'finish-human', { subJobId: 'sign', output: '  \n  ' });
+  assert.equal(f.sub().result.output, undefined);
+});
+
 test('the marks belong to human tasks alone, and Mark done still finishes one by hand', async (t) => {
   const f = fixture(t); await f.approve(plan([humanSpec('sign'), sessionSpec('spike')]));
   assert.throws(() => f.store.action(f.job.id, 'start-human', { subJobId: 'spike' }), /not a human task/);
@@ -1146,8 +1164,27 @@ test('a move arrives as a job-action with its own fields and reaches the store w
   stubRunner(t, host);
   await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'split-out',
     title: 'Sync the proto', brief: 'Regenerate the proto', position: 'after', note: 'small one' }, host);
-  assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id }]);
+  assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id, action: 'split-out', subJobId: 'api' }]);
   assert.deepEqual(f.store.get(f.job.id).subJobs.map((s) => s.id), ['api', 'api-2']);
+});
+
+test('starting a HUMAN task identifies its reply so the client can keep a draft open', async (t) => {
+  const f = fixture(t); await f.approve(plan([humanSpec('key')]));
+  const host = fakeHost(f); stubRunner(t, host);
+  await jobActionHandler.handler({ id: f.job.id, subJobId: 'key', action: 'start-human' }, host);
+  assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id, action: 'start-human', subJobId: 'key' }]);
+});
+
+test('get_job_context includes only completed direct HUMAN output for its assigned worker', async (t) => {
+  const f = fixture(t); await f.approve(plan([humanSpec('key'), humanSpec('other'), spec('api', ['key'])]));
+  f.store.action(f.job.id, 'finish-human', { subJobId: 'key', output: 'ssh-ed25519 AAAA' });
+  f.store.action(f.job.id, 'finish-human', { subJobId: 'other', output: 'unrelated-secret' });
+  await f.tick();
+  const worker = f.workerFor('api', 'implementation');
+  const ctx = (await getJobContextTool.handler({ host: fakeHost(f), caller: worker.sid }, {})).structuredContent;
+  assert.equal(ctx.job.subJobs.find((s) => s.id === 'key').result.output, 'ssh-ed25519 AAAA');
+  assert.equal(ctx.job.subJobs.find((s) => s.id === 'other').result.output, undefined);
+  assert.equal(f.store.get(f.job.id).subJobs.find((s) => s.id === 'other').result.output, 'unrelated-secret', 'projection must not rewrite the store');
 });
 
 // --- GitHub observation ---
