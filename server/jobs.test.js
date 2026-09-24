@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { JobStore, migrateJobs, MERGE_IS_DELIVERY } from './job-store.js';
 import { JobRunner, IDLE_RECEIPT_GRACE_MS } from './job-runner.js';
+import { JobRuntime } from './job-runtime.js';
 import { jobPrompt } from './job-prompts.js';
 import { JobGithub, prSummary } from './job-github.js';
 import { normaliseComments, commentsBlockMerge } from './job-comments.js';
@@ -710,6 +711,23 @@ test('Mark done finishes a session sub-job with its own receipt', async (t) => {
   assert.equal(spike.stage, 'cleanup');
   assert.deepEqual(spike.result, { checks: ['Already answered in the incident review'], at: spike.result.at, receiptId: null });
   assert.equal(spike.deployed, undefined);
+});
+
+test('Mark done on a PR sub-job that never opened a PR still completes cleanup', async (t) => {
+  const f = fixture(t); await f.approve(); f.alive.clear(); await f.tick();
+  f.store.update(f.job.id, (j) => { j.subJobs[0].worktree.cleanupHead = 'base'; });
+  f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'done', note: 'Finished outside the job' });
+  let api = f.sub();
+  assert.equal(api.stage, 'cleanup'); assert.equal(api.pr, null);
+  // The fixture's own runtime stub never exercises cleanupWorktree's git rules;
+  // swap in the real one, which is what threw "Cannot read properties of null
+  // (reading 'head')" on this exact shape before the cleanupHead fallback.
+  const host = { sessions: { get: () => null } };
+  const run = async (bin, args) => (args[0] === 'for-each-ref' ? 'base' : '');
+  f.runtime.cleanup = (j, s) => new JobRuntime({ host }, run).cleanup(j, s);
+  await f.tick();
+  api = f.sub();
+  assert.deepEqual([api.stage, api.state, api.error], ['done', 'done', null]);
 });
 
 test('Drop is the old cancel under a new name: it stops the live step and ignores its late receipt', async (t) => {
