@@ -19,9 +19,10 @@ feature).
   human consents to BEFORE any code runs, so it and `server/manifest.js` are
   duplicated by design and must agree (`id`, and `requires` in the manifest may
   not be WIDER than the block's). `requires` is the four `sessions:*` (read, spawn,
-  archive, bill) plus `usage:read` and `board:rebuild`/`board:broadcast` —
-  **not** `tasks:write`: spawn's `taskId` binds task memory and assigns the card
-  itself, and it is documented as not an escalation. `engines.wranglerApi` is
+  archive, bill) plus `tasks:read`/`tasks:write`, `usage:read` and
+  `board:rebuild`/`board:broadcast`. Task read/write lets New job validate a
+  selected Task or create one; spawn's `taskId` still binds task memory and
+  assigns the card itself. `engines.wranglerApi` is
   `^1.8.0`: 1.4 added the worktree/`addDirs`/`taskId`/PR-automation spawn
   options this repo depends on, 1.6 the `usage:read`/`sessions:bill` pair the
   Jobs board's prices and triage billing depend on, 1.8 the client

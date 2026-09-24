@@ -492,6 +492,7 @@ test('new-job form sends chosen model, repositories and the three review points'
   form.elements.repos.value = '/repo\n/repo\n/second';
   form.dispatchEvent(f.event('submit'));
   const msg = f.sent[0]; assert.equal(msg.type, 'job-create'); assert.deepEqual(msg.job.repos, ['/repo', '/second']);
+  assert.equal(msg.job.taskId, null, 'jobs stay Unassigned unless a task is chosen');
   assert.equal(msg.job.model, 'sonnet'); assert.equal(msg.job.reviewCode, true); assert.equal(msg.job.reviewMerge, true); assert.equal(msg.job.reviewSessions, true);
   assert.deepEqual(Object.keys(msg.job).filter((k) => /amendment/.test(k)), []);
   assert.equal(f.q('#job-dialog').open, true);

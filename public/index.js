@@ -50,6 +50,7 @@ export default {
     let toastTimer = null;
     let needsMe = 0;
     let sessions = [];
+    let tasks = [];
 
     // One toast element at a time, inside the view's own host: the board exposes
     // no toast to an extension, and a host that is display:none while another
@@ -79,6 +80,8 @@ export default {
       if (msg.event === 'job-created') {
         view?.created(msg);
         toast(msg.started ? 'Job started — planning' : 'Job added to backlog');
+      } else if (msg.event === 'job-create-failed') {
+        toast(msg.error);
       } else if (msg.event === 'job-action-complete') {
         view?.created(msg);
         toast('Job updated');
@@ -108,6 +111,7 @@ export default {
         view = initJobsView({
           send: api.send,
           getAgents: () => AGENTS,
+          getTasks: () => tasks,
           // Core answered "is this card on the board right now" off the graph's
           // session list, and so do we: on it → "Open session" selects the card,
           // off it → "Restore session" and openSession resumes it first.
@@ -119,6 +123,7 @@ export default {
       update(el, session, graph) {
         if (!graph?.jobs) return;
         sessions = graph.sessions || [];
+        tasks = graph.tasks?.tasks || [];
         // The rail count is every job that needs a human, NOT the subset the
         // view is currently drawing: its filter, Needs me and Show finished are
         // one human's view of the board, while the badge is what is waiting
@@ -145,6 +150,7 @@ export default {
         viewHost = null;
         needsMe = 0;
         sessions = [];
+        tasks = [];
       },
     });
   },

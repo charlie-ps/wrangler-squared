@@ -34,6 +34,10 @@ export class JobRuntime {
   }
 
   async launch(job, sub, run, prepared) {
+    if (job.taskId) {
+      const task = this.host.tasks.get(job.taskId);
+      if (!task || task.archived) throw new Error('The Job task is no longer active. Restore it before retrying.');
+    }
     // Planning discovers its repositories, ticketing only talks to Jira and a
     // session sub-job has none: blank cwd asks the wrangler for a fresh scratch
     // workspace (dispatch's own rule), without fetching or branching a repo.

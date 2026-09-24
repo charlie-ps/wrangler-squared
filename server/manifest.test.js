@@ -16,9 +16,8 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   const declared = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).wranglerExtension;
   assert.equal(manifest.id, declared.id);
   assert.deepEqual([...manifest.requires].sort(), [...declared.requires].sort(), 'the manifest may not be wider than what the human consented to');
-  // spawn's `taskId` binds the memory and assigns the card itself, and is
-  // documented as NOT a tasks:write escalation — so the capability is not asked for.
-  assert.ok(!manifest.requires.includes('tasks:write'));
+  assert.ok(manifest.requires.includes('tasks:read'));
+  assert.ok(manifest.requires.includes('tasks:write'));
   assert.equal(manifest.engines.wranglerApi, '^1.8.0', 'the client api.openSession the Jobs view opens cards with arrived in 1.8 (1.7 was the rail badge)');
   assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context']);
   assert.deepEqual(Object.keys(manifest.session), ['onBeforeDispatch']);
@@ -37,6 +36,88 @@ test('job-create through the extension handler signature creates, starts and bro
   assert.equal(job.stage, 'planning');
   assert.equal(host.rebuilds, 1);
   assert.deepEqual(broadcasts, [{ event: 'job-created', jobId: job.id, started: true }]);
+});
+
+test('job-create creates a named task and stores it on the job', async () => {
+  _resetForTests();
+  const { host, tasks } = fakeHost();
+  runnerFor(host).tick = async () => {};
+  await handler('job-create').handler({ job: newJob, newTaskName: 'Ship it together', start: false }, host);
+  const [job] = host.stores.jobs.snapshot().jobs;
+  assert.deepEqual(tasks, [{ id: 't_1', name: 'Ship it together', links: [] }]);
+  assert.equal(job.taskId, 't_1');
+});
+
+test('job-create stores an available selected task without creating another', async () => {
+  _resetForTests();
+  const { host, tasks } = fakeHost();
+  tasks.push({ id: 't_existing', name: 'Existing work', links: [] });
+  runnerFor(host).tick = async () => {};
+  await handler('job-create').handler({ job: { ...newJob, taskId: 't_existing' }, start: false }, host);
+  assert.equal(host.stores.jobs.snapshot().jobs[0].taskId, 't_existing');
+  assert.equal(tasks.length, 1);
+});
+
+test('job-create refuses a task that is no longer available', async () => {
+  _resetForTests();
+  const { host, broadcasts } = fakeHost();
+  runnerFor(host).tick = async () => {};
+  await handler('job-create').handler({ job: { ...newJob, taskId: 't_missing' }, start: false }, host);
+  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
+  assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'The selected task is no longer available' }]);
+});
+
+test('job-create refuses an archived selected task', async () => {
+  _resetForTests();
+  const { host, broadcasts, tasks } = fakeHost();
+  tasks.push({ id: 't_archived', name: 'Old work', links: [], archivedAt: Date.now() });
+  runnerFor(host).tick = async () => {};
+  await handler('job-create').handler({ job: { ...newJob, taskId: 't_archived' }, start: false }, host);
+  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
+  assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'The selected task is no longer available' }]);
+});
+
+test('job-create requires a name when creating a task', async () => {
+  _resetForTests();
+  const { host, broadcasts, tasks } = fakeHost();
+  runnerFor(host).tick = async () => {};
+  await handler('job-create').handler({ job: newJob, newTaskName: '   ', start: false }, host);
+  assert.deepEqual(tasks, []);
+  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
+  assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'Enter a name for the new task' }]);
+});
+
+test('job-create validates the job before creating its requested task', async () => {
+  _resetForTests();
+  const { host, broadcasts, tasks } = fakeHost();
+  runnerFor(host).tick = async () => {};
+  await handler('job-create').handler({ job: { title: '', intent: '' }, newTaskName: 'Orphan', start: false }, host);
+  assert.deepEqual(tasks, []);
+  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
+  assert.equal(broadcasts[0].event, 'job-create-failed');
+});
+
+test('job-create accepts only a short one-line string for a new task name', async () => {
+  for (const newTaskName of [null, false, 'x'.repeat(181), 'two\nlines']) {
+    _resetForTests();
+    const { host, broadcasts, tasks } = fakeHost();
+    runnerFor(host).tick = async () => {};
+    await handler('job-create').handler({ job: newJob, newTaskName, start: false }, host);
+    assert.deepEqual(tasks, [], `rejected ${JSON.stringify(newTaskName)}`);
+    assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
+    assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'Enter a task name of up to 180 characters on one line' }]);
+  }
+});
+
+test('job-create rejects selecting and creating a task at the same time', async () => {
+  _resetForTests();
+  const { host, broadcasts, tasks } = fakeHost();
+  tasks.push({ id: 't_existing', name: 'Existing work', links: [] });
+  runnerFor(host).tick = async () => {};
+  await handler('job-create').handler({ job: { ...newJob, taskId: 't_existing' }, newTaskName: 'Another task', start: false }, host);
+  assert.equal(tasks.length, 1);
+  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
+  assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'Choose an existing task or create a new one, not both' }]);
 });
 
 test('a launch binds its run to the card id via onBeforeDispatch, and job_report is caller-gated', async () => {
@@ -124,7 +205,8 @@ function activeSub(store, { branch = 'job-abcd1234-api', sessionId = 's_1' } = {
 
 test('a PR launch has the wrangler cut the worktree and keeps core off the job PR', async () => {
   _resetForTests();
-  const { host, spawned } = fakeHost();
+  const { host, spawned, tasks } = fakeHost();
+  tasks.push({ id: 'task_7', name: 'Ship it', links: [] });
   const runtime = runnerFor(host).runtime;
   runtime.run = async (bin, args) => {
     if (bin === 'gh') return JSON.stringify({ defaultBranchRef: { name: 'main' } });
