@@ -176,6 +176,15 @@ test('cleanup of a cancelled sub-job archives its sessions, keeps unpushed commi
   await assert.rejects(runtimeWith(host, { run: committed.run }).cleanup({}, cancelled), /additional commits/);
 });
 
+test('cleanup of a PR sub-job marked done by hand before it ever got a PR falls back to the worktree\'s cut point', async () => {
+  const { host } = fakeHost();
+  const sub = { ...merged, pr: null, worktree: { ...merged.worktree, path: missing() } };
+  const f = fakeRun({ head: 'base' });
+  await runtimeWith(host, { run: f.run }).cleanup({}, sub);
+  assert.deepEqual(f.calls.at(-1), ['update-ref', '-d', 'refs/heads/job-api', 'base'], 'never pushed, so the base it was cut from is what may be deleted');
+  assert.ok(!f.calls.some((c) => ['ls-remote', 'push'].includes(c[0])), 'no PR ever existed, so there is no origin branch to touch');
+});
+
 test('updateMain fast-forwards the main checkout only when it is clean and on the PR base', async () => {
   const { host } = fakeHost();
   const repo = fs.mkdtempSync(path.join(DATA_DIR, 'main-checkout-'));

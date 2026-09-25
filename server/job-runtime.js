@@ -179,9 +179,10 @@ export class JobRuntime {
       const s = this.host.sessions.get(sid);
       if (s && !s.archived) await this.host.sessions.archive(sid, { cascade: false });
     }
-    // A cancelled sub-job merged nothing. Its bytes are retained only if the
-    // branch was pushed (the PR head) or never left the base it was cut from.
-    if (sub.worktree) await this.cleanupWorktree(sub.worktree, sub.cancelledAt ? sub.pr?.head || sub.worktree.cleanupHead : sub.pr.head);
+    // A sub-job with no PR — cancelled, or marked done by hand before it ever
+    // opened one — merged nothing. Its bytes are retained only if the branch
+    // was pushed (the PR head) or never left the base it was cut from.
+    if (sub.worktree) await this.cleanupWorktree(sub.worktree, sub.pr?.head || sub.worktree.cleanupHead);
     if (sub.worktree && sub.pr && !sub.cancelledAt) await this.deleteRemoteBranch(sub.worktree, sub.pr.head);
     if (job.updateMain && !sub.cancelledAt && sub.pr) {
       const root = await gitRepoRoot(expandRepo(sub.repo));
