@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { JobRuntime } from './job-runtime.js';
+import { JobRuntime, LAUNCH_GRACE_MS } from './job-runtime.js';
 import { DATA_DIR } from './data-dir.js';
 import { fakeHost } from './test-helpers.js';
 
@@ -20,7 +20,7 @@ const exec = promisify(execFile);
 // test makes outlives the run (test-setup.js).
 let paths = 0;
 const missing = () => path.join(DATA_DIR, `gone-${++paths}`);
-const runtimeWith = (host, { statusOf = () => null, run } = {}) => new JobRuntime({ host, statusOf }, run);
+const runtimeWith = (host, { statusOf = () => null, now, run } = {}) => new JobRuntime({ host, statusOf, now }, run);
 // The git/gh fake that suite used, adapted to the current argv: every call
 // is recorded, `for-each-ref` answers with the branch head the repo is pretending
 // to have and everything else with the empty string a quiet git command gives.
@@ -64,13 +64,27 @@ test('isAlive reads the projection and the cached card status, and never another
   const { host, sessions } = fakeHost();
   sessions.set('sid', { sessionId: 'sid', archived: false });
   sessions.set('gone', { sessionId: 'gone', archived: true });
-  for (const [status, expected] of [['working', true], ['needs-you', true], ['idle', true], ['done', false], [null, false]]) {
+  for (const [status, expected] of [['working', true], ['needs-you', true], ['idle', true], ['unknown', true], ['done', false], [null, false]]) {
     assert.equal(await runtimeWith(host, { statusOf: () => status }).isAlive({ sessionId: 'sid' }), expected, String(status));
   }
   const live = runtimeWith(host, { statusOf: () => 'working' });
   assert.equal(await live.isAlive({ sessionId: 'gone' }), false, 'an archived card is not a live pane whatever the stale status says');
   assert.equal(await live.isAlive({ sessionId: 'never-existed' }), false);
   assert.equal(await live.isAlive({ id: 'run_1' }), false, 'an unbound run has nothing to probe');
+});
+
+test('a just-launched card with no status yet is alive for the launch grace, then is not', async () => {
+  const { host, sessions } = fakeHost();
+  sessions.set('sid', { sessionId: 'sid', archived: false });
+  // A starting Claude has written no status file and may not be in the cached
+  // graph yet: reaping it here killed Jira steps ~9s after launch.
+  const at = (ms) => runtimeWith(host, { now: () => 1_000 + ms });
+  const run = { sessionId: 'sid', startedAt: 1_000 };
+  assert.equal(await at(9_000).isAlive(run), true);
+  assert.equal(await at(LAUNCH_GRACE_MS).isAlive(run), false, 'a card that never reaches the graph still errors');
+  assert.equal(await at(0).isAlive({ sessionId: 'sid' }), false, 'no startedAt, no grace');
+  sessions.set('sid', { sessionId: 'sid', archived: true });
+  assert.equal(await at(0).isAlive(run), false, 'an archived card gets no grace');
 });
 
 test('a dispatch with no launch of ours pending is left to the board', () => {

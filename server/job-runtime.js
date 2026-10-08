@@ -22,14 +22,15 @@ import { CHECKOUTS_DIR } from './data-dir.js';
 // Same shape as core so job-runner.js is a verbatim copy: launch / stop / isAlive /
 // acceptTrustDialog / attributeSpend / cleanup / cleanupPlanning, plus
 // `noteDispatch` (new — see launch()).
+export const LAUNCH_GRACE_MS = 2 * 60 * 1000;
 export const expandRepo = (repo) => path.resolve(repo.startsWith('~/') ? path.join(os.homedir(), repo.slice(2)) : repo);
 
 export class JobRuntime {
   // `statusOf(sessionId)` answers from the graph the contributor last saw
   // (server/jobs.js): core read `lastGraph` directly; the projection
   // `host.sessions.get()` carries no status (TODO(host-api sessions:read status)).
-  constructor({ host, statusOf = () => null }, run = runFile) {
-    Object.assign(this, { host, statusOf, run });
+  constructor({ host, statusOf = () => null, now = Date.now }, run = runFile) {
+    Object.assign(this, { host, statusOf, now, run });
     this.pendingLaunch = null;
   }
 
@@ -146,11 +147,17 @@ export class JobRuntime {
   // `archived`, and the graph status the contributor cached is up to one tick
   // (~4s) stale and reads a DORMANT card as 'idle' too — so this is "archived, or
   // not on the board as a live pane" rather than a real probe.
+  //
+  // A starting Claude has no status file yet, so its card reads 'unknown' (core's
+  // "visible, never idle") or is not in the cached graph at all; reading either as
+  // dead reaped Jira steps seconds after launch. No status counts only for
+  // LAUNCH_GRACE_MS, so a card that never reaches the graph still errors.
   async isAlive(run) {
     const s = run.sessionId && this.host.sessions.get(run.sessionId);
     if (!s || s.archived) return false;
     const status = this.statusOf(run.sessionId);
-    return status === 'working' || status === 'needs-you' || status === 'idle';
+    if (['working', 'needs-you', 'idle', 'unknown'].includes(status)) return true;
+    return status == null && Number.isFinite(run.startedAt) && this.now() - run.startedAt < LAUNCH_GRACE_MS;
   }
 
   // TODO(host-api pane:capture/pane:keys): core answered Claude's first-launch
