@@ -98,6 +98,7 @@ export const jobInputSchema = z.object({
   title: line, intent: z.string().trim().min(1).max(16000),
   repos: z.array(repoPath).max(30).default([]),
   agent: z.enum(['claude', 'codex']).default('claude'), model: z.string().max(150).default(''),
+  effort: z.string().max(40).default(''),
   planningPrompt: z.string().max(8000).default(''),
   reviewCode: z.boolean().default(true), reviewMerge: z.boolean().default(true), reviewSessions: z.boolean().default(true),
   updateMain: z.boolean().default(false), taskId: z.string().nullable().default(null),

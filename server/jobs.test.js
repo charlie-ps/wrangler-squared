@@ -870,8 +870,8 @@ test('a long step is never killed by a clock, but one that stops working without
 });
 
 test('a run records the model it was claimed on, and none when the job leaves it to the agent', async (t) => {
-  const f = fixture(t, { ...input, model: 'sonnet' }); await f.approve();
-  assert.ok(f.store.get(f.job.id).runs.every((r) => r.model === 'sonnet'));
+  const f = fixture(t, { ...input, model: 'sonnet', effort: 'high' }); await f.approve();
+  assert.ok(f.store.get(f.job.id).runs.every((r) => r.model === 'sonnet' && r.effort === 'high'));
   const g = fixture(t); await g.approve();
   assert.ok(g.store.get(g.job.id).runs.every((r) => r.model === null), 'not guessed: Claude reads its default from settings.json at launch');
 });

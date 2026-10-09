@@ -12,6 +12,7 @@ const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 // names what ran. Null is "the agent's own default", which for Claude is whatever
 // ~/.claude/settings.json says at launch — not knowable here, so not guessed.
 const launchModel = (job) => job.model || null;
+const launchEffort = (job) => job.effort || null;
 const quoted = (title) => `“${title}”`;
 // Every human intervention lands in `moves`, plan moves and approvals alike: it
 // is the one timeline the next session's prompt (job-prompts.js history) and
@@ -261,7 +262,7 @@ export class JobStore {
       const active = d.jobs.flatMap((j) => j.runs).filter(runnable);
       if (!j || j.paused || j.cancelledAt || d.settings.paused || active.length >= d.settings.concurrency) return null;
       if (j.runs.some((r) => runnable(r) && r.subJobId === subJobId)) return null;
-      const run = { id: uid('run'), subJobId, phase, model: launchModel(j), startedAt: Date.now(), sessionId: null, stopped: false, report: null };
+      const run = { id: uid('run'), subJobId, phase, model: launchModel(j), effort: launchEffort(j), startedAt: Date.now(), sessionId: null, stopped: false, report: null };
       j.runs.push(run); j.revision++;
       return run;
     });

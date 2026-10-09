@@ -21,10 +21,10 @@ retrying the Job so later sessions do not lose the Task context.
 
 ## Status
 
-Functionally complete against host API **1.8.0**: 1.4 added the worktree,
+Functionally complete against host API **1.25.0**: 1.4 added the worktree,
 `addDirs`, `taskId` and PR-automation spawn options this extension depends on,
 1.6 the `usage:read` and `sessions:bill` capabilities behind the per-job price,
-1.7 the `view` badge that puts the needs-you count on the rail button, and 1.8 the client `api.openSession` the Jobs view opens a step's card with. Every feature the in-core system had is either wired
+1.7 the `view` badge that puts the needs-you count on the rail button, 1.8 the client `api.openSession` the Jobs view opens a step's card with, and 1.25 the client `api.agents()` the New job form reads its models and efforts from. Every feature the in-core system had is either wired
 through the extension `host` façade or is one of the open host-API gaps listed in
 **`docs/PORTING.md`**, which is the map: what came from where, what stands in
 for what, and which gap blocks which feature. `grep -rn 'TODO(host-api' server
@@ -32,7 +32,7 @@ public` is the live list of gaps.
 
 ## Install
 
-Requires an agent-wrangler on `main` (host API `^1.8.0`). In the wrangler's
+Requires an agent-wrangler on `main` (host API `^1.25.0`). In the wrangler's
 Extensions tab, install from this repository's git URL, consent to the
 capabilities disclosed in `package.json`'s `wranglerExtension` block, then
 restart the wrangler. The extension asks for `sessions:read`, `sessions:spawn`,
