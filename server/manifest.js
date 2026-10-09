@@ -41,7 +41,7 @@ export default {
     'tasks:read', 'tasks:write',
     'usage:read', 'board:rebuild', 'board:broadcast',
   ],
-  engines: { wranglerApi: '^1.8.0' },
+  engines: { wranglerApi: '^1.25.0' },
 
   // Instantiated once by the wrangler with `{ id, log }`; the file path is the
   // extension's own choice (server/data-dir.js).

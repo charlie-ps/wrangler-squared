@@ -13,7 +13,7 @@ function fixture(t) {
   globalThis.document = window.document; globalThis.FormData = window.FormData;
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
   const sent = [], sessions = [], diffs = [], diffContexts = [], onBoard = new Set();
-  const view = initJobsView({ send: (m) => sent.push(structuredClone(m)), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }] }], onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
+  const view = initJobsView({ send: (m) => sent.push(structuredClone(m)), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; await window.happyDOM.close(); });
   const job = { id: 'job1', title: 'Sign-in', intent: 'Reliable sign-in', repos: ['/repo'], stage: 'planning', plan, subJobs: [], runs: [], moves: [], revision: 2, reviewMerge: true };
   const data = { jobs: [structuredClone(job)], settings: { concurrency: 2, maxRepairs: 2 } };
@@ -494,8 +494,25 @@ test('new-job form sends chosen model, repositories and the three review points'
   const msg = f.sent[0]; assert.equal(msg.type, 'job-create'); assert.deepEqual(msg.job.repos, ['/repo', '/second']);
   assert.equal(msg.job.taskId, null, 'jobs stay Unassigned unless a task is chosen');
   assert.equal(msg.job.model, 'sonnet'); assert.equal(msg.job.reviewCode, true); assert.equal(msg.job.reviewMerge, true); assert.equal(msg.job.reviewSessions, true);
+  assert.equal(msg.job.effort, '', 'Default leaves effort to the agent');
   assert.deepEqual(Object.keys(msg.job).filter((k) => /amendment/.test(k)), []);
   assert.equal(f.q('#job-dialog').open, true);
+});
+
+test('new-job effort picker follows the chosen agent and keeps a level both offer', (t) => {
+  const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
+  const options = () => [...form.elements.effort.options].map((o) => o.value);
+  assert.deepEqual(options(), ['', 'high', 'max']);
+  form.elements.effort.value = 'max';
+  form.elements.agent.value = 'codex'; form.elements.agent.onchange();
+  assert.deepEqual(options(), ['', 'high']); assert.equal(form.elements.effort.value, '', 'a level the new agent lacks falls back to Default');
+  assert.equal(form.elements.model.value, 'gpt-5.6-sol');
+  form.elements.effort.value = 'high';
+  form.elements.agent.value = 'claude'; form.elements.agent.onchange();
+  assert.equal(form.elements.effort.value, 'high');
+  form.elements.title.value = 'T'; form.elements.intent.value = 'I';
+  form.dispatchEvent(f.event('submit'));
+  assert.equal(f.sent[0].job.effort, 'high');
 });
 
 test('the new-job primary action starts planning and the plain button parks it in the backlog', (t) => {

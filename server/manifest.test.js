@@ -18,7 +18,7 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   assert.deepEqual([...manifest.requires].sort(), [...declared.requires].sort(), 'the manifest may not be wider than what the human consented to');
   assert.ok(manifest.requires.includes('tasks:read'));
   assert.ok(manifest.requires.includes('tasks:write'));
-  assert.equal(manifest.engines.wranglerApi, '^1.8.0', 'the client api.openSession the Jobs view opens cards with arrived in 1.8 (1.7 was the rail badge)');
+  assert.equal(manifest.engines.wranglerApi, '^1.25.0', 'the client api.agents the New job form reads its models and efforts from arrived in 1.25');
   assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context']);
   assert.deepEqual(Object.keys(manifest.session), ['onBeforeDispatch']);
   assert.equal(manifest.client, 'public/index.js');
@@ -212,7 +212,7 @@ test('a PR launch has the wrangler cut the worktree and keeps core off the job P
     if (bin === 'gh') return JSON.stringify({ defaultBranchRef: { name: 'main' } });
     return args[0] === 'rev-parse' ? 'basehead' : '';
   };
-  const job = { id: 'job_00000000abcd1234', title: 'Ship it', agent: 'claude', model: 'opus', taskId: 'task_7' };
+  const job = { id: 'job_00000000abcd1234', title: 'Ship it', agent: 'claude', model: 'opus', effort: 'high', taskId: 'task_7' };
   const sub = { id: 'api', repo: '/repos/thing', brief: 'Do it', jiraKey: 'AUTH-1' };
   let prepared;
   await runtime.launch(job, sub, { id: 'run_1', phase: 'implementation' }, (...v) => { prepared = v; });
@@ -222,6 +222,7 @@ test('a PR launch has the wrangler cut the worktree and keeps core off the job P
   assert.deepEqual(opts.worktree, { branch: placeholderBranch(job, sub), base: 'refs/remotes/origin/main', auto: true });
   assert.equal(opts.addDirs, undefined, 'only planning gets the repos parent');
   assert.equal(opts.taskId, 'task_7');
+  assert.deepEqual([opts.model, opts.effort], ['opus', 'high']);
   assert.deepEqual([opts.autoMergeOnPass, opts.autoFixPrChecks], [false, false], 'the runner drives this PR');
   assert.deepEqual(prepared, ['s_1', {
     branch: placeholderBranch(job, sub), path: `/repos/thing-worktree-${placeholderBranch(job, sub)}`, repoRoot: '/repos/thing',
@@ -238,6 +239,7 @@ test('a later phase has the wrangler adopt the existing worktree and leaves the 
   let prepared = 'unset';
   await runtime.launch({ id: 'job_00000000abcd1234', title: 'Ship it', agent: 'claude' }, { id: 'api', repo: '/repos/thing', brief: 'Do it', worktree },
     { id: 'run_2', phase: 'publish' }, (...v) => { prepared = v; });
+  assert.equal(spawned[0].effort, undefined, 'Default effort is left to the agent');
   assert.equal(spawned[0].cwd, '/repos/thing', 'adoption is asked of the repo the worktree belongs to');
   assert.deepEqual(spawned[0].worktree, { branch: 'AUTH-1-add-the-thing', folderName: os.tmpdir(), auto: false },
     'the stored record, handed back so createWorktree classifies it as adopt');

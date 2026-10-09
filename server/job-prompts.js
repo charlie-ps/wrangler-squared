@@ -70,9 +70,9 @@ const heading = (job, sub) => `${sub?.jiraKey ? `${sub.jiraKey} · ` : ''}${job.
 export const HISTORY_MAX_LINES = 10;
 const HUMAN_VERBS = { 'fix-here': 'requested changes', retry: 'retried', 'approve-code': 'approved the working tree', 'approve-session': 'approved the result', 'revise-session': 'requested changes' };
 // TODO(host-api agents:read): the core version pretty-printed this through the
-// agent adapter's `models` table; an extension cannot reach the adapters, so the
-// raw model value stands in until the host exposes the vocabulary.
-const modelLabel = (job, run) => run.model || '';
+// agent adapter's `models` table; the browser half reads that list (api.agents,
+// 1.25) but the server half still cannot, so the raw values stand in.
+const modelLabel = (job, run) => [run.model, run.effort].filter(Boolean).join(' ');
 const joinChecks = (list) => (list || []).join(' · ');
 const outcome = (r) => {
   const p = r.report;

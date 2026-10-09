@@ -90,6 +90,7 @@ export class JobRuntime {
         cwd: existing?.repoRoot || repo,
         agent: job.agent,
         model: job.model || undefined,
+        effort: job.effort || undefined,
         intent: jobPrompt(job, sub, run),
         ...(worktree ? { worktree } : {}),
         // Planning discovers and clones checkouts, so it needs the parent of the

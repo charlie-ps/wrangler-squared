@@ -20,23 +20,8 @@ import { jobCards, jobNeedsReview } from './jobs.js';
 //    lands on the card and the human opens the panel there.
 //    TODO(host-api client navigation): `api.openDiff(sid, {onClose})` would
 //    restore the round trip core had (public/diff-return.js).
-//  - `getAgents()` read the board's connect-time `agents` list → not on the api;
-//    the two adapters' model vocabularies are mirrored below until
-//    TODO(host-api agents:read) — they WILL drift, which is exactly what the
-//    wrangler's "one source for the model vocabulary" rule forbids, so treat this
-//    constant as a placeholder, not a design.
-const AGENTS = [
-  { id: 'claude', label: 'Claude', models: [
-    { value: 'fable', label: 'Fable 5 · 1M context' }, { value: 'opus', label: 'Opus 5 · 1M context', default: true },
-    { value: 'opusplan', label: 'Opus plan · Sonnet execution' }, { value: 'sonnet', label: 'Sonnet 5 · 200K context' },
-    { value: 'sonnet[1m]', label: 'Sonnet 5 · 1M context' }, { value: 'haiku', label: 'Haiku 4.5 · 200K context' },
-  ] },
-  { id: 'codex', label: 'Codex', models: [
-    { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol · capable', default: true }, { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra · everyday coding' },
-    { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna · fast & cheap' }, { value: 'gpt-5.5', label: 'GPT-5.5 · capable' },
-    { value: 'gpt-5.4', label: 'GPT-5.4 · everyday coding' }, { value: 'gpt-5.4-mini', label: 'GPT-5.4 mini · fast & cheap' },
-  ] },
-];
+//  - `getAgents()` read the board's connect-time `agents` list → `api.agents()`
+//    (host api 1.25), the same live-catalog list, read each time New job opens.
 
 const ICON = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16M5 8h2M11 11h2M17 8h2"/></svg>';
 
@@ -110,7 +95,7 @@ export default {
         document.body.appendChild(dialog);
         view = initJobsView({
           send: api.send,
-          getAgents: () => AGENTS,
+          getAgents: () => api.agents(),
           getTasks: () => tasks,
           // Core answered "is this card on the board right now" off the graph's
           // session list, and so do we: on it → "Open session" selects the card,
@@ -138,8 +123,8 @@ export default {
       // owned Jobs: the needs-you count on the rail button, visible from any
       // view. Core evaluates this on every graph tick and draws or hides its own
       // span (agent-wrangler public/slots.js syncHosts); 0 draws nothing. Host
-      // API 1.7 is where core started calling it; the manifest's `^1.8.0` is
-      // pinned for openSession below, not for this — a board that spreads the
+      // API 1.7 is where core started calling it; the manifest's pin (now
+      // `^1.25.0`, for api.agents) is not for this — a board that spreads the
       // key without reading it only loses the count.
       badge: () => needsMe,
       unmount() {

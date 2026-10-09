@@ -25,7 +25,7 @@ function mountClient() {
   const el = window.document.createElement('div');
   host.appendChild(el);
   const c = contributions[0];
-  c.mount(el, { send: (f) => sent.push(f), openSession: (sid) => opened.push(sid), selectedSessionId: () => null, requestPanelRender: () => {}, storage: null, version: '1.8.0' });
+  c.mount(el, { send: (f) => sent.push(f), openSession: (sid) => opened.push(sid), selectedSessionId: () => null, requestPanelRender: () => {}, agents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'opus', label: 'Opus 5.5', default: true }], efforts: [{ value: 'high', label: 'High' }] }], storage: null, version: '1.25.0' });
   const dispatch = (frame) => { for (const fn of [...listeners]) fn({ type: 'ext:jobs', ...frame }); };
   return { window, el, c, sent, opened, contributions, dispatch, listeners };
 }
