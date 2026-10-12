@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { isPrSub, isSessionSub, isHumanSub, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, replanPending, replanProposed, heldByReplan, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber } from './jobs.js';
 
 // The one state vocabulary every surface draws: a tone (the colour, see the
 // .tone-* rules in jobs.css), a glyph and a short name. Every stage, run status,
@@ -27,7 +27,7 @@ export function subState(job, sub) {
   if (sub.cancelledAt) return 'dropped';
   if (sub.stage === 'done') return 'done';
   if (job.error || cancelledDependencies(job, sub).length || (eventFor(job, sub) && !deploymentStalled(sub))) return 'failing';
-  if (job.paused) return 'paused';
+  if (job.paused || heldByReplan(job, sub)) return 'paused';
   if (jobNeedsReview(job, sub)) return 'needs';
   if (jobStatus(job, sub).tone === 'working') return 'running';
   if (redPipeline(sub)) return 'failing';
@@ -44,7 +44,11 @@ export function jobState(job) {
     if (job.runs.some((r) => !r.stopped)) return 'running';
     return job.stage === 'backlog' ? 'planned' : 'queued';
   }
-  const states = job.subJobs.map((s) => subState(job, s)).filter((s) => s !== 'dropped');
+  // Sub-jobs frozen by a pending plan change roll up to the change itself:
+  // re-planning, then a proposal that needs the human.
+  const states = job.subJobs.filter((s) => job.paused || !heldByReplan(job, s)).map((s) => subState(job, s)).filter((s) => s !== 'dropped');
+  if (replanProposed(job) && !job.paused) states.push('needs');
+  else if (replanPending(job) && !job.paused) states.push('running');
   if (!states.length) return 'queued';
   if (states.every((s) => s === 'done')) return 'done';
   return STATE_ORDER.find((s) => states.includes(s));
@@ -89,6 +93,8 @@ export function jobLabel(job) {
   if (job.stage !== 'active') return jobStatus(job, null).text;
   if (state === 'done') return 'Delivered';
   if (state === 'paused') return 'Paused';
+  if (state === 'needs' && replanProposed(job)) return 'Plan change ready';
+  if (state === 'running' && replanPending(job) && !replanProposed(job)) return 'Re-planning';
   const peers = job.subJobs.filter((s) => subState(job, s) === state);
   return `${subLabel(job, peers[0])}${peers.length > 1 ? ` +${peers.length - 1}` : ''}`;
 }

@@ -38,7 +38,7 @@ const freeId = (taken, make) => { let n = 2; while (taken.has(make(n))) n++; ret
 // is about to refuse. A migrated plan may carry a brief longer than today's cap;
 // it is not what is being changed, so the throwaway projection trims it rather
 // than refusing an unrelated move.
-function validatePlan(plan) {
+export function validatePlan(plan) {
   const projected = { ...plan, subJobs: plan.subJobs.map((s) => ({ ...s, brief: String(s.brief || 'x').slice(0, 500) })) };
   const parsed = planSchema.safeParse(projected);
   if (!parsed.success) throw new Error([...new Set(parsed.error.issues.map((i) => i.message))].join('; '));

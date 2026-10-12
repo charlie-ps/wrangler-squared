@@ -5,6 +5,7 @@ import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
 import { jobInputSchema, settingsSchema, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, storiesKeyed } from './jobs-schema.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { applyMove, dropSub, MOVE_ACTIONS } from './job-moves.js';
+import { requestReplan, discardReplan, proposeReplan, approveReplan } from './job-replan.js';
 
 const activeForSub = (job, sub) => job.runs.some((r) => !r.stopped && r.subJobId === sub.id);
 const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
@@ -54,9 +55,10 @@ function activate(j) {
 function cancelJob(j, now) {
   if (j.stage === 'done') throw new Error('Job has already finished');
   if (j.cancelledAt) throw new Error('Job is already cancelled');
-  j.cancelledAt = now; j.paused = false; j.error = null; j.blocked = null;
+  j.cancelledAt = now; j.paused = false; j.error = null; j.blocked = null; j.replan = null;
   for (const s of j.subJobs) if (!['cleanup', 'done'].includes(s.stage)) dropSub(s, now);
 }
+const HELD_BY_REPLAN = new Set(['approve-code', 'approve-merge', 'approve-session', 'revise-session', 'start-human', 'finish-human']);
 export const MERGE_IS_DELIVERY = 'Merged; nothing runs on push for these paths';
 export const CURRENT_VERSION = 2;
 
@@ -165,6 +167,10 @@ export class JobStore {
       if (j.cancelledAt && action !== 'retry') throw new Error('Job was cancelled');
       // `cancel` is Drop's old name and still arrives from an older board.
       const move = action === 'cancel' ? 'drop' : action;
+      // A pending plan change freezes the job where it stands: a sub-job that
+      // moves on under the planner (approved, merged, marked done, reshaped by a
+      // move) is no longer the job the proposal was written against.
+      if (j.replan && (MOVE_ACTIONS.has(move) || HELD_BY_REPLAN.has(action))) throw new Error('A plan change is pending. Approve or discard it first.');
       if (MOVE_ACTIONS.has(move)) {
         const { detail } = applyMove(j, s, move, payload, { now: Date.now(), buildSubJob });
         if (j.plan) j.repos = planRepos(j.plan);
@@ -176,6 +182,17 @@ export class JobStore {
       if (action === 'start') {
         if (j.stage !== 'backlog') throw new Error('Job has already started');
         j.stage = 'planning'; return;
+      }
+      // On a running job the change is a proposal the human approves (job-replan.js);
+      // until then the plan stands and no new step launches.
+      if (action === 'replan' && j.stage === 'active') { requestReplan(j, feedback, Date.now()); return; }
+      if (action === 'discard-replan') { discardReplan(j); record(j, null, 'discard-replan', null, 'Discarded the proposed plan change'); return; }
+      if (action === 'approve-replan') {
+        const { lines, detail, feedback: asked } = approveReplan(j, payload.proposalId, { now: Date.now(), buildSubJob });
+        j.repos = planRepos(j.plan);
+        record(j, null, 'approve-replan', asked.slice(0, 180), detail);
+        for (const l of lines) record(j, l.sub, 'replan', null, l.detail);
+        return;
       }
       if (action === 'replan') {
         if (j.stage !== 'planning' || j.runs.some(runnable)) throw new Error('Wait for planning to finish');
@@ -317,6 +334,11 @@ export class JobStore {
     });
   }
   _applyReceipt(j, r, s, report) {
+    if (report.kind === 'plan' && j.stage === 'active') {
+      // Discarded while the planner worked: kept on the run, applied nowhere.
+      if (j.replan) proposeReplan(j, r, report.plan, Date.now());
+      return;
+    }
     if (report.kind === 'plan') {
       j.plan = report.plan;
       j.repos = planRepos(report.plan);

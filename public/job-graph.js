@@ -16,7 +16,10 @@ import { STATES, stateIconHtml, stateSolid, subState, subLine, jobState, jobLabe
 // rectangles, not by this markup, so callers re-run it after anything that can
 // move a node.
 export const dependencyEditorHtml = (s, others, depKey) => others.map((d) => `<label><input type="checkbox" data-dep="${esc(depKey)}" value="${esc(d.id)}" ${s.after.includes(d.id) ? 'checked' : ''}>${kindChipHtml(d)}<span>${esc(d.title)}</span></label>`).join('') || '<span>No other sub-jobs</span>';
-export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, openDeps = new Set() } = {}) {
+// A proposed change to a running job's plan (`markOf`) is drawn static, each
+// node in its live state and labelled with what approval would do to it.
+const MARKS = { frozen: 'Locked · already landed', removed: 'Will be cancelled', added: 'New', edited: 'Edited', kept: 'Unchanged' };
+export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, openDeps = new Set() } = {}) {
   const subs = plan.subJobs;
   if (!subs.length) return '';
   const levels = dependencyLevels(plan);
@@ -33,6 +36,7 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
       return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<textarea class="job-node-title" aria-label="${kindLabel(s)} title ${i + 1}" data-title="${i}" maxlength="180" rows="3">${esc(s.title)}</textarea>
         <details class="job-node-deps" data-deps="${esc(s.id)}" ${openDeps.has(s.id) ? 'open' : ''}><summary title="${esc(deps || 'Independent')} · change">${ICONS.link}<span>${s.after.length || 'None'}</span></summary>${dependencyEditorHtml(s, others, String(i))}</details></div>`;
     }
+    if (markOf) { const mark = markOf(s); return `<div class="${cls} job-mark-${mark}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong><span class="job-mark">${mark === 'frozen' ? ICONS.lock : ''}${esc(MARKS[mark])}</span></div>`; }
     if (!stateOf) return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong></div>`;
     return `<button type="button" class="${cls} ${state === 'done' ? 'done' : ''}" data-node="${esc(s.id)}" data-open-sub="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong><span class="job-status">${esc(lineOf ? lineOf(s) : STATES[state].label)}</span></button>`;
   };

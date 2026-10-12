@@ -126,7 +126,9 @@ export const redAccepted = (sub) => !!sub?.acceptedRed && sub.acceptedRed.ref ==
 // Mirrors server/job-moves.js: a move the server would refuse is never drawn.
 // Nothing at all once the sub-job is finished, dropped, or already cleaning up.
 export function movesFor(job, sub) {
-  if (!sub || sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage)) return [];
+  // Every move reshapes the plan a pending change was written against, so the
+  // server refuses them all until it is approved or discarded.
+  if (!sub || sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage) || replanPending(job)) return [];
   const pr = isPrSub(sub);
   const allowed = {
     'fix-here': ['pr', 'implementation', 'review', 'session'].includes(sub.stage),
@@ -163,12 +165,22 @@ export function eventFor(job, sub) {
   if (sub.stage === 'pr' && redComments(sub)) return { title: 'Comments block merging', detail: commentVerdict(sub).text, suggested };
   return null;
 }
+// A plan change on a running job (server/job-replan.js): asked for, then a
+// proposal the human approves or discards. Mirrors the server's isFrozen.
+export const replanPending = (job) => !!job.replan && !job.cancelledAt;
+export const replanProposed = (job) => replanPending(job) && !!job.replan.proposal;
+export const isFrozen = (sub) => !!sub.cancelledAt || ['deployment', 'cleanup', 'done'].includes(sub.stage) || !!sub.mergedAt || !!sub.deployed;
+// While a change is pending every sub-job it may still touch is frozen where it
+// stands (server/job-store.js refuses its approvals and moves, the runner its
+// launches and merges); one with a step still running carries on.
+export const heldByReplan = (job, sub) => replanPending(job) && !!sub?.stage && !isFrozen(sub) && !sub.error && !liveRun(job, sub);
 export function jobNeedsReview(job, sub) {
   if (job.error || sub?.error) return true;
   // A step waiting on a prompt is the human's, whatever else the job is doing.
   if (runStatus(job, sub) === 'needs-you') return true;
+  if (heldByReplan(job, sub)) return false;
   if (sub && mergeHeldByComments(job, sub)) return true;
-  if (!sub) return !job.cancelledAt && job.stage === 'planning' && job.plan && !job.runs.some((r) => !r.stopped);
+  if (!sub) return !job.cancelledAt && (job.stage === 'planning' && job.plan || replanProposed(job)) && !job.runs.some((r) => !r.stopped && !r.subJobId);
   if (!sub.cancelledAt && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return true;
   if (isHumanSub(sub)) return humanTaskWaiting(job, sub);
   if (isSessionSub(sub)) return sub.stage === 'review';
@@ -180,15 +192,16 @@ export function jobNeedsReview(job, sub) {
 const waitingNoun = (list) => list.every(isSessionSub) ? 'session' : list.every(isHumanSub) ? 'human task' : list.every(isPrSub) ? 'deployment' : 'prerequisite';
 export function jobStatus(job, sub) {
   if (job.error || sub?.error) return { tone: 'needs', text: 'Needs attention' };
-  if (sub?.cancelledAt) return { tone: sub.stage === 'done' ? 'done' : 'muted', text: sub.stage === 'done' ? 'Dropped' : 'Dropped · cleaning up' };
+  if (sub?.cancelledAt) { const word = sub.superseded ? 'Superseded' : 'Dropped'; return { tone: sub.stage === 'done' ? 'done' : 'muted', text: sub.stage === 'done' ? word : `${word} · cleaning up` }; }
   if (!sub && job.cancelledAt) return { tone: job.stage === 'done' ? 'done' : 'muted', text: job.stage === 'done' ? 'Cancelled' : 'Cancelled · cleaning up' };
   if (job.paused) return { tone: 'muted', text: 'Paused' };
   if (sub && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return { tone: 'needs', text: 'Depends on a dropped sub-job' };
   const run = liveRun(job, sub);
   if (run) {
     if (run.status === 'needs-you') return { tone: 'needs', text: 'Waiting on a prompt' };
-    return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: 'Planning', jira: 'Creating Jira tickets', implementation: reviewCode(job) ? 'Working' : 'Working on the PR', publish: 'Committing & opening the PR', repair: 'Fixing the PR', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };
+    return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: job.stage === 'active' ? 'Re-planning' : 'Planning', jira: 'Creating Jira tickets', implementation: reviewCode(job) ? 'Working' : 'Working on the PR', publish: 'Committing & opening the PR', repair: 'Fixing the PR', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };
   }
+  if (sub && heldByReplan(job, sub)) return { tone: 'muted', text: 'Held for the plan change' };
   // The human said they had started; no agent and no clock runs against it, so
   // this outranks the prerequisite line a waiting one would show.
   if (isHumanSub(sub) && sub.stage === 'human' && sub.state === 'doing') return { tone: 'working', text: 'In progress' };
@@ -196,7 +209,7 @@ export function jobStatus(job, sub) {
   // whatever the checks currently say.
   if (sub?.stage === 'pr' && sub.fixRequested) return { tone: 'working', text: 'Fix requested' };
   if (deploymentStalled(sub)) return { tone: 'needs', text: 'No deployment run' };
-  if (jobNeedsReview(job, sub)) return { tone: 'needs', text: sub ? isHumanSub(sub) ? 'Needs you' : isSessionSub(sub) || codeAwaitingReview(sub) ? 'Ready to review' : sub.stage === 'pr' ? mergeHeldByComments(job, sub) ? 'Comments block merging' : 'Ready to merge' : 'Needs you' : 'Plan ready to review' };
+  if (jobNeedsReview(job, sub)) return { tone: 'needs', text: sub ? isHumanSub(sub) ? 'Needs you' : isSessionSub(sub) || codeAwaitingReview(sub) ? 'Ready to review' : sub.stage === 'pr' ? mergeHeldByComments(job, sub) ? 'Comments block merging' : 'Ready to merge' : 'Needs you' : replanProposed(job) ? 'Plan change to review' : 'Plan ready to review' };
   // Approved: the publish session starts on the runner's next tick.
   if (sub?.stage === 'review' && isPrSub(sub)) return { tone: 'working', text: 'Approved · committing next' };
   if (!sub) return { tone: 'muted', text: job.stage === 'backlog' ? 'Ready when you are' : job.stage === 'done' ? 'Delivered' : job.stage === 'jira' ? 'Tickets queued' : 'Queued' };
@@ -225,7 +238,7 @@ export function jobCards(jobs) {
   return jobs.flatMap((job) => job.stage === 'active' || job.stage === 'done'
     ? [...job.subJobs.map((sub) => isSessionSub(sub) ? { job, sub, board: 'sessions', stage: sessionColumn(job, sub) }
       : isHumanSub(sub) ? { job, sub, board: 'human', stage: humanColumn(sub) }
-      : { job, sub, board: 'prs', stage: sub.stage === 'done' ? 'cleanup' : sub.stage }), ...(job.error || !job.subJobs.length ? [{ job, sub: null, board: 'prs', stage: 'cleanup' }] : [])]
+      : { job, sub, board: 'prs', stage: sub.stage === 'done' ? 'cleanup' : sub.stage }), ...(job.error || !job.subJobs.length || replanProposed(job) ? [{ job, sub: null, board: 'prs', stage: 'cleanup' }] : [])]
     : [{ job, sub: null, board: 'prs', stage: job.stage }]);
 }
 // Every dependency gates the start: a PR once it deploys, a session or human task

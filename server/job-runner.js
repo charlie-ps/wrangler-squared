@@ -2,6 +2,7 @@ import { runnable, dependencySatisfied, dependenciesSatisfied, MERGE_IS_DELIVERY
 import { summariseComments, commentsBlockMerge } from './job-comments.js';
 import { awaitsTicket } from './jobs-schema.js';
 import { logWarn } from './log.js';
+import { isFrozen } from './job-replan.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 export const acceptedRedLine = (sub) => `Post-merge run accepted red${sub.acceptedRed?.note ? `: ${sub.acceptedRed.note}` : ''}`;
 const activeFor = (j, s) => j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null));
@@ -45,7 +46,9 @@ export class JobRunner {
       const job = this.store.get(id);
       // A cancelled job stops its planning/ticketing run the way a dropped
       // sub-job stops its step: quietly, no missing-receipt error.
-      const cancelled = job.cancelledAt || (run.subJobId && job.subJobs.find((s) => s.id === run.subJobId)?.cancelledAt);
+      // So does a re-planning run whose plan change the human discarded.
+      const cancelled = job.cancelledAt || (run.subJobId && job.subJobs.find((s) => s.id === run.subJobId)?.cancelledAt)
+        || (run.phase === 'planning' && job.stage === 'active' && !job.replan);
       if (!run.report && !cancelled) {
         if (!run.sessionId) error = 'Launch was interrupted. Check for an existing session/worktree before retrying.';
         else if (!(await this.runtime.isAlive(run))) error = 'Session stopped without a receipt. Open it to see why, then retry.';
@@ -111,6 +114,11 @@ export class JobRunner {
     this.triaging.set(key, { fingerprint: comments.fingerprint }); this.pending.add(done);
   }
   async launch(job, sub, phase) {
+    // A plan change waiting on the human freezes every sub-job it may still
+    // edit or cancel: no new step, no merge, no human approval (job-store.js).
+    // Steps already running carry on, PRs keep being watched, and work past the
+    // point of no return (a verify after deploy) lands as it would have.
+    if (sub && this.store.get(job.id).replan && !isFrozen(sub)) return;
     const run = this.store.claim(job.id, sub?.id || null, phase);
     if (!run) return;
     try {
@@ -135,10 +143,14 @@ export class JobRunner {
     if (job.stage === 'planning' && !job.plan && !activeFor(job)) { await this.launch(job, null, 'planning'); return; }
     if (job.stage === 'jira' && !activeFor(job)) { await this.launch(job, null, 'jira'); return; }
     if (job.stage !== 'active') return;
+    if (job.replan && !job.replan.proposal && !activeFor(job)) {
+      await this.launch(job, null, 'planning');
+      job = this.store.get(id);
+    }
     // A New ticket move can add a keyless story to a running job: ticketing is
     // the same step, run again, and the sub-job waiting on that key starts once
     // its receipt lands (job-store.js).
-    if (job.plan?.stories.some((s) => !s.key) && !activeFor(job)) {
+    if (!job.replan && job.plan?.stories.some((s) => !s.key) && !activeFor(job)) {
       await this.launch(job, null, 'jira');
       job = this.store.get(id);
     }
@@ -198,13 +210,13 @@ export class JobRunner {
             const limit = this.store.snapshot().settings.maxRepairs + (sub.repairAllowance || 0);
             if (attempts >= limit) this.patchSub(id, sub.id, (s) => { s.error = 'Automatic repair limit reached. Review changes, then retry if needed.'; });
             else await this.launch(job, sub, 'repair');
-          } else if ((pr.checkStatus === 'passing' || sub.acceptedRed?.ref === pr.head) && dependenciesSatisfied(job, sub) && (sub.mergeApprovedHead === pr.head || (!job.reviewMerge && !commentsBlockMerge(sub)))) {
+          } else if (!job.replan && (pr.checkStatus === 'passing' || sub.acceptedRed?.ref === pr.head) && dependenciesSatisfied(job, sub) && (sub.mergeApprovedHead === pr.head || (!job.reviewMerge && !commentsBlockMerge(sub)))) {
             // An accepted-red head merges whatever its checks say — the move
             // pinned both the acceptance and the merge approval to this head.
             // Match-head on GitHub closes the push-vs-merge race; re-poll after
             // success instead of pretending an accepted merge-queue entry merged.
             if (sub.mergeRequestedHead !== pr.head) {
-              await this.github.merge(sub, { canMerge: () => this.allowed(id) });
+              await this.github.merge(sub, { canMerge: () => this.allowed(id) && !this.store.get(id).replan });
               this.patchSub(id, sub.id, (s) => { s.mergeRequestedHead = pr.head; });
             }
           }

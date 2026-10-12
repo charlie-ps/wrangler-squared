@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { isHumanSub, reviewCode } from './jobs-schema.js';
 import { CHECKOUTS_DIR, displayPath } from './data-dir.js';
+import { isFrozen, replanStatus } from './job-replan.js';
 
 const checkouts = displayPath(CHECKOUTS_DIR);
 
@@ -122,6 +123,19 @@ const thisPr = (sub) => `This PR (${sub?.repo ? path.basename(sub.repo) : 'this 
 // the work is a change to it, and the push goes to the PR that already exists.
 const openPrLine = (sub) => sub?.pr?.url ? `PR ${sub.pr.url} is already open from this worktree's branch; this is a fix to it, requested by the human (see the history below).` : '';
 
+// A running job's plan change (job-replan.js): the planner sees where every
+// sub-job stands, which ones it may no longer touch, and returns the WHOLE plan
+// as a proposal the human approves.
+const replanBlock = (job) => lines(
+  'This job is ALREADY RUNNING and the human wants its plan changed. Where each sub-job stands now:',
+  ...job.subJobs.map((s) => replanStatus(job, s)),
+  `Frozen (delivered or past the point of no return; keep each exactly as it is): ${job.subJobs.filter(isFrozen).map((s) => s.id).join(', ') || 'none'}.`,
+  'Return the WHOLE plan. Keep an id to keep or edit that sub-job: only its title, brief, check and after may change (its kind, repo and story are fixed, so new work in another place is a new id). Leave an unfrozen sub-job out to cancel it: it stays on the board as cancelled and any open PR stays open on GitHub. Give new work a new id. Do not make anything wait on a sub-job you cancel. Do not repeat work a frozen sub-job already delivered. Your plan is a proposal: nothing changes until the human approves it, and new steps are held meanwhile.',
+  `Current plan: ${JSON.stringify(job.plan)}`,
+  job.replan.previous ? `Your previous proposal, which the human asked to change: ${JSON.stringify(job.replan.previous)}` : '',
+  `Requested change: ${job.replan.feedback}`,
+);
+
 export function jobPrompt(job, sub, run) {
   const report = (body, lead = '') => `${lead}job_report {runId:"${run.id}", ${body}}. ${blockedLine}`;
   const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, 'Commit, push to the open PR, then ') : report('kind:"published", url:"<PR url>"', 'Commit, push, open the PR, then ');
@@ -139,7 +153,7 @@ export function jobPrompt(job, sub, run) {
       'Write `context` ONCE for the whole job (≤2000 chars), the way a human writes a dispatch: the shared background, conventions and constraints every worker needs. Each `brief` (≤500 chars) is a dispatch intent that refers to the context rather than repeating it.',
       'Never describe deployments or verification steps: Wrangler reads the repository\'s workflows to know whether a merge deploys and watches whatever GitHub starts. Give `check` (one line) ONLY when the pipeline cannot prove the change works where it lands, e.g. "helm shows the release in dev and prod". A session or human sub-job has no check: a session\'s receipt is its check.',
       '`after` means START AFTER: a sub-job waits until every PR it is after has deployed and every session or human sub-job it is after is done (its output is an input). Each edge serialises the work, so add one only when the dependent needs the prerequisite live or its output. Minimise dependencies and PRs while keeping each piece independently deliverable. Do not propose branch names: the implementing session names its own.',
-      job.plan || job.previousPlan || job.feedback ? `Previous plan / feedback: ${JSON.stringify({ plan: job.plan || job.previousPlan, feedback: job.feedback })}` : '',
+      job.replan ? replanBlock(job) : job.plan || job.previousPlan || job.feedback ? `Previous plan / feedback: ${JSON.stringify({ plan: job.plan || job.previousPlan, feedback: job.feedback })}` : '',
       '',
       report('kind:"plan", plan:{context, stories:[{id,key?,project?,title}], subJobs:[{id,title,kind:"pr"|"session"|"human",repo,storyId?,jiraKey?,after:[],brief,check?}]}'),
     ),

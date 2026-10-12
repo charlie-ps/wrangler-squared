@@ -1013,3 +1013,90 @@ test('a folded section stays open across live ticks', (t) => {
   assert.equal(f.q('[data-keep="details"]').open, true);
   assert.equal(f.q('.job-overflow').open, false, 'nothing went wrong: the moves stay behind the overflow');
 });
+
+// --- Changing the plan of a running job ---
+
+test('Change plan on a running job asks for a proposal; while it is pending new work reads as held and Discard is offered', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'done', deployed: { at: 1, checks: ['ok'] } }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-card-open').click();
+  f.q('#job-refine').click();
+  assert.equal(f.q('#job-dialog h2').textContent, 'Change the plan');
+  assert.match(f.q('#job-dialog').textContent, /nothing changes until you approve the proposal/);
+  f.q('#job-feedback textarea').value = 'Split web in two';
+  f.q('#job-feedback').dispatchEvent(f.event('submit'));
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'replan', feedback: 'Split web in two' });
+
+  job.replan = { feedback: 'Split web in two', at: 1, proposal: null, previous: null };
+  job.runs = [{ id: 'plan2', subJobId: null, phase: 'planning', stopped: false }];
+  f.view.update(f.data); f.q('[data-board="job1"] .job-card-open').click();
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Re-planning');
+  assert.equal(jobStatus(job, job.subJobs[1]).text, 'Held for the plan change');
+  assert.match(f.q('.job-replan-ask').textContent, /Split web in two/);
+  assert.equal(f.q('#job-refine'), null, 'one change at a time');
+  f.q('[data-action="discard-replan"]').click();
+  assert.equal(f.sent.at(-1).action, 'discard-replan');
+});
+
+test('a pending plan change freezes a sub-job awaiting review: held, not needs-you, and nothing to approve or move', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'review', state: 'verified', ready: { checks: ['Tests pass'], receiptId: 'r1' }, worktree: { path: '/wt/api' } }];
+  f.view.update(f.data);
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Review code');
+  job.replan = { feedback: 'Rethink api', at: 1, proposal: null, previous: null };
+  f.view.update(f.data);
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Re-planning');
+  assert.equal(jobNeedsReview(job, job.subJobs[0]), false); assert.equal(f.q('#jobs-review-count').textContent, '');
+  f.q('[data-sub="api"]').click();
+  assert.equal(f.q('[data-action="approve-code"]'), null);
+  assert.equal(f.q('.job-overflow'), null, 'every move is refused while the change is pending');
+  assert.match(f.q('#job-dialog').textContent, /Held for the plan change/);
+  job.runs = [{ id: 'w', subJobId: 'api', phase: 'implementation', stopped: false, status: 'running' }];
+  assert.notEqual(jobStatus(job, job.subJobs[0]).text, 'Held for the plan change', 'a step already running carries on');
+});
+
+test('a plan-change proposal locks landed work, marks removed work as cancelled with its PR, highlights new and edited, and Approve is pinned to the proposal', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  const api = { ...sub('api'), stage: 'done', deployed: { at: 1, checks: ['ok'] } };
+  const web = { ...sub('web', ['api']), stage: 'pr', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', checkStatus: 'pending' } };
+  const docs = { ...sub('docs'), stage: 'implementation', state: 'queued' };
+  job.subJobs = [api, web, docs]; job.plan = { ...plan, subJobs: [sub('api'), sub('web', ['api']), sub('docs')] };
+  const merged = { ...job.plan, subJobs: [sub('api'), sub('web', ['api']), { ...sub('docs'), title: 'Docs <b>v2</b>' }, sub('cli', ['docs'])] };
+  job.replan = { feedback: 'Replace web with a CLI', at: 1, proposal: { id: 'run_p', plan: merged, merged,
+    changes: { frozen: ['api'], kept: [], edited: [{ id: 'docs', fields: ['title'] }], added: ['cli'], removed: ['web'] } } };
+  f.view.update(f.data);
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Plan change ready');
+  assert.ok(f.q('[data-board="job1"]').classList.contains('tone-warn'));
+  assert.equal(jobNeedsReview(job, null), true); assert.equal(f.q('#jobs-review-count').textContent, '1');
+  f.q('[data-board="job1"] .job-card-open').click();
+  const mark = (id) => f.q(`.job-node[data-node="${id}"] .job-mark`).textContent;
+  assert.equal(mark('api'), 'Locked · already landed'); assert.ok(f.q('.job-node[data-node="api"] .job-mark svg'));
+  assert.equal(mark('web'), 'Will be cancelled'); assert.equal(mark('docs'), 'Edited'); assert.equal(mark('cli'), 'New');
+  assert.equal(f.q('.job-node[data-node="docs"] .job-node-title').textContent, 'Docs <b>v2</b>', 'agent text is escaped');
+  const removed = f.q('.job-replan-changes .job-mark-removed');
+  assert.match(removed.textContent, /Will be cancelled: Deliver web · PR #7 ↗ stays open on GitHub/);
+  assert.equal(removed.querySelector('a').href, 'https://github.com/org/repo/pull/7');
+  assert.equal(f.q('[data-node="cli"]').tagName, 'DIV', 'a proposed node opens nothing: it has no sub-job yet');
+  f.q('[data-action="approve-replan"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_p' });
+  f.q('[data-action="discard-replan"]').click();
+  assert.equal(f.sent.at(-1).action, 'discard-replan');
+  f.q('#job-refine').click();
+  f.q('#job-feedback textarea').value = 'Keep web';
+  f.q('#job-feedback').dispatchEvent(f.event('submit'));
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'replan', feedback: 'Keep web' });
+});
+
+test('a superseded sub-job reads as superseded, and its open PR stays linked from the job and the sub-job', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'done', state: 'cancelled', cancelledAt: 1, superseded: true, pr: { url: 'https://github.com/org/repo/pull/7', checkStatus: 'pending' } }, { ...sub('cli'), stage: 'implementation', state: 'queued' }];
+  f.view.update(f.data);
+  assert.equal(jobStatus(job, job.subJobs[0]).text, 'Superseded');
+  f.q('[data-board="job1"] .job-card-open').click();
+  assert.match(f.q('.job-node[data-node="api"] .job-status').textContent, /#7 · Superseded/);
+  assert.equal(f.q('.job-superseded a').href, 'https://github.com/org/repo/pull/7');
+  f.q('.job-node[data-node="api"]').click();
+  assert.match(f.q('#job-dialog .job-chip-state').title, /Superseded by a plan change and cancelled. Its PR is left open on GitHub/);
+  assert.equal(f.q('.job-pipeline-status').href, 'https://github.com/org/repo/pull/7');
+});

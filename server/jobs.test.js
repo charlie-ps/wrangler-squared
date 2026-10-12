@@ -1405,3 +1405,95 @@ test('deployment observer discovers the runs GitHub started for the exact merge 
   const rerun = await gh.deployment(sub);
   assert.equal(rerun.status, 'passing'); assert.equal(rerun.runs.length, 1);
 });
+
+// --- Changing the plan of a running job ---
+
+test('a running job takes a plan change as a proposal: frozen work is locked, removed work is cancelled, new work held until approval', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web'), spec('docs', ['api'])]));
+  const web = f.workerFor('web');
+  assert.throws(() => f.store.action(f.job.id, 'replan', { feedback: ' ' }), /Explain the change/);
+  f.alive.delete(f.workerFor('api').sid); await f.tick();
+  f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'done' });
+  f.store.action(f.job.id, 'replan', { feedback: 'Drop docs; ship a CLI after web' }); await f.tick();
+  const planner = f.last();
+  await f.tick();
+  assert.throws(() => f.store.action(f.job.id, 'drop', { subJobId: 'docs' }), /plan change is pending/, 'a move would reshape the plan under the planner');
+  assert.equal(planner.run.phase, 'planning'); assert.equal(planner.sub, null);
+  assert.equal(f.launched.filter((w) => w.sub?.id === 'docs').length, 0, 'new sub-job work is held while the change is pending');
+  assert.equal(f.sub(0).stage, 'done');
+  const prompt = jobPrompt(f.store.get(f.job.id), null, planner.run);
+  assert.match(prompt, /ALREADY RUNNING/); assert.match(prompt, /- api \(pr\) "Deliver api": done\/done · FROZEN/);
+  assert.match(prompt, /Frozen \(.*\): api\./); assert.match(prompt, /- web .*a step is running/); assert.match(prompt, /Requested change: Drop docs/);
+  assert.throws(() => f.store.action(f.job.id, 'replan', { feedback: 'again' }), /Wait for the planning/);
+
+  const proposal = (subs) => plan(subs);
+  assert.throws(() => f.report({ kind: 'plan', plan: proposal([{ ...spec('api'), brief: 'Redo api' }, spec('web')]) }, planner), /api has already landed/);
+  assert.throws(() => f.report({ kind: 'plan', plan: proposal([spec('web'), spec('cli', ['docs'])]) }, planner), /Unknown dependency: docs/);
+  assert.throws(() => f.report({ kind: 'plan', plan: proposal([{ ...spec('web'), repo: '/other' }]) }, planner), /web: repo cannot change/);
+  f.report({ kind: 'plan', plan: proposal([{ ...spec('web'), title: 'Deliver web, smaller' }, spec('cli', ['web'])]) }, planner);
+  let job = f.store.get(f.job.id);
+  assert.deepEqual(job.plan.subJobs.map((s) => s.id), ['api', 'web', 'docs'], 'a proposal is never applied directly');
+  assert.deepEqual(job.replan.proposal.changes, { frozen: ['api'], kept: [], edited: [{ id: 'web', fields: ['title'] }], added: ['cli'], removed: ['docs'] });
+  await f.tick();
+  assert.equal(f.launched.filter((w) => w.sub?.id === 'docs').length, 0);
+
+  assert.throws(() => f.store.action(f.job.id, 'approve-replan', { proposalId: 'stale' }), /proposal changed/);
+  assert.throws(() => f.store.action(f.job.id, 'approve-replan', { proposalId: planner.run.id }), /Wait for the running step on “Deliver web”/);
+  f.report({ kind: 'ready', checks: ['Tests pass'] }, web); await f.tick();
+  const ready = f.store.get(f.job.id).subJobs.find((s) => s.id === 'web').ready;
+  assert.throws(() => f.store.action(f.job.id, 'approve-code', { subJobId: 'web', readyReceiptId: ready.receiptId }), /plan change is pending/, 'the job is frozen while the human weighs the proposal');
+  f.store.action(f.job.id, 'approve-replan', { proposalId: planner.run.id });
+  job = f.store.get(f.job.id);
+  assert.equal(job.replan, null);
+  assert.deepEqual(job.plan.subJobs.map((s) => s.id), ['api', 'web', 'docs', 'cli'], 'a cancelled sub-job stays in the plan as the record of it');
+  const docs = job.subJobs.find((s) => s.id === 'docs');
+  assert.ok(docs.cancelledAt); assert.equal(docs.superseded, true); assert.equal(docs.stage, 'cleanup');
+  assert.equal(job.subJobs.find((s) => s.id === 'web').title, 'Deliver web, smaller');
+  assert.equal(job.subJobs.find((s) => s.id === 'web').stage, 'review', 'an edit does not throw away the work');
+  assert.deepEqual(job.subJobs.find((s) => s.id === 'cli'), { ...job.subJobs.find((s) => s.id === 'cli'), stage: 'implementation', state: 'queued', after: ['web'] });
+  const moves = job.moves.filter((m) => /replan/.test(m.move));
+  assert.deepEqual(moves.map((m) => [m.move, m.subJobId]), [['approve-replan', null], ['replan', 'web'], ['replan', 'docs'], ['replan', 'cli']]);
+  assert.equal(moves[0].note, 'Drop docs; ship a CLI after web'); assert.match(moves[0].detail, /1 added, 1 edited, 1 cancelled/);
+  const before = f.launched.length;
+  await f.tick();
+  assert.equal(f.store.get(f.job.id).subJobs.find((s) => s.id === 'docs').stage, 'done');
+  assert.equal(f.launched.length, before, 'cli waits for web to deploy');
+});
+
+test('a pending plan change holds a green PR from merging until it is discarded', async (t) => {
+  const f = fixture(t); await atPr(f);
+  f.store.action(f.job.id, 'replan', { feedback: 'Rethink it' }); await f.tick();
+  f.setPr({ checkStatus: 'passing' }); await f.tick(); await f.tick();
+  assert.equal(f.merged.length, 0, 'merging would land work the proposal may cancel');
+  assert.equal(f.sub().pr.checkStatus, 'passing', 'the PR is still watched');
+  f.store.action(f.job.id, 'discard-replan'); f.store.update(f.job.id, (j) => { j.subJobs[0].nextPollAt = 0; }); await f.tick();
+  assert.equal(f.merged.length, 1);
+});
+
+test('a discarded plan change stops its planner quietly and ignores a late proposal', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api')]));
+  assert.throws(() => f.store.action(f.job.id, 'discard-replan'), /No plan change/);
+  f.store.action(f.job.id, 'replan', { feedback: 'Smaller' }); await f.tick();
+  const planner = f.last();
+  f.store.action(f.job.id, 'discard-replan');
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web')]) }, planner);
+  await f.tick();
+  const job = f.store.get(f.job.id);
+  assert.equal(job.replan, null); assert.equal(job.error ?? null, null);
+  assert.deepEqual(job.plan.subJobs.map((s) => s.id), ['api']);
+  assert.ok(f.stopped.includes(planner.run.id));
+  assert.equal(job.moves.at(-1).move, 'discard-replan');
+});
+
+test('asking again replaces a waiting proposal and shows it to the next planner; a blocked planner is cleared by discarding', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api')]));
+  f.store.action(f.job.id, 'replan', { feedback: 'Add web' }); await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web')]) }); await f.tick();
+  f.store.action(f.job.id, 'replan', { feedback: 'Web first' }); await f.tick();
+  const second = f.last();
+  assert.match(jobPrompt(f.store.get(f.job.id), null, second.run), /Your previous proposal, which the human asked to change: .*"web"/);
+  f.report({ kind: 'blocked', summary: 'Cannot tell which repo' }, second); await f.tick();
+  assert.equal(f.store.get(f.job.id).error, 'Cannot tell which repo');
+  f.store.action(f.job.id, 'discard-replan');
+  assert.equal(f.store.get(f.job.id).error, null);
+});
