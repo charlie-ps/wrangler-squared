@@ -1,5 +1,6 @@
 import { initJobsView } from './jobs-view.js';
 import { jobCards, jobNeedsReview } from './jobs.js';
+import { diffReturnTarget } from './diff-return.js';
 
 // The client half: one `view` slot contribution (agent-wrangler public/slots.js),
 // which the board draws a rail button, a `#view=ext:jobs:board` route and a
@@ -16,16 +17,19 @@ import { jobCards, jobNeedsReview } from './jobs.js';
 //    an archived one → `api.openSession(sid)` (host api 1.8) does exactly that
 //    on our behalf; the card list `onBoard` reads for the button's label is the
 //    graph's `sessions`, kept from the last update(). "Review code in Wrangler"
-//    also opened the diff panel → nothing on the api opens it, so the button
-//    lands on the card and the human opens the panel there.
-//    TODO(host-api client navigation): `api.openDiff(sid, {onClose})` would
-//    restore the round trip core had (public/diff-return.js).
+//    also opened the diff panel and came back to the job when it closed →
+//    `api.openDiff(sid, {onClose})` (host api 1.27) opens it, and onClose runs
+//    the same diff-return.js decision core's app.js did (reviewDiff below).
 //  - `getAgents()` read the board's connect-time `agents` list → `api.agents()`
 //    (host api 1.25), the same live-catalog list, read each time New job opens.
 
 const ICON = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16M5 8h2M11 11h2M17 8h2"/></svg>';
 
 const TOAST_MS = 3000;
+
+// This view's route (agent-wrangler app.js extViewKey). Setting the hash is how
+// the diff round trip gets back here: the api can show the grid but no other view.
+const VIEW_HASH = '#view=ext:jobs:board';
 
 export default {
   register(slots) {
@@ -36,6 +40,7 @@ export default {
     let needsMe = 0;
     let sessions = [];
     let tasks = [];
+    let jobs = [];
 
     // One toast element at a time, inside the view's own host: the board exposes
     // no toast to an extension, and a host that is display:none while another
@@ -51,6 +56,25 @@ export default {
       el.textContent = text;
       viewHost.appendChild(el);
       toastTimer = setTimeout(() => el.remove(), TOAST_MS);
+    }
+
+    // Core disarmed the trip when the reader left the grid or picked another
+    // card, BEFORE either closed the panel. onClose fires inside those same
+    // closes, while the board is still mid-switch, so the check waits a tick and
+    // then reads where they ended up: a `#view=` hash or another selected card
+    // is somewhere they chose, and is left alone.
+    function reviewDiff(api, sid, from) {
+      const armed = { sid, jobId: from?.jobId || null, subId: from?.subId || '' };
+      api.openDiff(sid, { onClose: () => setTimeout(() => {
+        const loc = document.defaultView?.location;
+        if (!loc || loc.hash.startsWith('#view=')) return;
+        const now = api.selectedSessionId?.();
+        if (now && now !== sid) return;
+        const target = diffReturnTarget({ armed, closedSid: sid, jobs });
+        if (!target) return;
+        loc.hash = VIEW_HASH;
+        if (target.jobId) view?.openDetail(target.jobId, target.subId);
+      }) });
     }
 
     // Subscribed on the REGISTRAR, not in mount(): a subscription taken here is
@@ -102,12 +126,13 @@ export default {
           // off it → "Restore session" and openSession resumes it first.
           onBoard: (sid) => sessions.some((s) => s.sessionId === sid),
           onSession: (sid) => api.openSession(sid),
-          onDiff: (sid) => api.openSession(sid),
+          onDiff: (sid, from) => reviewDiff(api, sid, from),
         });
       },
       update(el, session, graph) {
         if (!graph?.jobs) return;
         sessions = graph.sessions || [];
+        jobs = graph.jobs.jobs || [];
         tasks = graph.tasks?.tasks || [];
         // The rail count is every job that needs a human, NOT the subset the
         // view is currently drawing: its filter, Needs me and Show finished are
@@ -124,7 +149,7 @@ export default {
       // view. Core evaluates this on every graph tick and draws or hides its own
       // span (agent-wrangler public/slots.js syncHosts); 0 draws nothing. Host
       // API 1.7 is where core started calling it; the manifest's pin (now
-      // `^1.25.0`, for api.agents) is not for this — a board that spreads the
+      // `^1.27.0`, for api.openDiff) is not for this — a board that spreads the
       // key without reading it only loses the count.
       badge: () => needsMe,
       unmount() {
@@ -136,6 +161,7 @@ export default {
         needsMe = 0;
         sessions = [];
         tasks = [];
+        jobs = [];
       },
     });
   },

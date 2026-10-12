@@ -414,6 +414,15 @@ test('a job session archived when its step stopped is offered as a restore, not 
   f.q('#job-session').click(); assert.deepEqual(f.sessions, ['s2'], 'the latest run, live or archived');
 });
 
+test('Review code in Wrangler opens the latest run already on the board, else the latest', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'review', worktree: { path: '/wt/api' }, sessions: ['s1', 's2', 's3'] }];
+  f.view.update(f.data); f.q('[data-sub="api"]').click();
+  f.q('#job-diff').click(); assert.deepEqual(f.diffs, ['s3'], 'every run shares the worktree; nothing on the board, so the latest');
+  f.onBoard.add('s1'); f.onBoard.add('s2'); f.view.openDetail('job1', 'api');
+  f.q('#job-diff').click(); assert.equal(f.diffs.at(-1), 's2', 'an archived card would resume its agent just to show a diff');
+});
+
 test('PR review shows green checks, what runs on merge, CI changes, and approves only the displayed head', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'pr', deploys: deploys(), worktree: { path: '/wt/api' }, sessions: ['s1'],

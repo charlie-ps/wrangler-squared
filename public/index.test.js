@@ -10,10 +10,12 @@ import client from './index.js';
 // stands in for slots.dispatchMessage — every listener gets its OWN shallow
 // copy of the frame, `type` included.
 function mountClient() {
-  const window = new Window();
+  const window = new Window({ url: 'http://localhost:7777/' });
   globalThis.document = window.document;
   const sent = [];
   const opened = [];
+  const diffs = [];
+  const board = { selected: null };
   const contributions = [];
   const listeners = new Set();
   client.register({
@@ -25,9 +27,9 @@ function mountClient() {
   const el = window.document.createElement('div');
   host.appendChild(el);
   const c = contributions[0];
-  c.mount(el, { send: (f) => sent.push(f), openSession: (sid) => opened.push(sid), selectedSessionId: () => null, requestPanelRender: () => {}, agents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'opus', label: 'Opus 5.5', default: true }], efforts: [{ value: 'high', label: 'High' }] }], storage: null, version: '1.25.0' });
+  c.mount(el, { send: (f) => sent.push(f), openSession: (sid) => opened.push(sid), openDiff: (sid, opts) => diffs.push({ sid, ...opts }), selectedSessionId: () => board.selected, requestPanelRender: () => {}, agents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'opus', label: 'Opus 5.5', default: true }], efforts: [{ value: 'high', label: 'High' }] }], storage: null, version: '1.27.0' });
   const dispatch = (frame) => { for (const fn of [...listeners]) fn({ type: 'ext:jobs', ...frame }); };
-  return { window, el, c, sent, opened, contributions, dispatch, listeners };
+  return { window, el, c, sent, opened, diffs, board, contributions, dispatch, listeners };
 }
 
 const graphWith = (jobs, sessions = []) => ({ sessions, jobs: { jobs, settings: { concurrency: 2, maxRepairs: 2, deploymentStaleMinutes: 30, paused: false } } });
@@ -230,10 +232,61 @@ test('Open/Restore session reads the board off the graph and hands the card to a
   assert.deepEqual(sent, [], 'no frame of our own: the board navigates');
 });
 
-test('Review code in Wrangler lands on the first run\'s card until the api can open a diff', () => {
-  const { window, el, c, opened } = mountClient();
-  c.update(el, null, graphWith([activeJob({ worktree: { path: '/wt/api', branch: 'fix/api' } })]));
-  el.querySelector('[data-sub="api"]').dispatchEvent(new window.Event('click', { bubbles: true }));
-  window.document.getElementById('job-dialog').querySelector('#job-diff').dispatchEvent(new window.Event('click', { bubbles: true }));
-  assert.deepEqual(opened, ['s1']);
+// Core's diff round trip (diff-return.js), now over api.openDiff: the panel opens
+// over the grid, and closing it comes back to this view with the same detail —
+// unless the reader went somewhere else on the way out.
+const tick = () => new Promise((r) => setTimeout(r));
+function reviewFromDialog(sessions = []) {
+  const m = mountClient();
+  m.c.update(m.el, null, graphWith([activeJob({ worktree: { path: '/wt/api', branch: 'fix/api' } })], sessions));
+  m.el.querySelector('[data-sub="api"]').dispatchEvent(new m.window.Event('click', { bubbles: true }));
+  m.dialog = m.window.document.getElementById('job-dialog');
+  m.dialog.querySelector('#job-diff').dispatchEvent(new m.window.Event('click', { bubbles: true }));
+  return m;
+}
+
+test('Review code in Wrangler opens the diff through api.openDiff, not openSession', () => {
+  const { dialog, diffs, opened, sent } = reviewFromDialog([{ sessionId: 's1', status: 'idle' }]);
+  assert.equal(diffs.length, 1);
+  assert.equal(diffs[0].sid, 's1', 'the latest run on the board: s2 is archived');
+  assert.equal(typeof diffs[0].onClose, 'function');
+  assert.deepEqual(opened, []);
+  assert.deepEqual(sent, []);
+  assert.equal(dialog.hasAttribute('open'), false);
+});
+
+test('closing the diff returns to the Jobs view and re-opens the same detail', async () => {
+  const { window, dialog, diffs, board } = reviewFromDialog();
+  assert.equal(diffs[0].sid, 's2', 'nothing on the board: the latest run');
+  window.location.hash = '#session=s2'; board.selected = 's2';
+  diffs[0].onClose();
+  await tick();
+  assert.equal(window.location.hash, '#view=ext:jobs:board');
+  assert.equal(dialog.hasAttribute('open'), true);
+  assert.match(dialog.textContent, /Deliver api/);
+});
+
+test('closing the diff by leaving the grid or picking another card stays where the reader went', async () => {
+  const left = reviewFromDialog();
+  left.window.location.hash = '#view=search';
+  left.diffs[0].onClose();
+  await tick();
+  assert.equal(left.window.location.hash, '#view=search');
+  assert.equal(left.dialog.hasAttribute('open'), false);
+
+  const other = reviewFromDialog();
+  other.board.selected = 'elsewhere';
+  other.diffs[0].onClose();
+  await tick();
+  assert.notEqual(other.window.location.hash, '#view=ext:jobs:board');
+  assert.equal(other.dialog.hasAttribute('open'), false);
+});
+
+test('a job gone by the time the diff closes returns to Jobs without a dialog', async () => {
+  const { window, el, c, dialog, diffs } = reviewFromDialog();
+  c.update(el, null, graphWith([]));
+  diffs[0].onClose();
+  await tick();
+  assert.equal(window.location.hash, '#view=ext:jobs:board');
+  assert.equal(dialog.hasAttribute('open'), false);
 });

@@ -10,7 +10,7 @@
 //
 // Split out as a pure function for the same reason chat-handoff.js is: the guards
 // all have to hold at once, and a wrong one moves a view the user is looking at.
-// app.js owns the armed state and does the switching.
+// index.js (reviewDiff) owns the armed state and does the switching.
 
 // `armed` is {sid, jobId, subId} (null when nothing is armed), `closedSid` the card
 // whose diff just closed, and `jobs` the latest jobs snapshot's array. Returns null

@@ -382,9 +382,12 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
     bind('#job-cancel', () => openCancel(job));
     bind('#job-session', () => { dialog.close(); onSession(sub.sessions.at(-1)); });
     // Reviewing the code is a round trip out to the board's diff panel, so hand over
-    // where the reader came FROM as well as what to show — app.js re-opens this same
-    // detail via openDetail once the panel closes.
-    bind('#job-diff', () => { dialog.close(); onDiff(sub.sessions[0], { jobId: job.id, subId: sub.id }); });
+    // where the reader came FROM as well as what to show — index.js re-opens this
+    // same detail via openDetail once the panel closes. Every run of a sub-job
+    // shares its worktree (later phases adopt it), so any of its cards shows the
+    // same diff: the latest one already on the board, because opening an archived
+    // card resumes its agent just to read a diff; else the latest.
+    bind('#job-diff', () => { dialog.close(); onDiff(sub.sessions.findLast(onBoard) || sub.sessions.at(-1), { jobId: job.id, subId: sub.id }); });
     // The IDE opens beside the board rather than instead of it, so the dialog
     // stays: approving is still done here once the code has been read.
     bind('#job-ide', () => send({ type: 'job-open-ide', id: job.id, subJobId: sub.id }));
@@ -516,7 +519,7 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
   dialog.addEventListener('close', () => { selected = null; planDraft = null; commentsShown.clear(); openDeps.clear(); openMore.clear(); });
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
-  // the same dialog a board card's click does, from a job/sub id pair app.js kept.
+  // the same dialog a board card's click does, from a job/sub id pair index.js kept.
   return { update, created: (msg) => {
     if (dialog.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;
     dialog.close();

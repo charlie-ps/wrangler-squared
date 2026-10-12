@@ -18,7 +18,7 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   assert.deepEqual([...manifest.requires].sort(), [...declared.requires].sort(), 'the manifest may not be wider than what the human consented to');
   assert.ok(manifest.requires.includes('tasks:read'));
   assert.ok(manifest.requires.includes('tasks:write'));
-  assert.equal(manifest.engines.wranglerApi, '^1.25.0', 'the client api.agents the New job form reads its models and efforts from arrived in 1.25');
+  assert.equal(manifest.engines.wranglerApi, '^1.27.0', 'the client api.openDiff behind Review code in Wrangler arrived in 1.27');
   assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context']);
   assert.deepEqual(Object.keys(manifest.session), ['onBeforeDispatch']);
   assert.equal(manifest.client, 'public/index.js');
