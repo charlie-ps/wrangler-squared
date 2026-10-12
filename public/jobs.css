@@ -181,7 +181,7 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
 .job-more code { display:block; overflow-wrap:anywhere; margin-top:8px; font-size:11px; }
 .job-dialog summary { cursor:pointer; }
 .job-error { color:var(--red-fg) !important; background:var(--danger-bg); padding:10px 12px; border-radius:10px; }
-.job-dialog .job-error[hidden] { display:none; }
+.job-dialog .job-error[hidden],.job-dialog label[hidden] { display:none; }
 .job-repair { border-left:2px solid var(--snooze); padding:0 12px; font-size:12px; margin-bottom:12px; }
 .job-repair details { color:var(--fg-muted); }
 /* PR comment triage shading: the three verdicts reuse the state tones. */
