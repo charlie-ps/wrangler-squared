@@ -1,31 +1,5 @@
-import { esc, tildify } from './util.js';
+import { esc } from './util.js';
 import { PERSON_ICON, PULL_REQUEST_ICON, ROBOT_ICON } from './icons.js';
-export const JOB_COLUMNS = [
-  ['backlog', 'Backlog', 'Ideas ready to shape'],
-  ['planning', 'Planning', 'Tickets, PRs and order'],
-  ['jira', 'Jira tickets', 'Approved titles become tickets'],
-  ['implementation', 'Work', 'One session in a dedicated worktree'],
-  ['review', 'Code review', 'Read the diff before anything is committed'],
-  ['pr', 'PR', 'Checks, comments and merge'],
-  ['deployment', 'Landing', 'Post-merge runs, then the check if there is one'],
-  ['cleanup', 'Done', 'Worktree and merged branch removed'],
-];
-// A job's second board: sub-jobs that are an agent session on this machine
-// rather than a PR. Queued/Running are one stored stage ('session') split by
-// whether a run is live; Review holds a receipt awaiting the human.
-export const SESSION_COLUMNS = [
-  ['queued', 'Queued', 'Waiting for prerequisites or an agent'],
-  ['running', 'Running', 'An agent is on it'],
-  ['review', 'Review', 'Read the receipt, then approve'],
-  ['done', 'Done', 'Finished on this machine'],
-];
-// A job's third board: the steps no agent will ever run. Waiting/In progress are
-// one stored stage ('human') split by the mark the human made on it.
-export const HUMAN_COLUMNS = [
-  ['waiting', 'Waiting', 'Yours to do — nothing automatic will'],
-  ['doing', 'In progress', 'You said you had started'],
-  ['done', 'Done', 'You marked it done by hand'],
-];
 export const isSessionSub = (sub) => sub?.kind === 'session';
 export const isHumanSub = (sub) => sub?.kind === 'human';
 // Mirrors server/jobs-schema.js isPrSub: a PR is the only kind with a repository,
@@ -35,23 +9,17 @@ export const hasSessionSubs = (job) => job.subJobs.some(isSessionSub);
 export const hasHumanSubs = (job) => job.subJobs.some(isHumanSub);
 // Mirrors server/jobs-schema.js reviewCode: a job from before the flag reviews.
 export const reviewCode = (job) => job.reviewCode ?? true;
-// The Code review column is only drawn for a job that reviews — or that still
-// holds a card there, so turning review off can never make a card vanish.
-export const jobColumns = (job) => JOB_COLUMNS.filter(([stage]) => stage !== 'review' || reviewCode(job) || job.subJobs.some((s) => isPrSub(s) && s.stage === 'review'));
-// A sub-job is one of exactly three kinds, and the same chip names it everywhere
-// one appears (board card, plan graph, detail heading) so the kinds are never
-// told apart by wording alone: a PR (blue, pull-request glyph), an agent session
-// on this machine (purple, robot glyph, no PR), or a human task (amber, person
-// glyph, nothing runs it).
+// A sub-job is one of exactly three kinds, drawn as the same glyph everywhere one
+// appears (stepper badge, dependency editor, detail chip) and named only in its
+// tooltip: a PR, an agent session on this machine (no PR), or a human task.
 export const kindClass = (sub) => isSessionSub(sub) ? 'session' : isHumanSub(sub) ? 'human' : 'pr';
 const KIND_LABEL = { pr: 'PR', session: 'Session', human: 'Human' };
 const KIND_ICON = { pr: PULL_REQUEST_ICON, session: ROBOT_ICON, human: PERSON_ICON };
-const KIND_TITLE = { pr: 'A pull request in a repository', session: 'An agent session on this machine — no pull request',
+export const KIND_TITLE = { pr: 'A pull request in a repository', session: 'An agent session on this machine — no pull request',
   human: 'Only you can do this one — no agent, no pull request' };
-// What each chip means, for the plan graph's legend on a job that mixes kinds.
-export const KIND_BLURB = { pr: 'opens a pull request', session: 'runs as an agent session here, no PR', human: 'is yours to do by hand' };
 export const kindLabel = (sub) => KIND_LABEL[kindClass(sub)];
-export const kindChipHtml = (sub) => `<span class="job-kind ${kindClass(sub)}" title="${KIND_TITLE[kindClass(sub)]}">${KIND_ICON[kindClass(sub)]}${kindLabel(sub)}</span>`;
+export const kindIconHtml = (sub) => KIND_ICON[kindClass(sub)];
+export const kindChipHtml = (sub) => `<span class="job-kind ${kindClass(sub)}" role="img" aria-label="${kindLabel(sub)}" title="${KIND_TITLE[kindClass(sub)]}">${KIND_ICON[kindClass(sub)]}</span>`;
 // "2 PRs · 1 session · 1 human task" rather than "4 sub-jobs": the count is where
 // a reader first learns the mix.
 export function kindCountLabel(subJobs) {
@@ -174,7 +142,7 @@ export function movesFor(job, sub) {
 // The runner writes these error strings itself, so the short title is derived
 // from them; anything it does not recognise keeps the neutral heading and lets
 // the detail line — the agent's own sentence, or the observation — do the work.
-const prNumber = (sub) => (sub?.pr?.url || '').split('/').filter(Boolean).pop();
+export const prNumber = (sub) => (sub?.pr?.url || '').split('/').filter(Boolean).pop();
 function eventTitle(sub) {
   if (sub.blocked?.summary && sub.blocked.summary === sub.error) return 'Worker blocked';
   if (/closed without merging/i.test(sub.error)) return 'PR was closed';
@@ -287,46 +255,6 @@ export function storyLabel(story, stories = []) {
   return project ? `${project}-NEW-${n}` : `NEW-${n}`;
 }
 export const receiptHtml = (checks = []) => `<ul class="job-receipt">${checks.map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul>`;
-export function jobCardHtml({ job, sub }) {
-  const status = jobStatus(job, sub);
-  const deps = sub ? dependencyLine(job, sub) : '';
-  const deploys = sub ? deploysLine(sub) : '';
-  const cost = sub ? jobCostLabel(sub.usd, sub.usdEstimated) : '';
-  return `<button class="job-card ${jobNeedsReview(job, sub) ? 'job-card-review' : ''} ${eventFor(job, sub) ? 'job-card-event' : ''} ${sub?.stage === 'done' ? 'job-card-done' : ''}" data-job="${esc(job.id)}" data-sub="${esc(sub?.id || '')}">
-    <span class="job-card-eyebrow">${sub ? `${kindChipHtml(sub)}${sub.jiraKey ? `<span>${esc(sub.jiraKey)}</span>` : ''}` : 'JOB'}</span>
-    <strong>${esc(sub?.title || job.title)}</strong>
-    ${sub ? `<span class="job-card-meta">${isSessionSub(sub) ? 'Agent session on this machine' : isHumanSub(sub) ? 'Only you can do this one' : esc(tildify(sub.repo).split('/').pop())}</span>` : `<span class="job-card-meta">${job.repos.length ? `${job.repos.length} repositor${job.repos.length === 1 ? 'y' : 'ies'}` : 'Repositories to discover'}</span>`}
-    ${deps ? `<span class="job-card-deps">↳ ${esc(deps)}</span>` : ''}
-    ${deploys ? `<span class="job-card-deploys">${esc(deploys)}</span>` : ''}
-    ${sub?.note ? `<span class="job-card-note">Note: ${esc(sub.note)}</span>` : ''}
-    ${commentsLineHtml(sub)}
-    ${cost ? `<span class="job-card-cost" title="${esc(SUB_COST_TITLE)}">${esc(cost)}</span>` : ''}
-    <span class="job-status ${status.tone}"><i></i>${esc(status.text)}</span>
-  </button>`;
-}
-// The board header owns the job identity, so a sub-job card never has to carry
-// its job's title itself.
-export function jobBoardHeaderHtml(job) {
-  // jobStatus's job-level 'Queued' describes a card waiting in a column; a live board reads as in progress.
-  const status = job.stage === 'active' && jobStatus(job, null).text === 'Queued' ? { tone: 'working', text: 'In progress' } : jobStatus(job, null);
-  const cost = jobCostLabel(job.usd, job.usdEstimated);
-  const working = job.runs.filter((r) => !r.stopped).length;
-  const needs = jobCards([job]).filter((c) => jobNeedsReview(c.job, c.sub)).length;
-  const delivered = job.subJobs.filter((s) => s.stage === 'done' && !s.cancelledAt).length;
-  const meta = [
-    job.subJobs.length ? `${kindCountLabel(job.subJobs)}${delivered ? ` · ${delivered} delivered` : ''}` : job.repos.length ? `${job.repos.length} repositor${job.repos.length === 1 ? 'y' : 'ies'}` : 'Repositories to discover',
-    working ? `${working} agent${working === 1 ? '' : 's'} working` : '',
-    reviewFlagsLabel(job),
-  ].filter(Boolean);
-  return `<header class="job-board-header"><div class="job-board-title"><span class="jobs-kicker">JOB</span><button class="job-board-open" data-job="${esc(job.id)}" data-sub=""><h2>${esc(job.title)}</h2></button><span class="job-board-meta">${meta.map(esc).join(' · ')}</span></div>
-    <div class="job-board-side">${cost ? `<span class="job-board-cost" title="${esc(JOB_COST_TITLE)}${job.usdEstimated ? ' · includes an estimate for Codex sessions' : ''}">${esc(cost)}</span>` : ''}<span class="job-status ${status.tone}"><i></i>${esc(status.text)}</span>${needs ? `<span class="job-board-needs">${needs} need${needs === 1 ? 's' : ''} you</span>` : ''}<button data-pause="${esc(job.id)}" ${job.paused ? 'data-paused="1"' : ''}>${job.paused ? 'Resume job' : 'Pause job'}</button></div></header>`;
-}
-export function commentsLineHtml(sub) {
-  const n = sub?.prComments?.items?.length;
-  if (!n) return '';
-  const verdict = commentVerdict(sub);
-  return `<span class="job-card-comments ${verdict ? esc(verdict.tone) : ''}">${n} PR comment${n === 1 ? '' : 's'} · ${verdict ? esc(COMMENT_TONE_LABEL[verdict.tone]) : 'summarising…'}</span>`;
-}
 export function dependencyLevels(plan) {
   const levels = new Map();
   function level(sub, visiting = new Set()) {
