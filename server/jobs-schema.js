@@ -52,6 +52,8 @@ export const awaitsTicket = (sub) => !!sub?.storyId && !sub?.jiraKey;
 // PR. Off, one session does all of it. Read through this helper: a job created
 // before the flag existed has no field and reviews like a new one.
 export const reviewCode = (job) => job?.reviewCode ?? true;
+// The one line every PR description and squash commit a job lands must end with.
+export const ATTRIBUTION = 'Made with Agent Wrangler and the charlie-ps/wrangler-squared extension';
 // A story either already exists in Jira (key) or is a proposal (no key, optional
 // project hint). Planning never writes to Jira: the human approves the titles and
 // their mapping to sub-jobs first, then the ticketing step creates the keyless ones.

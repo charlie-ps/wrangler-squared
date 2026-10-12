@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { COMMENTS_QUERY, normaliseComments } from './job-comments.js';
 import { inferDeploys } from './job-deploys.js';
+import { ATTRIBUTION } from './jobs-schema.js';
 const exec = promisify(execFile);
 export async function runFile(bin, args, cwd) {
   const { stdout } = await exec(bin, args, { cwd: cwd?.startsWith('~/') ? path.join(os.homedir(), cwd.slice(2)) : cwd, timeout: 30000, maxBuffer: 4 * 1024 * 1024 });
@@ -121,8 +122,12 @@ export class JobGithub {
       }
       admin = current.mergeWithAdmin;
     }
+    // An explicit body lands the PR description (and its attribution line)
+    // whichever squash message the repository is set to build.
+    const description = (JSON.parse(await this.run('gh', ['pr', 'view', sub.pr.url, '--json', 'body'], sub.repo)).body || '').trim();
+    const body = description.endsWith(ATTRIBUTION) ? description : [description, ATTRIBUTION].filter(Boolean).join('\n\n');
     if (!canMerge()) throw new Error('Job paused before merge');
-    await this.run('gh', ['pr', 'merge', sub.pr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', sub.pr.head], sub.repo);
+    await this.run('gh', ['pr', 'merge', sub.pr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', sub.pr.head, '--body', body], sub.repo);
   }
   // Watch whatever GitHub actually started for this merge, rather than a list of
   // workflow names chosen before the merge existed: the plan cannot reliably

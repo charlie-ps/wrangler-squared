@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { isHumanSub, reviewCode } from './jobs-schema.js';
+import { ATTRIBUTION, isHumanSub, reviewCode } from './jobs-schema.js';
 import { CHECKOUTS_DIR, displayPath } from './data-dir.js';
 import { isFrozen, replanStatus } from './job-replan.js';
 
@@ -138,7 +138,8 @@ const replanBlock = (job) => lines(
 
 export function jobPrompt(job, sub, run) {
   const report = (body, lead = '') => `${lead}job_report {runId:"${run.id}", ${body}}. ${blockedLine}`;
-  const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, 'Commit, push to the open PR, then ') : report('kind:"published", url:"<PR url>"', 'Commit, push, open the PR, then ');
+  const attribution = `End the commit message${sub?.pr?.url ? '' : ' and the PR description'} with exactly this line and add no other attribution (no Co-Authored-By):\n${ATTRIBUTION}`;
+  const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, `${attribution}\nCommit, push to the open PR, then `) : report('kind:"published", url:"<PR url>"', `${attribution}\nCommit, push, open the PR, then `);
   const prompts = {
     planning: lines(
       `Plan this job: ${job.title}`,

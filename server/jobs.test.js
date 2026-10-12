@@ -1280,7 +1280,7 @@ test('admin merge re-observes readiness, pins the head, and drops admin when rev
     const { gh, sub, calls } = reviewGithub(raw);
     await gh.merge(sub);
     assert.equal(calls[0][1], 'view');
-    assert.deepEqual(calls.at(-1), ['pr', 'merge', rawPr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', 'head1']);
+    assert.deepEqual(calls.at(-1), ['pr', 'merge', rawPr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', 'head1', '--body', 'Made with Agent Wrangler and the charlie-ps/wrangler-squared extension']);
   }
   for (const patch of [{ headRefOid: 'head2' }, { statusCheckRollup: [{ name: 'tests', conclusion: 'FAILURE' }] }, { reviewDecision: 'CHANGES_REQUESTED' }]) {
     const { gh, sub, calls } = reviewGithub({ ...reviewRequiredPr, ...patch });
@@ -1296,7 +1296,7 @@ test('an accepted-red merge re-observes the head and uses admin only where GitHu
     sub.pr.mergeWithAdmin = false; sub.acceptedRed = { ref: 'head1', note: null, at: 1 };
     await gh.merge(sub);
     assert.equal(calls[0][1], 'view');
-    assert.deepEqual(calls.at(-1), ['pr', 'merge', rawPr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', 'head1'], mergeStateStatus);
+    assert.deepEqual(calls.at(-1), ['pr', 'merge', rawPr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', 'head1', '--body', 'Made with Agent Wrangler and the charlie-ps/wrangler-squared extension'], mergeStateStatus);
   }
   for (const [patch, message] of [[{ headRefOid: 'head2' }, /PR changed/], [{ state: 'MERGED' }, /PR changed/], [{ mergeStateStatus: 'DIRTY' }, /merge conflicts/]]) {
     const { gh, sub, calls } = reviewGithub({ ...redPr, ...patch });
@@ -1308,7 +1308,17 @@ test('an accepted-red merge re-observes the head and uses admin only where GitHu
   const { gh, sub, calls } = reviewGithub({ ...rawPr, reviewDecision: 'APPROVED' });
   sub.pr.mergeWithAdmin = false; sub.acceptedRed = { ref: 'head0', note: null, at: 1 };
   await gh.merge(sub);
-  assert.deepEqual(calls, [['pr', 'merge', rawPr.url, '--squash', '--match-head-commit', 'head1']]);
+  assert.deepEqual(calls, [['pr', 'view', rawPr.url, '--json', 'body'], ['pr', 'merge', rawPr.url, '--squash', '--match-head-commit', 'head1', '--body', 'Made with Agent Wrangler and the charlie-ps/wrangler-squared extension']]);
+});
+
+test('the squash body is the PR description ending with the attribution line exactly once, whatever the repository squash setting', async () => {
+  const line = 'Made with Agent Wrangler and the charlie-ps/wrangler-squared extension';
+  for (const [body, expected] of [['Fix the retry.\n', `Fix the retry.\n\n${line}`], [`Fix the retry.\n\n${line}\n`, `Fix the retry.\n\n${line}`], [null, line]]) {
+    const { gh, sub, calls } = reviewGithub({ ...rawPr, reviewDecision: 'APPROVED', body });
+    sub.pr.mergeWithAdmin = false;
+    await gh.merge(sub);
+    assert.deepEqual(calls.at(-1).slice(-2), ['--body', expected]);
+  }
 });
 
 test('failure to observe required checks never permits an admin merge', async () => {
@@ -1360,7 +1370,7 @@ test('GitHub PR observer verifies repository and worktree branch, merge pins hea
   const gh = new JobGithub(async (bin, args) => { calls.push(args); return JSON.stringify(args[0] === 'repo' ? { nameWithOwner: 'org/repo' } : rawPr); });
   const sub = { repo: '/repo', worktree: { branch: 'branch-api' }, pr: { url: rawPr.url, head: 'head1' } };
   await gh.pr(sub); await gh.merge(sub);
-  assert.deepEqual(calls.at(-1).slice(-2), ['--match-head-commit', 'head1']);
+  assert.deepEqual(calls.at(-1).slice(-4), ['--match-head-commit', 'head1', '--body', 'Made with Agent Wrangler and the charlie-ps/wrangler-squared extension']);
   assert.ok(!calls.at(-1).includes('--admin'));
   await assert.rejects(gh.pr({ ...sub, worktree: { branch: 'other' } }), /does not belong/);
   gh.run = async (bin, args) => { calls.push(args); return JSON.stringify({ data: { resource: resource({ comments: [node('c1', 'alice', 'Nice', '2026-09-08T10:00:00Z')] }) } }); };
