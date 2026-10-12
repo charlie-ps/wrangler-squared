@@ -138,7 +138,7 @@ const replanBlock = (job) => lines(
 
 export function jobPrompt(job, sub, run) {
   const report = (body, lead = '') => `${lead}job_report {runId:"${run.id}", ${body}}. ${blockedLine}`;
-  const attribution = `End the commit message${sub?.pr?.url ? '' : ' and the PR description'} with exactly this line and add no other attribution (no Co-Authored-By):\n${ATTRIBUTION}`;
+  const attribution = `End the commit message${sub?.pr?.url ? '' : ' and the PR description'} with exactly this line:\n${ATTRIBUTION}`;
   const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, `${attribution}\nCommit, push to the open PR, then `) : report('kind:"published", url:"<PR url>"', `${attribution}\nCommit, push, open the PR, then `);
   const prompts = {
     planning: lines(

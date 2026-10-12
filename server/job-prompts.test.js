@@ -66,7 +66,7 @@ test('the implementation prompt is one bounded step: context once, the brief, wh
   assert.match(publish, /Do not change the code/);
   assert.match(publish, /branch is fix\/AUTH-1-api; keep it/);
   assert.match(publish, /Commit, push, open the PR, then job_report \{runId:"run1", kind:"published", url:"<PR url>"\}/);
-  for (const text of [unreviewed, publish]) assert.match(text, /End the commit message and the PR description with exactly this line and add no other attribution \(no Co-Authored-By\):\nMade with Agent Wrangler and the charlie-ps\/wrangler-squared extension\nCommit, push, open the PR/);
+  for (const text of [unreviewed, publish]) assert.match(text, /End the commit message and the PR description with exactly this line:\nMade with Agent Wrangler and the charlie-ps\/wrangler-squared extension\nCommit, push, open the PR/);
   assert.doesNotMatch(text, /Made with Agent Wrangler/, 'nothing is committed under code review');
   const onOpenPr = jobPrompt(planned, { ...briefed, pr: { url: 'https://github.com/org/repo/pull/1' } }, { ...run, phase: 'publish' });
   assert.match(onOpenPr, /End the commit message with exactly this line[^\n]*\nMade with Agent Wrangler and the charlie-ps\/wrangler-squared extension\nCommit, push to the open PR/);
