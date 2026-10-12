@@ -28,6 +28,8 @@ test('a sub-job maps onto the vocabulary from its stage, run, checks and gates',
     ['approved, committing next', { stage: 'review', state: 'approved' }, {}, 'running'],
     ['checks pending', { stage: 'pr', pr: pr() }, {}, 'queued'],
     ['green PR awaiting manual merge', { stage: 'pr', pr: pr({ checkStatus: 'passing' }) }, {}, 'needs'],
+    ['green PR, manual merge, fix requested', { stage: 'pr', pr: pr({ checkStatus: 'passing' }), fixRequested: { note: null, at: 1 } }, {}, 'running'],
+    ['green PR, manual merge, repair running', { stage: 'pr', pr: pr({ checkStatus: 'passing' }) }, { runs: [run('a', { phase: 'repair' })] }, 'running'],
     ['green PR merging on its own', { stage: 'pr', pr: pr({ checkStatus: 'passing' }) }, { reviewMerge: false }, 'running'],
     ['red checks', { stage: 'pr', pr: pr({ checkStatus: 'failing' }) }, {}, 'failing'],
     ['red checks with a repair running', { stage: 'pr', pr: pr({ checkStatus: 'failing' }) }, { runs: [run('a', { phase: 'repair' })] }, 'running'],
@@ -76,6 +78,11 @@ test('a job rolls up to its most urgent sub-job, and before work starts follows 
 test('the short labels name the decision, with the PR number where there is one', () => {
   const merge = sub('a', { stage: 'pr', pr: pr({ checkStatus: 'passing' }) });
   assert.equal(subLabel(job({ subJobs: [merge] }), merge), 'Merge #142');
+  const asked = { ...merge, fixRequested: { note: null, at: 1 } };
+  assert.equal(subLabel(job({ subJobs: [asked] }), asked), 'Fix requested', 'Fix here takes the merge decision off the human');
+  assert.equal(jobState(job({ subJobs: [asked] })), 'running');
+  const fixing = job({ subJobs: [merge], runs: [run('a', { phase: 'repair' })] });
+  assert.equal(subLabel(fixing, merge), 'Fixing the PR'); assert.equal(jobState(fixing), 'running');
   const red = sub('a', { stage: 'pr', pr: pr({ checkStatus: 'failing', checks: [{ name: 'e2e', state: 'FAILURE' }, { name: 'lint', state: 'ERROR' }, { name: 'unit', state: 'SUCCESS' }] }) });
   assert.equal(subLabel(job({ subJobs: [red] }), red), 'Checks failing');
   assert.equal(subLine(job({ subJobs: [red] }), red), '#142 · 2 checks red');

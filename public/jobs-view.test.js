@@ -458,6 +458,10 @@ test('PR comments render escaped with their shaded verdict, and a red verdict ho
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Comments block merging'); assert.ok(f.q('.job-seg[data-sub="api"].tone-bad'));
   assert.equal(mergeHeldByComments(job, job.subJobs[0]), true); assert.equal(jobNeedsReview(job, job.subJobs[0]), true);
   assert.equal(jobStatus(job, job.subJobs[0]).text, 'Comments block merging');
+  const asked = { ...job.subJobs[0], fixRequested: { note: null, at: 1 } };
+  assert.equal(jobNeedsReview(job, asked), false, 'a requested fix takes the comments off the human'); assert.equal(jobStatus(job, asked).text, 'Fix requested');
+  const fixing = { ...job, runs: [{ id: 'r1', subJobId: 'api', phase: 'repair', stopped: false, status: 'working' }] };
+  assert.equal(jobNeedsReview(fixing, job.subJobs[0]), false); assert.equal(jobStatus(fixing, job.subJobs[0]).text, 'Fixing the PR');
   f.q('[data-sub="api"]').click();
   const dialog = f.q('#job-dialog');
   assert.equal(dialog.querySelector('.job-event b').textContent, 'Comments block merging', 'blocked comments are an event like any other');

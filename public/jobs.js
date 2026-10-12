@@ -179,6 +179,9 @@ export function jobNeedsReview(job, sub) {
   // A step waiting on a prompt is the human's, whatever else the job is doing.
   if (runStatus(job, sub) === 'needs-you') return true;
   if (heldByReplan(job, sub)) return false;
+  // A requested or running fix is the agent's turn on the PR: the merge and comment
+  // gates it would otherwise show belong to the head the repair is about to replace.
+  if (sub?.stage === 'pr' && (sub.fixRequested || liveRun(job, sub))) return false;
   if (sub && mergeHeldByComments(job, sub)) return true;
   if (!sub) return !job.cancelledAt && (job.stage === 'planning' && job.plan || replanProposed(job)) && !job.runs.some((r) => !r.stopped && !r.subJobId);
   if (!sub.cancelledAt && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return true;
