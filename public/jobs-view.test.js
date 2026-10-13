@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isPrimaryActionKey, primaryAction } from './jobs-view.js';
 import { jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, movesFor, eventFor } from './jobs.js';
-import { jobTileHtml } from './job-graph.js';
+import { jobTileHtml, planGraphHtml } from './job-graph.js';
 
 const sub = (id, after = []) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Implement it and open the PR', sessions: [], repairs: [] });
 const plan = { context: 'Keys live in the vault; every service reads them at boot.', stories: [{ id: 'story', key: 'AUTH-1', title: 'Customers can sign in' }], subJobs: [sub('api'), sub('web', ['api'])] };
@@ -911,6 +911,17 @@ test('a live job shows the same graph with each box carrying its kind and status
   f.q('[data-open-sub="api"]').click();
   assert.equal(f.q('#job-dialog h2').textContent, 'Deliver api'); assert.equal(f.q('.job-detail-meta .job-kind').getAttribute('aria-label'), 'PR');
   assert.equal(f.q('.job-graph'), null, 'a sub-job detail is about one sub-job, not the graph');
+});
+
+test('a PR node names its repo under the title in every graph mode; session, human and jira nodes do not', () => {
+  const plan = { stories: [], subJobs: [{ ...sub('api'), repo: '/Users/me/IdeaProjects/wrangler-squared' }, sessionSub('spike', ['api']), humanSub('sign', ['api']), { ...sub('ticket', ['api']), kind: 'jira' }] };
+  const { document } = new Window();
+  for (const opts of [{ editable: true }, {}, { markOf: () => 'kept' }, { stateOf: () => 'planned' }]) {
+    document.body.innerHTML = planGraphHtml(plan, opts);
+    assert.deepEqual([...document.querySelectorAll('.job-node-repo')].map((e) => [e.closest('.job-node').dataset.node, e.textContent]), [['api', 'wrangler-squared']], JSON.stringify(opts));
+    assert.equal(document.querySelector('.job-node-title + .job-node-repo')?.textContent, 'wrangler-squared', 'the repo sits right under the title');
+    assert.match(document.querySelector('[data-node="api"]').title, /wrangler-squared/);
+  }
 });
 
 test('a merge that deploys nothing says so in the detail', (t) => {

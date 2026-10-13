@@ -31,14 +31,15 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     const tip = [KIND_TITLE[kindClass(s)], story(s), isPrSub(s) ? tildify(s.repo) : '', deps, stateOf ? STATES[state].label : ''].filter(Boolean).join('\n');
     const tile = `<span class="job-node-tile ${stateSolid(state) ? 'on' : ''}">${kindChipHtml(s)}<span class="job-node-state">${stateIconHtml(state)}</span></span>`;
     const cls = `job-node tone-${STATES[state].tone} ${kindClass(s)}`;
+    const repo = isPrSub(s) && s.kind !== 'jira' && s.repo ? `<span class="job-node-repo">${esc(tildify(s.repo).split('/').pop())}</span>` : '';
     if (editable) {
       const others = subs.filter((d) => d.id !== s.id);
-      return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<textarea class="job-node-title" aria-label="${kindLabel(s)} title ${i + 1}" data-title="${i}" maxlength="180" rows="3">${esc(s.title)}</textarea>
+      return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<textarea class="job-node-title" aria-label="${kindLabel(s)} title ${i + 1}" data-title="${i}" maxlength="180" rows="3">${esc(s.title)}</textarea>${repo}
         <details class="job-node-deps" data-deps="${esc(s.id)}" ${openDeps.has(s.id) ? 'open' : ''}><summary title="${esc(deps || 'Independent')} · change">${ICONS.link}<span>${s.after.length || 'None'}</span></summary>${dependencyEditorHtml(s, others, String(i))}</details></div>`;
     }
-    if (markOf) { const mark = markOf(s); return `<div class="${cls} job-mark-${mark}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong><span class="job-mark">${mark === 'frozen' ? ICONS.lock : ''}${esc(MARKS[mark])}</span></div>`; }
-    if (!stateOf) return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong></div>`;
-    return `<button type="button" class="${cls} ${state === 'done' ? 'done' : ''}" data-node="${esc(s.id)}" data-open-sub="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong><span class="job-status">${esc(lineOf ? lineOf(s) : STATES[state].label)}</span></button>`;
+    if (markOf) { const mark = markOf(s); return `<div class="${cls} job-mark-${mark}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}<span class="job-mark">${mark === 'frozen' ? ICONS.lock : ''}${esc(MARKS[mark])}</span></div>`; }
+    if (!stateOf) return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}</div>`;
+    return `<button type="button" class="${cls} ${state === 'done' ? 'done' : ''}" data-node="${esc(s.id)}" data-open-sub="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}<span class="job-status">${esc(lineOf ? lineOf(s) : STATES[state].label)}</span></button>`;
   };
   const columns = Array.from({ length: waves }, (_, w) => `<div class="job-graph-col">${subs.map((s, i) => levels.get(s.id) === w ? node(s, i) : '').join('')}</div>`).join('');
   const byId = new Map(subs.map((s) => [s.id, s]));
