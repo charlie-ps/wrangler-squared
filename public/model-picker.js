@@ -83,7 +83,7 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
     const d = describe(a, pv, models), t = themeOf(a);
     if (!cab) { cab = document.createElement('div'); cab.setAttribute('role', 'dialog'); cab.setAttribute('aria-label', 'Choose a model'); cover.appendChild(cab); }
     cab.className = `pick-cabinet ${t}`;
-    const flank = d.plate === 'galaxy' || t === 'codex' ? (() => { const i = d.name.lastIndexOf('-'); return i > 0 ? `<span class="pick-flank l">${esc(d.name.slice(0, i))}</span><span class="pick-flank r">${esc(d.name.slice(i + 1))}</span>` : ''; })() : '';
+    const flank = d.flank ? `<span class="pick-flank l">${esc(d.flank[0])}</span><span class="pick-flank r">${esc(d.flank[1])}</span>` : '';
     const focusValue = previewValue || chosen;
     const tray = models.map((x) => {
       const dx = describe(a, x, models);

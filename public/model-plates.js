@@ -66,9 +66,12 @@ export function describe(agent, m, all = []) {
     const h = Math.floor(rand(v)() * 360);
     const orb = [`hsl(${h} 100% 97%)`, `hsl(${h} 90% 80%)`, `hsl(${(h + 40) % 360} 70% 58%)`, `hsl(${(h + 80) % 360} 50% 22%)`];
     const c = kind === 'sun' ? SUN_AGES[age] : kind === 'luna' ? ['#f4f6fb', '#c6ccdc', '#7c859c', '#1b1f2b'] : kind === 'planet' ? ['#e9fbf4', '#9ed8c4', '#3f8f86', '#123036'] : kind === 'galaxy' ? ['#ffffff', '#c9d0ff', '#7b86f0', '#2a2560'] : orb;
+    // The live catalog folds the description into the label ('GPT-6.1-Sol · Latest workhorse…', trailing full stop dropped).
+    const cut = label.indexOf(' · '), told = cut > 0 ? label.slice(cut + 3).trim() : '';
+    const name = cut > 0 ? label.slice(0, cut).trim() : m.label ? label : version ? `GPT-${version}${suffix ? `-${cap(suffix)}` : ''}` : v;
     return {
-      name: label, short: suffix ? cap(suffix) + (version ? ` ${version}` : '') : label, latin: `${v}${m.efforts?.length ? ` · efforts up to ${m.efforts.at(-1)}` : ''}`,
-      desc: m.description || (kind ? `A ${suffix} model the board has just started offering.` : `Suffix “${suffix || v}” has no artwork here. Its orb is coloured from the id.`),
+      name, short: suffix ? cap(suffix) + (version ? ` ${version}` : '') : name, flank: version && suffix ? [`GPT-${version}`, cap(suffix)] : null, latin: `${v}${m.efforts?.length ? ` · efforts up to ${m.efforts.at(-1)}` : ''}`,
+      desc: m.description || (told && (/[.!?]$/.test(told) ? told : `${told}.`)) || (kind ? `A ${suffix} model the board has just started offering.` : `Suffix “${suffix || v}” has no artwork here. Its orb is coloured from the id.`),
       plate: kind === 'galaxy' ? 'galaxy' : 'body', body: { kind: kind === 'galaxy' ? 'astra' : kind || 'sun', c, r: kind === 'sun' ? 1 - age * .14 : .85 },
       family: suffix, version, numeral: version.split('.')[0] || '?', resolved: '', seed: v, known: !!kind,
     };

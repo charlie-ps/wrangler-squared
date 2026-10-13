@@ -51,6 +51,20 @@ test('describe draws Codex by suffix and dims older versions of the same suffix'
   assert.match(d(codex, 'gpt-6-luna', { efforts: ['low', 'high'] }).latin, /efforts up to high/);
 });
 
+test('a live Codex label "Name · description" splits into name, description and short flanks', () => {
+  const live = d(codex, 'gpt-6.1-sol', { label: 'GPT-6.1-Sol · Latest workhorse model for coding and everyday work' });
+  assert.equal(live.name, 'GPT-6.1-Sol');
+  assert.equal(live.desc, 'Latest workhorse model for coding and everyday work.');
+  assert.deepEqual(live.flank, ['GPT-6.1', 'Sol']);
+  assert.equal(live.short, 'Sol 6.1');
+  assert.equal(d(codex, 'gpt-6-astra', { label: 'GPT-6-Astra · Frontier.', description: 'Own words.' }).desc, 'Own words.', 'a separate description wins');
+  const plain = d(codex, 'gpt-6-luna', { label: 'GPT-6-Luna', description: 'Fast and affordable.' });
+  assert.equal(plain.name, 'GPT-6-Luna'); assert.equal(plain.desc, 'Fast and affordable.'); assert.deepEqual(plain.flank, ['GPT-6', 'Luna']);
+  const bare = d(codex, 'gpt-5.6-sol');
+  assert.equal(bare.name, 'GPT-5.6-Sol'); assert.match(bare.desc, /just started offering/); assert.deepEqual(bare.flank, ['GPT-5.6', 'Sol']);
+  assert.equal(d(codex, 'o4-mini').name, 'o4-mini'); assert.equal(d(codex, 'o4-mini').flank, null);
+});
+
 test('an unknown agent gets index cards, and catalog strings are escaped in the art', () => {
   const kestrel = { id: 'kestrel', label: 'Kestrel <b>', efforts: [], models: [] };
   const c = d(kestrel, 'kestrel-2-pro', { label: 'Kestrel 2 "Pro"' }, []);
