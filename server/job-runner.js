@@ -203,8 +203,9 @@ export class JobRunner {
             this.patchSub(id, sub.id, (s) => { s.error = 'PR was closed without merging'; });
           } else if (sub.fixRequested) {
             // The human saw something the checks do not cover; the repair runs
-            // whatever colour they are.
-            await this.launch(job, sub, 'repair');
+            // whatever colour they are. A plan change can ask for one ahead of
+            // the prerequisites the new brief builds on; it waits for them.
+            if (dependenciesSatisfied(job, sub)) await this.launch(job, sub, 'repair');
           } else if (pr.checkStatus === 'failing' && sub.acceptedRed?.ref !== pr.head) {
             const attempts = job.runs.filter((r) => r.subJobId === sub.id && r.phase === 'repair').length;
             const limit = this.store.snapshot().settings.maxRepairs + (sub.repairAllowance || 0);

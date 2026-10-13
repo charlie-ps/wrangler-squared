@@ -1512,6 +1512,27 @@ test('a running job takes a plan change as a proposal: frozen work is locked, re
   assert.equal(f.launched.length, before, 'cli waits for web to deploy');
 });
 
+test('a plan change that moves a green PR behind new work reworks it, and neither the rework nor a merge runs before that work deploys', async (t) => {
+  const f = fixture(t, { ...input, reviewCode: false }); await f.approve(plan([spec('api'), spec('web')]));
+  f.report({ kind: 'published', url: PR_URL }, f.workerFor('web')); f.setPr({ checkStatus: 'passing' }); await f.tick();
+  f.store.action(f.job.id, 'approve-merge', { subJobId: 'web', head: 'head1' });
+  f.store.action(f.job.id, 'replan', { feedback: 'Web needs the new api' }); await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web', ['api'], { brief: 'Implement web on the new api' })]) }, f.last());
+  f.store.action(f.job.id, 'approve-replan', { proposalId: f.last().run.id });
+  const web = () => f.store.get(f.job.id).subJobs.find((s) => s.id === 'web');
+  assert.equal(web().mergeApprovedHead, null);
+  assert.match(web().fixRequested.note, /^Web needs the new api\n\nNew brief: Implement web on the new api$/);
+  assert.equal(f.store.get(f.job.id).moves.at(-1).detail, 'Asked for a new commit on “Deliver web”');
+  assert.throws(() => f.store.action(f.job.id, 'approve-merge', { subJobId: 'web', head: 'head1' }), /prerequisites/);
+  await f.tick(); await f.tick();
+  assert.equal(f.workerFor('web', 'repair'), undefined, 'the new brief builds on api, which has not landed');
+  assert.deepEqual(f.merged, []);
+  f.store.update(f.job.id, (j) => { j.subJobs[0].deployed = { at: 1, checks: ['Shipped'] }; });
+  await f.tick();
+  assert.ok(f.workerFor('web', 'repair'));
+  assert.match(jobPrompt(f.store.get(f.job.id), web(), f.workerFor('web', 'repair').run), /the human asks: Web needs the new api/);
+});
+
 test('a pending plan change holds a green PR from merging until it is discarded', async (t) => {
   const f = fixture(t); await atPr(f);
   f.store.action(f.job.id, 'replan', { feedback: 'Rethink it' }); await f.tick();

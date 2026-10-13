@@ -60,7 +60,7 @@ export const redComments = (sub) => commentVerdict(sub)?.tone === 'red';
 // the stale window (server job-runner.js): nothing automatic will ever move it,
 // so it is the human's to act on, unlike an ordinary slow deploy.
 export const deploymentStalled = (sub) => sub?.stage === 'deployment' && !!sub.deploymentStale;
-export const mergeHeldByComments = (job, sub) => sub?.stage === 'pr' && !job.reviewMerge && sub.pr?.checkStatus === 'passing' && redComments(sub) && sub.mergeApprovedHead !== sub.pr.head;
+export const mergeHeldByComments = (job, sub) => sub?.stage === 'pr' && !job.reviewMerge && sub.pr?.checkStatus === 'passing' && redComments(sub) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 export const sessionReviewLabel = (job) => (job.reviewSessions ?? true) ? 'Session review on' : 'Sessions auto-complete';
 export const reviewFlagsLabel = (job) => `${reviewCode(job) ? 'Code review' : 'No code review'} · ${job.reviewMerge ? 'Manual merge' : 'Automatic merge'}${hasSessionSubs(job) ? ` · ${sessionReviewLabel(job)}` : ''}`;
 // The uncommitted working tree awaits the human: nothing is committed and no
@@ -189,7 +189,7 @@ export function jobNeedsReview(job, sub) {
   if (isSessionSub(sub)) return sub.stage === 'review';
   if (codeAwaitingReview(sub)) return true;
   if (deploymentStalled(sub)) return true;
-  return sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && job.reviewMerge && sub.mergeApprovedHead !== sub.pr.head;
+  return sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && job.reviewMerge && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 }
 // One kind of prerequisite names itself; a mix is only ever "prerequisites".
 const waitingNoun = (list) => list.every(isSessionSub) ? 'session' : list.every(isHumanSub) ? 'human task' : list.every(isPrSub) ? 'deployment' : 'prerequisite';
@@ -210,15 +210,16 @@ export function jobStatus(job, sub) {
   if (isHumanSub(sub) && sub.stage === 'human' && sub.state === 'doing') return { tone: 'working', text: 'In progress' };
   // A requested fix is a repair the runner picks up on its next tick, so it outranks
   // whatever the checks currently say.
-  if (sub?.stage === 'pr' && sub.fixRequested) return { tone: 'working', text: 'Fix requested' };
+  if (sub?.stage === 'pr' && sub.fixRequested && !pendingDependencies(job, sub).length) return { tone: 'working', text: 'Fix requested' };
   if (deploymentStalled(sub)) return { tone: 'needs', text: 'No deployment run' };
   if (jobNeedsReview(job, sub)) return { tone: 'needs', text: sub ? isHumanSub(sub) ? 'Needs you' : isSessionSub(sub) || codeAwaitingReview(sub) ? 'Ready to review' : sub.stage === 'pr' ? mergeHeldByComments(job, sub) ? 'Comments block merging' : 'Ready to merge' : 'Needs you' : replanProposed(job) ? 'Plan change to review' : 'Plan ready to review' };
   // Approved: the publish session starts on the runner's next tick.
   if (sub?.stage === 'review' && isPrSub(sub)) return { tone: 'working', text: 'Approved · committing next' };
   if (!sub) return { tone: 'muted', text: job.stage === 'backlog' ? 'Ready when you are' : job.stage === 'done' ? 'Delivered' : job.stage === 'jira' ? 'Tickets queued' : 'Queued' };
-  // A session or human prerequisite blocks the work from starting; a PR prerequisite only blocks its merge.
+  // A session or human prerequisite blocks the work from starting; a PR prerequisite
+  // only blocks its merge, and the rework a plan change asked of an open PR.
   const waiting = pendingDependencies(job, sub);
-  const blocked = ['session', 'human'].includes(sub.stage) ? waiting : sub.stage === 'implementation' ? waiting.filter((d) => !isPrSub(d)) : [];
+  const blocked = ['session', 'human', 'pr'].includes(sub.stage) ? waiting : sub.stage === 'implementation' ? waiting.filter((d) => !isPrSub(d)) : [];
   if (blocked.length) return { tone: 'muted', text: `Waiting for ${blocked.length} ${waitingNoun(blocked)}${blocked.length === 1 ? '' : 's'}` };
   // A story added by New ticket has no key until the jira phase runs, and a
   // sub-job that names a story cannot start without one; a storyless sub-job

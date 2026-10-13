@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { reviewCode, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan } from './jobs.js';
+import { reviewCode, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml, jobTileHtml } from './job-graph.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 const checkTone = (state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED', 'passing'].includes(state) ? 'passed' : ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'failing'].includes(state) ? 'failed' : '';
@@ -16,7 +16,8 @@ const flag = (on, icon, onText, offText) => `<span class="job-flag ${on ? 'on' :
 const flagsHtml = (job) => flag(reviewCode(job), ICONS.code, 'Code review: you read each PR’s diff before it is committed', 'No code review: work is committed without a read')
   + flag(job.reviewMerge, ICONS.merge, 'Manual merge: you approve each green PR', 'Automatic merge: green PRs merge on their own')
   + (hasSessionSubs(job) ? flag(job.reviewSessions ?? true, ICONS.robot, 'Session review on: you approve each agent session’s result', 'Sessions auto-complete once they report') : '');
-const mergeApprovable = (job, sub) => sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && (job.reviewMerge || redComments(sub)) && sub.mergeApprovedHead !== sub.pr.head;
+// Mirrors server/job-store.js approve-merge: nothing merges before its prerequisites deploy.
+const mergeApprovable = (job, sub) => sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && (job.reviewMerge || redComments(sub)) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 // Comment text is written by reviewers and bots: escaped, never trusted HTML.
 // A body is only rendered once asked for — a long review thread otherwise buries
 // the verdict and the actions under it — and the expanded keys are passed in from
@@ -309,7 +310,7 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
       codeAwaitingReview(sub) ? `Nothing is committed yet. Read the diff with Review code in Wrangler — comments there go straight to the session — then approve: a short session commits the working tree as it stands and ${sub.pr ? 'pushes it to the open PR' : 'pushes and opens the PR'}.` : pr && sub.stage === 'review' && !sub.error && !held ? `Approved. A session commits and ${sub.pr ? 'pushes to the open PR' : 'pushes and opens the PR'} next.` : '',
       mergeHeldByComments(job, sub) ? 'Comments read as blocking, so the automatic merge is on hold. Approve merge to override for this head.' : '',
       sub.stage === 'pr' && sub.pr?.mergeWithAdmin ? 'Checks have passed. Merging will override GitHub’s required review.' : '',
-      sub.fixRequested ? `Fix requested${sub.fixRequested.note ? `: ${sub.fixRequested.note}` : ''}. A repair session starts on the next tick.` : '',
+      sub.fixRequested ? `Fix requested${sub.fixRequested.note ? `: ${sub.fixRequested.note}` : ''}. A repair session starts ${pendingDependencies(job, sub).length ? 'once its prerequisites deploy' : 'on the next tick'}.` : '',
       staleHint(sub),
       sub.recoveredBy ? `The merged change stays deployed. The fix is a sub-job in this job, ${job.subJobs.find((f) => f.id === sub.recoveredBy)?.title || sub.recoveredBy}; this sub-job counts as deployed once it does.` : ''].filter(Boolean);
     const n = prNumber(sub);

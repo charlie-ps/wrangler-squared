@@ -1,5 +1,5 @@
 import { isPrSub } from './jobs-schema.js';
-import { dropSub, validatePlan } from './job-moves.js';
+import { dropSub, reworkSub, validatePlan } from './job-moves.js';
 
 // Changing the plan of a job that is already running. The human asks with
 // feedback, a planning session proposes a whole plan, and nothing changes until
@@ -20,6 +20,10 @@ const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const norm = (s) => ({ ...s, kind: s.kind || 'pr', after: s.after || [], check: s.check || undefined });
 const quoted = (title) => `“${title}”`;
 const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.subJobId === subId);
+// Code written to the old brief, or cut from a base without the new
+// prerequisites, must not merge as if it met the new plan.
+const REWORKS = ['brief', 'after'];
+const hasCode = (sub) => isPrSub(sub) && (sub.stage === 'review' || (sub.stage === 'pr' && !!sub.pr));
 
 // The proposal laid over the current plan: what each sub-job becomes, and the
 // merged plan approval would install. Throws the first rule the proposal breaks,
@@ -115,6 +119,10 @@ export function approveReplan(job, proposalId, { now, buildSubJob }) {
     const spec = plan.subJobs.find((s) => s.id === id);
     for (const k of EDITABLE) { if (spec[k] === undefined) delete sub[k]; else sub[k] = spec[k]; }
     lines.push({ sub, detail: `Plan change edited ${quoted(spec.title)} (${fields.join(', ')})` });
+    // The rework launches once the new prerequisites have landed (job-runner.js).
+    if (hasCode(sub) && fields.some((k) => REWORKS.includes(k))) {
+      lines.push({ sub, detail: reworkSub(job, sub, `${job.replan.feedback}\n\nNew brief: ${spec.brief}`, now) });
+    }
   }
   for (const id of changes.removed) {
     const sub = job.subJobs.find((s) => s.id === id);

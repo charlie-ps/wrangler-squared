@@ -273,6 +273,8 @@ export class JobStore {
       }
       if (action === 'approve-merge') {
         if (s?.stage !== 'pr' || s.pr?.checkStatus !== 'passing' || !head || head !== s.pr?.head || s.error) throw new Error('PR must have green checks first');
+        // The runner merges nothing before its prerequisites deploy (job-runner.js).
+        if (!dependenciesSatisfied(j, s)) throw new Error('Wait for its prerequisites to deploy first');
         // Approval belongs to these exact bytes. A later push invalidates it.
         s.mergeApprovedHead = s.pr.head; return;
       }

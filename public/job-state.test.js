@@ -60,6 +60,21 @@ test('waiting is a prerequisite holding the start; a dropped prerequisite fails 
   assert.equal(subLabel(job({ subJobs: [gone, behind] }), behind), 'Prerequisite dropped');
 });
 
+test('a green PR moved behind work that has not deployed waits instead of offering Merge, like the server', () => {
+  const dep = sub('a');
+  const green = sub('b', { stage: 'pr', pr: pr({ checkStatus: 'passing' }), after: ['a'] });
+  const j = job({ subJobs: [dep, green] });
+  assert.equal(subState(j, green), 'waiting'); assert.equal(subLabel(j, green), 'Waiting for 1 deployment');
+  assert.equal(subState(job({ subJobs: [dep, green], reviewMerge: false }), green), 'waiting');
+  const rework = { ...green, fixRequested: { note: 'New brief', at: 1 } };
+  assert.equal(subState(job({ subJobs: [dep, rework] }), rework), 'waiting', 'the rework starts once the prerequisite lands');
+  const landed = { ...dep, stage: 'cleanup', deployed: { at: 1 } };
+  assert.equal(subState(job({ subJobs: [landed, green] }), green), 'needs'); assert.equal(subLabel(job({ subJobs: [landed, green] }), green), 'Merge #142');
+  assert.equal(subLabel(job({ subJobs: [landed, rework] }), rework), 'Fix requested');
+  const red = { ...green, pr: pr({ checkStatus: 'failing' }) };
+  assert.equal(subState(job({ subJobs: [dep, red] }), red), 'failing', 'red checks still repair while it waits');
+});
+
 test('a job rolls up to its most urgent sub-job, and before work starts follows its own stage', () => {
   assert.equal(jobState(job({ stage: 'backlog' })), 'planned');
   assert.equal(jobState(job({ stage: 'planning', plan: { subJobs: [], stories: [] } })), 'needs');

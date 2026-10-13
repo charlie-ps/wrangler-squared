@@ -74,7 +74,8 @@ export function layoutGraphEdges(graph) {
 }
 
 // The board's tonal card: the whole surface is the job's rolled-up state, the
-// progress bar one segment per sub-job in that sub-job's own state, its kind icon above it. The open
+// progress bar one segment per sub-job in that sub-job's own state, its kind icon above it, in
+// dependency-wave order like the graph (a reorder or replan edits `after`, not the array). The open
 // button stretches over the card; the segments sit above it and open their
 // sub-job directly.
 export function jobTileHtml(job) {
@@ -82,7 +83,9 @@ export function jobTileHtml(job) {
   const label = jobLabel(job);
   const cost = jobCostLabel(job.usd, job.usdEstimated);
   const live = job.stage === 'active' || job.stage === 'done';
-  const subs = live ? job.subJobs : job.plan?.subJobs || [];
+  const plan = { subJobs: live ? job.subJobs : job.plan?.subJobs || [] };
+  const levels = dependencyLevels(plan);
+  const subs = [...plan.subJobs].sort((a, b) => levels.get(a.id) - levels.get(b.id));
   const segs = subs.map((s) => {
     const st = live ? subState(job, s) : 'planned';
     const tip = `${s.title} · ${live ? subLine(job, s) : 'Planned'}`;

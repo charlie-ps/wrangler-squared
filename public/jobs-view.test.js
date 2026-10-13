@@ -37,6 +37,13 @@ test('every job is one tonal card in its state, and only jobs with attention ite
   assert.deepEqual([...document.querySelectorAll('.job-card')].map((b) => b.dataset.board), ['job1']);
 });
 
+test('the board orders segments by dependency wave, so a sub-job moved after another reads after it', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('pr', ['web']), stage: 'pr' }, { ...sub('api'), stage: 'done' }, { ...sub('web', ['api']), stage: 'implementation' }];
+  f.view.update(f.data);
+  assert.deepEqual([...document.querySelectorAll('[data-board="job1"] .job-seg')].map((e) => e.dataset.sub), ['api', 'web', 'pr']);
+});
+
 test('the board leads with what is failing, colours each segment by its sub-job, and a segment opens that sub-job', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'done' }, { ...sub('web', ['api']), stage: 'implementation' }];
@@ -309,7 +316,7 @@ test('Cancel job is confirmed first, sends only the job action, and a cancelled 
   assert.equal(document.querySelectorAll('.job-card').length, 0, 'a cancelled job is finished: hidden until Show finished');
   f.q('#jobs-done').checked = true; f.q('#jobs-done').dispatchEvent(f.event('change'));
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Cancelled');
-  assert.deepEqual([...document.querySelectorAll('[data-board="job1"] .job-seg')].map((e) => [...e.classList].at(-1)), ['dropped', 'dropped', 'done'], 'dropped work reads apart from delivered work');
+  assert.deepEqual([...document.querySelectorAll('[data-board="job1"] .job-seg')].map((e) => [...e.classList].at(-1)), ['dropped', 'done', 'dropped'], 'dropped work reads apart from delivered work, in dependency-wave order');
   assert.match(f.q('#jobs-active-count').textContent, /1 delivered/, 'dropped sub-jobs are never counted as delivered');
 });
 
@@ -996,6 +1003,18 @@ test('a disabled primary stays disabled to the keyboard', (t) => {
   job.runs = []; f.view.update(f.data); f.q('[data-job="job1"]').click();
   chord(f, f.q('#job-dialog'));
   assert.equal(f.sent.at(-1).action, 'approve-plan');
+});
+
+test('a green PR moved behind work that has not deployed offers no Merge and is not counted as needing you', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation' }, { ...sub('web', ['api']), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/142', head: 'head9', checkStatus: 'passing', checks: [] }, fixRequested: { note: 'New brief', at: 1 } }];
+  f.view.update(f.data);
+  assert.equal(jobNeedsReview(job, job.subJobs[1]), false);
+  assert.equal(f.q('#jobs-review-count').textContent, '');
+  f.q('.job-seg[data-sub="web"]').click();
+  assert.equal(f.q('[data-action="approve-merge"]'), null);
+  assert.equal(f.q('#job-dialog .job-chip-state').textContent, 'Waiting for 1 deployment');
+  assert.match(hint(f), /A repair session starts once its prerequisites deploy/);
 });
 
 test('the job dialog’s one button merges the green PR waiting on you, pinned to its head; a failing step opens instead', (t) => {

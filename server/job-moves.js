@@ -78,6 +78,29 @@ function requeue(sub) {
   sub.nextPollAt = 0; sub.repairAllowance = (sub.repairAllowance || 0) + 1;
 }
 
+// Fix here on code that already exists: an open PR or an uncommitted working
+// tree. Shared with an approved plan change (job-replan.js) that rewrites one.
+export function reworkSub(job, sub, note, now) {
+  sub.error = null; sub.blocked = null; sub.mergeApprovedHead = null;
+  // Under code review a fix is the same road as the first cut: back to work in
+  // the PR's worktree, the human reads the uncommitted diff, and approval
+  // releases the publish session that pushes it to the open PR. A repair that
+  // commits straight to the branch would skip the very review the flag exists
+  // for. Without a PR nothing is committed either way, and an approval already
+  // given is withdrawn.
+  if (sub.stage === 'review' || reviewCode(job)) {
+    const wasPr = sub.stage === 'pr';
+    sub.note = note || null; sub.ready = null; sub.fixRequested = null; sub.stage = 'implementation'; sub.state = 'queued';
+    return wasPr ? `Sent ${quoted(sub.title)} back to work on its PR` : `Sent ${quoted(sub.title)} back to work`;
+  }
+  // Deliberately independent of checkStatus: the human has seen something
+  // green checks do not cover, so a repair launches anyway.
+  sub.fixRequested = { note: note || null, at: now };
+  sub.state = 'watching'; sub.nextPollAt = 0;
+  sub.repairAllowance = (sub.repairAllowance || 0) + 1;
+  return `Asked for a new commit on ${quoted(sub.title)}`;
+}
+
 export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJob }) {
   const schema = moveSchemas[move];
   if (!schema) throw new Error('Unknown job action');
@@ -89,22 +112,7 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
   if (move === 'fix-here') {
     if (sub.stage === 'pr') {
       if (liveRun(job, sub.id)) throw new Error('Wait for the session to stop');
-      // Under code review a fix is the same road as the first cut: back to work
-      // in the PR's worktree, the human reads the uncommitted diff, and approval
-      // releases the publish session that pushes it to the open PR. A repair
-      // that commits straight to the branch would skip the very review the
-      // flag exists for.
-      if (reviewCode(job)) {
-        sub.note = data.note || null; sub.ready = null; sub.fixRequested = null;
-        sub.error = null; sub.blocked = null; sub.stage = 'implementation'; sub.state = 'queued';
-        return { detail: `Sent ${quoted(sub.title)} back to work on its PR` };
-      }
-      // Deliberately independent of checkStatus: the human has seen something
-      // green checks do not cover, so the next tick launches a repair anyway.
-      sub.fixRequested = { note: data.note || null, at: now };
-      sub.error = null; sub.blocked = null; sub.state = 'watching'; sub.nextPollAt = 0;
-      sub.repairAllowance = (sub.repairAllowance || 0) + 1;
-      return { detail: `Asked for a new commit on ${quoted(sub.title)}` };
+      return { detail: reworkSub(job, sub, data.note, now) };
     }
     if (isHumanSub(sub)) throw new Error('Nothing runs this one, so there is nothing to run again');
     if (sub.stage === 'implementation' || sub.stage === 'session') {
@@ -112,13 +120,9 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
       sub.error = null; sub.blocked = null; sub.state = 'queued';
       return { detail: `Ran ${quoted(sub.title)} again` };
     }
-    // Under code review nothing is committed, so "fix" means back to work in
-    // the same worktree with the note; an approval already given is withdrawn.
     if (sub.stage === 'review') {
       if (liveRun(job, sub.id)) throw new Error('Wait for the session to stop');
-      sub.note = data.note || null; sub.ready = null;
-      sub.error = null; sub.blocked = null; sub.stage = 'implementation'; sub.state = 'queued';
-      return { detail: `Sent ${quoted(sub.title)} back to work` };
+      return { detail: reworkSub(job, sub, data.note, now) };
     }
     // Merged: a new commit on this PR is no longer possible, and the fix is a
     // new PR — which is exactly Split out.
