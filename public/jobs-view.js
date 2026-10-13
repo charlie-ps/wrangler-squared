@@ -81,7 +81,7 @@ export function primaryAction(dialog) {
 export function initJobsView({ send, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {} }) {
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
-  let data = { jobs: [], settings: { concurrency: 2, maxRepairs: 2, deploymentStaleMinutes: 30 } };
+  let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, deploymentStaleMinutes: 30 } };
   let filter = '', needsOnly = false, showDone = false, selected = null, planDraft = null, revision = null;
   const commentsShown = new Set();
   // Which folded sections the human has opened: the detail is rebuilt on every
@@ -95,7 +95,7 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
   const openDeps = new Set();
   root.innerHTML = `<header class="jobs-header"><h1>Jobs</h1>
     <div class="jobs-filters"><select id="jobs-filter" aria-label="Show one job"><option value="">Every job</option></select><label class="jobs-chip jobs-chip-needs" title="Only jobs waiting on you"><input id="jobs-needs" type="checkbox">${ICONS.eye}Needs me <span id="jobs-review-count">0</span></label><label class="jobs-chip" title="Include delivered and cancelled jobs"><input id="jobs-done" type="checkbox">${ICONS.check}Finished</label></div>
-    <div class="jobs-toolbar"><span id="jobs-active-count" aria-live="polite"></span><label class="jobs-chip" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="2" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-icon"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="primary" id="job-new">${ICONS.plus}New job</button></div></header>
+    <div class="jobs-toolbar"><span id="jobs-active-count" aria-live="polite"></span><label class="jobs-chip" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="8" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-icon"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="primary" id="job-new">${ICONS.plus}New job</button></div></header>
     <div id="jobs-boards" class="jobs-grid"></div>`;
   const q = (s) => root.querySelector(s);
   function update(snapshot) { data = snapshot || data; render(); }

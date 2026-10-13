@@ -106,7 +106,7 @@ export const jobInputSchema = z.object({
   updateMain: z.boolean().default(false), taskId: z.string().nullable().default(null),
 });
 export const settingsSchema = z.object({
-  concurrency: z.number().int().min(1).max(16).default(2),
+  concurrency: z.number().int().min(1).max(16).default(8),
   maxRepairs: z.number().int().min(0).max(5).default(2),
   // How long a merged sub-job may wait for a post-merge workflow to show ANY run
   // on the merge commit before the board flags it (job-runner.js).

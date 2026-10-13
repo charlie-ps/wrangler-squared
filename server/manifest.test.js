@@ -20,7 +20,7 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   assert.ok(manifest.requires.includes('tasks:read'));
   assert.ok(manifest.requires.includes('tasks:write'));
   assert.equal(manifest.engines.wranglerApi, '^1.27.0', 'the client api.openDiff behind Review code in Wrangler arrived in 1.27');
-  assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context']);
+  assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context', 'create_job']);
   assert.deepEqual(Object.keys(manifest.session), ['onBeforeDispatch']);
   assert.equal(manifest.client, 'public/index.js');
   assert.equal(manifest.styles, 'public/jobs.css');
@@ -121,6 +121,43 @@ test('job-create rejects selecting and creating a task at the same time', async 
   assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'Choose an existing task or create a new one, not both' }]);
 });
 
+test('create_job lets an agent create and start a job, kicks the runner and broadcasts nothing', async () => {
+  _resetForTests();
+  const { host, broadcasts } = fakeHost();
+  let ticks = 0;
+  runnerFor(host).tick = async () => { ticks++; };
+  const res = await tool('create_job').handler({ host, caller: 'an-agent' }, { ...newJob, repos: ['/repo'], model: 'opus', effort: 'high', start: true });
+  const [job] = host.stores.jobs.snapshot().jobs;
+  assert.deepEqual(res.structuredContent, { jobId: job.id, title: 'Ship it', stage: 'planning' });
+  assert.deepEqual([job.repos, job.model, job.effort], [['/repo'], 'opus', 'high']);
+  assert.equal(ticks, 1);
+  assert.equal(host.rebuilds, 1);
+  assert.deepEqual(broadcasts, [], 'a job-created frame would close a human\'s open New job form');
+});
+
+test('create_job shares the form\'s task handling and leaves an unstarted job in the backlog', async () => {
+  _resetForTests();
+  const { host, tasks } = fakeHost();
+  runnerFor(host).tick = async () => { throw new Error('a backlogged job must not kick the runner'); };
+  const res = await tool('create_job').handler({ host, caller: 'an-agent' }, { ...newJob, newTaskName: 'Agent work' });
+  const job = host.stores.jobs.get(res.structuredContent.jobId);
+  assert.equal(job.stage, 'backlog');
+  assert.deepEqual([tasks.map((t) => t.name), job.taskId], [['Agent work'], 't_1']);
+});
+
+test('create_job refuses invalid input as a tool error and creates nothing', async () => {
+  _resetForTests();
+  const { host, tasks } = fakeHost();
+  tasks.push({ id: 't_existing', name: 'Existing work', links: [] });
+  const both = await tool('create_job').handler({ host, caller: 'an-agent' }, { ...newJob, taskId: 't_existing', newTaskName: 'Another task' });
+  assert.deepEqual([both.isError, both.content[0].text], [true, 'Choose an existing task or create a new one, not both']);
+  const missing = await tool('create_job').handler({ host, caller: 'an-agent' }, { ...newJob, taskId: 't_missing' });
+  assert.deepEqual([missing.isError, missing.content[0].text], [true, 'The selected task is no longer available']);
+  assert.equal((await tool('create_job').handler({ host, caller: 'an-agent' }, { intent: '' })).isError, true);
+  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
+  assert.equal(tasks.length, 1);
+});
+
 test('a launch binds its run to the card id via onBeforeDispatch, and job_report is caller-gated', async () => {
   _resetForTests();
   const { host, spawned } = fakeHost();
@@ -141,6 +178,8 @@ test('a launch binds its run to the card id via onBeforeDispatch, and job_report
   assert.equal(manifest.hideTool({ caller: run.sessionId, tool: 'spawn_session', host }), true);
   assert.equal(manifest.hideTool({ caller: run.sessionId, tool: 'list_sessions', host }), false);
   assert.equal(manifest.hideTool({ caller: 'someone-else', tool: 'spawn_session', host }), false);
+  assert.equal(manifest.hideTool({ caller: run.sessionId, tool: 'create_job', host }), true, 'a job step cannot start another job');
+  assert.equal(manifest.hideTool({ caller: 'someone-else', tool: 'create_job', host }), false);
   assert.deepEqual(manifest.skillsFor({ sessionId: run.sessionId, skills: ['job-worker'], host }), ['job-worker']);
   assert.deepEqual(manifest.skillsFor({ sessionId: 'someone-else', skills: ['job-worker'], host }), []);
 

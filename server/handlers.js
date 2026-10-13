@@ -1,9 +1,7 @@
 import { execFile as defaultExecFile } from 'node:child_process';
 import { access as defaultAccess } from 'node:fs/promises';
-import { kick } from './tools.js';
-import { jobInputSchema, line, settingsSchema } from './jobs-schema.js';
-import { generateTitle } from './job-title.js';
-import { runHeadlessClaude } from './headless-claude.js';
+import { kick, makeCreateJob } from './job-create.js';
+import { settingsSchema } from './jobs-schema.js';
 
 // Control-WS handlers in the EXTENSION signature: `handler(msg, host)` — no
 // `ctx`, and therefore no `ctx.reply`. Core's control/handlers/jobs.js replied
@@ -16,46 +14,20 @@ import { runHeadlessClaude } from './headless-claude.js';
 // The types below are what `graph.extensions[].handlerTypes` announces, and what
 // the client façade's `send` is bound to — a frame of any other type is dropped
 // browser-side before it is sent.
-//
-// The form sends only a description, so the job is created under a fallback
-// title and Haiku's replaces it after the fact: naming never delays or fails a
-// create. Its spend is billed to the planning card when one is already up.
-export function makeJobCreateHandler({ run = runHeadlessClaude } = {}) {
-  const retitle = async (job, host) => {
-    const { title, liveSessionId } = await generateTitle(job.intent, { run });
-    if (!title || !host.stores.jobs.retitle(job.id, job.title, title)) return;
-    const sid = host.stores.jobs.get(job.id)?.runs.findLast((r) => r.sessionId)?.sessionId;
-    await host.rebuild();
-    if (sid && liveSessionId) host.sessions.bill(sid, liveSessionId);
-  };
+
+export function makeJobCreateHandler(deps) {
+  const createJob = makeCreateJob(deps);
   return {
     type: 'job-create',
     async handler(msg, host) {
       let job;
       try {
-        const input = jobInputSchema.parse(msg.job);
-        let taskId = input.taskId;
-        if (msg.newTaskName !== undefined) {
-          if (taskId) throw new Error('Choose an existing task or create a new one, not both');
-          if (typeof msg.newTaskName !== 'string') throw new Error('Enter a task name of up to 180 characters on one line');
-          const name = msg.newTaskName.trim();
-          if (!name) throw new Error('Enter a name for the new task');
-          if (!line.safeParse(name).success) throw new Error('Enter a task name of up to 180 characters on one line');
-          taskId = host.tasks.create({ name }).id;
-        } else if (taskId) {
-          const task = host.tasks.get(taskId);
-          if (!task || task.archived) throw new Error('The selected task is no longer available');
-        }
-        job = host.stores.jobs.create({ ...input, taskId });
+        job = await createJob(host, msg);
       } catch (e) {
         host.broadcast({ event: 'job-create-failed', error: e?.issues?.[0]?.message || e?.message || String(e) });
         return;
       }
-      if (msg.start) host.stores.jobs.action(job.id, 'start', {});
-      await host.rebuild();
       host.broadcast({ event: 'job-created', jobId: job.id, started: Boolean(msg.start) });
-      if (msg.start) kick(host).catch((e) => host.log('job-create tick failed', e));
-      if (!msg.job?.title) retitle(job, host).catch((e) => host.log('job title generation failed', e));
     },
   };
 }
