@@ -1,5 +1,5 @@
 import { esc } from './util.js';
-import { PERSON_ICON, PULL_REQUEST_ICON, ROBOT_ICON } from './icons.js';
+import { ICONS, PERSON_ICON, PULL_REQUEST_ICON, ROBOT_ICON } from './icons.js';
 export const isSessionSub = (sub) => sub?.kind === 'session';
 export const isHumanSub = (sub) => sub?.kind === 'human';
 // Mirrors server/jobs-schema.js isPrSub: a PR is the only kind with a repository,
@@ -9,6 +9,29 @@ export const hasSessionSubs = (job) => job.subJobs.some(isSessionSub);
 export const hasHumanSubs = (job) => job.subJobs.some(isHumanSub);
 // Mirrors server/jobs-schema.js reviewCode: a job from before the flag reviews.
 export const reviewCode = (job) => job.reviewCode ?? true;
+// The four review checkpoints, in the one set of words the New job form, the
+// job's flags, the plan dialog and the intro all use: each is named for what you
+// review, and each state for who acts. Merge alone defaults off on a stored job.
+export const CHECKPOINTS = [
+  { field: 'reviewPlan', icon: 'doc', name: 'Plan', you: 'You approve the plan before any ticket, PR or session starts', auto: 'Work starts as soon as the plan is drafted' },
+  { field: 'reviewCode', icon: 'code', name: 'Code', you: 'You read each PR’s diff before it’s committed', auto: 'The agent commits and opens the PR without a diff review' },
+  { field: 'reviewMerge', icon: 'merge', name: 'Merge', you: 'You approve each PR once its checks pass', auto: 'PRs merge once checks pass, unless a reviewer leaves blocking comments' },
+  { field: 'reviewSessions', icon: 'robot', name: 'Session results', you: 'You approve each session’s receipt before it counts as done', auto: 'A session counts as done once it reports' },
+];
+export const checkpoint = (field) => CHECKPOINTS.find((c) => c.field === field);
+export const youReview = (job, field) => field === 'reviewMerge' ? !!job.reviewMerge : field === 'reviewCode' ? reviewCode(job) : job[field] ?? true;
+export const checkpointLabel = (cp, you) => `${cp.name}: ${you ? 'You review' : 'Auto'}`;
+export const checkpointHint = (cp, you) => you ? cp.you : cp.auto;
+// The stage glyph stays readable either way; the fill (amber, the colour the step
+// shows while it waits) and the corner badge carry the setting, and the label
+// says it in words, so colour is never the only cue.
+export const checkpointFlagHtml = (cp, you) => {
+  const text = esc(`${checkpointLabel(cp, you)}. ${checkpointHint(cp, you)}`);
+  return `<span class="job-flag ${you ? 'you' : 'auto'}" role="img" aria-label="${text}" title="${text}">${ICONS[cp.icon]}<span class="job-flag-badge">${you ? ICONS.hand : ICONS.ff}</span></span>`;
+};
+// Native radios, so the arrow keys move between You review and Auto as they do in
+// any radio group; `name` lets the intro's picture keep out of a form's fields.
+export const checkpointSegHtml = (cp, you, name = cp.field) => `<span class="job-review-seg" role="radiogroup" aria-label="${esc(cp.name)}">${[['you', true, ICONS.hand, 'You review'], ['auto', false, ICONS.ff, 'Auto']].map(([value, on, icon, text]) => `<label class="${value}"><input type="radio" name="${esc(name)}" value="${value}"${you === on ? ' checked' : ''}>${icon}<span>${text}</span></label>`).join('')}</span>`;
 // A sub-job is one of exactly three kinds, drawn as the same glyph everywhere one
 // appears (stepper badge, dependency editor, detail chip) and named only in its
 // tooltip: a PR, an agent session on this machine (no PR), or a human task.
@@ -54,15 +77,15 @@ export function commentVerdict(sub) {
 }
 export const COMMENT_TONE_LABEL = { green: 'All good', amber: 'Needs attention', red: 'Blocks merging' };
 export const redComments = (sub) => commentVerdict(sub)?.tone === 'red';
-// Automatic merge stays on hold while comments read as blocking; approving the
+// An Auto merge stays on hold while comments read as blocking; approving the
 // displayed head is the human override.
 // A merged sub-job whose post-merge runs have shown nothing at all for longer than
 // the stale window (server job-runner.js): nothing automatic will ever move it,
 // so it is the human's to act on, unlike an ordinary slow deploy.
 export const deploymentStalled = (sub) => sub?.stage === 'deployment' && !!sub.deploymentStale;
 export const mergeHeldByComments = (job, sub) => sub?.stage === 'pr' && !job.reviewMerge && sub.pr?.checkStatus === 'passing' && redComments(sub) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
-export const sessionReviewLabel = (job) => (job.reviewSessions ?? true) ? 'Session review on' : 'Sessions auto-complete';
-export const reviewFlagsLabel = (job) => `${reviewCode(job) ? 'Code review' : 'No code review'} · ${job.reviewMerge ? 'Manual merge' : 'Automatic merge'}${hasSessionSubs(job) ? ` · ${sessionReviewLabel(job)}` : ''}`;
+export const sessionReviewLabel = (job) => checkpointLabel(checkpoint('reviewSessions'), youReview(job, 'reviewSessions'));
+export const reviewFlagsLabel = (job) => ['reviewCode', 'reviewMerge', ...(hasSessionSubs(job) ? ['reviewSessions'] : [])].map((f) => checkpointLabel(checkpoint(f), youReview(job, f))).join(' · ');
 // The uncommitted working tree awaits the human: nothing is committed and no
 // agent runs until approve-code (server/job-store.js) releases the publish session.
 export const codeAwaitingReview = (sub) => isPrSub(sub) && sub?.stage === 'review' && sub.state === 'verified';

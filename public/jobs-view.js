@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { reviewCode, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan } from './jobs.js';
+import { CHECKPOINTS, checkpoint, youReview, checkpointHint, checkpointFlagHtml, checkpointSegHtml, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml, jobTileHtml } from './job-graph.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 import { createJobImages, imagesPanelHtml, openZoom } from './job-images.js';
@@ -14,11 +14,7 @@ const chip = (icon, text, { cls = '', title = '' } = {}) => `<span class="job-ch
 // The state chip carries every explanatory sentence the step has, so they cost a
 // hover rather than a paragraph; the info glyph says there is something to read.
 const stateChip = (state, text, hints = []) => `<span class="job-chip job-chip-state tone-${STATES[state].tone}"${hints.length ? ` title="${esc(hints.join('\n\n'))}"` : ''}>${stateIconHtml(state)}<span>${esc(text)}</span>${hints.length ? ICONS.info : ''}</span>`;
-const flag = (on, icon, onText, offText) => `<span class="job-flag ${on ? 'on' : 'off'}" role="img" aria-label="${esc(on ? onText : offText)}" title="${esc(on ? onText : offText)}">${icon}</span>`;
-const flagsHtml = (job) => flag(job.reviewPlan ?? true, ICONS.doc, 'Plan review: you approve the plan before work begins', 'No plan review: work starts as soon as the plan is in')
-  + flag(reviewCode(job), ICONS.code, 'Code review: you read each PR’s diff before it is committed', 'No code review: work is committed without a read')
-  + flag(job.reviewMerge, ICONS.merge, 'Manual merge: you approve each green PR', 'Automatic merge: green PRs merge on their own')
-  + (hasSessionSubs(job) ? flag(job.reviewSessions ?? true, ICONS.robot, 'Session review on: you approve each agent session’s result', 'Sessions auto-complete once they report') : '');
+const flagsHtml = (job) => CHECKPOINTS.filter((cp) => cp.field !== 'reviewSessions' || hasSessionSubs(job)).map((cp) => checkpointFlagHtml(cp, youReview(job, cp.field))).join('');
 // Mirrors server/job-store.js approve-merge: nothing merges before its prerequisites deploy.
 const mergeApprovable = (job, sub) => sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && (job.reviewMerge || redComments(sub)) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 // Comment text is written by reviewers and bots: escaped, never trusted HTML.
@@ -66,8 +62,9 @@ function depsHtml(job, sub) {
   }).join('')}</div>`;
 }
 
-// New job's review switches: form field, sidebar label, and what the job waits on.
-const REVIEW_POINTS = [['reviewPlan', 'Plan', 'before tickets or work'], ['reviewCode', 'PR code', 'before commit'], ['reviewMerge', 'Green PRs', 'before merge'], ['reviewSessions', 'Session results', 'before done']];
+// New job's review checkpoints: every one starts on You review, and its hint
+// follows the choice (the form's change handler rewrites it).
+const REVIEW_POINTS = CHECKPOINTS.map((cp) => `<div class="job-review" data-checkpoint="${cp.field}"><div class="job-review-row"><span class="job-review-stage">${ICONS[cp.icon]}</span><span class="job-review-name">${cp.name}<small>${checkpointHint(cp, true)}</small></span>${checkpointSegHtml(cp, true)}</div></div>`).join('');
 
 // The board's own Cmd/Ctrl+Enter handlers only reach the elements they own, and
 // this dialog hangs off <body> outside every one of them, so the chord is matched
@@ -316,7 +313,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       const sessions = planDraft.subJobs.some(isSessionSub);
       const humans = planDraft.subJobs.some(isHumanSub);
       const newStories = planDraft.stories.filter((s) => !s.key).length;
-      const authority = `${newStories ? `Approve creates the ${newStories === 1 ? 'new Jira story' : `${newStories} new Jira stories`} with these titles, then starts` : 'Approve starts'} work in dedicated worktrees. ${reviewCode(job) ? 'You review each PR’s code before it is committed. ' : ''}${job.reviewMerge ? 'You approve each merge.' : 'Green PRs merge automatically.'}${sessions ? ((job.reviewSessions ?? true) ? ' You approve each agent session’s result.' : ' Agent sessions count as done once they report.') : ''}${humans ? ' Nothing starts a human task: you mark it done, and that releases whatever waits on it.' : ''}`;
+      const authority = `${newStories ? `Approve creates the ${newStories === 1 ? 'new Jira story' : `${newStories} new Jira stories`} with these titles, then starts` : 'Approve starts'} work in dedicated worktrees. ${['reviewCode', 'reviewMerge', ...(sessions ? ['reviewSessions'] : [])].map((f) => `${checkpoint(f).name}: ${checkpointHint(checkpoint(f), youReview(job, f))}.`).join(' ')}${humans ? ' Nothing starts a human task: you mark it done, and that releases whatever waits on it.' : ''}`;
       body = `${planGraphHtml(planDraft, { editable: true, openDeps })}${planMoreHtml(job, planDraft, true)}`;
       fab = `<button class="primary" data-action="approve-plan" title="${esc(authority)}" ${running ? 'disabled' : ''}>${ICONS.check}Approve ${planDraft.subJobs.length}</button>`;
       extra = `<button id="job-refine">${ICONS.edit}Request changes</button>`;
@@ -549,8 +546,8 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     const toggle = (name, label, consequence, checked) => `<label class="job-toggle"><span>${label}${consequence ? `<small>${consequence}</small>` : ''}</span><input type="checkbox" class="job-switch" name="${name}" ${checked ? 'checked' : ''}></label>`;
     show(`<form id="job-create-form" class="job-create">
       <div class="job-create-brief"><h2>New job</h2><div class="job-outcome"><label>Describe job<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should we deliver, and how will we know it works?"></textarea></label>${imagesPanelHtml()}</div><details class="job-more"><summary>Planning guidance & repository hints</summary><label>Repository hints <small>Optional · one local checkout path per line. Wrangler can discover others.</small><textarea name="repos" rows="2" placeholder="Leave blank to let Wrangler find the repositories"></textarea></label><label>Extra guidance for the planning agent<textarea name="planningPrompt" rows="4" maxlength="8000" placeholder="Your reusable planning guidance…"></textarea></label></details></div>
-      <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop job-pick" id="job-pick"><legend>Agent</legend></fieldset><input type="hidden" name="agent"><input type="hidden" name="model"><input type="hidden" name="effort"><fieldset class="job-prop"><legend>You review</legend>${REVIEW_POINTS.map(([name, label, consequence]) => toggle(name, label, consequence, true)).join('')}</fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset><fieldset class="job-prop"><legend>After delivery</legend>${toggle('updateMain', 'Fast-forward main', '', false)}</fieldset></aside>
-      <footer class="job-create-foot"><span>Planning proposes stories and repos. With plan review on, nothing touches Jira until you approve.</span><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
+      <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop job-pick" id="job-pick"><legend>Agent</legend></fieldset><input type="hidden" name="agent"><input type="hidden" name="model"><input type="hidden" name="effort"><fieldset class="job-prop"><legend>Review checkpoints</legend>${REVIEW_POINTS}</fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset><fieldset class="job-prop"><legend>After delivery</legend>${toggle('updateMain', 'Fast-forward main', '', false)}</fieldset></aside>
+      <footer class="job-create-foot"><span>Planning proposes stories and repos. With Plan on You review, nothing touches Jira until you approve.</span><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
     const form = dialog.querySelector('form');
     let images;
     images = createJobImages({
@@ -576,11 +573,15 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       form.elements.newTaskName.hidden = !creating;
       form.elements.newTaskName.required = creating;
     };
+    form.querySelectorAll('.job-review').forEach((row) => row.onchange = () => {
+      const cp = checkpoint(row.dataset.checkpoint);
+      row.querySelector('small').textContent = checkpointHint(cp, form.elements[cp.field].value === 'you');
+    });
     form.onsubmit = (e) => {
       e.preventDefault(); if (images.busy()) return; const values = new FormData(form);
       const taskId = values.get('taskId');
       // Enter and the primary button both start planning; only the grey button parks it.
-      send({ type: 'job-create', start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), repos: [...new Set(values.get('repos').split('\n').map((s) => s.trim()).filter(Boolean))], agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', planningPrompt: values.get('planningPrompt'), reviewPlan: values.has('reviewPlan'), reviewCode: values.has('reviewCode'), reviewMerge: values.has('reviewMerge'), reviewSessions: values.has('reviewSessions'), updateMain: values.has('updateMain'), images: images.names(), shareImages: values.has('shareImages'), taskId: taskId && taskId !== '__new__' ? taskId : null } });
+      send({ type: 'job-create', start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), repos: [...new Set(values.get('repos').split('\n').map((s) => s.trim()).filter(Boolean))], agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', planningPrompt: values.get('planningPrompt'), ...Object.fromEntries(CHECKPOINTS.map((cp) => [cp.field, values.get(cp.field) === 'you'])), updateMain: values.has('updateMain'), images: images.names(), shareImages: values.has('shareImages'), taskId: taskId && taskId !== '__new__' ? taskId : null } });
       const usualPick = { agent: String(values.get('agent')), model: String(values.get('model')), effort: String(values.get('effort')) };
       if (usualPick.agent && usualPick.model) send({ type: 'job-settings', patch: { usualPick } });
     };

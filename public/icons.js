@@ -32,6 +32,8 @@ export const ICONS = {
   next: svg('<path d="M4 12h15M13 6l6 6-6 6"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   code: svg('<path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/>'),
+  hand: svg('<path d="M18 11V6a2 2 0 0 0-4 0"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-6-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>'),
+  ff: svg('<path d="M13 19l9-7-9-7z"/><path d="M2 19l9-7-9-7z"/>'),
   terminal: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>'),
   info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'),
   note: svg('<path d="M4 4h16v12H8l-4 4z"/>'),

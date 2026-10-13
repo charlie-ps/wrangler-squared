@@ -50,7 +50,7 @@ test('Next, Back and the stepper walk the steps; only the current one is readabl
   let started = 0;
   const storage = memoryStorage();
   createIntro({ storage, onNewJob: () => { started += 1; } }).open();
-  assert.deepEqual(INTRO_STEPS.map((s) => s.tab), ['Welcome', 'Jobs', 'New job', 'Sub-jobs', 'Needs you', 'Receipts', 'Review gates', 'Jira', 'Start']);
+  assert.deepEqual(INTRO_STEPS.map((s) => s.tab), ['Welcome', 'Jobs', 'New job', 'Sub-jobs', 'Needs you', 'Receipts', 'Reviews', 'Jira', 'Start']);
   assert.equal(p.q('.intro-count').textContent, `1 of ${INTRO_STEPS.length}`);
   assert.ok(p.q('[data-intro="back"]').hidden, 'no Back on the first step');
   assert.equal(document.querySelectorAll('.intro-panel:not([inert])').length, 1, 'every step is laid out, one is live');
@@ -127,19 +127,28 @@ test('with reduced motion each live figure holds a finished frame and nothing ti
   assert.equal(p.q('.intro-body').innerHTML, html);
 });
 
-test('the arrow keys step through, and the gate switches are a picture that toggles in place', (t) => {
+test('the arrow keys step through, and the review checkpoints are a picture that switches in place', (t) => {
   const p = page(t);
   createIntro({ storage: memoryStorage() }).open(6);
-  assert.match(p.title(), /stops for your review/);
-  const sw = () => p.q('[data-gate="merge"]');
-  assert.equal(sw().getAttribute('aria-checked'), 'false');
-  sw().click();
-  assert.equal(sw().getAttribute('aria-checked'), 'true');
-  assert.match(sw().closest('.intro-gate').textContent, /You approve each green PR/);
+  assert.match(p.title(), /stops for you\./);
+  const row = () => p.q('.intro-checkpoint[data-checkpoint="reviewMerge"]');
+  assert.deepEqual([...p.window.document.querySelectorAll('.intro-checkpoint .job-review-name')].map((n) => n.firstChild.textContent), ['Plan', 'Code', 'Merge', 'Session results'], 'all four checkpoints, in the form’s words');
+  assert.equal(row().querySelector('.job-review-seg').getAttribute('role'), 'radiogroup');
+  assert.equal(row().querySelector('input[value="auto"]').checked, true);
+  assert.equal(row().querySelector('.job-flag').getAttribute('aria-label'), 'Merge: Auto. PRs merge once checks pass, unless a reviewer leaves blocking comments');
+  const you = row().querySelector('input[value="you"]');
+  you.checked = true; you.dispatchEvent(new p.window.Event('change', { bubbles: true }));
+  assert.equal(row().querySelector('input[value="you"]').checked, true);
+  assert.ok(row().querySelector('.job-flag.you .job-flag-badge'), 'the flag fills amber and takes the hand badge');
+  assert.match(row().textContent, /You approve each PR once its checks pass/);
+  assert.equal(p.window.document.activeElement, row().querySelector('input[value="you"]'), 'focus stays on the choice');
+  assert.equal(p.window.document.activeElement.form, null, 'the picture is no form’s field');
+  row().querySelector('input[value="you"]').dispatchEvent(new p.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  assert.match(p.title(), /stops for you\./, 'an arrow inside the control belongs to the radios, not the stepper');
   p.q('#jobs-intro').dispatchEvent(new p.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
   assert.match(p.title(), /Work with tickets/);
   p.q('#jobs-intro').dispatchEvent(new p.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-  assert.match(p.title(), /stops for your review/);
+  assert.match(p.title(), /stops for you\./);
 });
 
 test('reopens from the Jobs header and from Automation settings', (t) => {
