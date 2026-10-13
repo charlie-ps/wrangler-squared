@@ -63,7 +63,7 @@
 .jobs-empty { padding:60px 20px; font-size:13px; }
 
 /* The dialog: a Material surface — app bar, assist chips, stepper, one FAB. */
-.job-dialog { position:fixed; inset:0; margin:auto; width:min(920px,92vw); max-height:88vh; overflow:auto; box-sizing:border-box; background:var(--surface); color:var(--fg); border:0; border-radius:28px; padding:24px 28px; box-shadow:0 20px 70px var(--shadow); font-family:var(--font); }
+.job-dialog { position:fixed; inset:0; margin:auto; width:min(1600px,95vw); max-height:92vh; overflow:auto; scrollbar-width:thin; scrollbar-color:var(--border-muted) transparent; box-sizing:border-box; background:var(--surface); color:var(--fg); border:0; border-radius:28px; padding:24px 28px; box-shadow:0 20px 70px var(--shadow); font-family:var(--font); }
 .job-dialog::backdrop { background:var(--overlay); backdrop-filter:blur(3px); }
 .job-dialog-close { position:absolute; top:16px; right:16px; width:40px; height:40px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:transparent; color:var(--fg-muted); font-size:20px; cursor:pointer; }
 .job-dialog-close:hover { background:var(--surface-2); }
@@ -111,7 +111,7 @@ a.job-chip:hover { border-color:var(--border); }
    job-graph.js layoutGraphEdges. The SVG is inside the scrolling canvas so the
    connectors scroll with their tiles. */
 .job-graph { margin:4px 0 20px; }
-.job-graph-scroll { overflow-x:auto; padding:4px 0 6px; }
+.job-graph-scroll { overflow-x:auto; padding:4px 0 6px; scrollbar-width:thin; }
 .job-graph-canvas { position:relative; min-width:calc(var(--waves,1) * 196px - 48px); }
 .job-graph-columns { display:grid; grid-template-columns:repeat(var(--waves,1), minmax(148px,1fr)); gap:48px; align-items:start; }
 .job-graph-col { display:flex; flex-direction:column; gap:18px; min-width:0; }
