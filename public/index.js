@@ -1,6 +1,7 @@
 import { initJobsView } from './jobs-view.js';
 import { jobCards, jobNeedsReview } from './jobs.js';
 import { diffReturnTarget } from './diff-return.js';
+import { createIntro } from './intro.js';
 
 // The client half: one `view` slot contribution (agent-wrangler public/slots.js),
 // which the board draws a rail button, a `#view=ext:jobs:board` route and a
@@ -41,6 +42,7 @@ export default {
     let sessions = [];
     let tasks = [];
     let jobs = [];
+    let newJobOnMount = false;
 
     // One toast element at a time, inside the view's own host: the board exposes
     // no toast to an extension, and a host that is display:none while another
@@ -101,6 +103,22 @@ export default {
       }
     });
 
+    // The intro's last button: New job on the Jobs view. From any other view the
+    // hash switches to Jobs and the form opens once mount() has built it.
+    function startJob() {
+      const loc = document.defaultView?.location;
+      if (loc && loc.hash !== VIEW_HASH) loc.hash = VIEW_HASH;
+      if (view) view.newJob();
+      else newJobOnMount = true;
+    }
+
+    // Built from the REGISTRAR's api (host api 1.14), not mount()'s, so a reader
+    // who has never seen it gets it on whatever view the board opens on — the
+    // intro is what tells them the Jobs button exists. Same storage object either
+    // way: the board builds one api per extension.
+    const intro = createIntro({ storage: slots.api?.storage, onNewJob: startJob });
+    intro.maybeShow();
+
     slots.register('view', {
       id: 'board',
       label: 'Jobs',
@@ -127,7 +145,9 @@ export default {
           onBoard: (sid) => sessions.some((s) => s.sessionId === sid),
           onSession: (sid) => api.openSession(sid),
           onDiff: (sid, from) => reviewDiff(api, sid, from),
+          onIntro: () => intro.open(0),
         });
+        if (newJobOnMount) { newJobOnMount = false; view.newJob(); }
       },
       update(el, session, graph) {
         if (!graph?.jobs) return;

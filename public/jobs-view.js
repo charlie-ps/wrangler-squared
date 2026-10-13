@@ -78,7 +78,7 @@ export function primaryAction(dialog) {
   return form ? () => form.requestSubmit(button) : () => button.click();
 }
 
-export function initJobsView({ send, getAgents, getTasks = () => [], onSession, onDiff, onBoard }) {
+export function initJobsView({ send, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {} }) {
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
   let data = { jobs: [], settings: { concurrency: 2, maxRepairs: 2, deploymentStaleMinutes: 30 } };
@@ -95,7 +95,7 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
   const openDeps = new Set();
   root.innerHTML = `<header class="jobs-header"><h1>Jobs</h1>
     <div class="jobs-filters"><select id="jobs-filter" aria-label="Show one job"><option value="">Every job</option></select><label class="jobs-chip jobs-chip-needs" title="Only jobs waiting on you"><input id="jobs-needs" type="checkbox">${ICONS.eye}Needs me <span id="jobs-review-count">0</span></label><label class="jobs-chip" title="Include delivered and cancelled jobs"><input id="jobs-done" type="checkbox">${ICONS.check}Finished</label></div>
-    <div class="jobs-toolbar"><span id="jobs-active-count" aria-live="polite"></span><label class="jobs-chip" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="2" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-icon"></button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="primary" id="job-new">${ICONS.plus}New job</button></div></header>
+    <div class="jobs-toolbar"><span id="jobs-active-count" aria-live="polite"></span><label class="jobs-chip" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="2" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-icon"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="primary" id="job-new">${ICONS.plus}New job</button></div></header>
     <div id="jobs-boards" class="jobs-grid"></div>`;
   const q = (s) => root.querySelector(s);
   function update(snapshot) { data = snapshot || data; render(); }
@@ -536,10 +536,12 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
   q('#jobs-boards').onclick = (e) => {
     const card = e.target.closest('[data-job]'); if (card) openDetail(card.dataset.job, card.dataset.sub);
   };
+  q('#jobs-intro-open').onclick = () => onIntro();
   q('#jobs-settings').onclick = () => {
     selected = null; planDraft = null;
-    show(`<h2>Automation settings</h2><form id="job-settings-form"><label>Automatic CI repair attempts per sub-job<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label>Minutes a merged PR may wait for a post-merge run to start before it is flagged<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label><label>Application for “Review code in…” <small>A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…</small><input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label><div class="job-actions"><button class="primary" title="These limits apply across all automated jobs. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.">Save settings</button></div></form>`);
+    show(`<h2>Automation settings</h2><form id="job-settings-form"><label>Automatic CI repair attempts per sub-job<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label>Minutes a merged PR may wait for a post-merge run to start before it is flagged<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label><label>Application for “Review code in…” <small>A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…</small><input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label><div class="job-actions"><button class="primary" title="These limits apply across all automated jobs. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.">Save settings</button><button type="button" id="job-settings-intro">${ICONS.info}How Jobs works</button></div></form>`);
     dialog.querySelector('form').onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); send({ type: 'job-settings', patch: { maxRepairs: +f.get('maxRepairs'), deploymentStaleMinutes: +f.get('deploymentStaleMinutes'), ideApp: String(f.get('ideApp')).trim() } }); dialog.close(); };
+    dialog.querySelector('#job-settings-intro').onclick = () => { dialog.close(); onIntro(); };
   };
   dialog.addEventListener('keydown', (e) => {
     if (!isPrimaryActionKey(e)) return;
@@ -552,7 +554,8 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
   // the same dialog a board card's click does, from a job/sub id pair index.js kept.
-  return { update, created: (msg) => {
+  // newJob is the intro's last button.
+  return { update, newJob: createJob, created: (msg) => {
     if (dialog.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;
     dialog.close();
   }, openDetail };
