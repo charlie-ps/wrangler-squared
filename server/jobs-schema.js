@@ -102,7 +102,7 @@ export const jobInputSchema = z.object({
   agent: z.enum(['claude', 'codex']).default('claude'), model: z.string().max(150).default(''),
   effort: z.string().max(40).default(''),
   planningPrompt: z.string().max(8000).default(''),
-  reviewCode: z.boolean().default(true), reviewMerge: z.boolean().default(true), reviewSessions: z.boolean().default(true),
+  reviewPlan: z.boolean().default(true), reviewCode: z.boolean().default(true), reviewMerge: z.boolean().default(true), reviewSessions: z.boolean().default(true),
   updateMain: z.boolean().default(false), taskId: z.string().nullable().default(null),
 });
 export const settingsSchema = z.object({

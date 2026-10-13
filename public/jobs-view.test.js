@@ -521,10 +521,26 @@ test('new-job form sends chosen model, repositories and the three review points'
   form.dispatchEvent(f.event('submit'));
   const msg = f.sent[0]; assert.equal(msg.type, 'job-create'); assert.deepEqual(msg.job.repos, ['/repo', '/second']);
   assert.equal(msg.job.taskId, null, 'jobs stay Unassigned unless a task is chosen');
-  assert.equal(msg.job.model, 'sonnet'); assert.equal(msg.job.reviewCode, true); assert.equal(msg.job.reviewMerge, true); assert.equal(msg.job.reviewSessions, true);
+  assert.equal(msg.job.model, 'sonnet'); assert.equal(msg.job.reviewPlan, true); assert.equal(msg.job.reviewCode, true); assert.equal(msg.job.reviewMerge, true); assert.equal(msg.job.reviewSessions, true);
   assert.equal(msg.job.effort, '', 'Default leaves effort to the agent');
   assert.deepEqual(Object.keys(msg.job).filter((k) => /amendment/.test(k)), []);
   assert.equal(f.q('#job-dialog').open, true);
+});
+
+test('plan review is an opt-out in the new-job form and a flag on the job', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0];
+  f.q('[data-job="job1"]').click();
+  assert.match(f.q('.job-flag[aria-label^="Plan review"]').title, /approve the plan before work begins/, 'a job without the flag still reviews its plan');
+  f.q('#job-dialog').close();
+  job.reviewPlan = false; f.view.update(f.data);
+  f.q('[data-job="job1"]').click();
+  assert.match(f.q('.job-flag.off[aria-label^="No plan review"]').title, /work starts as soon as the plan is in/);
+  f.q('#job-dialog').close();
+  f.q('#job-new').click(); const form = f.q('#job-create-form');
+  assert.equal(form.elements.reviewPlan.disabled, false); assert.equal(form.elements.reviewPlan.checked, true);
+  form.elements.reviewPlan.checked = false;
+  form.elements.intent.value = 'Deliver it'; form.dispatchEvent(f.event('submit'));
+  assert.equal(f.sent.at(-1).job.reviewPlan, false);
 });
 
 test('new-job effort picker follows the chosen agent and keeps a level both offer', (t) => {

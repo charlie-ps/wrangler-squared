@@ -28,6 +28,7 @@ export const runnable = (run) => run && !run.stopped;
 export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : dep.stage === 'done' && !dep.cancelledAt;
 export const dependenciesSatisfied = (job, sub) => sub.after.every((id) => dependencySatisfied(job.subJobs.find((s) => s.id === id)));
 const reviewSessions = (job) => job.reviewSessions ?? true;
+const reviewPlan = (job) => job.reviewPlan ?? true;
 const planRepos = (plan) => [...new Set(plan.subJobs.filter(isPrSub).map((s) => s.repo))];
 // The one place a plan entry becomes a live sub-job, so one approved with the
 // plan and one added later by a move are indistinguishable to the runner. A
@@ -43,6 +44,13 @@ export function buildSubJob(plan, s) {
 function activate(j) {
   j.subJobs = j.plan.subJobs.map((s) => buildSubJob(j.plan, s));
   j.stage = 'active';
+}
+function approve(j, input) {
+  const plan = planSchema.parse(input);
+  j.plan = plan;
+  j.repos = planRepos(plan);
+  j.approvedAt = Date.now(); j.error = null;
+  if (storiesKeyed(plan)) activate(j); else j.stage = 'jira';
 }
 // The whole job at once: Drop applied to every sub-job that has not finished,
 // plus the job-level state Drop never touches. A sub-job already in cleanup is
@@ -156,11 +164,7 @@ export class JobStore {
       if (j.revision !== revision) throw new Error('The plan changed. Review the latest version before approving.');
       if (j.cancelledAt) throw new Error('Job was cancelled');
       if (j.stage !== 'planning' || !j.plan || j.runs.some(runnable)) throw new Error('The plan is not ready for review');
-      const plan = planSchema.parse(editedPlan || j.plan);
-      j.plan = plan;
-      j.repos = planRepos(plan);
-      j.approvedAt = Date.now(); j.error = null;
-      if (storiesKeyed(plan)) activate(j); else j.stage = 'jira';
+      approve(j, editedPlan || j.plan);
     });
   }
   // Every action carries its own fields on the control message, so the payload
@@ -351,9 +355,11 @@ export class JobStore {
       if (j.replan) proposeReplan(j, r, report.plan, Date.now());
       return;
     }
+    // With plan review off the planner's own receipt is the approval: the
+    // planning run is still live here, which approvePlan would refuse.
     if (report.kind === 'plan') {
-      j.plan = report.plan;
-      j.repos = planRepos(report.plan);
+      if (!reviewPlan(j) && j.stage === 'planning') approve(j, report.plan);
+      else { j.plan = report.plan; j.repos = planRepos(report.plan); }
     }
     // The ticketing step fills in exactly the keys the approved plan lacked. An
     // approved key is part of what the human agreed to, so it cannot be swapped.

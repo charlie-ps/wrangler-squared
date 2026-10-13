@@ -1105,6 +1105,42 @@ test('with session review off a completed session goes straight to done; request
     [['spike', 'revise-session', 'Also check staging'], ['spike', 'approve-session', null]], 'approvals and requests are on the same timeline as the plan moves');
 });
 
+test('with plan review off the plan receipt approves itself; a keyless story still goes through ticketing and a replan still waits', async (t) => {
+  const f = fixture(t, { ...input, reviewPlan: false });
+  assert.equal(f.store.get(f.job.id).reviewPlan, false);
+  f.store.action(f.job.id, 'start'); await f.tick();
+  f.report({ kind: 'plan', plan: plan() });
+  let job = f.store.get(f.job.id);
+  assert.equal(job.stage, 'active'); assert.ok(job.approvedAt); assert.equal(job.subJobs[0].id, 'api');
+  await f.tick();
+  assert.equal(f.last().run.phase, 'implementation');
+  f.store.action(f.job.id, 'replan', { feedback: 'Split the API change' }); await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('more')]) }); await f.tick();
+  job = f.store.get(f.job.id);
+  assert.ok(job.replan.proposal, 'a replan is a proposal the human approves'); assert.deepEqual(job.subJobs.map((s) => s.id), ['api']);
+
+  const g = fixture(t, { ...input, reviewPlan: false });
+  g.store.action(g.job.id, 'start'); await g.tick();
+  g.report({ kind: 'plan', plan: plan([spec('api')], [{ id: 'story', title: 'Reliable sign-in' }]) });
+  assert.equal(g.store.get(g.job.id).stage, 'jira'); assert.deepEqual(g.store.get(g.job.id).subJobs, []);
+  await g.tick();
+  assert.equal(g.last().run.phase, 'jira');
+
+  const h = fixture(t, { ...input, reviewPlan: false });
+  h.store.action(h.job.id, 'start'); await h.tick();
+  assert.throws(() => h.report({ kind: 'plan', plan: plan([spec('api', ['missing'])]) }));
+  assert.equal(h.store.get(h.job.id).stage, 'planning', 'an invalid plan approves nothing');
+});
+
+test('jobs created before plan review was optional still stop for approval', async (t) => {
+  const f = fixture(t);
+  assert.equal(f.store.get(f.job.id).reviewPlan, true);
+  f.store.update(f.job.id, (j) => { delete j.reviewPlan; });
+  f.store.action(f.job.id, 'start'); await f.tick();
+  f.report({ kind: 'plan', plan: plan() }); await f.tick();
+  assert.equal(f.store.get(f.job.id).stage, 'planning');
+});
+
 // --- MCP and control ---
 
 // Both halves in the EXTENSION signatures: a tool is `handler({ host, caller }, args)`

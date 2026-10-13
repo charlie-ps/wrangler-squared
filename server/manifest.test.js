@@ -126,10 +126,10 @@ test('create_job lets an agent create and start a job, kicks the runner and broa
   const { host, broadcasts } = fakeHost();
   let ticks = 0;
   runnerFor(host).tick = async () => { ticks++; };
-  const res = await tool('create_job').handler({ host, caller: 'an-agent' }, { ...newJob, repos: ['/repo'], model: 'opus', effort: 'high', start: true });
+  const res = await tool('create_job').handler({ host, caller: 'an-agent' }, { ...newJob, repos: ['/repo'], model: 'opus', effort: 'high', reviewPlan: false, start: true });
   const [job] = host.stores.jobs.snapshot().jobs;
   assert.deepEqual(res.structuredContent, { jobId: job.id, title: 'Ship it', stage: 'planning' });
-  assert.deepEqual([job.repos, job.model, job.effort], [['/repo'], 'opus', 'high']);
+  assert.deepEqual([job.repos, job.model, job.effort, job.reviewPlan], [['/repo'], 'opus', 'high', false]);
   assert.equal(ticks, 1);
   assert.equal(host.rebuilds, 1);
   assert.deepEqual(broadcasts, [], 'a job-created frame would close a human\'s open New job form');
