@@ -13,6 +13,27 @@ const jiraRow = (tone, icon, title, status, state, on = false) => `<div class="i
 const kind = (tone, icon, label) => `<div class="intro-kind tone-${tone}"><span class="job-node-tile">${ICONS[icon]}</span>${label}</div>`;
 const railBtn = (icon, active = false, badge = '') => `<span class="intro-rail-btn${active ? ' on' : ''}">${ICONS[icon]}${badge ? `<span class="intro-rail-badge">${badge}</span>` : ''}</span>`;
 
+// The Welcome figure: one job's graph played on a loop, each frame a [tone,
+// status, state glyph] per node in DEMO_NODES order. The session waits on both
+// PRs, as a real dependency would.
+const DEMO_NODES = [['story', 'Passkey sign-in'], ['pr', 'desktop-app'], ['pr', 'api'], ['robot', 'Migrate accounts']];
+const WAIT = ['idle', 'Planned', 'planned'];
+const DEMO = [
+  [['run', 'Planning', 'spin'], WAIT, WAIT, ['idle', 'Waits for both PRs', 'planned']],
+  [['ok', 'Approved', 'check'], ['run', 'Working', 'spin'], ['run', 'Working', 'spin'], ['idle', 'Waits for both PRs', 'planned']],
+  [['ok', 'Approved', 'check'], ['run', 'Checks running', 'spin'], ['ok', 'Merged', 'check'], ['idle', 'Waits for desktop-app', 'planned']],
+  [['ok', 'Approved', 'check'], ['ok', 'Merged', 'check'], ['ok', 'Merged', 'check'], ['run', 'Migrating', 'spin']],
+  [['ok', 'Approved', 'check'], ['ok', 'Merged', 'check'], ['ok', 'Merged', 'check'], ['ok', 'Verified', 'check']],
+];
+export const DEMO_FRAMES = DEMO.length;
+const EDGES = [[0, 1], [0, 2], [1, 3], [2, 3]];
+const AT = [[50, 26], [25, 136], [75, 136], [50, 246]];
+function demo(phase) {
+  const f = DEMO[phase] || DEMO[DEMO.length - 1];
+  const edges = EDGES.map(([a, b]) => `<path class="${f[a][0] === 'ok' ? 'on' : ''}" d="M${AT[a][0]} ${AT[a][1]}L${AT[b][0]} ${AT[b][1]}"/>`).join('');
+  return `<div class="intro-demo" role="img" aria-label="One job: a plan, a pull request each in desktop-app and api running in parallel, then a migration session once both merge"><svg class="job-graph-edges" viewBox="0 0 100 330" preserveAspectRatio="none" aria-hidden="true">${edges}</svg>${DEMO_NODES.map(([icon, title], i) => `<div class="intro-demo-node" style="--x:${AT[i][0]}%">${node(f[i][0], icon, title, f[i][1], f[i][2], f[i][0] !== 'idle')}</div>`).join('')}</div>`;
+}
+
 // The gate switches are a picture the reader can poke, not settings: each job
 // sets its own on the New job form.
 const GATES = [
@@ -22,9 +43,12 @@ const GATES = [
 ];
 
 export const INTRO_STEPS = [
-  { tab: 'Welcome', title: `Hand ${W2} an outcome. It splits the work and tracks it for you.`,
-    body: `<p>${W2} adds <b>automated jobs</b> to Agent Wrangler. You describe a goal; it splits the goal into sub-jobs, starts agent sessions for them, and brings each result back to you to check.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board.</p>`,
-    figure: () => `<div class="intro-rail">${railBtn('grid')}${railBtn('note')}${railBtn('jobs', true, '2')}</div><div class="job-chips intro-center"><span class="job-chip">${ICONS.robot}<span>Agents at once: 2</span></span><span class="job-chip">${ICONS.eye}<span>2 need you</span></span></div>` },
+  { tab: 'Welcome', title: 'One goal. Two repos. One follow-up. You just approve.',
+    body: `<p>Your desktop app and its API both need passkey sign-in. Write that once as a <b>job</b>: ${W2} plans it, opens a pull request in <b>each repo in parallel</b>, and starts the account migration the moment both have merged.</p><p>You read the plan, the diffs and the results. The waiting, the checks and the hand-offs are its job, not yours.</p>`,
+    figure: (gates, phase) => demo(phase) },
+  { tab: 'Jobs button', title: 'It all lives behind the Jobs button.',
+    body: `<p>${W2} adds <b>automated jobs</b> to Agent Wrangler. Everything lives behind the <b>Jobs</b> button in the left rail.</p><p>The number on it is how many things are waiting on you, wherever you are on the board.</p>`,
+    figure: () => `<div class="intro-rail">${railBtn('grid')}${railBtn('note')}${railBtn('jobs', true, '2')}</div><div class="job-chips intro-center"><span class="job-chip">${ICONS.robot}<span>Agents at once: 8</span></span><span class="job-chip">${ICONS.eye}<span>2 need you</span></span></div>` },
   { tab: 'New job', title: 'New job, then a plan you approve before anything runs.',
     body: `<p>Press <b>New job</b> and write the outcome you want. ${W2} drafts a <b>plan</b>, splitting work into ordered tasks.</p><p>Iterate on the plan until you’re happy, then <b>Approve</b>. Until you approve, no session starts and no ticket or PR is created. You can also save a job to the backlog and start it later.</p>`,
     figure: () => `<div class="intro-flow">${node('ok', 'edit', 'Describe', 'Done', 'check')}<span class="intro-flow-line"></span>${node('run', 'robot', 'Plan', 'Planning', 'spin', true)}<span class="intro-flow-line"></span>${node('warn', 'eye', 'Approve', 'Needs you', 'eye')}</div>` },
@@ -54,6 +78,8 @@ export const INTRO_STEPS = [
 export function createIntro({ storage, onNewJob = () => {} }) {
   let dialog = null;
   let at = 0;
+  let phase = 0;
+  let timer = null;
   const gates = { code: true, merge: false, sessions: true };
 
   function build() {
@@ -91,7 +117,7 @@ export function createIntro({ storage, onNewJob = () => {} }) {
     });
     // Every way out (close, Skip, Escape, finishing) is the reader saying they
     // have seen it; a reload while it is still open is not.
-    dialog.addEventListener('close', () => storage?.set(SEEN_KEY, '1'));
+    dialog.addEventListener('close', () => { stopDemo(); storage?.set(SEEN_KEY, '1'); });
   }
 
   // Every step is laid out in the same grid cell, so the dialog takes the tallest
@@ -100,17 +126,33 @@ export function createIntro({ storage, onNewJob = () => {} }) {
     const last = at === INTRO_STEPS.length - 1;
     dialog.querySelector('.intro-count').textContent = `${at + 1} of ${INTRO_STEPS.length}`;
     dialog.querySelector('.intro-steps').innerHTML = INTRO_STEPS.map((s, i) => `<button type="button" class="job-seg tone-ok${i <= at ? '' : ' planned'}" role="tab" aria-selected="${i === at}" data-go="${i}"><span>${s.tab}</span></button>`).join('');
-    dialog.querySelector('.intro-body').innerHTML = INTRO_STEPS.map((s, i) => `<div class="intro-panel"${i === at ? '' : ' inert aria-hidden="true"'}><div><h2${i === at ? ' id="jobs-intro-title"' : ''}>${s.title}</h2>${s.body}</div><div class="intro-figure">${s.figure(gates)}</div></div>`).join('');
+    dialog.querySelector('.intro-body').innerHTML = INTRO_STEPS.map((s, i) => `<div class="intro-panel"${i === at ? '' : ' inert aria-hidden="true"'}><div><h2${i === at ? ' id="jobs-intro-title"' : ''}>${s.title}</h2>${s.body}</div><div class="intro-figure">${s.figure(gates, phase)}</div></div>`).join('');
     const next = dialog.querySelector('[data-intro="next"]');
     next.className = `primary tone-${last ? 'ok' : 'run'}`;
     next.innerHTML = last ? `${ICONS.plus}New job` : `Next${ICONS.next}`;
     dialog.querySelector('[data-intro="back"]').hidden = at === 0;
     dialog.querySelector('[data-intro="skip"]').hidden = last;
+    if (at === 0) playDemo(); else stopDemo();
   }
+
+  // Only the Welcome figure is redrawn per frame, so focus and the other panels
+  // are untouched; with reduced motion it stays on the finished graph.
+  function playDemo() {
+    if (timer) return;
+    const win = document.defaultView;
+    if (!win || win.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { phase = DEMO_FRAMES - 1; return drawDemo(); }
+    timer = win.setInterval(() => { phase = (phase + 1) % (DEMO_FRAMES + 1); drawDemo(); }, 1500);
+  }
+  function drawDemo() {
+    const fig = dialog?.querySelector('.intro-panel .intro-figure');
+    if (fig) fig.innerHTML = INTRO_STEPS[0].figure(gates, phase);
+  }
+  function stopDemo() { if (timer) document.defaultView?.clearInterval(timer); timer = null; }
 
   function open(step = 0) {
     if (!dialog || !dialog.isConnected) build();
     at = step;
+    phase = 0;
     render();
     if (!dialog.open) dialog.showModal();
   }
@@ -118,6 +160,6 @@ export function createIntro({ storage, onNewJob = () => {} }) {
   return {
     open,
     maybeShow() { if (storage && !storage.get(SEEN_KEY)) open(0); },
-    remove() { dialog?.remove(); dialog = null; },
+    remove() { stopDemo(); dialog?.remove(); dialog = null; },
   };
 }
