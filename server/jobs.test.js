@@ -769,7 +769,7 @@ test('every move is refused on a finished or dropped sub-job', async (t) => {
 });
 
 test('cancelling a job drops every unfinished sub-job, stops its steps, cleans up and finishes as cancelled', async (t) => {
-  const f = fixture(t); await f.approve(plan([spec('api'), spec('web'), spec('docs')]));
+  const f = fixture(t); f.store.settings({ concurrency: 2 }); await f.approve(plan([spec('api'), spec('web'), spec('docs')]));
   assert.deepEqual(f.launched.filter((w) => w.sub).map((w) => w.sub.id), ['api', 'web'], 'two slots, so docs is still queued');
   f.store.action(f.job.id, 'pause');
   const before = f.launched.length, api = f.workerFor('api');
@@ -1212,7 +1212,7 @@ test('an invalid job-settings patch is refused and leaves the settings alone', a
   // Core replied `{type:'error'}`; with no reply channel a throw is the whole
   // answer, and the wrangler's router is what reports it.
   await assert.rejects(jobSettingsHandler.handler({ patch: { concurrency: 0 } }, host));
-  assert.equal(f.store.snapshot().settings.concurrency, 2);
+  assert.equal(f.store.snapshot().settings.concurrency, 8);
   assert.equal(host.rebuilds, 0, 'a refused patch does not rebuild');
   await jobSettingsHandler.handler({ patch: { concurrency: 4 } }, host);
   assert.equal(f.store.snapshot().settings.concurrency, 4);
