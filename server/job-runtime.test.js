@@ -193,6 +193,37 @@ test('cleanup deletes the branch on origin only while it still points at the mer
   await assert.rejects(runtimeWith(host, { run: failing.run }).cleanup({}, sub), /network/, 'only exit 2 means "already gone"');
 });
 
+test('cleanup of a PR sub-job accepts a local head behind the GitHub-updated PR head and deletes the local value', async () => {
+  const { host } = fakeHost();
+  const sub = { ...merged, worktree: { ...merged.worktree, path: missing() } };
+  const f = fakeRun({ head: 'pushed', remote: 'head1\trefs/heads/job-api' });
+  await runtimeWith(host, { run: f.run }).cleanup({}, sub);
+  assert.ok(f.calls.some((c) => c[0] === 'fetch'), 'the merge commit was made on GitHub');
+  assert.deepEqual(f.calls.find((c) => c[0] === 'merge-base'), ['merge-base', '--is-ancestor', 'pushed', 'head1']);
+  assert.deepEqual(f.calls.find((c) => c[0] === 'update-ref'), ['update-ref', '-d', 'refs/heads/job-api', 'pushed']);
+});
+
+test('cleanup of a PR sub-job still preserves a local commit the merged head does not contain', async () => {
+  const { host } = fakeHost();
+  const notAncestor = { 'merge-base': () => { throw Object.assign(new Error('exit 1'), { code: 1 }); } };
+  const sub = { ...merged, worktree: { ...merged.worktree, path: missing() } };
+  const branch = fakeRun({ head: 'local-extra', overrides: notAncestor });
+  await assert.rejects(runtimeWith(host, { run: branch.run }).cleanup({}, sub), /additional commits/);
+  assert.ok(!branch.calls.some((c) => ['update-ref', 'push'].includes(c[0])));
+  const dir = fs.mkdtempSync(path.join(DATA_DIR, 'worktree-'));
+  const tree = fakeRun({ overrides: { ...notAncestor, 'symbolic-ref': () => 'refs/heads/job-api', 'rev-parse': () => 'local-extra' } });
+  await assert.rejects(runtimeWith(host, { run: tree.run }).cleanup({}, { ...sub, worktree: { ...sub.worktree, path: dir } }), /preserve it for review/);
+  assert.ok(!tree.calls.some((c) => c[0] === 'worktree'));
+});
+
+test('cleanup of a PR sub-job fails safely, deleting nothing, when the merged head cannot be resolved', async () => {
+  const { host } = fakeHost();
+  const sub = { ...merged, worktree: { ...merged.worktree, path: missing() } };
+  const f = fakeRun({ head: 'pushed', overrides: { 'cat-file': () => { throw new Error('bad object'); } } });
+  await assert.rejects(runtimeWith(host, { run: f.run }).cleanup({}, sub), /Cannot resolve merged PR head head1/);
+  assert.ok(!f.calls.some((c) => ['update-ref', 'push', 'merge-base'].includes(c[0])));
+});
+
 test('cleanup of a cancelled sub-job archives its sessions, keeps unpushed commits and leaves origin alone', async () => {
   const { host, archived, sessions } = fakeHost();
   sessions.set('sid', { sessionId: 'sid', archived: false });

@@ -192,7 +192,7 @@ export class JobRuntime {
     // A sub-job with no PR — cancelled, or marked done by hand before it ever
     // opened one — merged nothing. Its bytes are retained only if the branch
     // was pushed (the PR head) or never left the base it was cut from.
-    if (sub.worktree) await this.cleanupWorktree(sub.worktree, sub.pr?.head || sub.worktree.cleanupHead);
+    if (sub.worktree) await this.cleanupWorktree(sub.worktree, sub.pr?.head || sub.worktree.cleanupHead, { mergedHead: sub.pr?.head });
     if (sub.worktree && sub.pr && !sub.cancelledAt) await this.deleteRemoteBranch(sub.worktree, sub.pr.head);
     if (job.updateMain && !sub.cancelledAt && sub.pr) {
       const root = await gitRepoRoot(expandRepo(sub.repo));
@@ -205,22 +205,42 @@ export class JobRuntime {
     }
   }
 
+  // A PR head can move on GitHub after the push (`gh pr update-branch`, the merge
+  // commit), so with `mergedHead` a local value strictly behind it is also
+  // accepted. The caller still deletes with the exact value that passed.
+  async isMergedAncestor(local, mergedHead, repoRoot) {
+    if (local === mergedHead) return true;
+    await this.run('git', ['fetch', 'origin'], repoRoot).catch(() => {});
+    await this.run('git', ['cat-file', '-e', `${mergedHead}^{commit}`], repoRoot).catch(() => {
+      throw new Error(`Cannot resolve merged PR head ${mergedHead}; nothing was deleted, preserve it for review`);
+    });
+    try {
+      await this.run('git', ['merge-base', '--is-ancestor', local, mergedHead], repoRoot);
+      return true;
+    } catch (e) {
+      if (e.code === 1) return false;
+      throw e;
+    }
+  }
+
   // Verbatim from core: compare-and-delete, so a racing local commit is refused.
-  async cleanupWorktree(wt, expectedHead) {
+  async cleanupWorktree(wt, expectedHead, { mergedHead } = {}) {
     if (!expectedHead) throw new Error('Cannot clean up without the verified branch head');
+    const accepts = async (local) => local === expectedHead
+      || (!!mergedHead && await this.isMergedAncestor(local, mergedHead, wt.repoRoot));
     const ref = `refs/heads/${wt.branch}`;
     if (fs.existsSync(wt.path)) {
       const branch = await this.run('git', ['symbolic-ref', 'HEAD'], wt.path);
       const head = await this.run('git', ['rev-parse', 'HEAD'], wt.path);
-      if (branch !== ref || head !== expectedHead) throw new Error('Worktree has changed since verification; preserve it for review');
+      if (branch !== ref || !(await accepts(head))) throw new Error('Worktree has changed since verification; preserve it for review');
       await removeWorktree({ worktreePath: wt.path, repoRoot: wt.repoRoot });
     }
     const trees = await this.run('git', ['worktree', 'list', '--porcelain'], wt.repoRoot);
     if (trees.split('\n').includes(`branch ${ref}`)) throw new Error('Branch is in use by another worktree');
     const existing = await this.run('git', ['for-each-ref', '--format=%(objectname)', ref], wt.repoRoot);
     if (!existing) return;
-    if (existing !== expectedHead) throw new Error('Branch has additional commits; preserve it for review');
-    await this.run('git', ['update-ref', '-d', ref, expectedHead], wt.repoRoot);
+    if (!(await accepts(existing))) throw new Error('Branch has additional commits; preserve it for review');
+    await this.run('git', ['update-ref', '-d', ref, existing], wt.repoRoot);
   }
 
   // Verbatim from core: the merged PR's branch on origin, only while it still
