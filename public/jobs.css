@@ -65,7 +65,7 @@
 /* The dialog: a Material surface — app bar, assist chips, stepper, one FAB. */
 .job-dialog { position:fixed; inset:0; margin:auto; width:min(1600px,95vw); max-height:92vh; overflow:auto; scrollbar-width:thin; scrollbar-color:var(--border-muted) transparent; box-sizing:border-box; background:var(--surface); color:var(--fg); border:0; border-radius:28px; padding:24px 28px; box-shadow:0 20px 70px var(--shadow); font-family:var(--font); }
 .job-dialog::backdrop { background:var(--overlay); backdrop-filter:blur(3px); }
-.job-dialog-close { position:absolute; top:16px; right:16px; width:40px; height:40px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:transparent; color:var(--fg-muted); font-size:20px; cursor:pointer; }
+.job-dialog-close { position:absolute; z-index:1; top:16px; right:16px; width:40px; height:40px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:transparent; color:var(--fg-muted); font-size:20px; cursor:pointer; }
 .job-dialog-close:hover { background:var(--surface-2); }
 .job-dialog h2 { font-size:24px; font-weight:400; line-height:1.25; margin:4px 44px 0 0; text-wrap:balance; overflow-wrap:anywhere; }
 .job-dialog h3 { margin:20px 0 8px; font-size:12px; font-weight:600; }
@@ -91,13 +91,15 @@
 .job-create-props { padding:60px 18px 12px; background:color-mix(in srgb, var(--surface-2) 55%, var(--surface)); border-left:1px solid var(--border-muted); }
 .job-dialog .job-prop { display:grid; gap:4px; min-width:0; margin:0; padding:0 0 10px; border:0; border-bottom:1px solid var(--border-muted); border-radius:0; }
 .job-dialog .job-prop:last-child { border-bottom:0; }
-.job-dialog .job-prop+.job-prop { margin-top:12px; }
-.job-prop legend { padding:0; margin-bottom:6px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-subtle); }
+/* ~ not +: the picker's hidden inputs sit between Agent and You review. */
+.job-dialog .job-prop~.job-prop { margin-top:12px; }
+.job-prop legend { padding:0; margin-bottom:8px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-subtle); }
 .job-create-props select { width:calc(100% + 6px); min-width:0; margin-left:-6px; padding:4px 6px; border-color:transparent; background:transparent; font-size:13px; cursor:pointer; }
 .job-create-props select:hover,.job-create-props select:focus-visible { border-color:var(--border); background:var(--field-bg); }
 .job-create-props input[name=newTaskName] { width:100%; padding:5px 8px; font-size:13px; }
 .job-prop-split { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
-.job-dialog .job-toggle { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0; padding:4px 0; font-size:13px; cursor:pointer; }
+.job-dialog .job-toggle { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0; padding:0; font-size:13px; cursor:pointer; }
+.job-prop:has(>.job-toggle) { gap:10px; }
 .job-toggle small { display:block; font-size:11.5px; color:var(--fg-subtle); }
 .job-create-foot { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; padding:12px 18px 12px 28px; border-top:1px solid var(--border-muted); }
 .job-create-foot>span { flex:1 1 260px; font-size:12px; color:var(--fg-subtle); }
