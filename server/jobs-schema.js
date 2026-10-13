@@ -97,7 +97,7 @@ export const planSchema = z.object({
   }
 });
 export const jobInputSchema = z.object({
-  title: line, intent: z.string().trim().min(1).max(16000),
+  title: line.optional(), intent: z.string().trim().min(1).max(16000),
   repos: z.array(repoPath).max(30).default([]),
   agent: z.enum(['claude', 'codex']).default('claude'), model: z.string().max(150).default(''),
   effort: z.string().max(40).default(''),

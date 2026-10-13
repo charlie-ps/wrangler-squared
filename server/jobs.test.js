@@ -9,7 +9,7 @@ import { JobRuntime } from './job-runtime.js';
 import { jobPrompt } from './job-prompts.js';
 import { JobGithub, prSummary } from './job-github.js';
 import { normaliseComments, commentsBlockMerge } from './job-comments.js';
-import { jobCreateHandler, jobActionHandler, jobSettingsHandler } from './handlers.js';
+import { jobCreateHandler, makeJobCreateHandler, jobActionHandler, jobSettingsHandler } from './handlers.js';
 import { _resetForTests, runnerFor } from './jobs.js';
 import { jobReportTool, getJobContextTool } from './tools.js';
 
@@ -1162,6 +1162,48 @@ test('job-create acknowledges the creation by broadcast and kicks the runner whe
   assert.equal(host.broadcasts[1].event, 'job-created'); assert.equal(host.broadcasts[1].started, true);
   assert.equal(f.store.get(host.broadcasts[1].jobId).stage, 'planning', 'the main action skips the backlog');
   assert.equal(ticks(), 1, 'the runner is kicked so planning launches without waiting for the next sweep');
+});
+
+test('a job created without a title starts under its description and takes the generated one when Haiku answers', async (t) => {
+  const f = fixture(t);
+  const host = fakeHost(f); const billed = [];
+  host.sessions.bill = (sid, live) => billed.push([sid, live]);
+  stubRunner(t, host);
+  let answer;
+  const handler = makeJobCreateHandler({ run: () => new Promise((resolve) => { answer = resolve; }) });
+  await handler.handler({ job: { intent: 'Customers can sign in reliably\nwith SSO' } }, host);
+  const id = host.broadcasts[0].jobId;
+  assert.equal(host.broadcasts[0].event, 'job-created', 'the create does not wait for a title');
+  assert.equal(f.store.get(id).title, 'Customers can sign in reliably');
+  const { revision } = f.store.get(id); const rebuilds = host.rebuilds;
+  answer({ text: 'Reliable SSO sign-in', liveSessionId: 'live-1', error: null });
+  await new Promise(setImmediate);
+  assert.equal(f.store.get(id).title, 'Reliable SSO sign-in');
+  assert.equal(f.store.get(id).revision, revision, 'a title is not a plan revision');
+  assert.equal(host.rebuilds, rebuilds + 1);
+  assert.deepEqual(billed, [], 'no card yet, so nothing to bill');
+});
+
+test('a failed title generation keeps the fallback, and a supplied title is never regenerated', async (t) => {
+  const f = fixture(t);
+  const host = fakeHost(f);
+  stubRunner(t, host);
+  let calls = 0;
+  const handler = makeJobCreateHandler({ run: async () => { calls++; return { text: null, liveSessionId: 'live-1', error: new Error('boom') }; } });
+  await handler.handler({ job: { intent: 'Make sign-in reliable' } }, host);
+  await new Promise(setImmediate);
+  assert.equal(f.store.get(host.broadcasts[0].jobId).title, 'Make sign-in reliable');
+  await handler.handler({ job: input }, host);
+  await new Promise(setImmediate);
+  assert.equal(calls, 1); assert.equal(f.store.get(host.broadcasts[1].jobId).title, 'Reliable sign-in');
+});
+
+test('a generated title replaces only the title it was generated for', (t) => {
+  const f = fixture(t);
+  const job = f.store.create({ intent: 'Make sign-in reliable' });
+  assert.equal(f.store.retitle(job.id, 'Something else', 'Generated'), false);
+  assert.equal(f.store.retitle(job.id, job.title, 'Generated'), true);
+  assert.equal(f.store.get(job.id).title, 'Generated');
 });
 
 test('an invalid job-settings patch is refused and leaves the settings alone', async (t) => {

@@ -516,7 +516,7 @@ test('new-job form sends chosen model, repositories and the three review points'
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   assert.equal(form.elements.reviewCode.checked, true, 'the human reads each diff before it is committed, unless they opt out');
   assert.equal(form.elements.amendmentAuthority, undefined, 'agents never change the plan, so there is no authority to grant');
-  form.elements.title.value = 'New value'; form.elements.intent.value = 'Deliver something useful';
+  form.elements.intent.value = 'Deliver something useful';
   form.elements.repos.value = '/repo\n/repo\n/second';
   form.dispatchEvent(f.event('submit'));
   const msg = f.sent[0]; assert.equal(msg.type, 'job-create'); assert.deepEqual(msg.job.repos, ['/repo', '/second']);
@@ -538,7 +538,7 @@ test('new-job effort picker follows the chosen agent and keeps a level both offe
   form.elements.effort.value = 'high';
   form.elements.agent.value = 'claude'; form.elements.agent.onchange();
   assert.equal(form.elements.effort.value, 'high');
-  form.elements.title.value = 'T'; form.elements.intent.value = 'I';
+  form.elements.intent.value = 'I';
   form.dispatchEvent(f.event('submit'));
   assert.equal(f.sent[0].job.effort, 'high');
 });
@@ -548,7 +548,7 @@ test('the new-job primary action starts planning and the plain button parks it i
   const [primary, backlog] = form.querySelectorAll('.job-actions button');
   assert.equal(primary.className, 'primary'); assert.equal(primary.textContent, 'Start planning');
   assert.equal(backlog.className, ''); assert.equal(backlog.textContent, 'Add to backlog');
-  form.elements.title.value = 'Value'; form.elements.intent.value = 'Deliver it';
+  form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
   assert.equal(f.sent[0].start, true, 'Enter is the main action');
   form.dispatchEvent(new f.window.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: primary }));
@@ -559,7 +559,7 @@ test('the new-job primary action starts planning and the plain button parks it i
 
 test('new jobs need only an outcome while repository hints stay optional', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
-  form.elements.title.value = 'Reliable sign-in'; form.elements.intent.value = 'Customers can access their accounts';
+  form.elements.intent.value = 'Customers can access their accounts';
   assert.equal(form.elements.repos.required, false);
   assert.equal(form.elements.repos.closest('details').open, false);
   assert.equal(form.checkValidity(), true);
@@ -744,7 +744,7 @@ test('plans show session rows without a repository and new jobs default to revie
   assert.match(f.q('[data-action="approve-plan"]').title, /approve each agent session/);
   f.q('#job-dialog').close();
   f.q('#job-new').click(); const form = f.q('#job-create-form');
-  form.elements.title.value = 'Value'; form.elements.intent.value = 'Deliver it'; form.dispatchEvent(f.event('submit'));
+  form.elements.intent.value = 'Deliver it'; form.dispatchEvent(f.event('submit'));
   assert.equal(f.sent.at(-1).job.reviewSessions, true);
 });
 
@@ -963,7 +963,7 @@ test('Cmd+Enter in a move form submits it, honouring required exactly as the but
 
 test('the chord carries the primary submitter, so a new job starts planning rather than parking', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
-  form.elements.title.value = 'Reliable sign-in'; form.elements.intent.value = 'Customers can access their accounts';
+  form.elements.intent.value = 'Customers can access their accounts';
   chord(f, form.elements.intent);
   assert.equal(f.sent.at(-1).type, 'job-create'); assert.equal(f.sent.at(-1).start, true, 'the primary button is the submitter, not Add to backlog');
 });

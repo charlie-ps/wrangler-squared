@@ -4,6 +4,7 @@ import { DATA_DIR } from './data-dir.js';
 import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
 import { jobInputSchema, settingsSchema, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, storiesKeyed } from './jobs-schema.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
+import { fallbackTitle } from './job-title.js';
 import { applyMove, dropSub, MOVE_ACTIONS } from './job-moves.js';
 import { requestReplan, discardReplan, proposeReplan, approveReplan } from './job-replan.js';
 
@@ -131,9 +132,20 @@ export class JobStore {
     return this.change((d) => { d.settings = settingsSchema.parse({ ...d.settings, ...patch }); return d.settings; });
   }
   create(input, extra = {}) {
-    const job = { ...jobInputSchema.parse(input), id: uid('job'), stage: 'backlog', revision: 0,
+    const parsed = jobInputSchema.parse(input);
+    const job = { ...parsed, title: parsed.title || fallbackTitle(parsed.intent), id: uid('job'), stage: 'backlog', revision: 0,
       createdAt: Date.now(), updatedAt: Date.now(), paused: false, plan: null, subJobs: [], runs: [], moves: [], ...extra };
     return this.change((d) => { d.jobs.push(job); return job; });
+  }
+  // A generated title replaces only the one it was generated for, and is not a
+  // revision: approval compares revisions, and a title is not part of the plan.
+  retitle(id, from, to) {
+    return this.change((d) => {
+      const job = d.jobs.find((j) => j.id === id);
+      if (!job || job.title !== from || !to || to === from) return false;
+      job.title = to; job.updatedAt = Date.now();
+      return true;
+    });
   }
   // Approval authorises two things in order: the Jira changes (only if a story
   // still needs a ticket; a fully-keyed or storyless plan has nothing to write)

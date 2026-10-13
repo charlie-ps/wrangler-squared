@@ -85,7 +85,6 @@ test('the new-job form selects an active task or reveals a required new-task nam
   form.elements.taskId.dispatchEvent(new window.Event('change', { bubbles: true }));
   assert.equal(form.elements.newTaskName.hidden, false);
   assert.equal(form.elements.newTaskName.required, true);
-  form.elements.title.value = 'Reliable sign-in';
   form.elements.intent.value = 'Customers can access their accounts';
   form.elements.newTaskName.value = 'Sign-in delivery';
   assert.equal(form.checkValidity(), true);
@@ -95,7 +94,6 @@ test('the new-job form selects an active task or reveals a required new-task nam
 
   el.querySelector('#job-new').dispatchEvent(new window.Event('click', { bubbles: true }));
   const existing = window.document.getElementById('job-create-form');
-  existing.elements.title.value = 'Use the existing task';
   existing.elements.intent.value = 'Keep the work together';
   existing.elements.taskId.value = 't_auth';
   existing.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
