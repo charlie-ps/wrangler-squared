@@ -82,6 +82,31 @@
 .job-dialog fieldset label { display:flex; align-items:center; gap:8px; margin:10px 0; }
 .job-form-row { display:flex; gap:16px; }
 .job-form-row>label { flex:1; min-width:0; }
+/* New job: the brief on the left, the job's properties in a sidebar that bleeds
+   to the dialog's edge, so the dialog itself drops its padding. Narrow windows stack. */
+.job-dialog:has(.job-create) { width:min(880px,95vw); padding:0; }
+.job-create { display:grid; grid-template-columns:minmax(0,1fr) 280px; }
+.job-create-brief { padding:24px 28px 16px; min-width:0; }
+.job-create-brief label { display:flex; flex-direction:column; gap:7px; font-size:12px; margin:14px 0; }
+.job-create-props { padding:60px 18px 12px; background:color-mix(in srgb, var(--surface-2) 55%, var(--surface)); border-left:1px solid var(--border-muted); }
+.job-dialog .job-prop { display:grid; gap:4px; min-width:0; margin:0; padding:0 0 10px; border:0; border-bottom:1px solid var(--border-muted); border-radius:0; }
+.job-dialog .job-prop:last-child { border-bottom:0; }
+.job-dialog .job-prop+.job-prop { margin-top:12px; }
+.job-prop legend { padding:0; margin-bottom:6px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-subtle); }
+.job-create-props select { width:calc(100% + 6px); min-width:0; margin-left:-6px; padding:4px 6px; border-color:transparent; background:transparent; font-size:13px; cursor:pointer; }
+.job-create-props select:hover,.job-create-props select:focus-visible { border-color:var(--border); background:var(--field-bg); }
+.job-create-props input[name=newTaskName] { width:100%; padding:5px 8px; font-size:13px; }
+.job-prop-split { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
+.job-dialog .job-toggle { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0; padding:4px 0; font-size:13px; cursor:pointer; }
+.job-toggle small { display:block; font-size:11.5px; color:var(--fg-subtle); }
+.job-create-foot { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; padding:12px 18px 12px 28px; border-top:1px solid var(--border-muted); }
+.job-create-foot>span { flex:1 1 260px; font-size:12px; color:var(--fg-subtle); }
+.job-create-foot .job-actions { margin:0 0 0 auto; }
+.job-create-foot .job-actions button:not(.primary) { color:var(--fg-muted); }
+.job-create-foot .job-actions button:not(.primary):hover { background:var(--surface-2); color:var(--fg); }
+/* The primary stays first in the DOM so Enter in a field submits with it, not with Add to backlog. */
+.job-create-foot .job-actions button.primary { order:1; margin:0; }
+@media(max-width:760px) { .job-create { grid-template-columns:1fr; } .job-create-props { padding:8px 28px 12px; border-left:0; border-top:1px solid var(--border-muted); } }
 .job-appbar { margin-bottom:20px; }
 .job-back { all:unset; display:inline-flex; align-items:center; gap:6px; max-width:calc(100% - 50px); font-size:12px; color:var(--fg-muted); cursor:pointer; }
 .job-back span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -330,11 +355,12 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
 .intro-gate .job-flag { width:30px; height:30px; font-size:16px; }
 .intro-gate>span:nth-child(2) { flex:1; min-width:0; }
 .intro-gate small { display:block; font-size:12px; color:var(--fg-muted); }
-.intro-switch { position:relative; flex:none; width:38px; height:22px; padding:0; border:0; border-radius:11px; background:var(--border); cursor:pointer; transition:background .15s; }
-.intro-switch::after { content:""; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:var(--surface); transition:transform .15s; }
-.intro-switch[aria-checked="true"] { background:var(--blue); }
-.intro-switch[aria-checked="true"]::after { transform:translateX(16px); }
-.intro-switch:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.intro-switch,.job-switch { position:relative; flex:none; width:38px; height:22px; padding:0; border:0; border-radius:11px; background:var(--border); cursor:pointer; transition:background .15s; }
+.intro-switch::after,.job-switch::after { content:""; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:var(--surface); transition:transform .15s; }
+.intro-switch[aria-checked="true"],.job-switch:checked { background:var(--blue); }
+.intro-switch[aria-checked="true"]::after,.job-switch:checked::after { transform:translateX(16px); }
+.job-switch { appearance:none; margin:0; }
+.intro-switch:focus-visible,.job-switch:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
 .intro-jira { position:relative; display:grid; gap:14px; }
 .intro-jira::before { content:""; position:absolute; left:20px; top:20px; bottom:20px; width:2px; background:var(--border); }
 .intro-jira-row { position:relative; display:flex; align-items:center; gap:14px; }
@@ -357,4 +383,4 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
   .intro-graph .job-graph-columns { gap:28px; }
   .job-node-repo { display:none; }
 }
-@media(prefers-reduced-motion:reduce) { .intro-switch,.intro-switch::after,.intro-figure .job-node-tile,.intro-graph path,.intro-goal,.intro-goal .job-avatar,.intro-mini-job,.intro-mini-job .job-avatar,.intro-rail-badge { transition:none; } .intro-rail-badge.bump { animation:none; } }
+@media(prefers-reduced-motion:reduce) { .intro-switch,.intro-switch::after,.job-switch,.job-switch::after,.intro-figure .job-node-tile,.intro-graph path,.intro-goal,.intro-goal .job-avatar,.intro-mini-job,.intro-mini-job .job-avatar,.intro-rail-badge { transition:none; } .intro-rail-badge.bump { animation:none; } }

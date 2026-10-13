@@ -598,6 +598,26 @@ test('the new-job primary action starts planning and the plain button parks it i
   assert.equal(f.sent[2].start, false);
 });
 
+test('new job is a brief beside a property sidebar, with the planning extras folded under the brief', (t) => {
+  const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
+  const brief = form.querySelector('.job-create-brief'); const props = form.querySelector('.job-create-props');
+  assert.equal(brief.querySelector('h2').textContent, 'New job');
+  assert.ok(brief.contains(form.elements.intent));
+  const more = brief.querySelector('details');
+  assert.equal(more.open, false, 'repository hints and guidance start folded');
+  assert.equal(more.querySelector('summary').textContent, 'Planning guidance & repository hints');
+  assert.ok(more.contains(form.elements.repos) && more.contains(form.elements.planningPrompt));
+  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'You review', 'After delivery']);
+  for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'updateMain']) assert.ok(props.contains(form.elements[name]), `${name} lives in the sidebar`);
+  assert.equal(form.elements.model.parentElement, form.elements.effort.parentElement, 'model and effort sit side by side');
+  assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('small')?.textContent]),
+    [['reviewPlan', true, 'before tickets or work'], ['reviewCode', true, 'before commit'], ['reviewMerge', true, 'before merge'], ['reviewSessions', true, 'before done'], ['updateMain', false, undefined]]);
+  assert.match(form.querySelector('.job-create-foot').textContent, /nothing touches Jira until you approve/);
+  form.elements.intent.value = 'Deliver it';
+  form.dispatchEvent(f.event('submit'));
+  assert.deepEqual(f.sent[0], { type: 'job-create', start: true, job: { intent: 'Deliver it', repos: [], agent: 'claude', model: 'sonnet', effort: '', planningPrompt: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, updateMain: false, taskId: null } });
+});
+
 test('new jobs need only an outcome while repository hints stay optional', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   form.elements.intent.value = 'Customers can access their accounts';
