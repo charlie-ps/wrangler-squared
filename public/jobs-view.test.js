@@ -1166,3 +1166,9 @@ test('a superseded sub-job reads as superseded, and its open PR stays linked fro
   assert.match(f.q('#job-dialog .job-chip-state').title, /Superseded by a plan change and cancelled. Its PR is left open on GitHub/);
   assert.equal(f.q('.job-pipeline-status').href, 'https://github.com/org/repo/pull/7');
 });
+
+test('a green PR behind its base reads as updating the branch', () => {
+  const sub = { id: 'a', title: 'A', repo: '/repo', after: [], stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'h1', checkStatus: 'pending', behind: true, checks: [] } };
+  const job = { id: 'j', stage: 'active', subJobs: [sub], runs: [], moves: [], reviewMerge: true };
+  assert.deepEqual(jobStatus(job, sub), { tone: 'working', text: 'Behind base · updating branch' });
+});

@@ -228,7 +228,7 @@ export function jobStatus(job, sub) {
   if (sub.observationError) return { tone: 'needs', text: 'Pipeline polling will retry' };
   // Accepted red: the runner merges, or finishes the landing, on its next tick.
   if (redAccepted(sub)) return { tone: 'working', text: sub.stage === 'pr' ? (sub.mergeRequestedHead ? 'Merge requested' : 'Merging with red checks') : 'Red run accepted · landing' };
-  if (sub.stage === 'pr') return { tone: sub.pr?.checkStatus === 'passing' ? 'working' : 'muted', text: sub.mergeRequestedHead ? 'Merge requested' : sub.pr?.checkStatus === 'awaiting-review' ? 'GitHub review required' : 'Watching checks' };
+  if (sub.stage === 'pr') return { tone: sub.pr?.checkStatus === 'passing' || sub.pr?.behind ? 'working' : 'muted', text: sub.mergeRequestedHead ? 'Merge requested' : sub.pr?.behind ? 'Behind base · updating branch' : sub.pr?.checkStatus === 'awaiting-review' ? 'GitHub review required' : 'Watching checks' };
   if (sub.stage === 'deployment') return sub.recoveredBy ? { tone: 'muted', text: 'Awaiting fix' } : { tone: 'muted', text: 'Watching post-merge runs' };
   // Fix here on an open PR under code review: the work restarts on the next tick.
   if (sub.stage === 'implementation' && sub.pr) return { tone: 'working', text: 'Fix queued' };

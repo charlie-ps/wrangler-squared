@@ -4,6 +4,8 @@ import { awaitsTicket } from './jobs-schema.js';
 import { logWarn } from './log.js';
 import { isFrozen } from './job-replan.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
+const BRANCH_UPDATE_BACKOFF_MS = 120000;
+const MAX_BRANCH_UPDATES = 3;
 export const acceptedRedLine = (sub) => `Post-merge run accepted red${sub.acceptedRed?.note ? `: ${sub.acceptedRed.note}` : ''}`;
 const activeFor = (j, s) => j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null));
 // A worker that stopped WORKING without reporting has finished in the only sense
@@ -91,6 +93,34 @@ export class JobRunner {
   // Haiku call takes seconds and the tick must not stall other jobs on it. The
   // verdict lands only if the comments it read are still the current ones;
   // otherwise the next poll re-triages against the newer set.
+  // update-branch merges the base into the PR head, so the PR's own diff is what
+  // the human approved: an approval (or accepted red) pinned to the head we
+  // updated moves to the head the update produced. Any other head change was not
+  // ours, and leaves the approval to lapse as it always did.
+  carryApproval(s, pr) {
+    const bu = s.branchUpdate;
+    if (!bu?.updated || bu.carried || !pr.head || pr.head === bu.from) return;
+    if (s.mergeApprovedHead === bu.from) s.mergeApprovedHead = pr.head;
+    if (s.acceptedRed?.ref === bu.from) s.acceptedRed = { ...s.acceptedRed, ref: pr.head };
+    s.branchUpdate = { ...bu, carried: true, to: pr.head }; s.mergeRequestedHead = null;
+  }
+  async updateBranch(id, sub, pr) {
+    const prior = sub.branchUpdate?.from === pr.head ? sub.branchUpdate : null;
+    // GitHub takes a moment to move the head and the PR may report BEHIND until
+    // it has; one attempt per head per interval, and a bounded number of them.
+    if (prior && this.now() - prior.at < BRANCH_UPDATE_BACKOFF_MS) return;
+    const attempts = (prior?.attempts || 0) + 1;
+    if (attempts > MAX_BRANCH_UPDATES) { this.patchSub(id, sub.id, (s) => { s.error = 'Branch is still behind its base after repeated updates. Update it by hand, then retry.'; }); return; }
+    const record = { from: pr.head, at: this.now(), attempts };
+    try {
+      await this.github.updateBranch(sub);
+      this.patchSub(id, sub.id, (s) => { s.branchUpdate = { ...record, updated: true }; });
+    } catch (e) {
+      const message = String(e.stderr || e.message || e).trim().slice(0, 500);
+      const conflict = /conflict/i.test(message);
+      this.patchSub(id, sub.id, (s) => { s.branchUpdate = { ...record, error: message, ...(conflict ? { failedHead: pr.head } : {}) }; s.note = `Updating the branch failed: ${message}`; });
+    }
+  }
   triage(id, subId) {
     const sub = this.store.get(id)?.subJobs.find((s) => s.id === subId);
     const comments = sub?.prComments;
@@ -181,12 +211,15 @@ export class JobRunner {
           if (sub.state === 'approved') await this.launch(job, sub, 'publish');
         } else if (sub.stage === 'pr') {
           if (sub.nextPollAt > this.now()) continue;
-          const pr = await this.github.pr(sub);
+          let pr = await this.github.pr(sub);
+          // A failed update-branch (conflicts) on this head reads as DIRTY, so the
+          // repair path that already handles conflicts takes it from here.
+          if (pr.behind && sub.branchUpdate?.failedHead === pr.head) pr = { ...pr, behind: false, dirty: true, checkStatus: 'failing' };
           const comments = await this.github.comments(sub);
           // Whether this diff deploys is a property of the head, so it is read
           // once per head and again after every repair push.
           const deploys = !sub.deploys || sub.deploys.head !== pr.head ? await this.github.deploys(sub, pr) : sub.deploys;
-          this.patchSub(id, sub.id, (s) => { s.pr = pr; s.prComments = comments; s.deploys = deploys; s.observationError = null; s.nextPollAt = this.now() + 30000; });
+          this.patchSub(id, sub.id, (s) => { s.pr = pr; this.carryApproval(s, pr); s.prComments = comments; s.deploys = deploys; s.observationError = null; s.nextPollAt = this.now() + 30000; });
           this.triage(id, sub.id);
           if (!this.allowed(id)) continue;
           job = this.store.get(id); sub = job.subJobs.find((s) => s.id === sub.id);
@@ -211,6 +244,10 @@ export class JobRunner {
             const limit = this.store.snapshot().settings.maxRepairs + (sub.repairAllowance || 0);
             if (attempts >= limit) this.patchSub(id, sub.id, (s) => { s.error = 'Automatic repair limit reached. Review changes, then retry if needed.'; });
             else await this.launch(job, sub, 'repair');
+          } else if (pr.behind && sub.acceptedRed?.ref !== pr.head) {
+            // Green but behind a base that requires up-to-date branches: bring it
+            // up to date and keep watching, since the new head re-runs the checks.
+            if (!job.replan && dependenciesSatisfied(job, sub)) await this.updateBranch(id, sub, pr);
           } else if (!job.replan && (pr.checkStatus === 'passing' || sub.acceptedRed?.ref === pr.head) && dependenciesSatisfied(job, sub) && (sub.mergeApprovedHead === pr.head || (!job.reviewMerge && !commentsBlockMerge(sub)))) {
             // An accepted-red head merges whatever its checks say — the move
             // pinned both the acceptance and the merge approval to this head.

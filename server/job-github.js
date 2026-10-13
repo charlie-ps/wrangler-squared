@@ -22,13 +22,15 @@ export function prSummary(pr) {
   const mergeWithAdmin = pr.state === 'OPEN' && !pr.isDraft && allGreen
     && pr.reviewDecision === 'REVIEW_REQUIRED' && pr.mergeStateStatus === 'BLOCKED'
     && pr.mergeable === 'MERGEABLE';
+  const behind = pr.state === 'OPEN' && !pr.isDraft && pr.mergeStateStatus === 'BEHIND' && !failed
+    && pr.reviewDecision !== 'CHANGES_REQUESTED' && (allGreen || !checks.length);
   let checkStatus = 'pending';
   if (failed || pr.reviewDecision === 'CHANGES_REQUESTED' || pr.mergeStateStatus === 'DIRTY') checkStatus = 'failing';
   else if (mergeWithAdmin || (pr.mergeStateStatus === 'CLEAN' && !pr.isDraft && (allGreen || !checks.length))) checkStatus = 'passing';
   else if (allGreen && pr.reviewDecision === 'REVIEW_REQUIRED') checkStatus = 'awaiting-review';
   return { url: pr.url, state: pr.state, head: pr.headRefOid, branch: pr.headRefName,
     base: pr.baseRefName, mergeCommit: pr.mergeCommit?.oid || null,
-    checkStatus, checks, mergeWithAdmin, dirty: pr.mergeStateStatus === 'DIRTY', mergeState: pr.mergeStateStatus || null, reviewDecision: pr.reviewDecision };
+    checkStatus, checks, mergeWithAdmin, behind, dirty: pr.mergeStateStatus === 'DIRTY', mergeState: pr.mergeStateStatus || null, reviewDecision: pr.reviewDecision };
 }
 export class JobGithub {
   constructor(run = runFile) { this.run = run; }
@@ -49,6 +51,10 @@ export class JobGithub {
       }
     }
     return summary;
+  }
+  // Merges the base into the PR head. Fails (non-zero exit) when it conflicts.
+  async updateBranch(sub) {
+    await this.run('gh', ['pr', 'update-branch', sub.pr.url], sub.repo);
   }
   async comments(sub) {
     const raw = JSON.parse(await this.run('gh', ['api', 'graphql', '-f', `query=${COMMENTS_QUERY}`, '-f', `url=${sub.pr.url}`], sub.repo));

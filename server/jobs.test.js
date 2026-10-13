@@ -1606,3 +1606,62 @@ test('asking again replaces a waiting proposal and shows it to the next planner;
   f.store.action(f.job.id, 'discard-replan');
   assert.equal(f.store.get(f.job.id).error, null);
 });
+
+// --- Behind base ---
+
+const behindPr = { ...rawPr, mergeStateStatus: 'BEHIND' };
+
+test('a green PR behind its base is flagged behind, not passing', () => {
+  const s = prSummary(behindPr);
+  assert.equal(s.behind, true); assert.equal(s.checkStatus, 'pending');
+  assert.equal(prSummary({ ...behindPr, reviewDecision: 'REVIEW_REQUIRED' }).behind, true);
+  assert.equal(prSummary({ ...behindPr, statusCheckRollup: [] }).behind, true);
+  for (const patch of [{ statusCheckRollup: [{ conclusion: 'FAILURE' }] }, { statusCheckRollup: [{ conclusion: '', status: 'IN_PROGRESS' }] }, { isDraft: true }, { reviewDecision: 'CHANGES_REQUESTED' }, { mergeStateStatus: 'CLEAN' }]) {
+    assert.equal(prSummary({ ...behindPr, ...patch }).behind, false);
+  }
+});
+
+test('JobGithub.updateBranch runs gh pr update-branch in the repo', async () => {
+  const calls = [];
+  await new JobGithub(async (bin, args, cwd) => { calls.push([bin, args, cwd]); return ''; }).updateBranch({ repo: '/repo', pr: { url: PR_URL } });
+  assert.deepEqual(calls, [['gh', ['pr', 'update-branch', PR_URL], '/repo']]);
+});
+
+test('runner updates a behind PR once, backs off, keeps a prior approval across the new head', async (t) => {
+  const f = fixture(t); await atPr(f);
+  const updated = []; f.github.updateBranch = async (s) => { updated.push(s.pr.head); };
+  f.setPr({ checkStatus: 'pending', behind: true }); await f.tick();
+  f.store.update(f.job.id, (j) => { j.subJobs[0].mergeApprovedHead = 'head1'; });
+  assert.deepEqual(updated, ['head1']); assert.equal(f.sub().branchUpdate.from, 'head1');
+  await f.tick(); assert.deepEqual(updated, ['head1'], 'backs off while GitHub catches up');
+  f.setPr({ head: 'head2', behind: false, checkStatus: 'passing' }); await f.tick();
+  assert.equal(f.sub().mergeApprovedHead, 'head2'); assert.deepEqual(f.merged, ['head2']);
+});
+
+test('a head change that was not ours does not inherit the approval', async (t) => {
+  const f = fixture(t); await atPr(f);
+  f.store.update(f.job.id, (j) => { j.subJobs[0].mergeApprovedHead = 'head1'; });
+  f.setPr({ head: 'head2', checkStatus: 'pending' }); await f.tick();
+  assert.equal(f.sub().mergeApprovedHead, 'head1');
+});
+
+test('a conflicting update is treated as DIRTY and sent to repair; transient failures just retry', async (t) => {
+  const f = fixture(t); await atPr(f);
+  f.github.updateBranch = async () => { throw new Error('merge conflict between base and head'); };
+  f.setPr({ checkStatus: 'pending', behind: true }); await f.tick();
+  assert.match(f.sub().note, /conflict/);
+  await f.tick();
+  assert.equal(f.last().run.phase, 'repair'); assert.equal(f.sub().pr.dirty, true);
+  const g = fixture(t); await atPr(g);
+  g.github.updateBranch = async () => { throw new Error('network down'); };
+  g.setPr({ checkStatus: 'pending', behind: true }); await g.tick(); await g.tick();
+  assert.notEqual(g.last().run.phase, 'repair'); assert.equal(g.sub().branchUpdate.failedHead, undefined);
+});
+
+test('a PR that stays behind gives up after repeated updates', async (t) => {
+  const f = fixture(t); await atPr(f);
+  let n = 0; f.github.updateBranch = async () => { n++; };
+  f.setPr({ checkStatus: 'pending', behind: true });
+  for (let i = 0; i < 5; i++) { await f.tick(); await f.tick(); await f.tick(); }
+  assert.equal(n, 3); assert.match(f.sub().error, /still behind/);
+});
