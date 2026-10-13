@@ -28,7 +28,7 @@ function fixture(t) {
 test('every job is one tonal card in its state, and only jobs with attention items survive Needs me', (t) => {
   const f = fixture(t);
   f.data.jobs.push({ ...f.data.jobs[0], id: 'backlog', stage: 'backlog', plan: null }); f.view.update(f.data);
-  assert.deepEqual([...document.querySelectorAll('.job-card')].map((b) => b.dataset.board), ['job1', 'backlog']);
+  assert.deepEqual([...document.querySelectorAll('.job-card')].map((b) => b.dataset.board), ['backlog', 'job1'], 'newest first');
   assert.ok(f.q('[data-board="job1"]').classList.contains('tone-warn'), 'a plan to review is amber');
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Plan ready');
   assert.equal(f.q('[data-board="backlog"] .job-status').textContent, 'Backlog');
@@ -44,13 +44,13 @@ test('the board orders segments by dependency wave, so a sub-job moved after ano
   assert.deepEqual([...document.querySelectorAll('[data-board="job1"] .job-seg')].map((e) => e.dataset.sub), ['api', 'web', 'pr']);
 });
 
-test('the board leads with what is failing, colours each segment by its sub-job, and a segment opens that sub-job', (t) => {
+test('the board colours each segment by its sub-job, and a segment opens that sub-job', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'done' }, { ...sub('web', ['api']), stage: 'implementation' }];
   job.runs = [{ id: 'r1', subJobId: 'web', phase: 'implementation', stopped: false, status: 'working' }];
   f.data.jobs.push({ ...structuredClone(job), id: 'job2', title: 'Broken', runs: [], subJobs: [{ ...sub('x'), stage: 'implementation', error: 'boom' }] });
   f.view.update(f.data);
-  assert.deepEqual([...document.querySelectorAll('.job-card')].map((b) => b.dataset.board), ['job2', 'job1'], 'failing sorts first');
+  assert.deepEqual([...document.querySelectorAll('.job-card')].map((b) => b.dataset.board), ['job2', 'job1'], 'newest first, whatever is failing');
   assert.ok(f.q('[data-board="job2"]').classList.contains('tone-bad'));
   assert.deepEqual([...document.querySelectorAll('[data-board="job1"] .job-seg')].map((e) => [e.dataset.sub, [...e.classList].find((c) => c.startsWith('tone-'))]), [['api', 'tone-ok'], ['web', 'tone-run']]);
   assert.match(f.q('.job-seg[data-sub="web"]').title, /Deliver web · Working/);
@@ -94,11 +94,11 @@ test('each job is its own card, and a delivered job only returns with Finished',
   const done = { ...structuredClone(a), id: 'job3', title: 'Old work', stage: 'done', subJobs: [{ ...sub('legacy'), stage: 'done' }] };
   f.data.jobs.push(b, done); f.view.update(f.data);
   const boards = () => [...document.querySelectorAll('.job-card')].map((x) => x.dataset.board);
-  assert.deepEqual(boards(), ['job1', 'job2'], 'the delivered job is hidden by default');
-  assert.deepEqual([...document.querySelectorAll('.job-card')].map((x) => [...x.querySelectorAll('.job-seg')].map((c) => c.dataset.sub)), [['api'], ['cart']]);
+  assert.deepEqual(boards(), ['job2', 'job1'], 'the delivered job is hidden by default');
+  assert.deepEqual([...document.querySelectorAll('.job-card')].map((x) => [...x.querySelectorAll('.job-seg')].map((c) => c.dataset.sub)), [['cart'], ['api']]);
   assert.match(f.q('[data-board="job2"]').textContent, /Checkout/);
   f.q('#jobs-done').checked = true; f.q('#jobs-done').dispatchEvent(f.event('change'));
-  assert.deepEqual(boards(), ['job1', 'job2', 'job3']);
+  assert.deepEqual(boards(), ['job3', 'job2', 'job1']);
   assert.ok(f.q('[data-board="job3"]').classList.contains('tone-ok'));
   f.q('#jobs-filter').value = 'job2'; f.q('#jobs-filter').dispatchEvent(f.event('change'));
   assert.deepEqual(boards(), ['job2']);

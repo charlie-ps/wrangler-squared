@@ -98,4 +98,4 @@ export function jobLabel(job) {
   const peers = job.subJobs.filter((s) => subState(job, s) === state);
   return `${subLabel(job, peers[0])}${peers.length > 1 ? ` +${peers.length - 1}` : ''}`;
 }
-export const sortJobs = (jobs) => jobs.map((job, i) => [job, STATE_ORDER.indexOf(jobState(job)), i]).sort((a, b) => a[1] - b[1] || a[2] - b[2]).map(([job]) => job);
+export const sortJobs = (jobs) => jobs.map((job, i) => [job, job.createdAt ?? 0, i]).sort((a, b) => b[1] - a[1] || b[2] - a[2]).map(([job]) => job);

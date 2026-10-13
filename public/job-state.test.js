@@ -113,11 +113,11 @@ test('the short labels name the decision, with the PR number where there is one'
   assert.equal(jobLabel(job({ stage: 'done', cancelledAt: 1 })), 'Cancelled');
 });
 
-test('the board sorts failing, then needs-you, then the rest, keeping order within a state', () => {
-  const quiet = job({ id: 'quiet', subJobs: [sub('a')] });
-  const fine = job({ id: 'fine', subJobs: [sub('a', { stage: 'done' })] });
-  const broken = job({ id: 'broken', error: 'x' });
-  const waiting = job({ id: 'waiting', stage: 'planning', plan: { subJobs: [], stories: [] } });
-  const quiet2 = job({ id: 'quiet2', subJobs: [sub('a')] });
-  assert.deepEqual(sortJobs([quiet, fine, broken, waiting, quiet2]).map((j) => j.id), ['broken', 'waiting', 'quiet', 'quiet2', 'fine']);
+test('the board orders jobs newest first by creation, whatever their live state', () => {
+  const quiet = job({ id: 'quiet', createdAt: 10, subJobs: [sub('a')] });
+  const fine = job({ id: 'fine', createdAt: 30, subJobs: [sub('a', { stage: 'done' })] });
+  const broken = job({ id: 'broken', createdAt: 20, error: 'x' });
+  const legacy = job({ id: 'legacy', createdAt: undefined });
+  const legacy2 = job({ id: 'legacy2', createdAt: undefined });
+  assert.deepEqual(sortJobs([legacy, quiet, legacy2, broken, fine]).map((j) => j.id), ['fine', 'broken', 'quiet', 'legacy2', 'legacy']);
 });
