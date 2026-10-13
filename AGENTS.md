@@ -89,6 +89,7 @@ feature).
   `adopt` and stamps the record, which is what lets `name_branch` work on the
   publish run (the one that pushes). `noteDispatch` discards the adopted record
   (`pendingLaunch.adopt`) so the store's copy keeps its `cleanupHead` and rename.
+- **New job's model picker is `public/model-picker.js` over `public/model-plates.js`.** It owns no form state: it reports `{ agent, model, effort }` through `onChange` into hidden inputs, so `form.onsubmit` and the `job-create` payload are untouched, and creating a job saves `settings.usualPick`. `describe()` must never invent a version from an alias (gap 18 in `docs/PORTING.md`). A galaxy plate is exactly one rAF loop, stopped by `dispose()`/re-render; art colours are fixed, chrome is board variables.
 - **Client modules import their leaves RELATIVELY** (`./util.js`, `./icons.js`,
   vendored) rather than from the board by absolute URL, so the same files load
   under node for `public/*.test.js`. Don't switch them to `/util.js`.

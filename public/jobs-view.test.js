@@ -15,15 +15,15 @@ function fixture(t) {
   globalThis.document = window.document; globalThis.FormData = window.FormData;
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
   const staging = { stage: async () => ({ name: 'paste-1700000000000-aaaa1111.png' }) };
-  const sent = [], sessions = [], diffs = [], diffContexts = [], onBoard = new Set();
-  const view = initJobsView({ send: (m) => sent.push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
+  const sent = [], usualSaves = [], sessions = [], diffs = [], diffContexts = [], onBoard = new Set();
+  const view = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; await window.happyDOM.close(); });
   const job = { id: 'job1', title: 'Sign-in', intent: 'Reliable sign-in', repos: ['/repo'], stage: 'planning', plan, subJobs: [], runs: [], moves: [], revision: 2, reviewMerge: true };
   const data = { jobs: [structuredClone(job)], settings: { concurrency: 2, maxRepairs: 2 } };
   const q = (s) => document.querySelector(s);
   const event = (name) => new window.Event(name, { bubbles: true, cancelable: true });
   view.update(data);
-  return { window, view, data, staging, sent, q, event, sessions, diffs, diffContexts, onBoard };
+  return { window, view, data, staging, sent, usualSaves, q, event, sessions, diffs, diffContexts, onBoard };
 }
 
 test('every job is one tonal card in its state, and only jobs with attention items survive Needs me', (t) => {
@@ -569,20 +569,53 @@ test('plan review is an opt-out in the new-job form and a flag on the job', (t) 
   assert.equal(f.sent.at(-1).job.reviewPlan, false);
 });
 
-test('new-job effort picker follows the chosen agent and keeps a level both offer', (t) => {
+const click = (f, sel) => { const el = f.q(sel); assert.ok(el, `${sel} exists`); el.click(); };
+const picked = (form) => ['agent', 'model', 'effort'].map((k) => form.elements[k].value);
+
+test('new-job picker keeps an effort both models offer, drops one the new agent lacks, and sends the pick', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
-  const options = () => [...form.elements.effort.options].map((o) => o.value);
-  assert.deepEqual(options(), ['', 'high', 'max']);
-  form.elements.effort.value = 'max';
-  form.elements.agent.value = 'codex'; form.elements.agent.onchange();
-  assert.deepEqual(options(), ['', 'high']); assert.equal(form.elements.effort.value, '', 'a level the new agent lacks falls back to Default');
-  assert.equal(form.elements.model.value, 'gpt-5.6-sol');
-  form.elements.effort.value = 'high';
-  form.elements.agent.value = 'claude'; form.elements.agent.onchange();
-  assert.equal(form.elements.effort.value, 'high');
+  assert.equal(form.querySelectorAll('select[name=agent],select[name=model],select[name=effort]').length, 0, 'the selects are gone');
+  assert.deepEqual(picked(form), ['claude', 'sonnet', ''], 'no usual: the first agent’s default, effort left to the agent');
+  click(f, '.pick-bar[data-effort=max]'); assert.equal(form.elements.effort.value, 'max');
+  click(f, '.pick-ticket'); assert.ok(f.q('.pick-cabinet'), 'the ticket opens the cabinet');
+  click(f, '.pick-tab[data-agent=codex]'); click(f, '.pick-cell[data-value="gpt-5.6-sol"]');
+  assert.deepEqual(picked(form), ['codex', 'gpt-5.6-sol', ''], 'codex has no max, so the level falls back to auto');
+  assert.equal(f.q('.pick-cabinet'), null, 'choosing closes the cabinet');
+  click(f, '.pick-bar[data-effort=high]');
+  click(f, '.pick-ticket'); click(f, '.pick-tab[data-agent=claude]'); click(f, '.pick-cell[data-value=sonnet]');
+  assert.deepEqual(picked(form), ['claude', 'sonnet', 'high'], 'high survives the switch back');
   form.elements.intent.value = 'I';
   form.dispatchEvent(f.event('submit'));
-  assert.equal(f.sent[0].job.effort, 'high');
+  assert.equal(f.sent[0].job.effort, 'high'); assert.equal(f.sent[0].job.agent, 'claude'); assert.equal(f.sent[0].job.model, 'sonnet');
+  assert.deepEqual(f.usualSaves, [{ type: 'job-settings', patch: { usualPick: { agent: 'claude', model: 'sonnet', effort: 'high' } } }], 'creating a job saves the pick as your usual');
+});
+
+test('new-job picker opens on your usual, says when it is not, and one click returns to it', (t) => {
+  const f = fixture(t); f.data.settings.usualPick = { agent: 'codex', model: 'gpt-5.6-sol', effort: 'high' };
+  f.q('#job-new').click(); const form = f.q('#job-create-form');
+  assert.deepEqual(picked(form), ['codex', 'gpt-5.6-sol', 'high']);
+  assert.equal(f.q('.pick-usual').textContent.trim(), 'Your usual');
+  click(f, '.pick-ticket'); click(f, '.pick-tab[data-agent=claude]'); click(f, '.pick-cell[data-value=sonnet]');
+  assert.match(f.q('.pick-usual').textContent, /Not your usual/);
+  assert.match(f.q('.pick-reset').textContent, /Use Sol 5\.6 · high/);
+  click(f, '.pick-reset');
+  assert.deepEqual(picked(form), ['codex', 'gpt-5.6-sol', 'high']);
+  assert.equal(f.q('.pick-usual').textContent.trim(), 'Your usual');
+  f.view.update(f.data); f.data.settings.usualPick = { agent: 'codex', model: 'gone', effort: 'high' };
+  f.q('#job-dialog').close(); f.q('#job-new').click();
+  assert.deepEqual(picked(f.q('#job-create-form')), ['claude', 'sonnet', ''], 'a usual the catalog no longer has falls back to the default');
+  assert.equal(f.q('.pick-usual').textContent.trim(), 'Claude\'s default');
+});
+
+test('new-job picker follows a changed catalog and Escape closes only the cabinet', (t) => {
+  const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
+  click(f, '.pick-ticket');
+  form.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  assert.equal(f.q('.pick-cabinet'), null, 'Escape closes the cabinet');
+  assert.ok(f.q('#job-create-form'), 'the dialog content stays');
+  click(f, '.pick-ticket');
+  f.view.update(f.data);
+  assert.ok(f.q('.pick-cabinet'), 'an unchanged catalog leaves the open cabinet alone');
 });
 
 test('the new-job primary action starts planning and the plain button parks it in the backlog', (t) => {
@@ -610,7 +643,7 @@ test('new job is a brief beside a property sidebar, with the planning extras fol
   assert.ok(more.contains(form.elements.repos) && more.contains(form.elements.planningPrompt));
   assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'You review', 'Images', 'After delivery']);
   for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'shareImages', 'updateMain']) assert.ok(props.contains(form.elements[name]), `${name} lives in the sidebar`);
-  assert.equal(form.elements.model.parentElement, form.elements.effort.parentElement, 'model and effort sit side by side');
+  assert.ok(props.querySelector('#job-pick').querySelector('.pick-ticket') && props.querySelector('#job-pick .pick-meter'), 'the picker is a ticket with an effort meter in the sidebar');
   assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('small')?.textContent]),
     [['reviewPlan', true, 'before tickets or work'], ['reviewCode', true, 'before commit'], ['reviewMerge', true, 'before merge'], ['reviewSessions', true, 'before done'], ['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, undefined]]);
   assert.match(form.querySelector('.job-create-foot').textContent, /nothing touches Jira until you approve/);

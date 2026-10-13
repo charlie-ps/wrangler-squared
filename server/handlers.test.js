@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeOpenIdeHandler, jobImagesHandler } from './handlers.js';
+import { makeOpenIdeHandler, jobImagesHandler, jobSettingsHandler } from './handlers.js';
 import { fakeHost } from './test-helpers.js';
 
 // The launcher is `open -na <app> --args <worktree>`: an app NAME and a path,
@@ -55,4 +55,12 @@ test('job-images sends the job’s kept pictures back as base64 for the dialog s
   assert.deepEqual(broadcasts.at(-1), { event: 'job-images', jobId: job.id, images: [{ name: A, mime: 'image/png', dataBase64: Buffer.from(A).toString('base64') }] });
   jobImagesHandler.handler({ id: 'nope' }, host);
   assert.deepEqual(broadcasts.at(-1), { event: 'job-images', jobId: 'nope', images: [] });
+});
+
+test('job-settings stores the usual pick the New job picker sends, and refuses one the job fields would', async () => {
+  const { host } = fakeHost();
+  await jobSettingsHandler.handler({ patch: { usualPick: { agent: 'codex', model: 'gpt-6-sol', effort: 'high' } } }, host);
+  assert.deepEqual(host.stores.jobs.snapshot().settings.usualPick, { agent: 'codex', model: 'gpt-6-sol', effort: 'high' });
+  await assert.rejects(jobSettingsHandler.handler({ patch: { usualPick: { agent: 'nope', model: 'x', effort: '' } } }, host));
+  assert.equal(host.stores.jobs.snapshot().settings.usualPick.agent, 'codex');
 });

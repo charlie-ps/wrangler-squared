@@ -123,6 +123,11 @@ export const settingsSchema = z.object({
   // (`open -na <ideApp> --args <path>`, server/handlers.js). An app NAME, not a
   // command: nothing typed here ever reaches a shell.
   ideApp: z.string().trim().min(1).max(120).default('IntelliJ IDEA'),
+  // The agent/model/effort the last created job used: New job's picker opens on it
+  // while the catalog still offers that model. Same bounds as the job's own fields.
+  usualPick: z.object({
+    agent: z.enum(['claude', 'codex']), model: z.string().max(150), effort: z.string().max(40).default(''),
+  }).nullable().default(null),
 });
 // A worker never changes the plan: `move` is a SUGGESTION on a blocked receipt,
 // which the board offers the human as the pre-selected button (job-moves.js).

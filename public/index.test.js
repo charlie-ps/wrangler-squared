@@ -97,8 +97,9 @@ test('the new-job form selects an active task or reveals a required new-task nam
   existing.elements.intent.value = 'Keep the work together';
   existing.elements.taskId.value = 't_auth';
   existing.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  assert.equal(sent[1].job.taskId, 't_auth');
-  assert.equal('newTaskName' in sent[1], false);
+  const creates = sent.filter((m) => m.type === 'job-create');
+  assert.equal(creates[1].job.taskId, 't_auth');
+  assert.equal('newTaskName' in creates[1], false);
 });
 
 test('the rail badge counts every job that needs a human, whatever the view is drawing', () => {

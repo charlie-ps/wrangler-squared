@@ -88,6 +88,20 @@ test('store persists settings, plans and live claims across restart', async (t) 
   assert.equal(f.store.get(f.job.id).runs.filter((r) => !r.stopped).length, 1);
 });
 
+test('usualPick persists across restart, merges like any setting, and is validated like the job fields', async (t) => {
+  const f = fixture(t);
+  assert.equal(f.store.snapshot().settings.usualPick, null, 'unset until a job is created');
+  f.store.settings({ usualPick: { agent: 'codex', model: 'gpt-6-sol', effort: 'high' } });
+  f.store.settings({ concurrency: 3 });
+  assert.deepEqual(new JobStore(f.store.file).snapshot().settings.usualPick, { agent: 'codex', model: 'gpt-6-sol', effort: 'high' });
+  f.store.settings({ usualPick: { agent: 'claude', model: 'opus' } });
+  assert.deepEqual(f.store.snapshot().settings.usualPick, { agent: 'claude', model: 'opus', effort: '' }, 'effort defaults to the agent default');
+  assert.throws(() => f.store.settings({ usualPick: { agent: 'nope', model: 'x', effort: '' } }));
+  assert.throws(() => f.store.settings({ usualPick: { agent: 'claude', model: 'm'.repeat(151), effort: '' } }));
+  assert.throws(() => f.store.settings({ usualPick: { agent: 'claude', model: 'opus', effort: 'e'.repeat(41) } }));
+  assert.equal(f.store.snapshot().settings.usualPick.model, 'opus', 'a rejected patch changes nothing');
+});
+
 // --- Migration (version 1 -> 2) ---
 
 const legacy = {

@@ -4,6 +4,7 @@ import { reviewCode, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml, jobTileHtml } from './job-graph.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 import { createJobImages, imagesPanelHtml, openZoom } from './job-images.js';
+import { mountModelPicker } from './model-picker.js';
 const checkTone = (state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED', 'passing'].includes(state) ? 'passed' : ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'failing'].includes(state) ? 'failed' : '';
 const checkMark = (state) => checkTone(state) === 'passed' ? '✓' : checkTone(state) === 'failed' ? '×' : '○';
 const link = (url, title) => /^https:\/\/github\.com\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(title)} ↗</a>` : esc(title);
@@ -90,6 +91,8 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, deploymentStaleMinutes: 30 } };
   let filter = '', needsOnly = false, showDone = false, selected = null, planDraft = null, revision = null, basePlan = null;
   const commentsShown = new Set();
+  // The New job dialog's model picker while that dialog is open.
+  let picker = null;
   // Kept images by name, filled by `job-images` frames; asked once per job.
   const imageCache = new Map();
   const askedImages = new Set();
@@ -107,7 +110,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     <div class="jobs-toolbar"><span id="jobs-active-count" aria-live="polite"></span><label class="jobs-chip" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="8" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-icon"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="primary" id="job-new">${ICONS.plus}New job</button></div></header>
     <div id="jobs-boards" class="jobs-grid"></div>`;
   const q = (s) => root.querySelector(s);
-  function update(snapshot) { data = snapshot || data; render(); }
+  function update(snapshot) { data = snapshot || data; render(); picker?.agentsChanged(getAgents()); }
   function render() {
     const cards = jobCards(data.jobs);
     const needs = new Set(cards.filter((c) => jobNeedsReview(c.job, c.sub)).map((c) => c.job));
@@ -540,12 +543,13 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   }
   function createJob() {
     selected = null; planDraft = null;
+    picker?.dispose(); picker = null;
     const agents = getAgents();
     const tasks = getTasks().filter((t) => !t.archived && !t.archivedAt);
     const toggle = (name, label, consequence, checked) => `<label class="job-toggle"><span>${label}${consequence ? `<small>${consequence}</small>` : ''}</span><input type="checkbox" class="job-switch" name="${name}" ${checked ? 'checked' : ''}></label>`;
     show(`<form id="job-create-form" class="job-create">
       <div class="job-create-brief"><h2>New job</h2><div class="job-outcome"><label>Describe job<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should we deliver, and how will we know it works?"></textarea></label>${imagesPanelHtml()}</div><details class="job-more"><summary>Planning guidance & repository hints</summary><label>Repository hints <small>Optional · one local checkout path per line. Wrangler can discover others.</small><textarea name="repos" rows="2" placeholder="Leave blank to let Wrangler find the repositories"></textarea></label><label>Extra guidance for the planning agent<textarea name="planningPrompt" rows="4" maxlength="8000" placeholder="Your reusable planning guidance…"></textarea></label></details></div>
-      <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop"><legend>Agent</legend><select name="agent" aria-label="Agent">${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join('')}</select><div class="job-prop-split"><select name="model" aria-label="Model"></select><select name="effort" aria-label="Effort"></select></div></fieldset><fieldset class="job-prop"><legend>You review</legend>${REVIEW_POINTS.map(([name, label, consequence]) => toggle(name, label, consequence, true)).join('')}</fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset><fieldset class="job-prop"><legend>After delivery</legend>${toggle('updateMain', 'Fast-forward main', '', false)}</fieldset></aside>
+      <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop job-pick" id="job-pick"><legend>Agent</legend></fieldset><input type="hidden" name="agent"><input type="hidden" name="model"><input type="hidden" name="effort"><fieldset class="job-prop"><legend>You review</legend>${REVIEW_POINTS.map(([name, label, consequence]) => toggle(name, label, consequence, true)).join('')}</fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset><fieldset class="job-prop"><legend>After delivery</legend>${toggle('updateMain', 'Fast-forward main', '', false)}</fieldset></aside>
       <footer class="job-create-foot"><span>Planning proposes stories and repos. With plan review on, nothing touches Jira until you approve.</span><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
     const form = dialog.querySelector('form');
     let images;
@@ -561,16 +565,12 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       },
     });
     dialog.addEventListener('close', () => images.dispose(), { once: true });
-    const setModels = () => { form.elements.model.innerHTML = (agents.find((a) => a.id === form.elements.agent.value)?.models || []).map((m) => `<option value="${esc(m.value)}" ${m.default ? 'selected' : ''}>${esc(m.label || m.value)}</option>`).join(''); };
-    // Default leaves effort to the agent, as core's dispatch dialog does; a level
-    // only survives an agent switch if the new agent offers it too.
-    const setEfforts = () => {
-      const prev = form.elements.effort.value;
-      const efforts = agents.find((a) => a.id === form.elements.agent.value)?.efforts || [];
-      form.elements.effort.innerHTML = `<option value="">Default</option>${efforts.map((e) => `<option value="${esc(e.value)}">${esc(e.label || e.value)}</option>`).join('')}`;
-      form.elements.effort.value = efforts.some((e) => e.value === prev) ? prev : '';
-    };
-    setModels(); setEfforts(); form.elements.agent.onchange = () => { setModels(); setEfforts(); };
+    // Hidden agent/model/effort keep form.onsubmit and the job-create payload as they were.
+    picker = mountModelPicker(form.querySelector('#job-pick'), {
+      agents, usual: data.settings.usualPick, cover: form,
+      onChange: (pick) => { for (const k of ['agent', 'model', 'effort']) form.elements[k].value = pick[k]; },
+    });
+    dialog.addEventListener('close', () => { picker?.dispose(); picker = null; }, { once: true });
     form.elements.taskId.onchange = () => {
       const creating = form.elements.taskId.value === '__new__';
       form.elements.newTaskName.hidden = !creating;
@@ -581,6 +581,8 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       const taskId = values.get('taskId');
       // Enter and the primary button both start planning; only the grey button parks it.
       send({ type: 'job-create', start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), repos: [...new Set(values.get('repos').split('\n').map((s) => s.trim()).filter(Boolean))], agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', planningPrompt: values.get('planningPrompt'), reviewPlan: values.has('reviewPlan'), reviewCode: values.has('reviewCode'), reviewMerge: values.has('reviewMerge'), reviewSessions: values.has('reviewSessions'), updateMain: values.has('updateMain'), images: images.names(), shareImages: values.has('shareImages'), taskId: taskId && taskId !== '__new__' ? taskId : null } });
+      const usualPick = { agent: String(values.get('agent')), model: String(values.get('model')), effort: String(values.get('effort')) };
+      if (usualPick.agent && usualPick.model) send({ type: 'job-settings', patch: { usualPick } });
     };
   }
   q('#job-new').onclick = createJob;
