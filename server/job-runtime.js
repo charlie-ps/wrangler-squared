@@ -4,7 +4,7 @@ import path from 'node:path';
 import { runFile } from './job-github.js';
 import { jobPrompt, placeholderBranch } from './job-prompts.js';
 import { removeWorktree, gitRepoRoot } from './git.js';
-import { CHECKOUTS_DIR } from './data-dir.js';
+import { checkoutsDir } from './data-dir.js';
 
 // The one module that touches sessions — and therefore the one that had to be
 // REWRITTEN for the extension port rather than copied. In core (agent-wrangler
@@ -85,6 +85,7 @@ export class JobRuntime {
     // TODO(host-api sessions:spawn tag): a `tag` option echoed to onBeforeDispatch
     // would make this explicit rather than positional.
     this.pendingLaunch = { prepared, cleanupHead, adopt: Boolean(existing) };
+    const checkouts = planning && checkoutsDir();
     try {
       const result = await this.host.sessions.spawn({
         cwd: existing?.repoRoot || repo,
@@ -95,8 +96,9 @@ export class JobRuntime {
         ...(worktree ? { worktree } : {}),
         // Planning discovers and clones checkouts, so it needs the parent of the
         // repos it will find; a Codex worker's own worktree git dir is granted by
-        // the wrangler (session-manager.js withCodexWorktreeAddDir).
-        ...(planning ? { addDirs: [CHECKOUTS_DIR] } : {}),
+        // the wrangler (session-manager.js withCodexWorktreeAddDir). No such
+        // folder on this machine, no grant: a missing --add-dir fails the launch.
+        ...(checkouts ? { addDirs: [checkouts] } : {}),
         // Binds task memory before the pane starts, which is the only ordering a
         // Codex session honours (it resolves its writable root once, at launch).
         taskId: job.taskId || undefined,

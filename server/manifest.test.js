@@ -4,6 +4,7 @@ import manifest from './manifest.js';
 import os from 'node:os';
 import path from 'node:path';
 import { placeholderBranch } from './job-prompts.js';
+import { checkoutsDir } from './data-dir.js';
 import { _resetForTests, runnerFor, spendFor, statusOf } from './jobs.js';
 import { fakeHost } from './test-helpers.js';
 
@@ -132,7 +133,7 @@ test('a launch binds its run to the card id via onBeforeDispatch, and job_report
   assert.equal(run.sessionId, spawned[0].sessionId, 'bound before spawn returned');
   assert.match(spawned[0].intent, /^Plan this job: Ship it/);
   assert.equal(spawned[0].worktree, undefined, 'planning runs in a scratch workspace, not a branch');
-  assert.deepEqual(spawned[0].addDirs, [path.join(os.homedir(), 'IdeaProjects')], 'planning clones the repos it discovers');
+  assert.deepEqual(spawned[0].addDirs, checkoutsDir() ? [checkoutsDir()] : undefined, 'planning clones the repos it discovers, if this machine has a checkouts folder');
   assert.deepEqual([spawned[0].autoMergeOnPass, spawned[0].autoFixPrChecks], [false, false]);
 
   // The step protocol is only for a job step: hideTool vetoes spawning for the

@@ -1,9 +1,8 @@
 import path from 'node:path';
 import { ATTRIBUTION, isHumanSub, reviewCode } from './jobs-schema.js';
-import { CHECKOUTS_DIR, displayPath } from './data-dir.js';
+import { checkoutsDir, displayPath } from './data-dir.js';
 import { isFrozen, replanStatus } from './job-replan.js';
 
-const checkouts = displayPath(CHECKOUTS_DIR);
 
 
 // The worktree starts on a placeholder branch (job-runtime.js). The session
@@ -136,7 +135,13 @@ const replanBlock = (job) => lines(
   `Requested change: ${job.replan.feedback}`,
 );
 
+// No checkouts folder on this machine (see data-dir.js): clone beside the
+// checkouts planning did find rather than invent a root.
+const cloneInto = (dir) => dir ? `into ${dir}/<repository-name>` : 'beside your checkouts';
+
 export function jobPrompt(job, sub, run) {
+  const dir = checkoutsDir();
+  const checkouts = dir && displayPath(dir);
   const report = (body, lead = '') => `${lead}job_report {runId:"${run.id}", ${body}}. ${blockedLine}`;
   const attribution = `End the commit message${sub?.pr?.url ? '' : ' and the PR description'} with exactly this line:\n${ATTRIBUTION}`;
   const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, `${attribution}\nCommit, push to the open PR, then `) : report('kind:"published", url:"<PR url>"', `${attribution}\nCommit, push, open the PR, then `);
@@ -150,7 +155,7 @@ export function jobPrompt(job, sub, run) {
       '',
       'Split the goal into the sub-jobs that deliver it, grouped under Jira stories where the work is tracked in Jira. A "pr" sub-job is one repository, one PR, one session. A "session" sub-job is work on this machine that is not a repository change (a one-off script or migration, a console change, a spike later PRs need): no repo, a scratch workspace, a short receipt. A "human" sub-job is a step no agent can do at all (a click only you can make, a vendor, a signature): no repo, no check, nothing runs it — it waits on the board until you mark it done. Prefer a PR for anything that changes a repository.',
       'Stories are optional: work nobody tracks in Jira (personal tooling, a repository with no Jira project, a goal the human says needs no ticket) gets no story — empty `stories`, no `storyId`, never an invented one. Otherwise search Jira READ-ONLY with your own tools and authenticated setup (do not infer it is unavailable because no Jira tool is listed): reference an existing story by its real key, or propose one with no key and, where you can tell, its project (the key prefix). Never invent keys or print credentials; create, edit or transition NOTHING — the human approves titles first and a separate step creates them.',
-      `Discover the repositories yourself from task memory, Jira references and local checkouts. Reuse a matching checkout; if one is missing, verify the GitHub owner and origin and clone it into ${checkouts}/<repository-name>, never into this workspace or over an existing directory. Leave every checkout unchanged (no reset, clean or branch switch) and report its absolute path so implementation can cut a worktree beside it.`,
+      `Discover the repositories from task memory, Jira references and local checkouts. Reuse a matching checkout; if one is missing, verify the GitHub owner and origin and clone it ${cloneInto(checkouts)}, never into this workspace or over an existing directory. Leave every checkout unchanged (no reset, clean or branch switch) and report its absolute path so implementation can cut a worktree beside it.`,
       'Write `context` ONCE for the whole job (≤2000 chars), the way a human writes a dispatch: the shared background, conventions and constraints every worker needs. Each `brief` (≤500 chars) is a dispatch intent that refers to the context rather than repeating it.',
       'Never describe deployments or verification steps: Wrangler reads the repository\'s workflows to know whether a merge deploys and watches whatever GitHub starts. Give `check` (one line) ONLY when the pipeline cannot prove the change works where it lands, e.g. "helm shows the release in dev and prod". A session or human sub-job has no check: a session\'s receipt is its check.',
       '`after` means START AFTER: a sub-job waits until every PR it is after has deployed and every session or human sub-job it is after is done (its output is an input). Each edge serialises the work, so add one only when the dependent needs the prerequisite live or its output. Minimise dependencies and PRs while keeping each piece independently deliverable. Do not propose branch names: the implementing session names its own.',
@@ -232,7 +237,7 @@ export function jobPrompt(job, sub, run) {
       humanOutputBlock(job, sub),
       historyBlock(job, sub, run),
       '',
-      `Do it on this machine in this scratch workspace; no repository changes (report blocked if one is needed); checkouts under ${checkouts} are read-only reference. Never modify production data. Record findings later work needs in task memory.`,
+      `Do it on this machine in this scratch workspace; no repository changes (report blocked if one is needed); ${checkouts ? `checkouts under ${checkouts}` : 'local checkouts'} are read-only reference. Never modify production data. Record findings later work needs in task memory.`,
       '',
       report('kind:"completed", checks:["what you did and how you know"]'),
     ),

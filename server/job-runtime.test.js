@@ -109,8 +109,15 @@ test('launch refuses an archived job task before preparing a workspace or spawni
   assert.deepEqual(spawned, []);
 });
 
+const withCheckouts = async (dir, fn) => {
+  const prev = process.env.AW_CHECKOUTS_DIR;
+  process.env.AW_CHECKOUTS_DIR = dir;
+  try { return await fn(); } finally { if (prev === undefined) delete process.env.AW_CHECKOUTS_DIR; else process.env.AW_CHECKOUTS_DIR = prev; }
+};
+
 test('a jira or session step gets the same scratch workspace as planning: no repository, no branch', async () => {
-  for (const phase of ['jira', 'session']) {
+  const checkouts = fs.mkdtempSync(path.join(os.tmpdir(), 'checkouts-'));
+  for (const phase of ['jira', 'session']) await withCheckouts(checkouts, async () => {
     const { host, spawned } = fakeHost();
     const runtime = runtimeWith(host, { run: async () => assert.fail(`${phase} has no repository to fetch`) });
     let prepared = 'unset';
@@ -118,11 +125,22 @@ test('a jira or session step gets the same scratch workspace as planning: no rep
       { id: 'run_1', phase }, (...v) => { prepared = v; });
     assert.equal(spawned[0].cwd, '', phase);
     assert.equal(spawned[0].worktree, undefined, phase);
-    assert.deepEqual(spawned[0].addDirs, [path.join(os.homedir(), 'IdeaProjects')], phase);
+    assert.deepEqual(spawned[0].addDirs, [checkouts], phase);
     assert.deepEqual(prepared, ['s_1', undefined], 'the wrangler cut nothing, so there is no record to report');
     // And nothing git-shaped to undo afterwards: no worktree, no branch, no PR.
     await runtime.cleanup({ updateMain: true }, { id: 'spike', kind: 'session', sessions: ['s_1'], pr: null, worktree: undefined });
-  }
+  });
+});
+
+test('planning grants no addDir and names no clone root when the checkouts folder does not exist', async () => {
+  await withCheckouts(missing(), async () => {
+    const { host, spawned } = fakeHost();
+    const runtime = runtimeWith(host, { run: async () => assert.fail('planning has no repository to fetch') });
+    await runtime.launch({ id: 'job_12345678', title: 'Sign-in', agent: 'claude', intent: 'Ship it' }, null, { id: 'run_1', phase: 'planning' }, () => {});
+    assert.equal(spawned[0].addDirs, undefined, 'a missing --add-dir fails the launch');
+    assert.doesNotMatch(spawned[0].intent, /IdeaProjects|<repository-name>/);
+    assert.match(spawned[0].intent, /clone it beside your checkouts/);
+  });
 });
 
 test('cleanup deletes only the ref value it verified, and refuses extra commits', async () => {

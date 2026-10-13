@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -19,11 +20,16 @@ export const DATA_DIR = process.env.AW_DATA_DIR
 
 // Where repositories are checked out on this machine: planning clones missing
 // repos here and workers treat it as read-only reference, so the prompts and the
-// planning launch's `addDirs` must agree on the one path. The default is the
-// author's layout; AW_CHECKOUTS_DIR overrides it.
-export const CHECKOUTS_DIR = process.env.AW_CHECKOUTS_DIR
-  ? path.resolve(expandTilde(process.env.AW_CHECKOUTS_DIR))
-  : path.join(os.homedir(), 'IdeaProjects');
+// planning launch's `addDirs` must agree on the one path. AW_CHECKOUTS_DIR, else
+// ~/IdeaProjects (the author's layout), and only if it is a real directory: an
+// `--add-dir` that does not exist fails the launch, so null means "no such folder".
+// Read per call so a test (or a later mkdir) is seen without a restart.
+export function checkoutsDir() {
+  const dir = process.env.AW_CHECKOUTS_DIR
+    ? path.resolve(expandTilde(process.env.AW_CHECKOUTS_DIR))
+    : path.join(os.homedir(), 'IdeaProjects');
+  try { return fs.statSync(dir).isDirectory() ? dir : null; } catch { return null; }
+}
 
 // The prompts show `~/…` where they can: shorter, and not the human's login name.
 export const displayPath = (p) => {
