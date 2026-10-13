@@ -19,6 +19,13 @@ new Task. Every agent session launched for that Job uses the same Task and its
 shared memory. Archiving that Task stops its active sessions; restore it before
 retrying the Job so later sessions do not lose the Task context.
 
+Agents can create jobs too: any ordinary agent session gets a `create_job` tool
+taking what the New job form takes (the description as `intent`, `repos`,
+`agent`/`model`/`effort`, an optional `taskId` or `newTaskName`, and `start`).
+It returns the `jobId`; without `start` the job waits in the backlog, and with it
+planning still stops for a human to approve the plan. Job-step sessions do not
+see the tool, so a job cannot start further jobs.
+
 ## Status
 
 Functionally complete against host API **1.27.0**: 1.4 added the worktree,
@@ -44,7 +51,7 @@ existing installation therefore requires fresh consent in the Extensions tab;
 a development copy with older consent is quarantined until it is reinstalled.
 The host currently groups Task creation with rename and session assignment under
 the broad `tasks:write` capability, although this extension uses it only to
-create the Task requested in the New job form.
+create the Task requested in the New job form or by `create_job`.
 
 For development, **copy** (never symlink — discovery only sees real directories)
 a checkout, `node_modules` included, to `<AW_DATA_DIR>/extensions/jobs` of a

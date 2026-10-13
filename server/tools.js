@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { isHumanSub, reportSchema } from './jobs-schema.js';
-import { runnerFor, runForSession } from './jobs.js';
+import { isHumanSub, jobInputSchema, reportSchema } from './jobs-schema.js';
+import { runForSession } from './jobs.js';
+import { makeCreateJob } from './job-create.js';
 
 // MCP tools in the EXTENSION signature: `handler({ host, caller }, args)` — no
 // `deps` (agent-wrangler docs/superpowers/specs/2026-09-11-extensions-api-design.md,
@@ -58,16 +59,36 @@ export const getJobContextTool = {
   },
 };
 
-export const TOOLS = [jobReportTool, getJobContextTool];
+// The New job form as a tool, so an ordinary agent session can hand work to
+// Wrangler². Unlike the form it broadcasts nothing: `job-created` would close a
+// human's open New job dialog. The rebuild is what shows the job on the board.
+export function makeCreateJobTool(deps) {
+  const createJob = makeCreateJob(deps);
+  return {
+    name: 'create_job',
+    description: 'Create a Wrangler² automated job from a description of the outcome you want, the way a human does through the Jobs view\'s New job form. intent is the description (a title is generated from it unless you pass one); repos are absolute repository paths the planner should start from (leave empty to let it discover them); agent/model/effort choose what runs each step (empty means the board default). Put the job in an existing Task with taskId, or create one with newTaskName, not both; leave both out for an unassigned job. start:true starts planning straight away; otherwise the job waits in the backlog for a human to start it. Planning still stops for the human to approve the plan. Returns the jobId.',
+    inputSchema: {
+      ...jobInputSchema.shape,
+      newTaskName: z.string().optional(),
+      start: z.boolean().default(false),
+    },
+    async handler({ host }, { newTaskName, start, ...job }) {
+      try {
+        const created = await createJob(host, { job, newTaskName, start });
+        return result({ jobId: created.id, title: created.title, stage: host.stores.jobs.get(created.id).stage });
+      } catch (e) { return errorResult(e?.issues?.[0]?.message || e?.message || String(e)); }
+    },
+  };
+}
+export const createJobTool = makeCreateJobTool();
+
+export const TOOLS = [jobReportTool, getJobContextTool, createJobTool];
 
 // Per-caller veto (manifest `hideTool`): a job step must not see the spawning and
 // scheduling tools — core's mcp/server.js skipped them for an `automationRun`
-// caller. Fails OPEN by the loader's design (a throw hides nothing).
-const SPAWNING = new Set(['spawn_session', 'spawn_workflow', 'schedule_session']);
+// caller — nor create_job, or a job could recursively spawn jobs. Fails OPEN by
+// the loader's design (a throw hides nothing).
+const SPAWNING = new Set(['spawn_session', 'spawn_workflow', 'schedule_session', 'create_job']);
 export function hideTool({ caller, tool, host }) {
   return SPAWNING.has(tool) && Boolean(runForSession(host.stores.jobs, caller));
 }
-
-// Keep the runner import used from here so tools.js is the one module handlers
-// and tools share for "something changed, poke the runner".
-export const kick = (host) => runnerFor(host).tick();
