@@ -14,15 +14,16 @@ function fixture(t) {
   const prevDoc = globalThis.document, prevFormData = globalThis.FormData;
   globalThis.document = window.document; globalThis.FormData = window.FormData;
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
+  const staging = { stage: async () => ({ name: 'paste-1700000000000-aaaa1111.png' }) };
   const sent = [], sessions = [], diffs = [], diffContexts = [], onBoard = new Set();
-  const view = initJobsView({ send: (m) => sent.push(structuredClone(m)), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
+  const view = initJobsView({ send: (m) => sent.push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; await window.happyDOM.close(); });
   const job = { id: 'job1', title: 'Sign-in', intent: 'Reliable sign-in', repos: ['/repo'], stage: 'planning', plan, subJobs: [], runs: [], moves: [], revision: 2, reviewMerge: true };
   const data = { jobs: [structuredClone(job)], settings: { concurrency: 2, maxRepairs: 2 } };
   const q = (s) => document.querySelector(s);
   const event = (name) => new window.Event(name, { bubbles: true, cancelable: true });
   view.update(data);
-  return { window, view, data, sent, q, event, sessions, diffs, diffContexts, onBoard };
+  return { window, view, data, staging, sent, q, event, sessions, diffs, diffContexts, onBoard };
 }
 
 test('every job is one tonal card in its state, and only jobs with attention items survive Needs me', (t) => {
@@ -607,15 +608,15 @@ test('new job is a brief beside a property sidebar, with the planning extras fol
   assert.equal(more.open, false, 'repository hints and guidance start folded');
   assert.equal(more.querySelector('summary').textContent, 'Planning guidance & repository hints');
   assert.ok(more.contains(form.elements.repos) && more.contains(form.elements.planningPrompt));
-  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'You review', 'After delivery']);
-  for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'updateMain']) assert.ok(props.contains(form.elements[name]), `${name} lives in the sidebar`);
+  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'You review', 'Images', 'After delivery']);
+  for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'shareImages', 'updateMain']) assert.ok(props.contains(form.elements[name]), `${name} lives in the sidebar`);
   assert.equal(form.elements.model.parentElement, form.elements.effort.parentElement, 'model and effort sit side by side');
   assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('small')?.textContent]),
-    [['reviewPlan', true, 'before tickets or work'], ['reviewCode', true, 'before commit'], ['reviewMerge', true, 'before merge'], ['reviewSessions', true, 'before done'], ['updateMain', false, undefined]]);
+    [['reviewPlan', true, 'before tickets or work'], ['reviewCode', true, 'before commit'], ['reviewMerge', true, 'before merge'], ['reviewSessions', true, 'before done'], ['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, undefined]]);
   assert.match(form.querySelector('.job-create-foot').textContent, /nothing touches Jira until you approve/);
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent[0], { type: 'job-create', start: true, job: { intent: 'Deliver it', repos: [], agent: 'claude', model: 'sonnet', effort: '', planningPrompt: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, updateMain: false, taskId: null } });
+  assert.deepEqual(f.sent[0], { type: 'job-create', start: true, job: { intent: 'Deliver it', repos: [], agent: 'claude', model: 'sonnet', effort: '', planningPrompt: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, updateMain: false, images: [], shareImages: true, taskId: null } });
 });
 
 test('new jobs need only an outcome while repository hints stay optional', (t) => {
@@ -1202,4 +1203,44 @@ test('a green PR behind its base reads as updating the branch', () => {
   const sub = { id: 'a', title: 'A', repo: '/repo', after: [], stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'h1', checkStatus: 'pending', behind: true, checks: [] } };
   const job = { id: 'j', stage: 'active', subJobs: [sub], runs: [], moves: [], reviewMerge: true };
   assert.deepEqual(jobStatus(job, sub), { tone: 'working', text: 'Behind base · updating branch' });
+});
+
+test('New job holds planning back while an image uploads, then creates the job with its names and the sharing flag', async (t) => {
+  const f = fixture(t);
+  const prevURL = globalThis.URL;
+  globalThis.URL = Object.assign(function (...a) { return new prevURL(...a); }, { createObjectURL: () => 'blob:1', revokeObjectURL() {} });
+  t.after(() => { globalThis.URL = prevURL; });
+  let release;
+  f.staging.stage = () => new Promise((r) => { release = () => r({ name: 'paste-1700000000000-aaaa1111.png' }); });
+  f.q('#job-new').click(); const form = f.q('#job-create-form');
+  const share = f.q('#job-share-images');
+  assert.equal(share.hidden, true, 'the sharing switch only appears once there is an image');
+  const drop = f.event('drop'); drop.dataTransfer = { files: [new f.window.File(['x'], 'shot.png', { type: 'image/png' })], types: ['Files'], items: [], getData: () => '' };
+  form.querySelector('.job-outcome').dispatchEvent(drop);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(share.hidden, false);
+  assert.deepEqual([...form.querySelectorAll('.job-create-foot button')].map((b) => b.disabled), [true, true]);
+  form.elements.intent.value = 'Match the mockup';
+  form.dispatchEvent(f.event('submit'));
+  assert.equal(f.sent.length, 0, 'submitting mid-upload sends nothing');
+  release(); await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual([...form.querySelectorAll('.job-create-foot button')].map((b) => b.disabled), [false, false]);
+  form.elements.shareImages.checked = false;
+  form.dispatchEvent(f.event('submit'));
+  assert.deepEqual([f.sent[0].job.images, f.sent[0].job.shareImages], [['paste-1700000000000-aaaa1111.png'], false]);
+});
+
+test('a job’s Outcome shows its pictures as a numbered strip, asks for the bytes once, and fills in when they arrive', (t) => {
+  const f = fixture(t);
+  const A = 'paste-1700000000000-aaaa1111.png', B = 'paste-1700000000001-bbbb2222.png';
+  f.data.jobs[0].images = [A, B]; f.view.update(f.data);
+  f.q('[data-job="job1"]').click();
+  assert.deepEqual([...f.q('#job-dialog').querySelectorAll('.job-image-strip .job-image-num')].map((n) => n.textContent), ['1', '2']);
+  assert.deepEqual(f.sent, [{ type: 'job-images', id: 'job1' }]);
+  f.view.update(f.data);
+  assert.equal(f.sent.length, 1, 'asked once per job');
+  f.view.images({ jobId: 'job1', images: [{ name: A, mime: 'image/png', dataBase64: 'eA==' }] });
+  const thumbs = [...f.q('#job-dialog').querySelectorAll('.job-image-strip .job-image-thumb')];
+  assert.equal(thumbs[0].querySelector('img').getAttribute('src'), 'data:image/png;base64,eA==');
+  assert.equal(thumbs[1].querySelector('img'), null, 'a picture the store lost stays a numbered blank');
 });

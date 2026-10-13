@@ -32,7 +32,7 @@ feature).
   client `api.agents()` the New job form reads its models and efforts from,
   1.27 the client `api.openDiff` behind Review code in Wrangler, and 1.31 the
   `images:keep` capability plus the `images` spawn option behind a job's attached
-  images (client `api.images.stage` stages them; the job keeps its own copies).
+  images (client `api.images.stage` stages them; the job keeps its own copies; the New job tray is `public/job-images.js`, built on a vendored `public/clipboard-images.js`).
 - **`package-lock.json` is mandatory** — the wrangler refuses to install without
   one. Regenerate it after any dependency change.
 

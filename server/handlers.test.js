@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeOpenIdeHandler } from './handlers.js';
+import { makeOpenIdeHandler, jobImagesHandler } from './handlers.js';
 import { fakeHost } from './test-helpers.js';
 
 // The launcher is `open -na <app> --args <worktree>`: an app NAME and a path,
@@ -43,4 +43,16 @@ test('every way the launch cannot happen is a job-ide-failed broadcast, not a th
   const missing = ideFixture({ fail: Object.assign(new Error('exit 1'), { code: 1 }) });
   await missing.handler.handler({ id: missing.job.id, subJobId: 'api' }, missing.host);
   assert.equal(missing.broadcasts.at(-1).error, 'Could not open IntelliJ IDEA: Unable to find application named');
+});
+
+test('job-images sends the job’s kept pictures back as base64 for the dialog strip, skipping a name the store lost', () => {
+  const { host, broadcasts, staged } = fakeHost();
+  const A = 'paste-1700000000000-aaaa1111.png', B = 'paste-1700000000001-bbbb2222.png';
+  staged.add(A);
+  host.images.keep(A);
+  const job = host.stores.jobs.create({ intent: 'Fix the layout', images: [A, B] });
+  jobImagesHandler.handler({ id: job.id }, host);
+  assert.deepEqual(broadcasts.at(-1), { event: 'job-images', jobId: job.id, images: [{ name: A, mime: 'image/png', dataBase64: Buffer.from(A).toString('base64') }] });
+  jobImagesHandler.handler({ id: 'nope' }, host);
+  assert.deepEqual(broadcasts.at(-1), { event: 'job-images', jobId: 'nope', images: [] });
 });

@@ -96,6 +96,8 @@ export default {
       } else if (msg.event === 'job-action-complete') {
         view?.created(msg);
         toast('Job updated');
+      } else if (msg.event === 'job-images') {
+        view?.images(msg);
       } else if (msg.event === 'job-ide-opened') {
         toast(`Opened in ${msg.app}`);
       } else if (msg.event === 'job-ide-failed') {
@@ -137,6 +139,7 @@ export default {
         document.body.appendChild(dialog);
         view = initJobsView({
           send: api.send,
+          stageImage: (file) => api.images.stage(file),
           getAgents: () => api.agents(),
           getTasks: () => tasks,
           // Core answered "is this card on the board right now" off the graph's

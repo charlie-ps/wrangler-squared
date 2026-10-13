@@ -3,6 +3,7 @@ import { ICONS } from './icons.js';
 import { reviewCode, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml, jobTileHtml } from './job-graph.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
+import { createJobImages, imagesPanelHtml, openZoom } from './job-images.js';
 const checkTone = (state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED', 'passing'].includes(state) ? 'passed' : ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'failing'].includes(state) ? 'failed' : '';
 const checkMark = (state) => checkTone(state) === 'passed' ? '✓' : checkTone(state) === 'failed' ? '×' : '○';
 const link = (url, title) => /^https:\/\/github\.com\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(title)} ↗</a>` : esc(title);
@@ -83,12 +84,15 @@ export function primaryAction(dialog) {
   return form ? () => form.requestSubmit(button) : () => button.click();
 }
 
-export function initJobsView({ send, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {} }) {
+export function initJobsView({ send, stageImage, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {} }) {
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, deploymentStaleMinutes: 30 } };
   let filter = '', needsOnly = false, showDone = false, selected = null, planDraft = null, revision = null, basePlan = null;
   const commentsShown = new Set();
+  // Kept images by name, filled by `job-images` frames; asked once per job.
+  const imageCache = new Map();
+  const askedImages = new Set();
   // Which folded sections the human has opened: the detail is rebuilt on every
   // graph tick, so the open state has to outlive the markup.
   const openMore = new Set();
@@ -231,12 +235,33 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
     : `<div><span class="job-story-key">${esc(storyLabel(s, stories))}</span> ${esc(s.title)}</div>`).join('')}</div>` : '';
   // Everything a plan says in prose, folded into one section: the stepper is the
   // decision, this is the reading behind it.
+  // The pictures a job was created with, as numbered thumbnails under the outcome. The
+  // markup is only placeholders: the bytes live server-side (images:keep) and are
+  // filled in from `imageCache` once a job-images frame has brought them.
+  const stripHtml = (job) => (job.images || []).length ? `<div class="job-image-strip" data-strip="${esc(job.id)}">${job.images.map((n, i) => `<button type="button" class="job-image-thumb" data-image="${esc(n)}" aria-label="Enlarge image ${i + 1}"><span class="job-image-num">${i + 1}</span></button>`).join('')}</div>` : '';
+  function hydrateStrips() {
+    dialog.querySelectorAll('[data-strip]').forEach((strip) => {
+      const missing = [];
+      strip.querySelectorAll('[data-image]').forEach((b) => {
+        const got = imageCache.get(b.dataset.image);
+        if (!got) return missing.push(b.dataset.image);
+        if (b.querySelector('img')) return;
+        const img = document.createElement('img');
+        img.src = `data:${got.mime};base64,${got.dataBase64}`;
+        img.alt = '';
+        b.prepend(img);
+        b.title = 'Enlarge';
+        b.onclick = () => openZoom(img.src, `Image ${b.querySelector('.job-image-num').textContent}`);
+      });
+      if (missing.length && !askedImages.has(strip.dataset.strip)) { askedImages.add(strip.dataset.strip); send({ type: 'job-images', id: strip.dataset.strip }); }
+    });
+  }
   function planMoreHtml(job, plan, editable) {
     const briefs = (plan?.subJobs || []).map((s) => `<h5>${kindChipHtml(s)} ${esc(s.title)}</h5><p>${esc(s.brief)}</p>${s.check ? `<p>Check after it lands: ${esc(s.check)}</p>` : ''}`).join('');
     const fresh = (plan?.stories || []).filter((s) => !s.key).length;
     return more('plan', `${ICONS.doc}Plan details`, `${plan?.stories?.length ? `<h4>Stories <small>${fresh ? `${fresh} new · created only after you approve` : 'existing'}</small></h4>${storiesHtml(plan.stories, editable)}` : ''}
       ${plan?.context ? `<h4>Context <small>every session on this job gets it</small></h4><p class="job-context">${esc(plan.context)}</p>` : ''}
-      <h4>Outcome</h4><p class="job-intent">${esc(job.intent)}</p>${briefs ? `<h4>What each sub-job is asked to do</h4>${briefs}` : ''}`, 'job-plan-more');
+      <h4>Outcome</h4><p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}${briefs ? `<h4>What each sub-job is asked to do</h4>${briefs}` : ''}`, 'job-plan-more');
   }
   // Superseded PRs are left open on GitHub (nothing here closes or deletes one),
   // so the job says where they are rather than leaving an orphan to puzzle over.
@@ -295,7 +320,7 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
     } else if (job.stage === 'jira') body = `${planGraphHtml(job.plan)}${planMoreHtml(job, job.plan, false)}`;
     else if (replanProposed(job)) body = proposalHtml(job);
     else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b> ${esc(job.replan.feedback)}</p>` : ''}${supersededHtml(job)}${planGraphHtml({ subJobs: job.subJobs, stories: job.plan?.stories }, { stateOf: (s) => subState(job, s), lineOf: (s) => subLine(job, s) })}${planMoreHtml(job, job.plan, false)}${movesHistoryHtml(job)}`;
-    else body = `<p class="job-intent">${esc(job.intent)}</p>`;
+    else body = `<p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}`;
     if (job.error) fab = `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>`;
     else if (job.stage === 'backlog' && !job.cancelledAt) fab = `<button class="primary" data-action="start" title="${esc(hints[0])}">${ICONS.play}Start planning</button>`;
     else if (replanProposed(job)) fab = `<button class="primary" data-action="approve-replan" title="${esc(hints.at(-1))}" ${job.runs.some((r) => !r.stopped && !r.subJobId) ? 'disabled' : ''}>${ICONS.check}Approve change</button>`;
@@ -402,6 +427,7 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });
     dialog.querySelectorAll('.job-move[data-move], [data-fab-move]').forEach((b) => b.onclick = () => openMove(job, sub, b.dataset.move || b.dataset.fabMove));
     wireGraph();
+    hydrateStrips();
     const bind = (id, fn) => { const e = dialog.querySelector(id); if (e) e.onclick = fn; };
     bind('#job-refine', () => {
       // On a running job the answer is a proposal, not a new plan: say so before
@@ -518,10 +544,23 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
     const tasks = getTasks().filter((t) => !t.archived && !t.archivedAt);
     const toggle = (name, label, consequence, checked) => `<label class="job-toggle"><span>${label}${consequence ? `<small>${consequence}</small>` : ''}</span><input type="checkbox" class="job-switch" name="${name}" ${checked ? 'checked' : ''}></label>`;
     show(`<form id="job-create-form" class="job-create">
-      <div class="job-create-brief"><h2>New job</h2><label>Describe job<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should we deliver, and how will we know it works?"></textarea></label><details class="job-more"><summary>Planning guidance & repository hints</summary><label>Repository hints <small>Optional · one local checkout path per line. Wrangler can discover others.</small><textarea name="repos" rows="2" placeholder="Leave blank to let Wrangler find the repositories"></textarea></label><label>Extra guidance for the planning agent<textarea name="planningPrompt" rows="4" maxlength="8000" placeholder="Your reusable planning guidance…"></textarea></label></details></div>
-      <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop"><legend>Agent</legend><select name="agent" aria-label="Agent">${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join('')}</select><div class="job-prop-split"><select name="model" aria-label="Model"></select><select name="effort" aria-label="Effort"></select></div></fieldset><fieldset class="job-prop"><legend>You review</legend>${REVIEW_POINTS.map(([name, label, consequence]) => toggle(name, label, consequence, true)).join('')}</fieldset><fieldset class="job-prop"><legend>After delivery</legend>${toggle('updateMain', 'Fast-forward main', '', false)}</fieldset></aside>
+      <div class="job-create-brief"><h2>New job</h2><div class="job-outcome"><label>Describe job<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should we deliver, and how will we know it works?"></textarea></label>${imagesPanelHtml()}</div><details class="job-more"><summary>Planning guidance & repository hints</summary><label>Repository hints <small>Optional · one local checkout path per line. Wrangler can discover others.</small><textarea name="repos" rows="2" placeholder="Leave blank to let Wrangler find the repositories"></textarea></label><label>Extra guidance for the planning agent<textarea name="planningPrompt" rows="4" maxlength="8000" placeholder="Your reusable planning guidance…"></textarea></label></details></div>
+      <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop"><legend>Agent</legend><select name="agent" aria-label="Agent">${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join('')}</select><div class="job-prop-split"><select name="model" aria-label="Model"></select><select name="effort" aria-label="Effort"></select></div></fieldset><fieldset class="job-prop"><legend>You review</legend>${REVIEW_POINTS.map(([name, label, consequence]) => toggle(name, label, consequence, true)).join('')}</fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset><fieldset class="job-prop"><legend>After delivery</legend>${toggle('updateMain', 'Fast-forward main', '', false)}</fieldset></aside>
       <footer class="job-create-foot"><span>Planning proposes stories and repos. With plan review on, nothing touches Jira until you approve.</span><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
     const form = dialog.querySelector('form');
+    let images;
+    images = createJobImages({
+      root: form.querySelector('.job-outcome'), input: form.elements.intent,
+      attach: form.querySelector('.job-images-attach'), fileInput: form.querySelector('.job-images-panel input[type=file]'),
+      stage: (blob) => stageImage(blob),
+      onChange: () => {
+        if (!images) return;
+        const busy = images.busy();
+        form.querySelector('#job-share-images').hidden = !images.names().length && !busy;
+        form.querySelectorAll('.job-create-foot button').forEach((b) => { b.disabled = busy; b.title = busy ? 'Waiting for images to finish uploading' : ''; });
+      },
+    });
+    dialog.addEventListener('close', () => images.dispose(), { once: true });
     const setModels = () => { form.elements.model.innerHTML = (agents.find((a) => a.id === form.elements.agent.value)?.models || []).map((m) => `<option value="${esc(m.value)}" ${m.default ? 'selected' : ''}>${esc(m.label || m.value)}</option>`).join(''); };
     // Default leaves effort to the agent, as core's dispatch dialog does; a level
     // only survives an agent switch if the new agent offers it too.
@@ -538,10 +577,10 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
       form.elements.newTaskName.required = creating;
     };
     form.onsubmit = (e) => {
-      e.preventDefault(); const values = new FormData(form);
+      e.preventDefault(); if (images.busy()) return; const values = new FormData(form);
       const taskId = values.get('taskId');
       // Enter and the primary button both start planning; only the grey button parks it.
-      send({ type: 'job-create', start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), repos: [...new Set(values.get('repos').split('\n').map((s) => s.trim()).filter(Boolean))], agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', planningPrompt: values.get('planningPrompt'), reviewPlan: values.has('reviewPlan'), reviewCode: values.has('reviewCode'), reviewMerge: values.has('reviewMerge'), reviewSessions: values.has('reviewSessions'), updateMain: values.has('updateMain'), taskId: taskId && taskId !== '__new__' ? taskId : null } });
+      send({ type: 'job-create', start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), repos: [...new Set(values.get('repos').split('\n').map((s) => s.trim()).filter(Boolean))], agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', planningPrompt: values.get('planningPrompt'), reviewPlan: values.has('reviewPlan'), reviewCode: values.has('reviewCode'), reviewMerge: values.has('reviewMerge'), reviewSessions: values.has('reviewSessions'), updateMain: values.has('updateMain'), images: images.names(), shareImages: values.has('shareImages'), taskId: taskId && taskId !== '__new__' ? taskId : null } });
     };
   }
   q('#job-new').onclick = createJob;
@@ -572,7 +611,7 @@ export function initJobsView({ send, getAgents, getTasks = () => [], onSession, 
   // openDetail is exposed for the return leg of the diff round trip only — it opens
   // the same dialog a board card's click does, from a job/sub id pair index.js kept.
   // newJob is the intro's last button.
-  return { update, newJob: createJob, created: (msg) => {
+  return { update, newJob: createJob, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
     if (dialog.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;
     dialog.close();
   }, openDetail };

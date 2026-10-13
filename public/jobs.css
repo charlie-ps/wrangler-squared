@@ -385,3 +385,32 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
   .job-node-repo { display:none; }
 }
 @media(prefers-reduced-motion:reduce) { .intro-switch,.intro-switch::after,.job-switch,.job-switch::after,.intro-figure .job-node-tile,.intro-graph path,.intro-goal,.intro-goal .job-avatar,.intro-mini-job,.intro-mini-job .job-avatar,.intro-rail-badge { transition:none; } .intro-rail-badge.bump { animation:none; } }
+
+/* Images on a job: the New job tray under the outcome, and the strip in the job dialog. */
+.job-outcome>label { margin:14px 0 0; }
+.job-outcome textarea { border-bottom-left-radius:0; border-bottom-right-radius:0; }
+.job-images-panel { border:1px solid var(--border); border-top:1px dashed var(--border-muted); border-radius:0 0 8px 8px; background:var(--field-bg); }
+.job-outcome.dragging textarea,.job-outcome.dragging .job-images-panel { border-color:var(--blue); background:color-mix(in srgb, var(--blue) 8%, var(--field-bg)); }
+.job-images-tray { display:flex; flex-wrap:wrap; gap:10px; margin:0; padding:10px; list-style:none; }
+.job-images-tray[hidden],.job-dialog .job-prop[hidden] { display:none; }
+.job-image { position:relative; width:112px; }
+.job-image-thumb { position:relative; display:block; width:112px; height:76px; padding:0; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--surface-2); cursor:zoom-in; }
+.job-image-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.job-image-num { position:absolute; left:4px; top:4px; min-width:18px; padding:1px 5px; border-radius:9px; background:var(--overlay); color:var(--fg); font-size:11px; line-height:16px; text-align:center; box-sizing:border-box; }
+.job-image-remove { position:absolute; right:4px; top:4px; width:20px; height:20px; padding:0; border:0; border-radius:50%; background:var(--overlay); color:var(--fg); font-size:14px; line-height:20px; cursor:pointer; }
+.job-image-remove:hover { background:var(--red); color:var(--surface); }
+.job-image-name { display:block; margin-top:4px; font-size:11px; color:var(--fg-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.job-image-spinner { display:none; position:absolute; left:50%; top:26px; width:22px; height:22px; margin-left:-11px; border:2px solid var(--border); border-top-color:var(--blue); border-radius:50%; animation:job-spin .9s linear infinite; }
+.job-image.uploading .job-image-spinner { display:block; }
+.job-image.uploading .job-image-thumb img { opacity:.45; }
+.job-images-bar { display:flex; align-items:center; gap:10px; padding:6px 10px; font-size:12px; color:var(--fg-muted); }
+.job-images-panel.has-images .job-images-bar { border-top:1px solid var(--border-muted); }
+.job-images-attach { padding:3px 10px; font-size:12px; }
+.job-images-count { margin-left:auto; font-variant-numeric:tabular-nums; }
+.job-dialog p.job-images-error { margin:6px 0 0; color:var(--red-fg); }
+.job-dialog p.job-images-error[hidden] { display:none; }
+.job-image-strip { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
+.job-image-strip .job-image-thumb { width:84px; height:57px; }
+.job-image-zoom { max-width:92vw; max-height:92vh; padding:0; border:0; background:transparent; }
+.job-image-zoom::backdrop { background:var(--overlay); }
+.job-image-zoom img { display:block; max-width:92vw; max-height:92vh; border-radius:8px; cursor:zoom-out; }

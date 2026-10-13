@@ -83,4 +83,20 @@ export function makeOpenIdeHandler({ execFile = defaultExecFile, access = defaul
 }
 export const jobOpenIdeHandler = makeOpenIdeHandler();
 
-export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler];
+// The job dialog's thumbnail strip. A job's pictures live in the extension's own
+// store (`images:keep`) and nothing serves that store to a browser, so the bytes
+// ride the one outbound channel there is. Asked once per job per dialog, and a
+// name the store has lost is simply absent.
+export const jobImagesHandler = {
+  type: 'job-images',
+  handler(msg, host) {
+    const job = host.stores.jobs.get(msg.id);
+    const images = (job?.images || []).flatMap((name) => {
+      const got = host.images.read(name);
+      return got ? [{ name, mime: got.mime, dataBase64: Buffer.from(got.bytes).toString('base64') }] : [];
+    });
+    host.broadcast({ event: 'job-images', jobId: msg.id, images });
+  },
+};
+
+export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler];
