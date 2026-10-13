@@ -419,21 +419,24 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
 
 /* New job's model picker (model-picker.js, art in model-plates.js): a ticket and an
    effort meter in the sidebar, and a cabinet that opens over the brief column only.
-   Chrome follows the board's variables; the Claude and Codex plates keep their own
-   fixed palettes (paper, night) in light and dark alike. */
+   Chrome follows the board's variables; the plates keep their own fixed palettes.
+   Claude's chrome is the near-black of the Opus and Sonnet launch pages on a dark
+   board and Haiku's ivory on a light one (core's body.light). */
 .job-create { position:relative; }
-.job-pick,.pick-cabinet { --pick-paper:#f8f7f3; --pick-ink:#191817; --pick-ink-soft:#6b675f; --pick-hair:#d6d0c4; --pick-night:#070a10; --pick-star:#eef0f6; --pick-star-soft:#8b93a7; --pick-serif:Georgia,"Iowan Old Style",serif; --pick-mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.job-pick,.pick-cabinet { --c-ground:#141413; --c-raised:#201f1d; --c-line:#33322e; --c-ink:#f0eee6; --c-hover:#ffffff0a; --pick-night:#070a10; --pick-star:#eef0f6; --pick-star-soft:#8b93a7; --pick-sans:system-ui,-apple-system,"Segoe UI",sans-serif; --pick-serif:Georgia,"Iowan Old Style",serif; --pick-mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#f0eee6; --c-line:#e3e0d6; --c-ink:#141413; --c-hover:#1414130a; }
 .pick-ticket { appearance:none; display:grid; width:100%; padding:0; border-radius:10px; overflow:hidden; text-align:left; cursor:pointer; color:inherit; font:inherit; transition:transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s; }
 .pick-ticket:hover { transform:translateY(-1px); box-shadow:0 8px 18px -12px var(--shadow); }
 .pick-ticket:focus-visible,.pick-bar:focus-visible,.pick-cell:focus-visible,.pick-tab:focus-visible,.pick-close:focus-visible,.pick-reset:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
-.pick-band { display:block; height:58px; position:relative; overflow:hidden; }
+.pick-band { display:block; height:64px; position:relative; overflow:hidden; }
 .pick-band>svg,.pick-band>canvas,.pick-band>div { position:absolute; inset:0; width:100%; height:100%; }
 .pick-trow { display:flex; align-items:baseline; justify-content:space-between; gap:8px; padding:7px 10px 8px; min-width:0; }
 .pick-tname { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pick-tchange { flex:none; font:500 9.5px var(--pick-mono); letter-spacing:.12em; opacity:.6; }
 .pick-ticket:hover .pick-tchange { opacity:1; }
-.pick-ticket.claude { background:var(--pick-paper); color:var(--pick-ink); border:1px solid var(--pick-hair); }
-.pick-ticket.claude .pick-tname { font:500 17px/1.2 var(--pick-serif); }
+.pick-ticket.claude { background:var(--c-ground); color:var(--c-ink); border:1px solid var(--c-line); }
+.pick-ticket.claude .pick-tname { font:500 16.5px/1.2 var(--pick-serif); letter-spacing:-.012em; }
+.pick-tname small,.pick-tag small { font:500 9.5px var(--pick-sans); letter-spacing:.12em; opacity:.6; margin-left:4px; }
 .pick-ticket.codex { background:var(--pick-night); color:var(--pick-star); border:1px solid #000; }
 .pick-ticket.codex .pick-tname { font:300 16px/1.2 var(--font); letter-spacing:-.02em; }
 .pick-ticket.generic { background:var(--surface); color:var(--fg); border:1px solid var(--border); }
@@ -465,11 +468,15 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
 .pick-preview { display:grid; gap:10px; align-content:start; min-width:0; }
 .pick-art { position:relative; width:100%; aspect-ratio:16/10; border-radius:9px; overflow:hidden; }
 .pick-art>svg,.pick-art>canvas,.pick-art>div { position:absolute; inset:0; width:100%; height:100%; }
-.plate-specimen { display:grid; place-items:center; background:radial-gradient(ellipse at 50% 45%, #fffdf8 0, #efe9dc 80%); }
 .pick-flank { position:absolute; top:50%; transform:translateY(-50%); font:400 15px/1 var(--font); color:#d7dbe6cc; pointer-events:none; }
 .pick-flank.l { left:6%; } .pick-flank.r { right:6%; }
 .pick-pname { line-height:1.08; overflow-wrap:anywhere; }
 .pick-pdesc { margin:0; max-width:46ch; font-size:13.5px; }
+.pick-rows { display:grid; gap:7px; font:400 13px var(--pick-serif); }
+.pick-rows div { display:grid; grid-template-columns:auto minmax(16px,1fr) auto; gap:10px; align-items:baseline; min-width:0; }
+.pick-rows span:first-child { font:500 10px var(--pick-sans); letter-spacing:.14em; text-transform:uppercase; opacity:.65; }
+.pick-rows i { border-bottom:1px solid var(--c-line); transform:translateY(-3px); }
+.pick-rows code { font:400 11.5px var(--pick-mono); overflow-wrap:anywhere; }
 .pick-ids { display:grid; gap:1px; padding-top:8px; font:400 11px var(--pick-mono); }
 .pick-ids div { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; }
 .pick-ids span:first-child { text-transform:uppercase; letter-spacing:.1em; opacity:.7; }
@@ -480,14 +487,17 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
 .pick-thumb>svg,.pick-thumb>div { position:absolute; inset:0; width:100%; height:100%; }
 .pick-tag { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11.5px; line-height:1.25; }
 
-.pick-cabinet.claude { background:var(--pick-paper); color:var(--pick-ink); }
-.claude .pick-pname { font:500 26px var(--pick-serif); letter-spacing:-.015em; }
-.claude .pick-platin { font:italic 400 15px var(--pick-serif); color:var(--pick-ink-soft); }
-.claude .pick-pdesc { font-family:var(--pick-serif); font-size:14.5px; }
-.claude .pick-ids { border-top:1px solid var(--pick-hair); }
-.claude .pick-tag { font-family:var(--pick-serif); font-size:13px; }
-.claude .pick-cell:hover,.claude .pick-cell:focus-visible { background:#0000000a; }
-.claude .pick-cell[aria-checked=true] { background:#fff8; box-shadow:0 0 0 1px var(--pick-ink); }
+.pick-cabinet.claude { background:var(--c-ground); color:var(--c-ink); }
+.claude .pick-art,.claude .pick-thumb { background:#000; }
+.claude .pick-art { border-radius:6px; }
+.claude .pick-thumb { border-radius:4px; }
+.claude .pick-pdesc { font:400 15px/1.5 var(--pick-serif); }
+.claude .pick-tray { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.claude .pick-cell { gap:6px; }
+.claude .pick-tag { font:400 13.5px/1.25 var(--pick-serif); }
+.claude .pick-tag small { font-size:9px; }
+.claude .pick-cell:hover,.claude .pick-cell:focus-visible { background:var(--c-hover); }
+.claude .pick-cell[aria-checked=true] { background:var(--c-raised); box-shadow:inset 0 0 0 1px var(--c-ink); }
 .pick-cabinet.codex { background:var(--pick-night) radial-gradient(ellipse at 25% 35%, #1a2340aa 0, transparent 55%); color:var(--pick-star); }
 .codex .pick-pname { font:300 28px var(--font); letter-spacing:-.04em; }
 .codex .pick-platin { font:400 11.5px var(--pick-mono); color:var(--pick-star-soft); }
@@ -505,10 +515,8 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
 .generic .pick-cell:hover,.generic .pick-cell:focus-visible { background:var(--surface-2); }
 .generic .pick-cell[aria-checked=true] { box-shadow:0 0 0 1px var(--fg); }
 
-.pick-flutter { animation:pick-flutter .55s ease-in-out; transform-box:fill-box; transform-origin:center; }
-@keyframes pick-flutter { 0%,100% { transform:scaleX(1); } 35% { transform:scaleX(.55); } 65% { transform:scaleX(1.04); } }
 .plate-spin { transform-origin:0 0; animation:pick-spin var(--d,30s) linear infinite; }
 @keyframes pick-spin { to { transform:rotate(360deg); } }
 .plate-twinkle { animation:pick-twinkle 3.2s ease-in-out infinite alternate; }
 @keyframes pick-twinkle { from { opacity:.25; } to { opacity:1; } }
-@media(prefers-reduced-motion:reduce) { .plate-spin,.plate-twinkle,.pick-flutter,.pick-cabinet { animation:none; } .pick-ticket,.pick-bar { transition:none; } .pick-ticket:hover { transform:none; } }
+@media(prefers-reduced-motion:reduce) { .plate-spin,.plate-twinkle,.pick-cabinet { animation:none; } .pick-ticket,.pick-bar { transition:none; } .pick-ticket:hover { transform:none; } }

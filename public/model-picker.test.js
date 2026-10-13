@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { initialPick, switchPick } from './model-picker.js';
-import { describe, startGalaxy, plateArt } from './model-plates.js';
+import { describe, startGalaxy, plateArt, plateThumb } from './model-plates.js';
 
 const claude = { id: 'claude', label: 'Claude', efforts: ['low', 'high', 'max'].map((value) => ({ value })), models: [{ value: 'fable' }, { value: 'opus', default: true }, { value: 'sonnet' }] };
 const codex = { id: 'codex', label: 'Codex', efforts: ['low', 'high', 'max', 'ultra'].map((value) => ({ value })), models: [
@@ -12,30 +12,53 @@ const d = (agent, value, extra = {}, all = agent.models) => describe(agent, { va
 test('describe reads a Claude alias by family only, and shows a version only for a full id', () => {
   assert.equal(d(claude, 'opus').name, 'Claude Opus');
   assert.equal(d(claude, 'opus').version, '');
-  assert.equal(d(claude, 'opus').plate, 'horizon');
-  assert.equal(d(claude, 'haiku').plate, 'arc');
-  assert.equal(d(claude, 'sonnet').plate, 'specimen');
   assert.equal(d(claude, 'claude-opus-6').name, 'Claude Opus 6');
   assert.equal(d(claude, 'claude-opus-6').short, 'Opus 6');
   assert.equal(d(claude, 'claude-haiku-4-5-20251001').version, '4.5');
   assert.equal(d(claude, 'claude-opus-6').resolved, 'claude-opus-6');
   assert.equal(d(claude, 'opus').resolved, '', 'nothing resolves an alias to an id yet');
+  assert.equal(d(claude, 'claude-opus-5-5').tag, 'CLAUDE-OPUS-5-5');
+  assert.equal(d(claude, 'opus').tag, 'CLAUDE-OPUS', 'an alias never invents a version for the id line');
 });
 
-test('the Fable numeral falls back to the family initial for an alias', () => {
-  assert.equal(d(claude, 'fable').plate, 'swarm');
-  assert.equal(d(claude, 'fable').numeral, 'F');
-  assert.equal(d(claude, 'claude-fable-5-1').numeral, '5');
-});
-
-test('describe handles the 1M suffix, opusplan and an unknown Claude family', () => {
-  const long = d(claude, 'sonnet[1m]');
-  assert.equal(long.name, 'Claude Sonnet · 1M'); assert.equal(long.short, 'Sonnet 1M'); assert.ok(long.sp.tail > d(claude, 'sonnet').sp.tail, 'long tails');
+test('each Claude family gets its own launch plate, and an unknown one borrows Haiku’s page', () => {
+  for (const fam of ['opus', 'sonnet', 'haiku', 'fable']) {
+    assert.equal(d(claude, fam).plate, fam, `${fam} alias`);
+    assert.equal(d(claude, `claude-${fam}-5-5[1m]`).plate, fam, `${fam} full id`);
+  }
   const plan = d(claude, 'opusplan', { label: 'Opus plan · Sonnet execution' });
-  assert.equal(plan.name, 'Opus plan'); assert.equal(plan.split.length, 2); assert.match(plan.latin, /opus × sonnet/);
+  assert.equal(plan.plate, 'plan'); assert.equal(plan.name, 'Opus plan'); assert.equal(plan.ctx, '');
+  assert.equal(d(claude, 'opusplan').name, 'Opus plan', 'named without a label too');
   const odd = d(claude, 'claude-lumen-1');
-  assert.equal(odd.name, 'Claude Lumen 1'); assert.equal(odd.known, false); assert.equal(odd.plate, 'specimen');
-  assert.deepEqual(d(claude, 'claude-lumen-1').sp, odd.sp, 'bred from the id, so stable');
+  assert.equal(odd.name, 'Claude Lumen 1'); assert.equal(odd.known, false); assert.equal(odd.plate, 'haiku');
+});
+
+test('the 1M suffix becomes a context badge rather than part of the name', () => {
+  const long = d(claude, 'sonnet[1m]');
+  assert.equal(long.name, 'Claude Sonnet'); assert.equal(long.short, 'Sonnet'); assert.equal(long.ctx, '1M');
+  assert.equal(d(claude, 'claude-sonnet-5-5').ctx, '200K');
+  assert.equal(d(claude, 'claude-opus-5-5[1m]').name, 'Claude Opus 5.5');
+});
+
+test('Claude plates are self-contained SVG: preview carries id and title, the tray the title, the band neither', () => {
+  const efforts = claude.efforts;
+  for (const v of ['claude-opus-5-5[1m]', 'sonnet', 'haiku', 'claude-fable-5-1', 'opusplan', 'claude-lumen-1']) {
+    const x = d(claude, v), full = plateArt(x, claude, efforts, 'high', 'preview'), band = plateArt(x, claude, efforts, 'high', 'band'), thumb = plateThumb(x, claude, efforts, 'high');
+    for (const svg of [full, band, thumb]) {
+      assert.match(svg, /^<svg viewBox="0 0 320 200"/, `${v} is one svg`);
+      assert.ok(!/<image|href="(?!#)/.test(svg), `${v} ships no images`);
+      const ids = new Set([...svg.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]));
+      for (const [, ref] of svg.matchAll(/url\(#([^)]+)\)|href="#([^"]+)"/g)) if (ref) assert.ok(ids.has(ref), `${v} defines ${ref}`);
+    }
+    assert.ok(full.includes(x.tag) && full.includes(`>${x.name}<`), `${v} preview has id and title`);
+    assert.ok(!thumb.includes(x.tag) && thumb.includes(`>${x.name}<`), `${v} thumb has title only`);
+    assert.ok(!band.includes(`>${x.name}<`), `${v} band is art only`);
+  }
+  const hi = plateArt(d(claude, 'opus'), claude, efforts, 'max', 'band'), lo = plateArt(d(claude, 'opus'), claude, efforts, 'low', 'band');
+  const glow = (svg) => Number(svg.match(/stroke="#ff5512" stroke-width="([\d.]+)"/)[1]);
+  assert.ok(glow(hi) > glow(lo), 'more effort, brighter limb');
+  const sly = plateArt({ ...d(claude, 'opus'), name: 'Claude <b>', tag: 'A&B' }, claude, efforts, '', 'preview');
+  assert.ok(!sly.includes('<b>') && sly.includes('Claude &lt;b&gt;') && sly.includes('A&amp;B'), 'name and id line escaped');
 });
 
 test('describe draws Codex by suffix and dims older versions of the same suffix', () => {

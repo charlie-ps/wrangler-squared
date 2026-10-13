@@ -29,7 +29,13 @@ export function switchPick(agents, pick, agentId, value) {
 }
 
 const attr = (v) => String(v).replace(/["\\]/g, '\\$&');
+const ctxBadge = (d) => (d.ctx ? `<small>${esc(d.ctx)}</small>` : '');
 const sameCatalog = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// A Claude plate already carries the name, so the preview under it is the
+// description and a ruled list of facts rather than a second title.
+const claudeFacts = (d, m, effort) => `<p class="pick-pdesc">${esc(d.desc)}</p>
+  <div class="pick-rows"><div><span>Model ID</span><i></i><code>${esc(m.value)}</code></div><div><span>Context</span><i></i><span>${d.ctx ? `${esc(d.ctx)} tokens` : 'Per phase'}</span></div><div><span>Effort</span><i></i><span>${esc(effort ? effort.label || effort.value : 'Auto')}</span></div></div>`;
 
 export function mountModelPicker(el, { agents, usual, cover, onChange }) {
   const legend = el.querySelector('legend')?.outerHTML || '';
@@ -41,11 +47,12 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
   const galaxies = (root, d, level, scope) => root.querySelectorAll('canvas').forEach((c) => stops.push([scope, startGalaxy(c, d, level)]));
   const usualLabel = () => {
     const ua = find(usual?.agent), um = modelsOf(ua).find((x) => x.value === usual?.model);
-    return um ? describe(ua, um, modelsOf(ua)).short : '';
+    const du = um && describe(ua, um, modelsOf(ua));
+    return du ? `${du.short}${du.ctx === '1M' ? ' 1M' : ''}` : '';
   };
   const isUsual = () => !!usual && usual.agent === pick.agent && usual.model === pick.model && (usual.effort || '') === pick.effort;
 
-  function renderTicket(flutter) {
+  function renderTicket() {
     stopAll('ticket');
     const a = find(pick.agent);
     if (!a) { el.innerHTML = `${legend}<div class="pick-usual">No agents available</div>`; onChange({ ...pick }); return; }
@@ -62,14 +69,13 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
     el.innerHTML = `${legend}
       <button type="button" class="pick-ticket ${themeOf(a)}" aria-haspopup="dialog" aria-expanded="${!!cab}" aria-label="${esc(d.name)}. Change model">
         <span class="pick-band">${plateArt(d, a, efforts, e, 'band')}</span>
-        <span class="pick-trow"><span class="pick-tname">${esc(d.name)}</span><span class="pick-tchange">CHANGE</span></span>
+        <span class="pick-trow"><span class="pick-tname">${esc(d.name)}${ctxBadge(d)}</span><span class="pick-tchange">CHANGE</span></span>
       </button>
       <div class="pick-meter"><span class="pick-lab">Effort</span>
         <div class="pick-bars" role="radiogroup" aria-label="Effort"><button type="button" class="pick-bar auto${e ? '' : ' on'}" role="radio" aria-checked="${!e}" data-effort="" title="Leave it to the agent" tabindex="${e ? -1 : 0}">AUTO</button>${bars}</div>
         <span class="pick-val">${esc(cur ? cur.label || cur.value : 'auto')}</span></div>
       <div class="pick-usual">${usualHtml}</div>`;
     galaxies(el.querySelector('.pick-band'), d, level, 'ticket');
-    if (flutter) el.querySelectorAll('.pick-band .wings').forEach((w) => w.classList.add('pick-flutter'));
     onChange({ ...pick });
   }
 
@@ -86,17 +92,17 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
     const flank = d.flank ? `<span class="pick-flank l">${esc(d.flank[0])}</span><span class="pick-flank r">${esc(d.flank[1])}</span>` : '';
     const focusValue = previewValue || chosen;
     const tray = models.map((x) => {
-      const dx = describe(a, x, models);
-      return `<button type="button" class="pick-cell" role="radio" data-value="${esc(x.value)}" aria-checked="${x.value === chosen}" tabindex="${x.value === focusValue ? 0 : -1}"><span class="pick-thumb">${plateThumb(dx, a)}</span><span class="pick-tag">${esc(dx.short)}</span></button>`;
+      const dx = describe(a, x, models), ex = effortsOf(a, x);
+      return `<button type="button" class="pick-cell" role="radio" data-value="${esc(x.value)}" aria-checked="${x.value === chosen}" tabindex="${x.value === focusValue ? 0 : -1}"><span class="pick-thumb">${plateThumb(dx, a, ex, offers(a, x, pick.effort) ? pick.effort : '')}</span><span class="pick-tag">${esc(dx.short)}${ctxBadge(dx)}</span></button>`;
     }).join('');
     cab.innerHTML = `${t === 'codex' ? `<svg class="pick-sky" aria-hidden="true">${starfield(50, 'sky')}</svg>` : ''}
       <div class="pick-head" role="tablist" aria-label="Agent">${agents.map((x) => `<button type="button" class="pick-tab" role="tab" data-agent="${esc(x.id)}" aria-selected="${x === a}"><span class="pick-dot" style="background:${dotFor(x.id)}"></span>${esc(x.label || x.id)}</button>`).join('')}<button type="button" class="pick-close" aria-label="Close">ESC</button></div>
       <div class="pick-body">
         <div class="pick-preview">
           <div class="pick-art">${plateArt(d, a, efforts, e, 'preview')}${flank}</div>
-          <div><div class="pick-pname">${esc(d.name)}</div><div class="pick-platin">${esc(d.latin)}</div></div>
+          ${t === 'claude' ? claudeFacts(d, pv, efforts.find((x) => x.value === e)) : `<div><div class="pick-pname">${esc(d.name)}</div><div class="pick-platin">${esc(d.latin)}</div></div>
           <p class="pick-pdesc">${esc(d.desc)}</p>
-          <div class="pick-ids"><div><span>Sends</span><span>${esc(pv.value)}</span></div>${d.resolved && d.resolved !== pv.value ? `<div><span>Runs as</span><span>${esc(d.resolved)}</span></div>` : ''}</div>
+          <div class="pick-ids"><div><span>Sends</span><span>${esc(pv.value)}</span></div>${d.resolved && d.resolved !== pv.value ? `<div><span>Runs as</span><span>${esc(d.resolved)}</span></div>` : ''}</div>`}
         </div>
         <div class="pick-tray" role="radiogroup" aria-label="Model">${tray}</div>
       </div>`;
@@ -110,7 +116,7 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
   }
   function choose(agentId, value) {
     pick = switchPick(agents, pick, agentId, value);
-    closeCabinet(false); renderTicket(true); el.querySelector('.pick-ticket')?.focus();
+    closeCabinet(false); renderTicket(); el.querySelector('.pick-ticket')?.focus();
   }
   const focusCell = (v) => cab?.querySelector(`.pick-cell[data-value="${attr(v)}"]`)?.focus();
 
@@ -118,12 +124,12 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
     if (ev.target.closest('.pick-ticket')) { if (cab) closeCabinet(); else { openCabinet(); cab?.querySelector('.pick-cell[tabindex="0"]')?.focus(); } return; }
     const bar = ev.target.closest('.pick-bar:not([disabled])');
     if (bar) {
-      pick = { ...pick, effort: bar.dataset.effort }; renderTicket(true);
+      pick = { ...pick, effort: bar.dataset.effort }; renderTicket();
       el.querySelector('.pick-bar[aria-checked="true"]')?.focus();
       if (cab) openCabinet(cab.dataset.agent, cab.dataset.preview);
       return;
     }
-    if (ev.target.closest('.pick-reset')) { pick = initialPick(agents, usual); if (cab) closeCabinet(false); renderTicket(true); }
+    if (ev.target.closest('.pick-reset')) { pick = initialPick(agents, usual); if (cab) closeCabinet(false); renderTicket(); }
   });
   el.addEventListener('keydown', (ev) => {
     const dir = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[ev.key];
@@ -147,7 +153,8 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
   cover.addEventListener('keydown', (ev) => {
     if (!cab) return;
     if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); return closeCabinet(); }
-    const dir = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 3, ArrowUp: -3 }[ev.key];
+    const cols = themeOf(find(cab.dataset.agent) || {}) === 'claude' ? 2 : 3;
+    const dir = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[ev.key];
     if (dir && ev.target.closest('.pick-cabinet .pick-tray')) {
       ev.preventDefault();
       const items = [...cab.querySelectorAll('.pick-cell')], next = items[Math.max(0, Math.min(items.length - 1, items.indexOf(ev.target) + dir))];
@@ -170,7 +177,7 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
       const a = find(pick.agent);
       if (!a || !modelsOf(a).some((m) => m.value === pick.model)) pick = initialPick(agents, usual);
       else if (pick.effort && !offers(a, modelOf(a, pick.model), pick.effort)) pick = { ...pick, effort: '' };
-      closeCabinet(false); renderTicket(true);
+      closeCabinet(false); renderTicket();
     },
     setUsual(u) { usual = u; renderTicket(); },
     rerender() { clearGlyphCache(); renderTicket(); if (cab) openCabinet(cab.dataset.agent, cab.dataset.preview); },
