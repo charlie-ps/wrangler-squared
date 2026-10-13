@@ -240,82 +240,121 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
 .job-replan-changes small { color:var(--fg-muted); }
 .job-superseded { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--fg-muted) !important; }
 /* The intro (intro.js): the job dialog's surface, app bar, stepper and FAB, with
-   a figure per step drawn from the same tiles, cards and chips as the board. */
-.jobs-intro { width:min(760px,92vw); }
+   a figure per step drawn from the same tiles, cards and chips as the board.
+   Sized up from the other dialogs so it reads like a page, not a form. */
+.jobs-intro { width:min(1060px,calc(100vw - 32px)); padding:32px 40px; }
 .jobs-intro sup { font-size:.7em; line-height:0; vertical-align:super; }
-.jobs-intro .intro-appbar { display:flex; align-items:center; gap:10px; margin-bottom:14px; padding-right:44px; }
-.intro-count { font-size:11px; color:var(--fg-subtle); font-variant-numeric:tabular-nums; }
-.intro-steps { margin:0 0 20px; }
-.intro-steps .job-seg { font:inherit; font-size:11px; font-weight:500; }
+.jobs-intro .intro-appbar { display:flex; align-items:center; gap:12px; margin-bottom:18px; padding-right:44px; }
+.jobs-intro .jobs-kicker { font-size:11px; }
+.intro-count { font-size:12px; color:var(--fg-subtle); font-variant-numeric:tabular-nums; }
+.intro-steps { margin:0 0 28px; gap:6px; }
+.intro-steps .job-seg { font:inherit; font-size:13px; font-weight:500; gap:7px; }
+.intro-steps .job-seg::after { height:6px; }
 .intro-steps .job-seg span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .intro-steps .job-seg:hover::after { transform:none; }
 .intro-body { display:grid; }
-.intro-panel { grid-area:1/1; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,260px); gap:24px; align-items:center; }
+.intro-panel { grid-area:1/1; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,400px); gap:40px; align-items:center; }
 .intro-panel[inert] { visibility:hidden; }
-.jobs-intro p { font-size:13px; margin:10px 0 0; max-width:62ch; }
+.intro-panel.intro-stack { grid-template-columns:1fr; gap:22px; align-items:start; }
+.jobs-intro h2 { font-size:32px; line-height:1.2; letter-spacing:-.01em; }
+.jobs-intro p { font-size:16px; line-height:1.6; margin:14px 0 0; max-width:62ch; }
 .jobs-intro p b { color:var(--fg); font-weight:500; }
-.jobs-intro .job-actions { margin-top:24px; }
+.jobs-intro .job-actions { margin-top:32px; }
+.jobs-intro .job-actions button { font-size:15px; }
+.jobs-intro .job-actions button.primary { padding:16px 24px; }
 .jobs-intro .job-actions button[hidden] { display:none; }
-.intro-figure { display:flex; flex-direction:column; gap:12px; padding:18px; background:var(--bg); border:1px solid var(--border-muted); border-radius:20px; font-size:13px; }
+.intro-figure { display:flex; flex-direction:column; gap:14px; padding:24px; background:var(--bg); border:1px solid var(--border-muted); border-radius:24px; font-size:15px; }
 .intro-figure .job-chips { margin:0; }
-.intro-figure .job-card { padding:14px; gap:12px; border-radius:16px; }
+.intro-figure .job-chip { font-size:13px; padding:6px 12px; }
+.intro-figure .job-card { padding:18px; gap:14px; border-radius:20px; }
 .intro-figure .job-card-open { cursor:default; }
-.intro-figure .job-card-open strong { font-size:17px; display:block; }
+.intro-figure .job-card-open strong { font-size:20px; display:block; }
 .intro-figure .job-card>footer .job-status,.intro-figure .job-chip>span { white-space:normal; }
-.intro-figure .job-avatar { width:40px; height:40px; font-size:20px; }
-.intro-figure .job-card>footer { font-size:14px; }
-.intro-figure .job-seg { font-size:14px; cursor:default; }
-.intro-figure .job-node-tile .icon { font-size:26px; color:var(--fg); }
+.intro-figure .job-avatar { width:46px; height:46px; font-size:23px; }
+.intro-figure .job-card>footer { font-size:16px; }
+.intro-figure .job-seg { font-size:16px; cursor:default; }
+.intro-figure .job-node-tile { width:62px; height:62px; border-radius:19px; transition:background .3s, box-shadow .3s; }
+.intro-figure .job-node-tile .icon { font-size:30px; color:var(--fg); }
 .intro-figure .job-node-tile.on .icon { color:var(--c-on); }
-.intro-figure .job-node-state .icon { font-size:12px; color:inherit; }
-.intro-center { justify-content:center; }
+.intro-figure .job-node-state { width:28px; height:28px; right:-8px; bottom:-8px; }
+.intro-figure .job-node-state .icon { font-size:14px; color:inherit; }
+.intro-figure .job-node-title { font-size:15px; }
+.intro-figure .job-node .job-status { font-size:13px; }
 .intro-start { align-self:flex-start; }
-.intro-rail { align-self:center; display:flex; align-items:center; gap:6px; padding:6px; background:var(--surface); border-radius:14px; }
-.intro-rail-btn { position:relative; width:40px; height:40px; display:grid; place-items:center; border-radius:12px; color:var(--fg-muted); font-size:18px; }
+/* Welcome: the live job, stacked full width under the heading. */
+.intro-value { padding:22px 26px 18px; }
+.intro-goal { display:flex; align-items:center; gap:14px; padding:14px 18px; border-radius:18px; background:var(--cb); transition:background .3s; }
+.intro-goal .job-avatar { width:42px; height:42px; font-size:21px; transition:background .3s; }
+.intro-goal strong { flex:1; min-width:0; font-size:18px; font-weight:500; }
+.intro-goal .job-status { font-size:14px; font-weight:500; color:var(--c-fg); white-space:nowrap; }
+.intro-graph { margin:0; }
+.intro-graph .job-graph-canvas { min-width:0; }
+.intro-graph .job-graph-columns { grid-template-columns:repeat(var(--waves,1), minmax(0,1fr)); gap:64px; align-items:center; }
+.intro-graph .job-graph-col { gap:14px; }
+.intro-graph .job-node-title { max-width:28ch; font-weight:500; }
+.intro-graph .job-graph-edges path { transition:stroke .3s; }
+.intro-graph .job-graph-edges path.landed { stroke:var(--st-ok); }
+.job-node-repo { font-size:12px; color:var(--fg-subtle); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+/* Jobs: a mini board, its rail badge counting the amber rows. */
+.intro-board { flex-direction:row; gap:0; padding:0; overflow:hidden; }
+.intro-mini-rail { display:flex; flex-direction:column; gap:8px; padding:16px 8px; background:var(--surface); border-right:1px solid var(--border-muted); }
+.intro-rail-btn { position:relative; width:42px; height:42px; display:grid; place-items:center; border-radius:12px; color:var(--fg-muted); font-size:20px; }
 .intro-rail-btn.on { background:color-mix(in srgb, var(--blue) 15%, transparent); color:var(--blue-fg); }
-.intro-rail-badge { position:absolute; top:2px; right:1px; min-width:15px; height:15px; padding:0 3px; box-sizing:border-box; display:grid; place-items:center; border-radius:8px; background:var(--snooze); color:var(--surface); font-size:9px; font-weight:700; }
-.intro-chip-on { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:8px; font-size:12px; background:color-mix(in srgb, var(--blue) 15%, transparent); color:var(--blue-fg); }
-.intro-count-pill { min-width:16px; text-align:center; border-radius:8px; padding:0 5px; font-size:10px; font-weight:600; background:color-mix(in srgb, var(--snooze) 22%, transparent); color:var(--snooze-fg); }
+.intro-rail-badge { position:absolute; top:1px; right:0; min-width:17px; height:17px; padding:0 4px; box-sizing:border-box; display:grid; place-items:center; border-radius:9px; background:var(--snooze); color:var(--surface); font-size:10px; font-weight:700; transition:transform .25s; }
+.intro-rail-badge.bump { animation:intro-bump .5s; }
+.intro-rail-badge.zero { transform:scale(0); }
+@keyframes intro-bump { 40% { transform:scale(1.5); } }
+.intro-mini-jobs { flex:1; min-width:0; display:flex; flex-direction:column; gap:10px; padding:16px; }
+.intro-mini-jobs header { display:flex; align-items:center; gap:8px; font-size:16px; font-weight:500; }
+.intro-mini-jobs header .intro-chip-on { margin-left:auto; padding:3px 9px; font-size:12px; }
+.intro-mini-job { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:16px; background:var(--cb); transition:background .3s; }
+.intro-mini-job .job-avatar { width:34px; height:34px; font-size:17px; transition:background .3s; }
+.intro-mini-job>span:nth-child(2) { flex:1; min-width:0; }
+.intro-mini-job b { display:block; font-size:14px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.intro-mini-job small { display:block; font-size:12px; font-weight:500; color:var(--c-fg); }
+.intro-mini-job .job-progress { width:52px; gap:3px; }
+.intro-mini-job .job-seg { font-size:0; gap:0; }
+.intro-mini-job .job-seg::after { height:6px; }
+.intro-chip-on { display:inline-flex; align-items:center; gap:6px; padding:5px 12px; border-radius:8px; font-size:13px; background:color-mix(in srgb, var(--blue) 15%, transparent); color:var(--blue-fg); }
+.intro-count-pill { min-width:16px; text-align:center; border-radius:8px; padding:0 5px; font-size:11px; font-weight:600; background:color-mix(in srgb, var(--snooze) 22%, transparent); color:var(--snooze-fg); }
 .intro-flow { display:flex; align-items:flex-start; justify-content:center; gap:4px; }
 .intro-flow .job-node { flex:1 1 0; min-width:0; padding:4px 0; }
-.intro-flow-line { flex:none; width:22px; height:2px; margin-top:30px; background:var(--border); }
-.intro-kinds { display:grid; grid-template-columns:repeat(2,1fr); gap:20px 12px; justify-items:center; padding-block:6px; }
-.intro-kind { display:flex; flex-direction:column; align-items:center; gap:8px; }
-.intro-label { font-size:11px; font-weight:600; color:var(--fg); }
-.intro-slop { margin-bottom:-4px; font-size:11px; line-height:1.45; color:var(--fg-muted); }
-.intro-figure .job-receipt { margin:0; padding:8px 12px; background:var(--surface); border-radius:12px; color:var(--fg); }
-.intro-gates { display:grid; gap:6px; }
-.intro-gate { display:flex; align-items:center; gap:10px; padding:6px 10px; background:var(--surface); border-radius:12px; font-size:12px; line-height:1.35; }
+.intro-flow-line { flex:none; width:28px; height:2px; margin-top:35px; background:var(--border); }
+.intro-kinds { display:grid; grid-template-columns:repeat(2,1fr); gap:26px 14px; justify-items:center; padding-block:8px; }
+.intro-kind { display:flex; flex-direction:column; align-items:center; gap:10px; }
+.intro-label { font-size:13px; font-weight:600; color:var(--fg); }
+.intro-slop { margin-bottom:-4px; font-size:13px; line-height:1.5; color:var(--fg-muted); }
+.intro-figure .job-receipt { margin:0; padding:10px 14px; background:var(--surface); border-radius:14px; color:var(--fg); font-size:14px; }
+.intro-gates { display:grid; gap:8px; }
+.intro-gate { display:flex; align-items:center; gap:12px; padding:9px 12px; background:var(--surface); border-radius:14px; font-size:14px; line-height:1.35; }
+.intro-gate .job-flag { width:30px; height:30px; font-size:16px; }
 .intro-gate>span:nth-child(2) { flex:1; min-width:0; }
-.intro-gate small { display:block; font-size:11px; color:var(--fg-muted); }
-.intro-switch { position:relative; flex:none; width:32px; height:18px; padding:0; border:0; border-radius:9px; background:var(--border); cursor:pointer; transition:background .15s; }
-.intro-switch::after { content:""; position:absolute; top:3px; left:3px; width:12px; height:12px; border-radius:50%; background:var(--surface); transition:transform .15s; }
+.intro-gate small { display:block; font-size:12px; color:var(--fg-muted); }
+.intro-switch { position:relative; flex:none; width:38px; height:22px; padding:0; border:0; border-radius:11px; background:var(--border); cursor:pointer; transition:background .15s; }
+.intro-switch::after { content:""; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:var(--surface); transition:transform .15s; }
 .intro-switch[aria-checked="true"] { background:var(--blue); }
-.intro-switch[aria-checked="true"]::after { transform:translateX(14px); }
+.intro-switch[aria-checked="true"]::after { transform:translateX(16px); }
 .intro-switch:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
-.intro-jira { position:relative; display:grid; gap:12px; }
-.intro-jira::before { content:""; position:absolute; left:17px; top:18px; bottom:18px; width:2px; background:var(--border); }
-.intro-jira-row { position:relative; display:flex; align-items:center; gap:12px; }
-.intro-jira-row .job-node-tile { width:36px; height:36px; border-radius:11px; box-shadow:inset 0 0 0 2px var(--c); }
-.intro-jira-row .job-node-tile.on { box-shadow:none; }
-.intro-jira-row .job-node-tile .icon { font-size:18px; }
-.intro-jira-row .job-node-state { width:18px; height:18px; right:-6px; bottom:-6px; }
-.intro-jira-row .job-node-state .icon { font-size:10px; }
-.intro-jira-row b { display:block; font-size:12px; font-weight:500; }
-.intro-jira-row small { display:block; font-size:11px; font-weight:500; color:var(--c-fg); }
-/* The Welcome job graph: nodes pinned at the same points the edge paths use. */
-.intro-demo { position:relative; height:330px; }
-.intro-demo .job-graph-edges path { vector-effect:non-scaling-stroke; transition:stroke .3s; }
-.intro-demo .job-graph-edges path.on { stroke:var(--st-ok); }
-.intro-demo-node { position:absolute; left:var(--x); width:112px; transform:translateX(-50%); }
-.intro-demo-node:nth-of-type(1) { top:0; }
-.intro-demo-node:nth-of-type(2),.intro-demo-node:nth-of-type(3) { top:110px; }
-.intro-demo-node:nth-of-type(4) { top:220px; }
-.intro-demo .job-node { padding:0; gap:4px; }
-.intro-demo :is(.job-node-title,.job-status) { padding:0 4px; border-radius:4px; background:var(--bg); }
-.intro-demo .job-node-tile { transition:background .3s, box-shadow .3s; }
-.intro-done { list-style:none; display:grid; gap:6px; margin:14px 0 0; padding:0; font-size:12px; color:var(--fg); }
-.intro-done li { display:flex; align-items:center; gap:8px; }
+.intro-jira { position:relative; display:grid; gap:14px; }
+.intro-jira::before { content:""; position:absolute; left:20px; top:20px; bottom:20px; width:2px; background:var(--border); }
+.intro-jira-row { position:relative; display:flex; align-items:center; gap:14px; }
+.intro-figure .intro-jira-row .job-node-tile { width:42px; height:42px; border-radius:13px; box-shadow:inset 0 0 0 2px var(--c); }
+.intro-figure .intro-jira-row .job-node-tile.on { box-shadow:none; }
+.intro-figure .intro-jira-row .job-node-tile .icon { font-size:21px; }
+.intro-figure .intro-jira-row .job-node-state { width:20px; height:20px; right:-6px; bottom:-6px; }
+.intro-figure .intro-jira-row .job-node-state .icon { font-size:11px; }
+.intro-jira-row b { display:block; font-size:14px; font-weight:500; }
+.intro-jira-row small { display:block; font-size:12px; font-weight:500; color:var(--c-fg); }
+.intro-done { list-style:none; display:grid; gap:8px; margin:16px 0 0; padding:0; font-size:15px; color:var(--fg); }
+.intro-done li { display:flex; align-items:center; gap:10px; }
 .intro-done .icon { color:var(--green-fg); }
-@media(max-width:700px) { .intro-panel { grid-template-columns:1fr; } .intro-steps .job-seg span { display:none; } }
-@media(prefers-reduced-motion:reduce) { .intro-switch,.intro-switch::after,.intro-demo .job-node-tile,.intro-demo path { transition:none; } }
+@media(max-width:700px) {
+  .jobs-intro { padding:22px 20px; border-radius:20px; }
+  .jobs-intro h2 { font-size:24px; }
+  .jobs-intro p { font-size:14px; }
+  .intro-panel { grid-template-columns:1fr; gap:22px; }
+  .intro-steps .job-seg span { display:none; }
+  .intro-graph .job-graph-columns { gap:28px; }
+  .job-node-repo { display:none; }
+}
+@media(prefers-reduced-motion:reduce) { .intro-switch,.intro-switch::after,.intro-figure .job-node-tile,.intro-graph path,.intro-goal,.intro-goal .job-avatar,.intro-mini-job,.intro-mini-job .job-avatar,.intro-rail-badge { transition:none; } .intro-rail-badge.bump { animation:none; } }

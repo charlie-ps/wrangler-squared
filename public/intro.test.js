@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { createIntro, DEMO_FRAMES, INTRO_STEPS, SEEN_KEY } from './intro.js';
+import { createIntro, INTRO_STEPS, SEEN_KEY } from './intro.js';
 import { initJobsView } from './jobs-view.js';
 import client from './index.js';
 
@@ -50,18 +50,18 @@ test('Next, Back and the stepper walk the steps; only the current one is readabl
   let started = 0;
   const storage = memoryStorage();
   createIntro({ storage, onNewJob: () => { started += 1; } }).open();
-  assert.deepEqual(INTRO_STEPS.map((s) => s.tab), ['Welcome', 'Jobs button', 'New job', 'Sub-jobs', 'Needs you', 'Receipts', 'Review gates', 'Jira', 'Start']);
+  assert.deepEqual(INTRO_STEPS.map((s) => s.tab), ['Welcome', 'Jobs', 'New job', 'Sub-jobs', 'Needs you', 'Receipts', 'Review gates', 'Jira', 'Start']);
   assert.equal(p.q('.intro-count').textContent, `1 of ${INTRO_STEPS.length}`);
   assert.ok(p.q('[data-intro="back"]').hidden, 'no Back on the first step');
   assert.equal(document.querySelectorAll('.intro-panel:not([inert])').length, 1, 'every step is laid out, one is live');
   p.click('[data-intro="next"]');
-  assert.match(p.title(), /Jobs button/);
+  assert.match(p.title(), /splits the work/);
   p.click('[data-intro="next"]');
   assert.match(p.title(), /plan you approve/);
   assert.equal(p.q('[role="tab"][aria-selected="true"]').textContent, 'New job');
   p.click('[data-intro="back"]');
   p.click('[data-intro="back"]');
-  assert.match(p.title(), /One goal/);
+  assert.equal(p.title(), 'Welcome');
   p.click(`[data-go="${INTRO_STEPS.length - 1}"]`);
   assert.match(p.title(), /ready to start/);
   assert.ok(p.q('[data-intro="skip"]').hidden, 'no Skip on the last step');
@@ -73,20 +73,58 @@ test('Next, Back and the stepper walk the steps; only the current one is readabl
   assert.equal(storage.get(SEEN_KEY), '1');
 });
 
-test('the first step sells the outcome: one goal fans out into two parallel PRs, then a session once both merge', async (t) => {
+const frames = (step) => Array.from({ length: INTRO_STEPS[step].anim.frames }, (_, i) => {
+  const el = document.createElement('div');
+  el.innerHTML = INTRO_STEPS[step].figure({}, i);
+  return el;
+});
+
+test('Welcome plays one job: two PRs in parallel, then a backfill once both deploy, drawn with the stepper markup', async (t) => {
   const p = page(t);
   createIntro({ storage: memoryStorage() }).open();
-  const nodes = () => [...document.querySelectorAll('.intro-demo .job-node')].map((n) => `${n.querySelector('.job-node-title').textContent}: ${n.querySelector('.job-status').textContent}`);
-  assert.deepEqual(nodes(), ['Passkey sign-in: Planning', 'desktop-app: Planned', 'api: Planned', 'Migrate accounts: Waits for both PRs']);
-  assert.equal(document.querySelectorAll('.intro-demo .job-graph-edges path').length, 4);
-  const seen = new Set([nodes().join()]);
-  for (let i = 0; i < DEMO_FRAMES; i++) { await new Promise((r) => p.window.setTimeout(r, 1550)); seen.add(nodes().join()); }
-  assert.ok(seen.has(['Passkey sign-in: Approved', 'desktop-app: Working', 'api: Working', 'Migrate accounts: Waits for both PRs'].join()), 'both PRs run at once');
-  assert.ok(seen.has(['Passkey sign-in: Approved', 'desktop-app: Merged', 'api: Merged', 'Migrate accounts: Migrating'].join()), 'the session starts once both land');
+  assert.ok(p.q('.intro-panel').classList.contains('intro-stack'), 'stacked, the graph full width under the heading');
+  assert.equal(document.querySelectorAll('.intro-graph .job-graph-col').length, 2);
+  assert.equal(document.querySelectorAll('.intro-graph .job-graph-edges path.deploy').length, 2);
+  const line = (el) => [el.querySelector('.intro-goal .job-status'), ...el.querySelectorAll('.intro-graph .job-status')].map((n) => n.textContent).join(' | ');
+  assert.equal(line(document), 'Planning | Queued | Queued | Waits for both');
+  const seen = frames(0).map(line);
+  assert.ok(seen.includes('2 agents working | Writing the PR | Writing the PR | Waits for both'), 'both PRs run at once');
+  assert.ok(seen.includes('1 agent working | Deployed | Deployed | Starting'), 'the backfill starts once both deploy');
+  assert.equal(seen.at(-1), 'Delivered | Deployed | Deployed | 48,210 users backfilled');
+  assert.equal(frames(0).at(-1).querySelectorAll('path.landed').length, 2, 'landed connectors turn green');
+  await new Promise((r) => p.window.setTimeout(r, 1450));
+  assert.equal(line(document), seen[1], 'it advances by itself');
   p.click('[data-intro="next"]');
   const frozen = p.q('.intro-panel').innerHTML;
-  await new Promise((r) => p.window.setTimeout(r, 1550));
+  await new Promise((r) => p.window.setTimeout(r, 1450));
   assert.equal(p.q('.intro-panel').innerHTML, frozen, 'the loop stops off the Welcome step');
+});
+
+test('the Jobs step plays a mini board whose rail badge counts the amber rows', async (t) => {
+  const p = page(t);
+  createIntro({ storage: memoryStorage() }).open(1);
+  const fig = () => document.querySelectorAll('.intro-panel')[1];
+  for (const el of frames(1)) {
+    const amber = el.querySelectorAll('.intro-mini-job.tone-warn').length;
+    assert.equal(el.querySelector('.intro-rail-badge').textContent, String(amber));
+    assert.equal(el.querySelector('.intro-count-pill').textContent, String(amber));
+    assert.equal(el.querySelector('.intro-rail-badge').classList.contains('zero'), amber === 0);
+  }
+  assert.ok(frames(1).some((el) => el.querySelectorAll('.intro-mini-job.tone-warn').length === 2));
+  const before = fig().querySelector('.intro-figure').innerHTML;
+  await new Promise((r) => p.window.setTimeout(r, 1650));
+  assert.notEqual(fig().querySelector('.intro-figure').innerHTML, before, 'it advances by itself');
+});
+
+test('with reduced motion each live figure holds a finished frame and nothing ticks', async (t) => {
+  const p = page(t);
+  p.window.matchMedia = (q) => ({ matches: q.includes('reduce') });
+  createIntro({ storage: memoryStorage() }).open();
+  const html = p.q('.intro-body').innerHTML;
+  assert.match(p.q('.intro-goal').textContent, /Delivered/);
+  assert.equal(document.querySelectorAll('.intro-panel')[1].querySelector('.intro-rail-badge').textContent, '2');
+  await new Promise((r) => p.window.setTimeout(r, 1450));
+  assert.equal(p.q('.intro-body').innerHTML, html);
 });
 
 test('the arrow keys step through, and the gate switches are a picture that toggles in place', (t) => {
