@@ -2,7 +2,7 @@
 
 This repo is the automated-jobs system from agent-wrangler's `job-system` branch
 (18 commits ahead of `main`, never merged), re-homed as an **installable
-extension**. The port is functionally complete against host API **1.27.0**: every
+extension**. The port is functionally complete against host API **1.31.0**: every
 feature the in-core system had is either wired through the `host` façade or is
 one of the five open gaps below. This document stays the map — what came from
 where, what stands in for what, and what has to change in agent-wrangler before
@@ -113,6 +113,7 @@ simply the absence of an option on them.
 | 8 | bill a headless run to a card | host API 1.6 `sessions:bill` | `attributeSpend(sub, liveId)` calls `host.sessions.bill(sub.sessions.at(-1), liveId)`, the façade's bind over `recordPriorLiveSessionId`, so a comment triage's `claude -p` lands on the sub-job's latest card's `priorLiveSessionIds` and the usage scan bills it |
 | 9 | usage read | host API 1.6 `usage:read` | `host.usage.byCard()` resolves to one `{ cardId, usd, estimatedUsd }` row per card through the wrangler's own usage memo (#163). `server/job-spend-refresh.js` reads it on core's 60s cadence — only once some run has bound a card, never awaited by the graph contributor, a failed read keeping the previous map — and `withJobSpend` prices jobs and sub-jobs off the map the last refresh produced |
 | 12 | client navigation: open a session | host API 1.8 `api.openSession(sid)` | the client façade does what core's `onSession` did — `setView('grid')`, then `selectSession(sid)` for a card on the board or `send({type:'resume'})` + toast for one that is not — so `onSession` is the one call and the interim `job-open-session` handler (server-side `sessions:wake`, human picks the card) is gone, `sessions:wake` with it. `onBoard` reads `graph.sessions` off the view's `update(el, session, graph)`, which is what labels the button Open vs Restore. Host API 1.27 (agent-wrangler #294) also made it land on the card: out of the tray, scrolled into view, and still fulfilled once a restored card comes back |
+| 17 | job images (server half) | host API 1.31 `images:keep` + `spawn({ images })` | a job carries `images` (minted names) and `shareImages` (default on). `makeCreateJob` copies each staged name into the extension's own store with `host.images.keep` (a staged name is single-use and pruned after a week) and fails the create if one is gone; `JobRuntime.imagesFor` passes them to every planning spawn and, with sharing on, every sub-job spawn (not the Jira step), skipping a name the store lost; `releaseImages` removes them when the job finishes. The client half (`api.images.stage`, the New job tray) is a separate change |
 | 12 | client navigation: the diff panel | host API 1.27 `api.openDiff(sid, {onClose})` | "Review code in Wrangler" opens the card's diff panel over the grid, and `onClose` runs core's `diffReturnTarget` (`public/index.js` `reviewDiff`): back to `#view=ext:jobs:board` with the same detail open. Core disarmed the trip when the reader left the grid or picked another card; `onClose` fires on those closes too, so `reviewDiff` waits a tick and stays put on a `#view=` hash or another selected card. Every run of a sub-job shares its worktree, so the button opens the latest run already on the board and only falls back to the latest (which resumes its agent) when none is |
 | 10 | agents/models vocabulary (client half) | host API 1.25 `api.agents()` | the New job form reads the board's live-catalog agent list (models and efforts) each time it opens, replacing the hand-copied `AGENTS` table that had already drifted. It gained an Effort select (Default plus the agent's levels), stored as `job.effort`, passed to `spawn` and recorded on each run beside `model` |
 | 11 | client broadcast delivery | #167 (host API 1.2) | `api.onMessage` delivers this extension's `ext:jobs` frames, so the New-job dialog closes on the reply and toasts instead of waiting a graph tick |
@@ -154,8 +155,8 @@ on `main` as their own small PRs. All are resolved.
 ## Tests
 
 `npm test` runs `node --test` over `server/*.test.js` and `public/*.test.js`:
-**261 tests, 260 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
-a checkout serving host API 1.27 or later, all 261 pass. Per file: jobs 85, jobs-view 62,
+**318 tests, 317 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
+a checkout serving host API 1.31 or later, all 318 pass. Per file: jobs 85, jobs-view 62,
 manifest 17, deploys 16, job-runtime 16, index 16, prompts 12, moves 10, spend 7,
 comments 6, job-state 6, spend-refresh 4, integration 2, handlers 2.
 

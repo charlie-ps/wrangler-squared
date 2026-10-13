@@ -96,6 +96,9 @@ export const planSchema = z.object({
     visit(s);
   }
 });
+// A name the wrangler minted (paste-<ms>-<hex>.<ext>), never a path.
+export const MAX_IMAGES = 8;
+const imageName = z.string().regex(/^paste-\d{1,20}-[a-f0-9]{4,32}\.(?:png|jpg|gif|webp)$/);
 export const jobInputSchema = z.object({
   title: line.optional(), intent: z.string().trim().min(1).max(16000),
   repos: z.array(repoPath).max(30).default([]),
@@ -104,6 +107,10 @@ export const jobInputSchema = z.object({
   planningPrompt: z.string().max(8000).default(''),
   reviewPlan: z.boolean().default(true), reviewCode: z.boolean().default(true), reviewMerge: z.boolean().default(true), reviewSessions: z.boolean().default(true),
   updateMain: z.boolean().default(false), taskId: z.string().nullable().default(null),
+  // Names of images the job keeps in the host's per-extension store (`images:keep`),
+  // already staged by the client's `api.images.stage`. `shareImages` decides whether
+  // sub-job sessions get them too; planning always does.
+  images: z.array(imageName).max(MAX_IMAGES).default([]), shareImages: z.boolean().default(true),
 });
 export const settingsSchema = z.object({
   concurrency: z.number().int().min(1).max(16).default(8),

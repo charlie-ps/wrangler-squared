@@ -314,7 +314,9 @@ export class JobRunner {
   // worktrees go, then `done`. `cancelledAt` is what tells the two apart.
   async finish(id) {
     try {
-      await this.runtime.cleanupPlanning(this.store.get(id));
+      const job = this.store.get(id);
+      await this.runtime.cleanupPlanning(job);
+      this.runtime.releaseImages(job);
       this.store.update(id, (j) => { j.stage = 'done'; j.completedAt = this.now(); });
     } catch (e) { this.store.update(id, (j) => { j.error = shortError(e); }); }
   }

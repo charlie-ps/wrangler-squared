@@ -34,6 +34,18 @@ export class JobRuntime {
     this.pendingLaunch = null;
   }
 
+  // The job's own copies (`images:keep`) go with the job. A name the store no
+  // longer has is dropped here rather than handed to spawn, which refuses an
+  // unknown image before launching anything and would wedge the step forever.
+  imagesFor(job, phase) {
+    const wanted = phase === 'planning' || (phase !== 'jira' && job.shareImages !== false);
+    return wanted ? (job.images || []).filter((n) => this.host.images.read(n)) : [];
+  }
+
+  releaseImages(job) {
+    for (const n of job.images || []) this.host.images.remove(n);
+  }
+
   async launch(job, sub, run, prepared) {
     if (job.taskId) {
       const task = this.host.tasks.get(job.taskId);
@@ -86,6 +98,7 @@ export class JobRuntime {
     // would make this explicit rather than positional.
     this.pendingLaunch = { prepared, cleanupHead, adopt: Boolean(existing) };
     const checkouts = planning && checkoutsDir();
+    const images = this.imagesFor(job, run.phase);
     try {
       const result = await this.host.sessions.spawn({
         cwd: existing?.repoRoot || repo,
@@ -93,6 +106,7 @@ export class JobRuntime {
         model: job.model || undefined,
         effort: job.effort || undefined,
         intent: jobPrompt(job, sub, run),
+        ...(images.length ? { images } : {}),
         ...(worktree ? { worktree } : {}),
         // Planning discovers and clones checkouts, so it needs the parent of the
         // repos it will find; a Codex worker's own worktree git dir is granted by

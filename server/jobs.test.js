@@ -33,7 +33,7 @@ function fixture(t, jobInput = input) {
     },
     async stop(r) { stopped.push(r.id); alive.delete(r.sessionId); },
     async isAlive(r) { return alive.has(r.sessionId); },
-    async cleanup(j, s) { cleaned.push(s.id); }, async cleanupPlanning() {},
+    async cleanup(j, s) { cleaned.push(s.id); }, async cleanupPlanning() {}, releaseImages() {},
     attributeSpend(s, live) { attributed.push(live); },
   };
   let pr = { state: 'OPEN', checkStatus: 'pending', head: 'head1', mergeCommit: null, checks: [], base: 'main' };

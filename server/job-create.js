@@ -38,6 +38,13 @@ export function makeCreateJob({ run = runHeadlessClaude } = {}) {
       const task = host.tasks.get(taskId);
       if (!task || task.archived) throw new Error('The selected task is no longer available');
     }
+    // The job keeps its own copies: a staged file is single-use and pruned after a
+    // week, and every spawn of the job needs the same pictures.
+    const kept = [];
+    for (const name of input.images) {
+      if (host.images.keep(name)) kept.push(name);
+      else { for (const k of kept) host.images.remove(k); throw new Error('An attached image is no longer available. Attach it again.'); }
+    }
     const job = host.stores.jobs.create({ ...input, taskId });
     if (start) host.stores.jobs.action(job.id, 'start', {});
     await host.rebuild();

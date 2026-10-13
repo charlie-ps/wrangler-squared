@@ -20,6 +20,8 @@ export function fakeHost() {
   const billed = [];
   const usage = []; // what host.usage.byCard() resolves to: [{ cardId, usd, estimatedUsd }]
   const tasks = [];
+  const staged = new Set(); // names host.images.keep() will accept
+  const kept = new Map(); // name → bytes, the job's own copies
   const sessions = new Map();
   const host = {
     id: 'jobs', version: '1.0.0', log: () => {},
@@ -66,7 +68,12 @@ export function fakeHost() {
         return true;
       },
     },
+    images: {
+      keep: (name) => { if (!staged.has(name)) return false; kept.set(name, Buffer.from(name)); return true; },
+      read: (name) => (kept.has(name) ? { mime: 'image/png', bytes: kept.get(name) } : null),
+      remove: (name) => kept.delete(name),
+    },
     usage: { byCard: async () => usage.map((r) => ({ ...r })) },
   };
-  return { host, spawned, broadcasts, archived, billed, usage, sessions, tasks };
+  return { host, spawned, broadcasts, archived, billed, usage, sessions, tasks, staged, kept };
 }
