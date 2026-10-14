@@ -10,7 +10,6 @@ const FILTERS = [
   ['all', 'In flight', (job) => job.stage !== 'done'],
   ['needs', 'Needs you', (job, needs) => needs.has(job)],
   ['running', 'Running', (job) => jobState(job) === 'running'],
-  ['waiting', 'Waiting', (job) => ['queued', 'waiting', 'paused'].includes(jobState(job))],
   ['backlog', 'Backlog', (job) => job.stage === 'backlog'],
   ['done', 'Finished', (job) => job.stage === 'done'],
 ];

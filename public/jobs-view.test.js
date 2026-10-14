@@ -102,7 +102,7 @@ test('each job is its own card, and a delivered job only returns with Finished',
   f.q('[data-filter="done"]').click();
   assert.deepEqual(boards(), ['job3'], 'Finished shows only the finished');
   assert.ok(f.q('[data-board="job3"]').classList.contains('tone-ok'));
-  assert.deepEqual([...document.querySelectorAll('.jobs-rail-n')].map((n) => n.textContent), ['2', '', '0', '2', '0', '1'], 'each filter counts its jobs; Needs you stays blank at none');
+  assert.deepEqual([...document.querySelectorAll('.jobs-rail-n')].map((n) => n.textContent), ['2', '', '0', '0', '1'], 'each filter counts its jobs; Needs you stays blank at none');
   f.q('[data-filter="all"]').click();
   f.q('.job-plate-open').click(); assert.equal(f.q('#job-dialog h2').textContent, 'Checkout');
   f.q('[data-sub="cart"]').dispatchEvent(f.event('click'));
