@@ -18,6 +18,8 @@ export function fakeHost() {
   const broadcasts = [];
   const archived = [];
   const billed = [];
+  const mailed = []; // host.mail.send(to, text), in order
+  const woken = []; // host.sessions.wake(sid), in order
   const usage = []; // what host.usage.byCard() resolves to: [{ cardId, usd, estimatedUsd }]
   const tasks = [];
   const staged = new Set(); // names host.images.keep() will accept
@@ -57,6 +59,8 @@ export function fakeHost() {
         return { sessionId, worktree };
       },
       get: (id) => sessions.get(id) ?? null,
+      // What resume does to a dormant card: relaunches it, so it is live again.
+      wake: async (id) => { woken.push(id); const s = sessions.get(id); if (s) s.dormant = false; return { ok: true }; },
       archive: async (id) => { archived.push(id); const s = sessions.get(id); if (s) s.archived = true; },
       // recordPriorLiveSessionId's contract: false for an unknown card or a live
       // id that IS the card's own; the set of prior ids grows otherwise.
@@ -74,6 +78,7 @@ export function fakeHost() {
       remove: (name) => kept.delete(name),
     },
     usage: { byCard: async () => usage.map((r) => ({ ...r })) },
+    mail: { send: (to, text) => { mailed.push({ to, text }); return { id: `m_${mailed.length}` }; } },
   };
-  return { host, spawned, broadcasts, archived, billed, usage, sessions, tasks, staged, kept };
+  return { host, spawned, broadcasts, archived, billed, usage, sessions, tasks, staged, kept, mailed, woken };
 }

@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, writeTrigger, writeTarget, milestonesFor, milestoneLabel, workflowFor, triggerDropped, writeDormant, writeAwaitingReview, writeReviewed, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
+import { CHECKPOINTS, checkpoint, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml, jobTileHtml } from './job-graph.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 import { createJobImages, imagesPanelHtml, openZoom } from './job-images.js';
@@ -67,30 +67,28 @@ function depsHtml(job, sub) {
 // choice (the form's change handler rewrites it).
 const startsOnYou = (cp) => cp.field !== 'reviewWrites';
 const REVIEW_POINTS = CHECKPOINTS.map((cp) => `<div class="job-review" data-checkpoint="${cp.field}"><div class="job-review-row"><span class="job-review-stage">${ICONS[cp.icon]}</span><span class="job-review-name">${cp.name}<small>${checkpointHint(cp, startsOnYou(cp))}</small></span>${checkpointToggleHtml(cp, startsOnYou(cp))}</div></div>`).join('');
-// What each place can be asked for (server/jobs-schema.js PLACE_ACTIONS); a
-// made output only under a session, which is what makes it.
+// What each place can be asked for (server/jobs-schema.js PLACE_ACTIONS); every
+// write hangs under the session that makes it.
 const PLACE_ACTIONS = { jira: ['transition', 'comment'], slack: ['post', 'make'], confluence: ['create', 'comment', 'make'], artifact: ['make'], file: ['make'], url: ['make'], other: ['write', 'make'] };
 const ACTION_LABEL = { post: 'Post a message', create: 'Create a page', comment: 'Comment on a page', write: 'Do something there' };
 const MADE_ONLY = ['artifact', 'file', 'url'];
-export const writeOwner = (plan, w) => plan.subJobs.find((s) => s.id === (isMakeWrite(w) ? w.by : w.on?.sub)) || null;
-const defaultOn = (type, t) => ({ sub: t.id, at: type === 'jira' ? (isPrSub(t) ? 'pr' : 'started') : 'deployed' });
+export const writeOwner = (plan, w) => plan.subJobs.find((s) => s.id === w.by) || null;
 const reviewToggleHtml = (job, w) => `<label class="job-write-toggle"><input type="checkbox" name="review" ${writeReviewed(job, w) ? 'checked' : ''}><span><b>${isMakeWrite(w) ? 'Review once published' : 'Review before writing'}</b><small>${isMakeWrite(w)
   ? 'Off: it is done as soon as its session reports where it is. On: once its session publishes it, it waits for you to accept it.'
-  : 'Off: Wrangler writes as soon as it is due and shows a receipt. On: it stops in review and shows you the exact change first.'}</small></span></label>`;
+  : 'Off: its session makes it and reports a receipt. On: its session drafts it and waits while you approve the exact change, edit it or skip it.'}</small></span></label>`;
 // A write's fields, shared by the plan-review editor, a live write's Edit form
-// and the panel a write in review is approved from. `plan` supplies the
-// triggers (its non-write sub-jobs), stories and the workflow statuses the
-// planner read; a status the workflow does not list (an older plan, a planner
-// that read none) is still offered as typed. In plan review (`pick`) the place
-// and what is done there can change too; live, they are what the write is. In
-// review (`inReview`) only what it writes can change: moving its trigger or
-// turning review off would send it back to wait instead.
+// and the panel a draft in review is approved from. `plan` supplies the owning
+// session, stories and the workflow statuses the planner read; a status the
+// workflow does not list (an older plan, a planner that read none) is still
+// offered as typed. In plan review (`pick`) the place and what is done there
+// can change too; live, they are what the write is. In review (`inReview`)
+// only what it writes can change. When it is made is its session's business.
 export function writeFieldsHtml(plan, w, { ticket = false, pick = false, job = null, inReview = false } = {}) {
   const type = placeOf(w);
   const a = w.action || {};
   const owner = writeOwner(plan, w);
   const review = inReview ? '' : reviewToggleHtml(job, w);
-  if (isStoryCreate(w)) return `<p class="job-write-hint">${ICONS.info}<span>Creates this story in Jira when you approve the plan; whatever names the story waits for its key. With review on it waits for you first, and you can change its summary and fields then.</span></p>${review}`;
+  if (isStoryCreate(w)) return `<p class="job-write-hint">${ICONS.info}<span>${esc(owner?.title || 'Its session')} creates this story in Jira; whatever names the story waits for its key. With review on it is drafted for you first, and you can change its summary and fields then.</span></p>${review}`;
   const types = Object.keys(PLACES).filter((t) => t === type || ((isSessionSub(owner) || !MADE_ONLY.includes(t)) && (t !== 'jira' || plan.stories?.length)));
   const actions = (PLACE_ACTIONS[type] || []).filter((x) => x !== 'make' || isSessionSub(owner) || x === a.type);
   const actionLabel = (x) => x === 'make' ? `Made by ${owner?.title || 'its session'}` : ACTION_LABEL[x];
@@ -98,7 +96,7 @@ export function writeFieldsHtml(plan, w, { ticket = false, pick = false, job = n
   const picker = pick ? `<fieldset class="job-place-pick"><legend>Place</legend>${types.map((t) => `<label class="job-place-opt ${t === 'other' ? 'other' : ''}" title="${esc(PLACES[t].name)}"><input type="radio" name="placeType" value="${t}" ${t === type ? 'checked' : ''}>${PLACES[t].icon}<span>${esc(t === 'other' ? 'Something else' : PLACES[t].short)}</span></label>`).join('')}</fieldset>
     ${type !== 'jira' && actions.length > 1 ? `<div class="job-form-row"><label>Do<select name="actionType">${actions.map((x) => `<option value="${x}" ${x === a.type ? 'selected' : ''}>${esc(actionLabel(x))}</option>`).join('')}</select></label></div>` : ''}` : '';
   const why = w.why ? `<p class="job-write-why"><b>Planner:</b> ${esc(w.why)}</p>` : '';
-  const filled = '{pr.url}, {pr.title}, {deploy.run} and {<write id>.url} are filled in when it runs';
+  const filled = '{pr.url}, {pr.title} and {deploy.run} come from its session\'s trigger, {<write id>.url} from that write once made';
   const refField = (label, hint, placeholder) => `<label>${label}${hint ? ` <small>${hint}</small>` : ''}<input name="ref" maxlength="500" value="${esc(w.place?.ref || '')}" placeholder="${esc(placeholder)}"></label>`;
   const textField = (label, optional) => `<label>${label} <small>${optional ? 'Optional · ' : ''}${filled}</small><textarea name="text" rows="3" maxlength="2000">${esc(a.text || '')}</textarea></label>`;
   const elsewhere = type === 'other' ? `<div class="job-form-row"><label>Place <small>One line: what it is called</small><input name="name" maxlength="60" value="${esc(w.place?.name || '')}" placeholder="Status page"></label>${refField('Where', 'Optional · a link or a path', 'https://…')}</div>` : '';
@@ -106,14 +104,11 @@ export function writeFieldsHtml(plan, w, { ticket = false, pick = false, job = n
     const where = type === 'slack' ? refField('Channel', '', '#channel') : type === 'confluence' ? refField('Where', 'Optional · space › parent', 'WEB › Incidents') : elsewhere;
     return `${why}${picker}${where}<label>What it is <small>One line; the session it hangs under makes it and reports where it is</small><input name="what" maxlength="180" value="${esc(a.what || '')}"></label>${review}`;
   }
-  const triggers = plan.subJobs.filter((s) => !isWriteSub(s) && (!s.cancelledAt || s.id === w.on?.sub));
-  const on = w.on ? `${w.on.sub}|${w.on.at}` : '';
-  const when = inReview ? '' : `<label>When<select name="on"><option value="" ${on ? '' : 'selected'}>On approve</option>${triggers.map((t) => milestonesFor(t).map((at) => `<option value="${esc(`${t.id}|${at}`)}" ${on === `${t.id}|${at}` ? 'selected' : ''}>${esc(`${t.title} · ${at === 'dropped' ? 'only if dropped' : milestoneLabel(t, at)}`)}</option>`).join('')).join('')}</select></label>`;
-  if (type === 'other') return `${why}${picker}${elsewhere}${when}<label>What to do there <small>The one instruction the writer follows · ${filled}</small><textarea name="text" rows="3" maxlength="2000">${esc(a.text || '')}</textarea></label>${review}`;
-  if (type === 'slack') return `${why}${picker}<div class="job-form-row">${when}${refField('Channel', '', '#channel')}</div>${textField('Post')}${review}`;
+  if (type === 'other') return `${why}${picker}${elsewhere}<label>What to do there <small>The one instruction its session follows · ${filled}</small><textarea name="text" rows="3" maxlength="2000">${esc(a.text || '')}</textarea></label>${review}`;
+  if (type === 'slack') return `${why}${picker}${refField('Channel', '', '#channel')}${textField('Post')}${review}`;
   if (type === 'confluence') {
-    return a.type === 'create' ? `${why}${picker}<div class="job-form-row">${when}${refField('Where', 'Space › parent page', 'WEB › Incidents')}</div><label>Title<input name="title" maxlength="180" value="${esc(a.title || '')}"></label>${textField('Body', true)}${review}`
-      : `${why}${picker}<div class="job-form-row">${when}${refField('Page', '', 'https://…/wiki/…')}</div>${textField('Comment')}${review}`;
+    return a.type === 'create' ? `${why}${picker}${refField('Where', 'Space › parent page', 'WEB › Incidents')}<label>Title<input name="title" maxlength="180" value="${esc(a.title || '')}"></label>${textField('Body', true)}${review}`
+      : `${why}${picker}${refField('Page', '', 'https://…/wiki/…')}${textField('Comment')}${review}`;
   }
   const statuses = workflowFor(plan, w);
   const to = a.to || '';
@@ -121,7 +116,7 @@ export function writeFieldsHtml(plan, w, { ticket = false, pick = false, job = n
     ? `<select name="to"><option value="" ${to ? '' : 'selected'}>No transition (comment only)</option>${[...statuses, ...(to && !statuses.includes(to) ? [to] : [])].map((st) => `<option value="${esc(st)}" ${st === to ? 'selected' : ''}>${esc(st)}</option>`).join('')}</select>`
     : `<input name="to" maxlength="180" value="${esc(to)}" placeholder="Status name, or blank to comment only">`;
   const stories = ticket && plan.stories?.length > 1 ? `<label>Ticket<select name="storyId">${plan.stories.map((t) => `<option value="${esc(t.id)}" ${t.id === w.storyId ? 'selected' : ''}>${esc(storyLabel(t, plan.stories))} · ${esc(t.title)}</option>`).join('')}</select></label>` : '';
-  return `${why}${picker}${stories}<div class="job-form-row">${when}<label>Move to${moveTo}</label></div>
+  return `${why}${picker}${stories}<label>Move to${moveTo}</label>
     <label>Comment <small>Optional · ${filled}</small><textarea name="comment" rows="3" maxlength="2000">${esc(a.comment || '')}</textarea></label>${review}`;
 }
 // The fields as the write they describe; empty means none, absent means the
@@ -129,15 +124,13 @@ export function writeFieldsHtml(plan, w, { ticket = false, pick = false, job = n
 export function readWriteFields(el) {
   const v = (n) => el.querySelector(`[name="${n}"]`);
   const text = (n) => (v(n) ? v(n).value.trim() : undefined);
-  const on = v('on')?.value || '';
-  return { placeType: el.querySelector('[name="placeType"]:checked')?.value, actionType: v('actionType')?.value, hasOn: !!v('on'),
-    on: on ? { sub: on.slice(0, on.lastIndexOf('|')), at: on.slice(on.lastIndexOf('|') + 1) } : null,
+  return { placeType: el.querySelector('[name="placeType"]:checked')?.value, actionType: v('actionType')?.value,
     to: text('to'), comment: text('comment'), text: text('text'), title: text('title'), what: text('what'), ref: text('ref'), name: text('name'),
     hasReview: !!v('review'), review: !!v('review')?.checked, storyId: v('storyId')?.value };
 }
 // The write the fields describe, from the one they were drawn for: a new place
-// type or action starts that write afresh, keeping its node and whether it is
-// reviewed. Pure; the plan editor stores it and a live Edit sends the difference.
+// type or action starts that write afresh, keeping its session and whether it
+// is reviewed. Pure; the plan editor stores it and a live Edit sends the difference.
 export function writeFromFields(plan, w, f) {
   const review = f.hasReview ? f.review : w.review;
   if (isStoryCreate(w)) return { ...w, ...(review === undefined ? {} : { review }) };
@@ -148,16 +141,14 @@ export function writeFromFields(plan, w, f) {
   if (type === 'jira') act = f.to || (retyped && !f.comment) ? 'transition' : 'comment';
   const name = type === 'other' && !retyped ? f.name ?? w.place?.name : '';
   const next = { ...w, place: { type, ...(name ? { name } : {}), ...((retyped ? '' : f.ref) ? { ref: f.ref } : {}) } };
-  for (const k of ['on', 'by', 'review', 'storyId', 'jiraKey']) delete next[k];
+  for (const k of ['review', 'storyId', 'jiraKey']) delete next[k];
   if (review !== undefined) next.review = review;
   if (type === 'jira') { next.storyId = (retyped ? owner?.storyId || plan.stories?.[0]?.id : f.storyId || w.storyId); if (!retyped && next.storyId === w.storyId && w.jiraKey) next.jiraKey = w.jiraKey; }
   if (act === 'make') {
-    next.by = owner?.id; next.action = { type: 'make', what: retyped || w.action?.type !== 'make' ? w.action?.what || '' : f.what || '' };
+    next.action = { type: 'make', what: retyped || w.action?.type !== 'make' ? w.action?.what || '' : f.what || '' };
     if (!next.action.what) delete next.action.what;
     return next;
   }
-  next.on = f.hasOn && !retyped && w.action?.type !== 'make' ? f.on || undefined : owner ? defaultOn(type, owner) : undefined;
-  if (!next.on) delete next.on;
   const fresh = retyped || act !== w.action?.type;
   const pick = (k) => (fresh ? undefined : f[k]) || undefined;
   next.action = Object.fromEntries(Object.entries(type === 'jira' ? { type: act, to: f.to || undefined, comment: f.comment || undefined }
@@ -166,10 +157,11 @@ export function writeFromFields(plan, w, f) {
   return next;
 }
 // A new Jira write moves the ticket to the first status past its start that
-// reads like review, or comments the PR where the planner read no workflow.
+// reads like review, or comments the PR its session waits on where the planner
+// read no workflow.
 function statusDefault(plan, w) {
   const statuses = workflowFor(plan, w);
-  return statuses.length ? { type: 'transition', to: statuses.find((st) => /review/i.test(st)) || statuses[Math.min(1, statuses.length - 1)] } : { type: 'comment', comment: 'PR opened: {pr.url}' };
+  return statuses.length ? { type: 'transition', to: statuses.find((st) => /review/i.test(st)) || statuses[Math.min(1, statuses.length - 1)] } : { type: 'comment', comment: writeOwner(plan, w)?.on ? 'PR: {pr.url}' : 'Update from this job.' };
 }
 // An `other` place's name goes only when changed: every other place has none.
 const nameEdit = (sub, f) => f.name !== undefined && f.name !== (sub.place?.name || '') ? { name: f.name } : {};
@@ -178,12 +170,12 @@ const nameEdit = (sub, f) => f.name !== undefined && f.name !== (sub.place?.name
 export function writeEditPayload(sub, f) {
   if (isStoryCreate(sub)) return { review: f.review };
   const action = Object.fromEntries(['to', 'comment', 'text', 'title', 'what'].filter((k) => f[k] !== undefined).map((k) => [k, f[k] || null]));
-  return { action, ...(f.ref !== undefined ? { ref: f.ref || null } : {}), ...nameEdit(sub, f), ...(f.hasOn ? { on: f.on } : {}), ...(f.hasReview ? { review: f.review } : {}) };
+  return { action, ...(f.ref !== undefined ? { ref: f.ref || null } : {}), ...nameEdit(sub, f), ...(f.hasReview ? { review: f.review } : {}) };
 }
 // What approving a write in review sends with it (approve-write's `write`, the
 // edit-write shape): only what the human changed in the panel, null where
-// emptied, and never `on` or `review`, either of which would send it back to
-// wait. `story` is a create's own summary and fields. Null when nothing changed.
+// emptied, and never `review`. `story` is a create's own summary and fields.
+// Null when nothing changed.
 export function writeReviewPayload(sub, f, story = null) {
   const a = sub.action || {};
   const action = Object.fromEntries(['to', 'comment', 'text', 'title', 'what'].filter((k) => f[k] !== undefined && (f[k] || null) !== (a[k] || null)).map((k) => [k, f[k] || null]));
@@ -229,13 +221,13 @@ export function authorityText(job, plan) {
   // A keyless story always gets a create write on the server; one not in this
   // draft yet is reviewed by the job's default.
   const heldStories = fresh.filter((t) => writeReviewed(job, creates.find((c) => c.storyId === t.id) || {})).length;
-  const milestone = writes.filter((w) => !isStoryCreate(w) && !isMakeWrite(w));
+  const given = writes.filter((w) => !isStoryCreate(w) && !isMakeWrite(w));
   const made = writes.filter(isMakeWrite);
   const n = fresh.length;
   const stories = !n ? '' : !heldStories ? ` ${n === 1 ? 'The new Jira story is' : `The ${n} new Jira stories are`} created in Jira straight away.`
     : heldStories === n ? ` ${n === 1 ? 'The new Jira story is' : `The ${n} new Jira stories are`} held for your review before ${n === 1 ? 'it is' : 'they are'} created.`
     : ` Of the ${n} new Jira stories, ${n - heldStories} ${n - heldStories === 1 ? 'is' : 'are'} created in Jira straight away and ${heldStories} ${heldStories === 1 ? 'is' : 'are'} held for your review first.`;
-  const fired = milestone.length ? ` ${milestone.length === 1 ? 'The write runs when its milestone arrives' : `The ${milestone.length} writes run as their milestones arrive`}${held(milestone) ? `; ${waits(held(milestone))} for your review first` : ''}.` : '';
+  const fired = given.length ? ` ${given.length === 1 ? 'Its session makes the write' : `Their sessions make the ${given.length} writes`}${held(given) ? `; ${held(given)} ${held(given) === 1 ? 'is' : 'are'} drafted for your review first` : ''}.` : '';
   const outputs = made.length ? ` ${made.length === 1 ? 'Its session makes the output and says where it is' : `Their sessions make the ${made.length} outputs and say where each is`}${held(made) ? `; ${waits(held(made))} for your review once published` : ''}.` : '';
   const sessions = plan.subJobs.some(isSessionSub), humans = plan.subJobs.some(isHumanSub);
   return `Approve starts work in dedicated worktrees.${stories}${fired}${outputs} ${['reviewCode', 'reviewMerge', ...(sessions ? ['reviewSessions'] : [])].map((f) => `${checkpoint(f).name}: ${checkpointHint(checkpoint(f), youReview(job, f))}.`).join(' ')}${humans ? ' Nothing starts a human task: you mark it done, and that releases whatever waits on it.' : ''}`;
@@ -398,7 +390,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     observer?.observe(graph.querySelector('.job-graph-canvas'));
     layoutGraphEdges(graph);
   }
-  // A human's own write, hung under the node they added it from: a Jira write
+  // A human's own write, made by the session they added it from: a Jira write
   // where the plan has stories (the first status past its start, or a PR-link
   // comment where the planner read no workflow), else a Slack post. Marked
   // `added`, so it is not drawn as Proposed.
@@ -408,7 +400,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     let id = `${subId}-write`.slice(0, 60), n = 2;
     while (taken.has(id)) id = `${subId}-write-${n++}`.slice(0, 64);
     const jira = planDraft.stories?.length > 0;
-    const w = { id, kind: 'write', title: '', place: { type: jira ? 'jira' : 'slack' }, after: [], on: defaultOn(jira ? 'jira' : 'slack', t), added: true,
+    const w = { id, kind: 'write', title: '', place: { type: jira ? 'jira' : 'slack' }, after: [], by: t.id, added: true,
       ...(jira ? { storyId: t.storyId || planDraft.stories[0].id } : {}) };
     w.action = jira ? statusDefault(planDraft, w) : { type: 'post' };
     w.title = writeTarget(planDraft, w).slice(0, 180);
@@ -739,20 +731,22 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       <div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${tail}</div>${footerHtml(job)}`;
   }
   // What a write's state means, in sentences: the chip's tooltip carries them all,
-  // and the review / already-there / trigger-dropped one is also the box above it.
+  // and the review / already-there one is also the box above it.
   const placeName = placeShort;
-  function writeHints(job, sub, trigger, held) {
+  function writeHints(job, sub, held) {
     if (!isWriteSub(sub) || sub.cancelledAt) return [];
     const key = sub.jiraKey || sub.result?.key || 'The ticket';
-    const session = writeSession(job, sub);
+    const by = writeSession(job, sub)?.title || 'Its session';
+    const parked = !!parkedRun(job, writeSession(job, sub));
     return [
-      writeAwaitingReview(sub) && !held ? (isMakeWrite(sub) ? `Review is on for this output: ${session?.title || 'its session'} published it. Accept it to finish, or drop it.`
-        : `${trigger && sub.on.at !== 'dropped' ? `${trigger.title} reached ${milestoneLabel(trigger, sub.on.at)}. ` : ''}Review is on for this write, so nothing has been written to ${placeName(sub)} yet. Change anything below before you approve it.`) : '',
+      writeAwaitingReview(sub) && !held ? (isMakeWrite(sub) ? `Review is on for this output: ${by} published it. Accept it to finish, or drop it.`
+        : `Review is on for this write: ${by} drafted it below and nothing has been written to ${placeName(sub)} yet. Change anything before you approve it${parked ? `; once every draft it sent is decided, ${by} is told what to make` : ''}.`) : '',
       sub.result?.outcome === 'already' ? (isJiraWrite(sub) ? `${key} was already ${sub.action?.to ? `at or past ${sub.action.to}` : 'there'}${sub.result.from ? ` (${sub.result.from})` : ''}, so nothing moved${sub.action?.comment ? '; the comment was still posted' : ''}.` : `It was already in ${placeName(sub)}, so nothing was written twice.`) : '',
-      writeDormant(job, sub) ? `Runs only if ${trigger?.title || sub.on.sub} is dropped, and is dropped itself once it deploys.` : '',
-      isMakeWrite(sub) && sub.stage === 'write' && sub.state === 'queued' ? `${session?.title || 'Its session'} makes this and says where it is when it reports.` : '',
-      sub.state === 'failed' && !sub.blocked ? (isMakeWrite(sub) ? 'The session did not make it. Mark it done with where it is if you made it yourself, or drop it.'
-        : `${placeName(sub)} refused it. Retry once it allows it${isJiraWrite(sub) ? ', pick another status' : ', edit it'}, or mark it done if you made the change yourself.`) : '',
+      sub.stage === 'write' && sub.state === 'queued' && sub.by ? (isMakeWrite(sub) ? `${by} makes this and says where it is when it reports.`
+        : writeReviewed(job, sub) ? `${by} drafts this for your review before it writes anything.` : `${by} makes this write and reports it.`) : '',
+      sub.stage === 'write' && sub.state === 'approved' ? `You approved it; ${by} makes it as approved.` : '',
+      sub.state === 'failed' && !sub.blocked && sub.by ? (isMakeWrite(sub) ? `${by} did not make it. Retry runs it again for this; or mark it done with where it is if you made it yourself, or drop it.`
+        : `${placeName(sub)} refused it. Retry once it allows it${isJiraWrite(sub) ? ', pick another status' : ', edit it'} (either runs ${by} again for it), or mark it done if you made the change yourself.`) : '',
     ].filter(Boolean);
   }
   // Where the write goes, and where it ended up: an http(s) link opens, a file
@@ -774,7 +768,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     const text = sub.result?.text || a.comment || a.text;
     const jira = isJiraWrite(sub);
     const where = jira ? row('Ticket', esc([sub.jiraKey || (story ? storyLabel(story, stories) : ''), story?.title].filter(Boolean).join(' · '))) : placeRowHtml(job, sub);
-    if (brief) return `<dl class="job-write-spec">${where}${row('When', esc(dependencyLine(job, sub)))}</dl>`;
+    if (brief) return `<dl class="job-write-spec">${where}${row('By', esc(dependencyLine(job, sub)))}</dl>`;
     return `<h3>The write</h3><dl class="job-write-spec">${where}
       ${isStoryCreate(sub) ? row('Action', 'Create the story') + (storyProject(story) ? row('Project', esc(storyProject(story))) : '') + (story?.fields || []).map((f) => row(esc(f.name), `<span class="job-write-quote">${esc(f.value)}</span>`)).join('') : ''}
       ${jira && sub.result?.url ? placeRowHtml(job, sub) : ''}
@@ -782,7 +776,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       ${a.what ? row('Makes', esc(a.what)) : ''}${a.title ? row('Title', esc(a.title)) : ''}
       ${a.to ? row('Status', `${sub.result?.from ? `<span class="job-write-from">${esc(sub.result.from)}</span> → ` : ''}<b>${esc(a.to)}</b>`) : ''}
       ${text ? row(a.type === 'post' ? 'Post' : a.type === 'create' ? 'Body' : 'Comment', `<span class="job-write-quote">${esc(text)}</span>`) : ''}
-      ${row('When', esc(dependencyLine(job, sub)))}${sub.why ? row('Why', esc(sub.why)) : ''}</dl>`;
+      ${row('By', esc(dependencyLine(job, sub)))}${sub.why ? row('Why', esc(sub.why)) : ''}</dl>`;
   }
   // What approving a write in review does, in the place's own words.
   function writeVerb(sub) {
@@ -813,9 +807,9 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     const state = subState(job, sub);
     const status = jobStatus(job, sub);
     const pr = isPrSub(sub);
-    const trigger = writeTrigger(job, sub);
-    const dropped = isWriteSub(sub) && sub.cancelledAt && !sub.superseded ? (sub.notNeeded ? `${trigger?.title || 'Its trigger'} landed, so this if-dropped write was not needed.` : isMakeWrite(sub) ? 'Dropped. The session will not make it.' : `Dropped. Nothing was written to ${placeName(sub)}.`) : sub.superseded ? `Superseded by a plan change and cancelled.${sub.pr?.url ? ' Its PR is left open on GitHub for you to close.' : ''}${isPrSub(sub) ? ' Cleanup removes the worktree only if every commit is already on GitHub or the branch is unchanged.' : ''}` : sub.cancelledAt ? (isHumanSub(sub) ? 'Dropped. Nothing ever ran for it, so there is nothing to clean up.' : isSessionSub(sub) ? 'Dropped. Its session is archived; nothing on disk is removed.' : 'Dropped. Nothing was merged. Cleanup archives its sessions and removes the worktree only if every commit is already on GitHub or the branch is unchanged.') : '';
-    const orphan = triggerDropped(job, sub) ? `${trigger.title} was dropped, so it will never reach ${milestoneLabel(trigger, sub.on.at)}. Drop this write, or Edit it to fire on something else.`
+    const trigger = sessionTrigger(job, sub);
+    const dropped = sub.notNeeded && !sub.superseded ? `${trigger?.title || 'Its trigger'} landed, so this if-dropped session was not needed.` : isWriteSub(sub) && sub.cancelledAt && !sub.superseded ? (isMakeWrite(sub) ? 'Dropped. The session will not make it.' : `Dropped. Nothing was written to ${placeName(sub)}.`) : sub.superseded ? `Superseded by a plan change and cancelled.${sub.pr?.url ? ' Its PR is left open on GitHub for you to close.' : ''}${isPrSub(sub) ? ' Cleanup removes the worktree only if every commit is already on GitHub or the branch is unchanged.' : ''}` : sub.cancelledAt ? (isHumanSub(sub) ? 'Dropped. Nothing ever ran for it, so there is nothing to clean up.' : isSessionSub(sub) ? 'Dropped. Its session is archived; nothing on disk is removed.' : 'Dropped. Nothing was merged. Cleanup archives its sessions and removes the worktree only if every commit is already on GitHub or the branch is unchanged.') : '';
+    const orphan = triggerDropped(job, sub) ? `${trigger.title} was dropped, so it will never reach ${milestoneLabel(trigger, sub.on.at)} and this session will never start. Drop it, or Change plan to start it on something else.`
       : !sub.cancelledAt && sub.stage !== 'done' && cancelledDependencies(job, sub).length
       ? `A prerequisite was dropped, so this ${isHumanSub(sub) ? 'task’s turn will never come' : isSessionSub(sub) ? 'session can never start' : 'sub-job can never land'}. Drop it too, or add the remaining work with New ticket.` : '';
     const held = heldByReplan(job, sub);
@@ -823,7 +817,9 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     const hints = [dropped, orphan,
       held ? 'Frozen while the plan is being changed: nothing here starts, merges or can be approved until you approve or discard the change on the job.' : '',
       isSessionSub(sub) && sub.stage === 'review' ? 'Approving marks the session done and lets the work depending on it start.' : '',
-      ...writeHints(job, sub, trigger, held),
+      parkedRun(job, sub) ? (draftsWaiting(job, sub).length ? `Paused on ${draftsWaiting(job, sub).length} draft${draftsWaiting(job, sub).length === 1 ? '' : 's'} for your review. Approve, edit or skip each; once all are decided the session is told which to make and carries on.` : 'Every draft is decided: the session is being told which writes to make.') : '',
+      sessionDormant(job, sub) ? `${triggerLine(job, sub)}: it is dropped itself once ${trigger?.title || sub.on.sub} lands.` : '',
+      ...writeHints(job, sub, held),
       yours ? `No agent will ever run this one${sub.state === 'doing' ? '; you marked it in progress' : ''}. Marking it done is what releases the work waiting on it.` : '',
       codeAwaitingReview(sub) ? `Nothing is committed yet. Read the diff with Review code in Wrangler — comments there go straight to the session — then approve: a short session commits the working tree as it stands and ${sub.pr ? 'pushes it to the open PR' : 'pushes and opens the PR'}.` : pr && sub.stage === 'review' && !sub.error && !held ? `Approved. A session commits and ${sub.pr ? 'pushes to the open PR' : 'pushes and opens the PR'} next.` : '',
       mergeHeldByComments(job, sub) ? 'Comments read as blocking, so the automatic merge is on hold. Approve merge to override for this head.' : '',
@@ -855,19 +851,24 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       const made = isMakeWrite(sub);
       const panel = review && !made;
       body = `${box(review || sub.result?.outcome === 'already' ? hints.find((h) => /^(Review is on|.* reached |.* was already )/.test(h)) : orphan)}${review && made ? madeWhereHtml(sub) : ''}${sub.result ? `<h3>Reported</h3>${receiptHtml(sub.result.checks)}` : ''}${panel ? writeReviewHtml(job, sub, state) : writeSpecHtml(job, sub)}`;
-      // An output whose session has finished can only be marked done or dropped:
+      // A write whose session has finished can only be marked done or dropped:
       // nothing is left to make it.
-      const madeTooLate = isMakeWrite(sub) && ['cleanup', 'done'].includes(writeSession(job, sub)?.stage);
-      const editable = !sub.cancelledAt && !['cleanup', 'done'].includes(sub.stage) && sub.state !== 'writing' && !held && !madeTooLate;
+      const madeTooLate = ['cleanup', 'done'].includes(writeSession(job, sub)?.stage);
+      const editable = !sub.cancelledAt && !['cleanup', 'done'].includes(sub.stage) && !held && !madeTooLate && !!sub.by
+        && !(sub.stage === 'write' && job.runs.some((r) => !r.stopped && r.subJobId === sub.by));
       const failed = sub.state === 'failed' && !isStoryCreate(sub);
-      // A made output comes back only from its session, so it is never retried
-      // on its own: Mark done with where it is, or Drop.
-      const again = isMakeWrite(sub) ? '' : retry;
+      // A write is only ever made by its session, so Retry runs that again for
+      // it, which only a session that has not finished can do.
+      const again = madeTooLate || !sub.by ? '' : retry;
       // A made output is already published: it can only be accepted or dropped.
       actions = `${review && made ? `<button class="primary" data-action="approve-write" title="Accept it as published and finish it">${ICONS.check}Accept</button>` : ''}${fabMove}${again}
-        ${editable && !review ? `<button id="job-write-edit">${ICONS.edit}${failed && isJiraWrite(sub) && sub.action?.to ? 'Pick another status' : triggerDropped(job, sub) ? 'Move trigger' : 'Edit'}</button>` : ''}`;
+        ${editable && !review ? `<button id="job-write-edit">${ICONS.edit}${failed && isJiraWrite(sub) && sub.action?.to ? 'Pick another status' : 'Edit'}</button>` : ''}`;
     } else if (isSessionSub(sub)) {
-      body = `${sub.feedback && !sub.result ? `<h3>Requested changes</h3><p>${esc(sub.feedback)}</p>` : ''}${sub.result ? `<h3>Reported</h3>${receiptHtml(sub.result.checks)}` : ''}${noteFor(sub)}`;
+      // Its writes hang under it in the graph; here each opens its own dialog,
+      // which is where a draft is approved.
+      const owned = job.subJobs.filter((w) => isWriteSub(w) && w.by === sub.id);
+      const writes = owned.length ? `<h3>Writes</h3><div class="job-chips">${owned.map((w) => `<button type="button" class="job-chip tone-${STATES[subState(job, w)].tone}" data-open-sub="${esc(w.id)}" title="${esc(jobStatus(job, w).text)}">${PLACES[placeOf(w)].icon}<span>${esc(w.title)}</span></button>`).join('')}</div>` : '';
+      body = `${sub.feedback && !sub.result ? `<h3>Requested changes</h3><p>${esc(sub.feedback)}</p>` : ''}${sub.result ? `<h3>Reported</h3>${receiptHtml(sub.result.checks)}` : ''}${writes}${noteFor(sub)}`;
       actions = `${sub.stage === 'review' && !sub.error && !held ? `<button class="primary" data-action="approve-session" title="${esc(hints.find((h) => h.startsWith('Approving')) || '')}">${ICONS.check}Approve</button><button id="job-revise-session">${ICONS.edit}Request changes</button>` : ''}${fabMove}${session}${retry}`;
     } else if (isHumanSub(sub)) {
       // The brief is the instruction here, not background for an agent, so it is

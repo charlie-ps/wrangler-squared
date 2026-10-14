@@ -24,7 +24,7 @@ function fixture(t, jobInput = input) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-jobs-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const store = new JobStore(path.join(dir, 'jobs.json'));
-  const launched = [], stopped = [], merged = [], cleaned = [], alive = new Set();
+  const launched = [], stopped = [], merged = [], cleaned = [], mailed = [], alive = new Set();
   let clock = Date.now();
   const runtime = {
     async launch(j, s, r, prepared) {
@@ -33,6 +33,8 @@ function fixture(t, jobInput = input) {
     },
     async stop(r) { stopped.push(r.id); alive.delete(r.sessionId); },
     async isAlive(r) { return alive.has(r.sessionId); },
+    async exists(r) { return alive.has(r.sessionId); },
+    async resumeWithMail(r, text) { mailed.push({ sid: r.sessionId, text }); },
     async cleanup(j, s) { cleaned.push(s.id); }, async cleanupPlanning() {}, releaseImages() {},
     attributeSpend(s, live) { attributed.push(live); },
   };
@@ -60,7 +62,7 @@ function fixture(t, jobInput = input) {
     store.action(job.id, 'start'); await tick(); report({ kind: 'plan', plan: p }); await tick();
     const current = store.get(job.id); store.approvePlan(job.id, current.revision); await tick();
   }
-  return { store, job, runner, runtime, github, alive, launched, stopped, merged, cleaned, tick, last, workerFor, report, approve, sub,
+  return { store, job, runner, runtime, github, alive, launched, stopped, merged, cleaned, mailed, tick, last, workerFor, report, approve, sub,
     attributed, triaged, deployCalls, clockNow: () => clock,
     setPr: (value) => { pr = { ...pr, ...value }; }, setDeployment: (value) => { deployment = value; },
     setDeploys: (value) => { deploys = { ...deploys, ...value }; }, setStatus: (fn) => { status = fn; },
@@ -83,7 +85,7 @@ async function atPr(f, p = plan()) {
 test('store persists settings, plans and live claims across restart', async (t) => {
   const f = fixture(t); await f.approve();
   f.store.settings({ concurrency: 4 });
-  assert.equal(f.store.snapshot().version, 4);
+  assert.equal(f.store.snapshot().version, 5);
   assert.deepEqual(new JobStore(f.store.file).snapshot(), f.store.snapshot());
   assert.equal(f.store.get(f.job.id).runs.filter((r) => !r.stopped).length, 1);
 });
@@ -120,14 +122,14 @@ const legacy = {
   }],
 };
 
-test('a version-1 file loads as version 4: after/brief replace dependsOn/instructions and every removed field is gone', async (t) => {
+test('a version-1 file loads as version 5: after/brief replace dependsOn/instructions and every removed field is gone', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-jobs-v1-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'jobs.json');
   fs.writeFileSync(file, JSON.stringify(legacy));
   const store = new JobStore(file);
   const job = store.get('job_old');
-  assert.equal(store.snapshot().version, 4);
+  assert.equal(store.snapshot().version, 5);
   assert.equal(store.snapshot().settings.maxRunMinutes, undefined);
   for (const key of ['amendmentAuthority', 'amendments', 'recoveryOf']) assert.equal(job[key], undefined, key);
   assert.equal(job.reviewCode, true, 'the version-1 flag meant the same thing and is kept');
@@ -143,8 +145,8 @@ test('a version-1 file loads as version 4: after/brief replace dependsOn/instruc
   // The file itself is untouched until the next ordinary write.
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 1);
   store.action('job_old', 'pause');
-  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 4);
-  assert.throws(() => migrateJobs({ version: 5, jobs: [] }), /refusing to discard jobs/);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 5);
+  assert.throws(() => migrateJobs({ version: 6, jobs: [] }), /refusing to discard jobs/);
   assert.throws(() => migrateJobs({ version: 1, jobs: {} }), /refusing to discard jobs/);
   assert.deepEqual(migrateJobs(structuredClone(migrateJobs(legacy))), migrateJobs(legacy), 'migration is idempotent');
 });
@@ -734,7 +736,7 @@ test('Split out from a merged sub-job is its fix: it counts as deployed when the
   assert.equal(f.sub().deployed.commit, 'merge1');
 });
 
-test('New ticket adds a keyless story and the write that creates it; its key releases the new PR', async (t) => {
+test('New ticket adds a keyless story and the write that creates it, under a stories session; its key releases the new PR', async (t) => {
   const f = fixture(t); await f.approve(); f.alive.clear(); await f.tick();
   f.store.action(f.job.id, 'new-ticket', { subJobId: 'api', storyTitle: 'Sign-ins are audited', project: 'SEC',
     title: 'Emit audit events', brief: 'Emit an event per sign-in', position: 'after' });
@@ -742,12 +744,13 @@ test('New ticket adds a keyless story and the write that creates it; its key rel
   assert.deepEqual(job.plan.stories.map((s) => [s.id, s.key ?? null, s.project ?? null]), [['story', 'AUTH-123', null], ['s-2', null, 'SEC']]);
   const extra = job.subJobs.find((s) => s.id === 'api-2');
   assert.equal(extra.storyId, 's-2'); assert.equal(extra.jiraKey, null); assert.deepEqual(extra.after, ['api']);
-  assert.deepEqual(job.subJobs.filter((s) => s.kind === 'write').map((s) => [s.id, s.storyId, s.action.type]), [['create-s-2', 's-2', 'create']]);
+  assert.deepEqual(job.subJobs.filter((s) => s.kind === 'write').map((s) => [s.id, s.storyId, s.action.type, s.by]), [['create-s-2', 's-2', 'create', 'stories']]);
+  assert.deepEqual(job.subJobs.find((s) => s.id === 'stories').title, 'Create Jira stories');
   await f.tick();
-  const ticketing = f.launched.findLast((w) => w.run.phase === 'write');
-  assert.equal(ticketing.sub, null); assert.deepEqual(ticketing.run.writes, ['create-s-2']);
+  const ticketing = f.workerFor('stories', 'session');
+  assert.match(jobPrompt(f.store.get(f.job.id), ticketing.sub, ticketing.run), /"id":"create-s-2","place":"jira","ticket":null,"story":"Sign-ins are audited","project":"SEC"/);
   assert.equal(f.launched.filter((w) => w.sub?.id === 'api-2').length, 0, 'nothing starts without a key');
-  f.report({ kind: 'write', writes: [{ id: 'create-s-2', outcome: 'written', key: 'SEC-42' }] }, ticketing);
+  f.report({ kind: 'completed', checks: ['Created SEC-42'], writes: [{ id: 'create-s-2', outcome: 'written', key: 'SEC-42' }] }, ticketing);
   job = f.store.get(f.job.id);
   assert.equal(job.stage, 'active');
   assert.equal(job.subJobs.find((s) => s.id === 'api-2').jiraKey, 'SEC-42'); assert.equal(job.plan.subJobs.find((s) => s.id === 'api-2').jiraKey, 'SEC-42');
@@ -1035,41 +1038,43 @@ test('pipeline API failure never turns old green evidence into a merge', async (
   await f.tick(); assert.equal(f.merged.length, 0); assert.match(f.sub().observationError, /unavailable/);
 });
 
-// --- Jira writes ---
+// --- Writes: every one made by a session ---
 
-const write = (id, on, action, extra = {}) => ({ id, kind: 'write', place: { type: 'jira' }, title: `Write ${id}`, storyId: 'story', ...(on ? { on } : {}), action, ...extra });
+const write = (id, by, action, extra = {}) => ({ id, kind: 'write', place: { type: 'jira' }, title: `Write ${id}`, storyId: 'story', after: [], ...(by ? { by } : {}), action, ...extra });
+const notifier = (id, on, after = []) => ({ id, kind: 'session', title: `Notify ${id}`, after, brief: `Make the writes of ${id}`, ...(on ? { on } : {}) });
 const moveTo = (to, comment) => ({ type: 'transition', to, ...(comment ? { comment } : {}) });
-const writer = (f) => f.launched.findLast((w) => w.run.phase === 'write');
+const completed = (writes, checks = ['Made the writes']) => ({ kind: 'completed', checks, writes });
+const noSessionReview = { ...input, reviewSessions: false };
 
-test('approving a plan with a keyless story creates it with its own write, whose key, and only that, unlocks the sub-jobs naming it', async (t) => {
+test('approving a plan with a keyless story creates it under a stories session, whose key, and only that, unlocks the sub-jobs naming it', async (t) => {
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
   const proposed = plan([spec('api'), { ...spec('web'), storyId: 'audit' }],
     [{ id: 'story', key: 'AUTH-123', title: 'Reliable sign-in' }, { id: 'audit', project: 'SEC', title: 'Sign-ins are audited' }]);
   f.report({ kind: 'plan', plan: proposed }); await f.tick();
-  assert.deepEqual(f.store.get(f.job.id).plan.subJobs[0], { id: 'create-audit', title: 'Create story: Sign-ins are audited', kind: 'write', place: { type: 'jira' }, storyId: 'audit', after: [], action: { type: 'create' } },
-    'the human reviews the create with the plan');
+  assert.deepEqual(f.store.get(f.job.id).plan.subJobs.slice(0, 2), [
+    { id: 'stories', kind: 'session', title: 'Create Jira stories', after: [], brief: 'Create this job\'s new Jira stories, one per create write you are given, and nothing else.' },
+    { id: 'create-audit', title: 'Create story: Sign-ins are audited', kind: 'write', place: { type: 'jira' }, storyId: 'audit', after: [], action: { type: 'create' }, by: 'stories' }],
+  'the human reviews the create and the session that makes it with the plan');
   f.store.approvePlan(f.job.id, f.store.get(f.job.id).revision); await f.tick();
   let job = f.store.get(f.job.id);
   assert.equal(job.stage, 'active', 'no separate ticketing stage: the create is a sub-job of the running job');
   assert.deepEqual(job.subJobs.map((s) => [s.id, s.kind, s.stage, s.state]),
-    [['create-audit', 'write', 'write', 'writing'], ['api', 'pr', 'implementation', 'queued'], ['web', 'pr', 'implementation', 'queued']]);
-  const w = writer(f);
-  assert.equal(w.sub, null); assert.deepEqual(w.run.writes, ['create-audit']);
+    [['stories', 'session', 'session', 'queued'], ['create-audit', 'write', 'write', 'queued'], ['api', 'pr', 'implementation', 'queued'], ['web', 'pr', 'implementation', 'queued']]);
+  const w = f.workerFor('stories', 'session');
   assert.deepEqual(f.launched.filter((l) => l.run.phase === 'implementation').map((l) => l.sub.id), ['api'], 'web waits for its key');
-  assert.throws(() => f.report({ kind: 'write', writes: [{ id: 'api', outcome: 'written' }] }, w), /not one of this run's writes/);
-  assert.throws(() => f.report({ kind: 'write', writes: [{ id: 'create-audit', outcome: 'written' }] }, w), /report the key/);
-  assert.throws(() => f.report({ kind: 'jira', stories: [{ id: 'story', key: 'AUTH-999' }] }, w), /approved as AUTH-123/);
-  assert.equal(f.store.get(f.job.id).subJobs[0].state, 'writing', 'a rejected receipt changes nothing');
-  f.report({ kind: 'write', writes: [{ id: 'create-audit', outcome: 'written', key: 'SEC-42' }] }, w); await f.tick();
+  assert.throws(() => f.report(completed([]), w), /still missing: create-audit/);
+  assert.throws(() => f.report(completed([{ id: 'api', outcome: 'written' }]), w), /api is not one of the writes this session makes/);
+  assert.throws(() => f.report(completed([{ id: 'create-audit', outcome: 'written' }]), w), /report the key/);
+  assert.equal(f.store.get(f.job.id).subJobs[1].state, 'queued', 'a rejected receipt changes nothing');
+  f.report(completed([{ id: 'create-audit', outcome: 'written', key: 'SEC-42' }]), w); await f.tick();
   job = f.store.get(f.job.id);
   assert.equal(job.plan.stories[1].key, 'SEC-42');
-  assert.deepEqual(job.subJobs.map((s) => s.jiraKey), ['SEC-42', 'AUTH-123', 'SEC-42']);
-  assert.deepEqual(job.subJobs[0].result.checks, ['Created SEC-42']); assert.equal(job.subJobs[0].stage, 'done');
+  assert.deepEqual(job.subJobs.map((s) => s.jiraKey), [null, 'SEC-42', 'AUTH-123', 'SEC-42']);
+  assert.deepEqual(job.subJobs[1].result.checks, ['Created SEC-42']); assert.equal(job.subJobs[1].stage, 'done');
   assert.deepEqual([f.last().run.phase, f.last().sub.id], ['implementation', 'web']);
-  assert.ok(f.stopped.includes(w.run.id), 'the write session is released like planning');
 });
 
-test('a proposed story carries the fields its create fills in; the human edits them on approval and the write run gets exactly those', async (t) => {
+test('a proposed story carries the fields its create fills in; the human edits them on approval and its session gets exactly those', async (t) => {
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
   const story = (fields) => [{ id: 'audit', project: 'SEC', title: 'Sign-ins are audited', fields }];
   assert.throws(() => f.report({ kind: 'plan', plan: plan([{ ...spec('web'), storyId: 'audit' }], story([{ name: 'Labels', value: 'a' }, { name: 'labels', value: 'b' }])) }), /name each field once/);
@@ -1079,7 +1084,7 @@ test('a proposed story carries the fields its create fills in; the human edits t
   edited.stories[0].fields = [{ name: 'Issue Type', value: 'Story' }, { name: 'Labels', value: 'audit' }];
   f.store.approvePlan(f.job.id, f.store.get(f.job.id).revision, edited); await f.tick();
   assert.deepEqual(f.store.get(f.job.id).plan.stories[0].fields, edited.stories[0].fields);
-  const w = writer(f); const prompt = jobPrompt(f.store.get(f.job.id), null, w.run);
+  const w = f.workerFor('stories', 'session'); const prompt = jobPrompt(f.store.get(f.job.id), w.sub, w.run);
   assert.match(prompt, /"fields":\[\{"name":"Issue Type","value":"Story"\},\{"name":"Labels","value":"audit"\}\]/);
   assert.doesNotMatch(prompt, /Components/, 'a field the human removed is not set');
 });
@@ -1088,149 +1093,215 @@ test('a plan can mix ticketed and ticketless sub-jobs: only the one naming a key
   const f = fixture(t);
   const tool = { ...spec('tool') }; delete tool.storyId;
   await f.approve(plan([tool, { ...spec('web'), storyId: 'audit' }], [{ id: 'audit', project: 'SEC', title: 'Sign-ins are audited' }]));
-  assert.deepEqual(f.launched.slice(1).map((l) => [l.run.phase, l.sub?.id ?? null]), [['implementation', 'tool'], ['write', null]]);
-  f.report({ kind: 'write', writes: [{ id: 'create-audit', outcome: 'already', key: 'SEC-42' }] }, writer(f)); await f.tick();
-  assert.deepEqual(f.store.get(f.job.id).subJobs.map((s) => [s.id, s.jiraKey]), [['create-audit', 'SEC-42'], ['tool', null], ['web', 'SEC-42']]);
+  assert.deepEqual(f.launched.slice(1).map((l) => [l.run.phase, l.sub?.id ?? null]), [['session', 'stories'], ['implementation', 'tool']]);
+  f.report(completed([{ id: 'create-audit', outcome: 'already', key: 'SEC-42' }]), f.workerFor('stories')); await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).subJobs.map((s) => [s.id, s.jiraKey]), [['stories', null], ['create-audit', 'SEC-42'], ['tool', null], ['web', 'SEC-42']]);
   assert.deepEqual([f.last().run.phase, f.last().sub.id], ['implementation', 'web']);
 });
 
-test('a blocked write run fails its writes, not the job; each retries on its own card; a fully keyed plan writes nothing', async (t) => {
+test('a blocked stories session holds its writes, not the job, and Retry runs it again; a fully keyed plan writes nothing', async (t) => {
   const f = fixture(t);
   await f.approve(plan([spec('api')], [{ id: 'story', title: 'Reliable sign-in' }]));
-  f.report({ kind: 'blocked', summary: 'Jira search failed: 401 from the Atlassian MCP' }, writer(f)); await f.tick();
+  f.report({ kind: 'blocked', summary: 'Jira search failed: 401 from the Atlassian MCP' }, f.workerFor('stories')); await f.tick();
   let job = f.store.get(f.job.id);
   assert.equal(job.error ?? null, null);
-  assert.match(job.subJobs[0].error, /401/); assert.equal(job.subJobs[0].blocked.phase, 'write'); assert.equal(job.subJobs[0].state, 'failed');
+  assert.match(job.subJobs[0].error, /401/); assert.equal(job.subJobs[0].blocked.phase, 'session');
+  assert.deepEqual([job.subJobs[1].state, job.subJobs[1].error ?? null], ['queued', null], 'its write still waits on it');
   const before = f.launched.length; await f.tick();
-  assert.equal(f.launched.length, before, 'a failed write waits for the human');
-  f.store.action(f.job.id, 'retry', { subJobId: 'create-story' }); await f.tick();
-  assert.deepEqual(writer(f).run.writes, ['create-story']);
-  f.report({ kind: 'write', writes: [{ id: 'create-story', outcome: 'written', key: 'AUTH-7' }] }, writer(f)); await f.tick();
+  assert.equal(f.launched.length, before, 'a blocked session waits for the human');
+  f.store.action(f.job.id, 'retry', { subJobId: 'stories' }); await f.tick();
+  f.report(completed([{ id: 'create-story', outcome: 'written', key: 'AUTH-7' }]), f.workerFor('stories')); await f.tick();
   job = f.store.get(f.job.id);
-  assert.equal(job.subJobs[1].jiraKey, 'AUTH-7'); assert.deepEqual([f.last().run.phase, f.last().sub.id], ['implementation', 'api']);
+  assert.equal(job.subJobs[2].jiraKey, 'AUTH-7'); assert.deepEqual([f.last().run.phase, f.last().sub.id], ['implementation', 'api']);
   const g = fixture(t); await g.approve();
   assert.deepEqual(g.launched.map((l) => l.run.phase), ['planning', 'implementation'], 'existing keys mean nothing to write in Jira');
 });
 
-test('writes fire on their trigger\'s milestones, batch when they fall due together, and fill their comment from the trigger', async (t) => {
-  const f = fixture(t);
+test('a session with a milestone starts at it and not before, and its writes are filled from that trigger', async (t) => {
+  const f = fixture(t, noSessionReview);
   await f.approve(plan([spec('api'),
-    write('w-start', { sub: 'api', at: 'started' }, moveTo('In Progress')),
-    write('w-pr', { sub: 'api', at: 'pr' }, moveTo('In Review', 'PR opened: {pr.url}'), { why: 'AUTH uses In Review for open PRs' }),
-    write('w-note', { sub: 'api', at: 'pr' }, { type: 'comment', comment: 'Review {pr.title}' }),
-    write('w-done', { sub: 'api', at: 'deployed' }, moveTo('Done'))]));
-  assert.deepEqual(writer(f).run.writes, ['w-start'], 'started: the implementation session was launched');
-  f.report({ kind: 'write', writes: [{ id: 'w-start', outcome: 'written', from: 'To Do' }] }, writer(f));
+    notifier('n-start', { sub: 'api', at: 'started' }), write('w-start', 'n-start', moveTo('In Progress')),
+    notifier('n-pr', { sub: 'api', at: 'pr' }), write('w-pr', 'n-pr', moveTo('In Review', 'PR opened: {pr.url}'), { why: 'AUTH uses In Review for open PRs' }),
+    write('w-note', 'n-pr', { type: 'comment', comment: 'Review {pr.title}' }),
+    notifier('n-done', { sub: 'api', at: 'deployed' }), write('w-done', 'n-done', moveTo('Done'))]));
+  const started = () => f.launched.filter((l) => l.run.phase === 'session').map((l) => l.sub.id);
+  assert.deepEqual(started(), ['n-start'], 'started: the implementation session was launched; nothing else has come');
+  f.report(completed([{ id: 'w-start', outcome: 'written', from: 'To Do' }]), f.workerFor('n-start'));
   f.setDeploys({ expected: false });
   f.report({ kind: 'published', url: PR_URL }, f.workerFor('api', 'implementation'));
   await f.tick();
+  assert.deepEqual(started(), ['n-start', 'n-pr']);
   let job = f.store.get(f.job.id);
-  const batch = writer(f);
-  assert.deepEqual(batch.run.writes, ['w-pr', 'w-note'], 'one session for every write due on this tick');
-  assert.deepEqual(job.subJobs.filter((s) => s.kind === 'write').map((s) => s.state), ['done', 'writing', 'writing', 'queued']);
-  const prompt = jobPrompt(job, null, batch.run);
+  const batch = f.workerFor('n-pr');
+  const prompt = jobPrompt(job, batch.sub, batch.run);
   assert.match(prompt, /"comment":"PR opened: https:\/\/github.com\/org\/repo\/pull\/1"/); assert.match(prompt, /"comment":"Review Deliver api"/);
-  assert.throws(() => f.report({ kind: 'write', writes: [{ id: 'w-pr', outcome: 'written' }] }, batch), /still missing: w-note/);
-  f.report({ kind: 'write', writes: [{ id: 'w-pr', outcome: 'already', from: 'In Review' }, { id: 'w-note', outcome: 'written', checks: ['Comment posted'] }] }, batch);
+  assert.throws(() => f.report(completed([{ id: 'w-pr', outcome: 'written' }]), batch), /still missing: w-note/);
+  f.report(completed([{ id: 'w-pr', outcome: 'already', from: 'In Review' }, { id: 'w-note', outcome: 'written', checks: ['Comment posted'] }]), batch);
   job = f.store.get(f.job.id);
   const pr = job.subJobs.find((s) => s.id === 'w-pr');
   assert.equal(pr.result.outcome, 'already'); assert.equal(pr.result.from, 'In Review');
   assert.equal(pr.result.text, `PR opened: ${PR_URL}`); assert.deepEqual(pr.result.checks, ['AUTH-123 was already at or past In Review; comment posted']);
   f.setPr({ state: 'MERGED', mergeCommit: 'm1' });
   await f.tick();
-  assert.deepEqual(writer(f).run.writes, ['w-done'], 'deployed: here the merge is the delivery');
-  f.report({ kind: 'write', writes: [{ id: 'w-done', outcome: 'written', from: 'In Review' }] }, writer(f));
+  assert.deepEqual(started(), ['n-start', 'n-pr', 'n-done'], 'deployed: here the merge is the delivery');
+  f.report(completed([{ id: 'w-done', outcome: 'written', from: 'In Review' }]), f.workerFor('n-done'));
   await f.tick(); await f.tick();
   job = f.store.get(f.job.id);
   assert.equal(job.subJobs.find((s) => s.id === 'w-done').result.checks[0], 'AUTH-123 moved to Done');
   assert.equal(job.stage, 'done');
 });
 
-test('a reviewed write stops in review until Write to Jira; Edit changes it in place and Skip finishes it unwritten', async (t) => {
-  const f = fixture(t);
-  await f.approve(plan([spec('api'), write('w', { sub: 'api', at: 'started' }, moveTo('In Progress'), { review: true }),
-    write('skip', { sub: 'api', at: 'started' }, { type: 'comment', comment: 'Started' }, { review: true })]));
+test('a reviewed write is drafted by its session, which stays parked until every draft is decided, is mailed the final text, and then completes', async (t) => {
+  const f = fixture(t, noSessionReview);
+  await f.approve(plan([notifier('n'),
+    write('post', 'n', { type: 'post', text: 'Planned post' }, { place: { type: 'slack', ref: '#web' }, storyId: undefined, review: true }),
+    write('move', 'n', moveTo('In Review'), { review: true }),
+    write('free', 'n', { type: 'comment', comment: 'Unreviewed' })]));
+  const w = f.workerFor('n', 'session');
+  assert.match(jobPrompt(f.store.get(f.job.id), w.sub, w.run), /Review is on for post, move: do NOT make them yet/);
+  assert.throws(() => f.report(completed([{ id: 'free', outcome: 'written' }]), w), /Review is on for post, move: report them as kind:"drafts" first/);
+  assert.throws(() => f.report({ kind: 'drafts', drafts: [{ id: 'post', text: 'x' }] }, w), /still missing: move/);
+  const drafts = { kind: 'drafts', drafts: [{ id: 'post', text: 'Shipped the sign-in fix' }, { id: 'move', to: 'In Review', comment: 'Ready for review' }] };
+  f.report(drafts, w);
+  f.report(drafts, w);
+  assert.throws(() => f.report({ ...drafts, drafts: drafts.drafts.slice().reverse() }, w), /already sent its drafts/);
   let job = f.store.get(f.job.id);
-  assert.deepEqual(job.subJobs.slice(1).map((s) => [s.stage, s.state]), [['review', 'verified'], ['review', 'verified']]);
-  assert.equal(f.launched.filter((l) => l.run.phase === 'write').length, 0, 'nothing is written before the human says so');
-  f.store.action(f.job.id, 'edit-write', { subJobId: 'w', write: { action: { to: 'In Review', comment: 'Picked up' } } });
+  const [post, move] = ['post', 'move'].map((id) => job.subJobs.find((s) => s.id === id));
+  assert.deepEqual([post.stage, post.state, post.action.text], ['review', 'verified', 'Shipped the sign-in fix'], 'the review panel shows the agent\'s draft');
+  assert.deepEqual(move.action, { type: 'transition', to: 'In Review', comment: 'Ready for review' });
+  const run = () => f.store.get(f.job.id).runs.find((r) => r.id === w.run.id);
+  assert.ok(run().parkedAt); assert.equal(run().report, null, 'drafts park the run; they do not end it');
+  f.setStatus(() => 'idle');
+  for (let i = 0; i < 12; i++) await f.tick();
+  assert.equal(run().stopped, false, 'an idle parked session is neither finished nor stalled');
+  assert.ok(!f.stopped.includes(w.run.id), 'nor archived');
+  assert.equal(f.store.get(f.job.id).subJobs[0].error ?? null, null);
+  assert.throws(() => f.report(completed([]), w), /Your drafts are with the human/);
+  f.store.action(f.job.id, 'approve-write', { subJobId: 'post', write: { action: { text: 'Shipped the sign-in fix today' } } }); await f.tick();
+  assert.deepEqual(f.mailed, [], 'one draft is still undecided');
+  f.store.action(f.job.id, 'skip-write', { subJobId: 'move' }); await f.tick();
+  assert.equal(f.mailed.length, 1);
+  assert.equal(f.mailed[0].sid, w.sid);
+  assert.match(f.mailed[0].text, /"id":"post","place":"slack","where":"#web","write":"post","text":"Shipped the sign-in fix today","approved":true/);
+  assert.match(f.mailed[0].text, /Do not make: move/);
+  assert.match(f.mailed[0].text, /kind:"completed".*for post, free/);
+  assert.ok(run().mailedAt); await f.tick();
+  assert.equal(f.mailed.length, 1, 'told once');
+  assert.throws(() => f.report(completed([{ id: 'post', outcome: 'written', url: 'https://acme.slack.com/archives/C1/p1' }]), w), /still missing: free/);
+  f.report(completed([{ id: 'post', outcome: 'written', url: 'https://acme.slack.com/archives/C1/p1' }, { id: 'free', outcome: 'written' }]), w);
+  await f.tick(); await f.tick();
   job = f.store.get(f.job.id);
-  assert.deepEqual(job.subJobs[1].action, { type: 'transition', to: 'In Review', comment: 'Picked up' });
-  assert.deepEqual(job.plan.subJobs[1].action, job.subJobs[1].action, 'the plan is the record of the write');
-  assert.equal(job.subJobs[1].stage, 'review', 'an edit with review still on waits for Write to Jira');
-  assert.throws(() => f.store.action(f.job.id, 'edit-write', { subJobId: 'w', write: { action: { to: null, comment: null } } }), /moves the ticket, comments on it, or both/);
-  assert.throws(() => f.store.action(f.job.id, 'fix-here', { subJobId: 'w' }), /only be edited, dropped or marked done/);
-  f.store.action(f.job.id, 'skip-write', { subJobId: 'skip' });
+  assert.deepEqual(job.subJobs.map((s) => [s.id, s.stage]), [['n', 'done'], ['post', 'done'], ['move', 'done'], ['free', 'done']]);
+  assert.deepEqual([job.subJobs[1].result.url, job.subJobs[2].result.outcome], ['https://acme.slack.com/archives/C1/p1', 'skipped']);
+  assert.deepEqual(job.moves.map((m) => m.move), ['approve-write', 'skip-write']);
+});
+
+test('a parked session whose card goes away errors; until then nothing relaunches it', async (t) => {
+  const f = fixture(t, { ...noSessionReview, reviewWrites: true });
+  await f.approve(plan([notifier('n'), write('w', 'n', moveTo('In Review'))]));
+  const w = f.workerFor('n');
+  f.report({ kind: 'drafts', drafts: [{ id: 'w', to: 'In Review' }] }, w);
+  f.alive.delete(w.sid); await f.tick();
+  const job = f.store.get(f.job.id);
+  assert.match(job.subJobs[0].error, /closed while its drafts waited for review/);
+  f.store.action(f.job.id, 'retry', { subJobId: 'n' }); await f.tick();
+  assert.equal(f.launched.filter((l) => l.sub?.id === 'n').length, 1, 'its draft is still the human\'s to decide');
   f.store.action(f.job.id, 'approve-write', { subJobId: 'w' }); await f.tick();
-  job = f.store.get(f.job.id);
-  assert.equal(job.subJobs[2].result.outcome, 'skipped'); assert.equal(job.subJobs[2].stage, 'done');
-  assert.deepEqual(writer(f).run.writes, ['w']);
-  assert.match(jobPrompt(job, null, writer(f).run), /"approved":true/, 'an approved write may move a ticket backwards');
-  assert.deepEqual((job.moves || []).map((m) => m.move), ['edit-write', 'skip-write', 'approve-write']);
+  const again = f.workerFor('n');
+  assert.notEqual(again.run.id, w.run.id);
+  assert.match(jobPrompt(f.store.get(f.job.id), again.sub, again.run), /"to":"In Review","approved":true/);
+  assert.doesNotMatch(jobPrompt(f.store.get(f.job.id), again.sub, again.run), /kind:"drafts"/, 'an approved write is not drafted twice');
 });
 
-test('a refused write shows Jira\'s error; Retry, Pick another status and Mark done each recover it', async (t) => {
+test('a refused write shows its place\'s error; Retry and Pick another status run its session again for it, and Mark done ends it', async (t) => {
   const f = fixture(t);
-  await f.approve(plan([spec('api'), write('w', { sub: 'api', at: 'started' }, moveTo('In Review'))]));
-  f.report({ kind: 'write', writes: [{ id: 'w', outcome: 'failed', error: 'Field Reviewer is required for this transition.' }] }, writer(f)); await f.tick();
-  let w = f.store.get(f.job.id).subJobs[1];
-  assert.equal(w.state, 'failed'); assert.equal(w.error, 'Field Reviewer is required for this transition.');
+  await f.approve(plan([notifier('n'), write('w', 'n', moveTo('In Review'))]));
+  f.report(completed([{ id: 'w', outcome: 'failed', error: 'Field Reviewer is required for this transition.' }]), f.workerFor('n')); await f.tick();
+  let job = f.store.get(f.job.id);
+  assert.deepEqual([job.subJobs[1].state, job.subJobs[1].error, job.subJobs[0].stage], ['failed', 'Field Reviewer is required for this transition.', 'review']);
   f.store.action(f.job.id, 'retry', { subJobId: 'w' }); await f.tick();
-  f.report({ kind: 'write', writes: [{ id: 'w', outcome: 'failed', error: 'Still required' }] }, writer(f)); await f.tick();
+  assert.equal(f.store.get(f.job.id).subJobs[0].stage, 'session', 'its session goes back to work for it');
+  f.report(completed([{ id: 'w', outcome: 'failed', error: 'Still required' }]), f.workerFor('n')); await f.tick();
   f.store.action(f.job.id, 'edit-write', { subJobId: 'w', write: { action: { to: 'QA' } } }); await f.tick();
-  assert.match(jobPrompt(f.store.get(f.job.id), null, writer(f).run), /"to":"QA"/);
-  f.report({ kind: 'write', writes: [{ id: 'w', outcome: 'failed', error: 'No' }] }, writer(f)); await f.tick();
+  assert.match(jobPrompt(f.store.get(f.job.id), f.workerFor('n').sub, f.workerFor('n').run), /"to":"QA"/);
+  f.report(completed([{ id: 'w', outcome: 'failed', error: 'No' }]), f.workerFor('n')); await f.tick();
   f.store.action(f.job.id, 'mark', { subJobId: 'w', position: 'done', note: 'Moved it by hand' }); await f.tick();
-  w = f.store.get(f.job.id).subJobs[1];
-  assert.equal(w.stage, 'done'); assert.deepEqual(w.result.checks, ['Moved it by hand']);
-  assert.equal(f.launched.filter((l) => l.run.phase === 'write').length, 3);
+  job = f.store.get(f.job.id);
+  assert.equal(job.subJobs[1].stage, 'done'); assert.deepEqual(job.subJobs[1].result.checks, ['Moved it by hand']);
+  assert.equal(f.launched.filter((l) => l.sub?.id === 'n').length, 3);
+  f.store.action(f.job.id, 'approve-session', { subJobId: 'n', sessionReceiptId: job.subJobs[0].result.receiptId }); await f.tick(); await f.tick();
+  const done = fixture(t, noSessionReview);
+  await done.approve(plan([notifier('n'), write('w', 'n', moveTo('In Review'))]));
+  done.report(completed([{ id: 'w', outcome: 'failed', error: 'No' }]), done.workerFor('n')); await done.tick(); await done.tick();
+  assert.throws(() => done.store.action(done.job.id, 'retry', { subJobId: 'w' }), /has finished, so nothing will make it now/);
 });
 
-test('an if-dropped write is dormant: it fires when its trigger is dropped and is dropped itself when it deploys; any other write on a dropped trigger can never run', async (t) => {
+test('an if-dropped session is dormant: it starts when its trigger is dropped and is dropped itself when it deploys; any other session on a dropped trigger can never start', async (t) => {
   const f = fixture(t);
   await f.approve(plan([spec('api'), spec('web'),
-    write('api-wont', { sub: 'api', at: 'dropped' }, moveTo("Won't Do")),
-    write('web-pr', { sub: 'web', at: 'pr' }, { type: 'comment', comment: 'PR {pr.url}' }),
-    write('web-wont', { sub: 'web', at: 'dropped' }, moveTo("Won't Do"))]));
-  assert.equal(f.launched.filter((l) => l.run.phase === 'write').length, 0, 'nothing is due yet');
+    notifier('api-wont', { sub: 'api', at: 'dropped' }), write('api-wont-w', 'api-wont', moveTo("Won't Do")),
+    notifier('web-pr', { sub: 'web', at: 'pr' }), write('web-pr-w', 'web-pr', { type: 'comment', comment: 'PR {pr.url}' }),
+    notifier('web-wont', { sub: 'web', at: 'dropped' }), write('web-wont-w', 'web-wont', moveTo("Won't Do"))]));
+  const sessions = () => f.launched.filter((l) => l.run.phase === 'session').map((l) => l.sub.id);
+  assert.deepEqual(sessions(), [], 'nothing has come yet');
   f.store.action(f.job.id, 'drop', { subJobId: 'web' }); await f.tick();
   let job = f.store.get(f.job.id);
-  assert.deepEqual(writer(f).run.writes, ['web-wont']);
-  assert.deepEqual([job.subJobs[3].stage, job.subJobs[3].state], ['write', 'queued'], 'its milestone will never come: the human drops it');
+  assert.deepEqual(sessions(), ['web-wont']);
+  assert.deepEqual([job.subJobs.find((s) => s.id === 'web-pr').stage, job.subJobs.find((s) => s.id === 'web-pr-w').state], ['session', 'queued'], 'its milestone will never come: the human drops it');
   f.store.update(f.job.id, (j) => { j.subJobs[0].deployed = { checks: ['Live'] }; j.subJobs[0].stage = 'done'; });
-  await f.tick();
+  await f.tick(); await f.tick();
   job = f.store.get(f.job.id);
-  assert.ok(job.subJobs[2].cancelledAt); assert.equal(job.subJobs[2].notNeeded, true);
-  assert.deepEqual(writer(f).run.writes, ['web-wont'], 'the landed trigger fired nothing');
+  const wont = job.subJobs.find((s) => s.id === 'api-wont');
+  assert.ok(wont.cancelledAt); assert.equal(wont.notNeeded, true);
+  assert.ok(job.subJobs.find((s) => s.id === 'api-wont-w').cancelledAt, 'its write goes with it');
+  assert.deepEqual(sessions(), ['web-wont'], 'the landed trigger started nothing');
 });
 
-test('a write run that ends without a receipt fails its writes; a pending plan change holds writes from launching', async (t) => {
+test('a session that ends without a receipt holds its writes; a pending plan change holds a milestone session from starting', async (t) => {
   const f = fixture(t);
-  await f.approve(plan([spec('api'), write('w', { sub: 'api', at: 'started' }, moveTo('In Progress')), write('later', { sub: 'api', at: 'pr' }, moveTo('In Review'))]));
-  f.alive.delete(writer(f).sid); await f.tick();
+  await f.approve(plan([spec('api'), notifier('n', { sub: 'api', at: 'started' }), write('w', 'n', moveTo('In Progress')),
+    notifier('later', { sub: 'api', at: 'pr' }), write('later-w', 'later', moveTo('In Review'))]));
+  f.alive.delete(f.workerFor('n').sid); await f.tick();
   let job = f.store.get(f.job.id);
   assert.match(job.subJobs[1].error, /without a receipt/); assert.equal(job.error ?? null, null);
+  assert.equal(job.subJobs[2].state, 'queued');
   f.store.action(f.job.id, 'replan', { feedback: 'Also cover SSO' });
   f.report({ kind: 'published', url: PR_URL }, f.workerFor('api', 'implementation')); await f.tick();
   job = f.store.get(f.job.id);
-  assert.equal(job.subJobs[2].state, 'queued', 'held: the change may still edit or drop it');
-  assert.equal(f.launched.filter((l) => l.run.phase === 'write').length, 1);
+  assert.equal(f.launched.filter((l) => l.sub?.id === 'later').length, 0, 'held: the change may still edit or drop it');
 });
 
-test('a write is one write to a story, fired by a reachable milestone; nothing waits on it', async (t) => {
+test('every write names the session that makes it; only a session waits on a milestone, which must be reachable; links are ordered', async (t) => {
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
-  const bad = (w, message, extra = []) => assert.throws(() => f.report({ kind: 'plan', plan: plan([spec('api'), sessionSpec('spike'), ...extra, w]) }), message);
-  bad(write('w', { sub: 'api', at: 'pr' }, moveTo('Done'), { after: ['api'] }), /fires on a milestone \(on\) or is made by a session \(by\), not after/);
-  bad(write('w', { sub: 'ghost', at: 'pr' }, moveTo('Done')), /unknown trigger ghost/);
-  bad(write('w', { sub: 'spike', at: 'merged' }, moveTo('Done')), /opens no PR, so it is never merged/);
-  bad(write('w', { sub: 'w', at: 'pr' }, moveTo('Done')), /fires on a PR, session or human sub-job/);
-  bad(write('w', { sub: 'api', at: 'pr' }, { type: 'transition' }), /needs a status/);
-  bad(write('w', { sub: 'api', at: 'pr' }, { type: 'create' }), /creating a story is the whole write/);
-  bad({ ...write('w', null, { type: 'comment', comment: 'x' }), storyId: undefined }, /names the story/);
-  bad(write('w', { sub: 'api', at: 'pr' }, moveTo('Done')), /nothing waits on a write/, [spec('web', ['w'])]);
-  f.report({ kind: 'plan', plan: { ...plan([spec('api'), write('w', { sub: 'api', at: 'pr' }, moveTo('In Review'), { why: 'Team convention' })]), workflows: { AUTH: ['To Do', 'In Review', 'Done'] } } });
+  const bad = (subs, message) => assert.throws(() => f.report({ kind: 'plan', plan: plan([spec('api'), sessionSpec('spike'), humanSpec('sign'), ...subs]) }), message);
+  bad([write('w', null, moveTo('Done'))], /w: a write names the session sub-job that makes it \(by\)/);
+  bad([write('w', 'api', moveTo('Done'))], /api is not a session sub-job, so it cannot make it/);
+  bad([write('w', 'sign', moveTo('Done'))], /sign is not a session sub-job/);
+  bad([write('w', 'spike', moveTo('Done'), { on: { sub: 'api', at: 'pr' } })], /a write is made by its session \(by\); put the milestone \(on\) on that session/);
+  bad([write('w', 'spike', moveTo('Done'), { after: ['api'] })], /not after anything; order the session instead/);
+  bad([{ ...spec('web'), on: { sub: 'api', at: 'pr' } }], /web: only a session sub-job waits for a milestone/);
+  bad([{ ...humanSpec('h'), on: { sub: 'api', at: 'pr' } }], /h: only a session sub-job waits for a milestone/);
+  bad([notifier('n', { sub: 'ghost', at: 'pr' })], /unknown trigger ghost/);
+  bad([notifier('n', { sub: 'spike', at: 'merged' })], /spike opens no PR, so it is never merged/);
+  bad([notifier('n', { sub: 'n', at: 'started' })], /not its own/);
+  bad([notifier('n', { sub: 'w', at: 'started' }), write('w', 'spike', moveTo('Done'))], /not a write's/);
+  bad([notifier('n', { sub: 'm', at: 'started' }), notifier('m', null, ['n'])], /must not contain cycles/);
+  bad([write('w', 'spike', { type: 'transition' })], /needs a status/);
+  bad([write('w', 'spike', { type: 'create', to: 'Done' })], /creating a story is the whole write/);
+  bad([{ ...write('w', 'spike', { type: 'comment', comment: 'x' }), storyId: undefined }], /names the story/);
+  bad([write('w', 'spike', moveTo('Done')), spec('web', ['w'])], /nothing waits on a write \(w\); wait on the session that makes it/);
+  const page = write('page', 'spike', { type: 'make', what: 'Notes' }, { place: { type: 'artifact' }, storyId: undefined });
+  const dm = (by, text = 'See {page.url}') => write('dm', by, { type: 'post', text }, { place: { type: 'slack', ref: '@sam' }, storyId: undefined });
+  bad([page, notifier('n'), dm('n')], /dm: \{page\.url\} is made by spike, so n must wait for spike to finish \(after\)/);
+  bad([page, notifier('n', { sub: 'spike', at: 'started' }), dm('n')], /must wait for spike to finish/);
+  bad([write('a', 'spike', { type: 'post', text: '{b.url}' }, { place: { type: 'slack', ref: '#x' }, storyId: undefined }),
+    write('b', 'spike', { type: 'post', text: '{a.url}' }, { place: { type: 'slack', ref: '#y' }, storyId: undefined })], /link each other in a circle/);
+  f.report({ kind: 'plan', plan: { ...plan([spec('api'), sessionSpec('spike'), page, notifier('n', null, ['spike']), dm('n'), notifier('m', { sub: 'spike', at: 'deployed' }),
+    write('dm2', 'm', { type: 'post', text: '{page.url}' }, { place: { type: 'slack', ref: '#web' }, storyId: undefined }),
+    notifier('t', { sub: 'api', at: 'merged' }), write('w', 't', moveTo('Done'), { why: 'Team convention' }),
+    write('same', 'spike', { type: 'post', text: 'Notes: {page.url}' }, { place: { type: 'slack', ref: '#z' }, storyId: undefined })]), workflows: { AUTH: ['To Do', 'In Review', 'Done'] } } });
   const stored = f.store.get(f.job.id).plan;
-  assert.deepEqual(stored.workflows, { AUTH: ['To Do', 'In Review', 'Done'] }); assert.equal(stored.subJobs[1].why, 'Team convention');
+  assert.deepEqual(stored.workflows, { AUTH: ['To Do', 'In Review', 'Done'] }); assert.equal(stored.subJobs.find((s) => s.id === 'w').why, 'Team convention');
 });
 
 // --- Places ---
@@ -1242,52 +1313,51 @@ test('a write goes to one place: each type takes its own actions, and a made out
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
   const base = [spec('api'), sessionSpec('report'), humanSpec('sign')];
   const bad = (w, message, extra = []) => assert.throws(() => f.report({ kind: 'plan', plan: plan([...base, ...extra, w]) }), message);
-  bad(place('w', 'slack', { type: 'post', text: 'Shipped' }, { on: { sub: 'api', at: 'deployed' } }), /names its channel/);
-  bad(place('w', 'slack', { type: 'transition', to: 'Done' }, { ref: '#web', on: { sub: 'api', at: 'pr' } }), /a slack write can post, make, not transition/);
-  bad(place('w', 'confluence', { type: 'create', text: 'Body' }, { ref: 'WEB › Incidents' }), /needs a title and where it goes/);
-  bad(place('w', 'artifact', { type: 'make', what: 'A chart' }), /names the session that makes it \(by\)/);
+  bad(place('w', 'slack', { type: 'post', text: 'Shipped' }, { by: 'report' }), /names its channel/);
+  bad(place('w', 'slack', { type: 'transition', to: 'Done' }, { ref: '#web', by: 'report' }), /a slack write can post, make, not transition/);
+  bad(place('w', 'confluence', { type: 'create', text: 'Body' }, { ref: 'WEB › Incidents', by: 'report' }), /needs a title and where it goes/);
+  bad(place('w', 'artifact', { type: 'make', what: 'A chart' }), /names the session sub-job that makes it \(by\)/);
   bad(make('w', 'file', 'api', 'k6 report'), /api is not a session sub-job/);
   bad(make('w', 'file', 'sign', 'k6 report'), /sign is not a session sub-job/);
-  bad(make('w', 'artifact', 'report', 'A chart', { on: { sub: 'api', at: 'pr' } }), /comes with its session \(by\), not on a milestone/);
+  bad(make('w', 'artifact', 'report', 'A chart', { on: { sub: 'api', at: 'pr' } }), /put the milestone \(on\) on that session/);
   bad(make('w', 'url', 'report', 'A page', { ref: 'somewhere' }), /a url is made by its session, so it has no ref/);
-  bad(place('w', 'slack', { type: 'post', text: 'Page: {nope.url}' }, { ref: '#web', on: { sub: 'api', at: 'pr' } }), /\{nope\.url\} names no write in this plan/);
-  bad(place('w', 'slack', { type: 'post', text: 'Fix: {api.url}' }, { ref: '#web', on: { sub: 'api', at: 'pr' } }), /\{api\.url\} names no write in this plan/);
-  bad(place('w', 'slack', { type: 'post', text: 'x' }, { ref: '#web', storyId: 'story' }), /only a Jira write names a story/);
-  bad(place('w', 'jira', { type: 'comment', comment: 'x' }, { storyId: 'story', ref: 'AUTH-1' }), /names its ticket through its story, not a ref/);
-  f.report({ kind: 'plan', plan: { ...plan([...base,
+  bad(place('w', 'slack', { type: 'post', text: 'Page: {nope.url}' }, { ref: '#web', by: 'report' }), /\{nope\.url\} names no write in this plan/);
+  bad(place('w', 'slack', { type: 'post', text: 'Fix: {api.url}' }, { ref: '#web', by: 'report' }), /\{api\.url\} names no write in this plan/);
+  bad(place('w', 'slack', { type: 'post', text: 'x' }, { ref: '#web', storyId: 'story', by: 'report' }), /only a Jira write names a story/);
+  bad(place('w', 'jira', { type: 'comment', comment: 'x' }, { storyId: 'story', ref: 'AUTH-1', by: 'report' }), /names its ticket through its story, not a ref/);
+  f.report({ kind: 'plan', plan: { ...plan([...base, notifier('ship', { sub: 'api', at: 'deployed' }, ['report']),
     make('chart', 'artifact', 'report', 'p95 chart by endpoint'), make('k6', 'file', 'report', 'k6 HTML report'),
     make('page', 'confluence', 'report', 'Incident review', { ref: 'WEB › Incidents' }),
-    place('post', 'slack', { type: 'post', text: 'Review: {page.url} for {pr.url}' }, { ref: '#web-platform', on: { sub: 'api', at: 'deployed' }, review: true, why: 'The team hears about incidents here' }),
-    place('note', 'confluence', { type: 'comment', text: 'Fixed in {pr.url}' }, { ref: 'https://x.atlassian.net/wiki/pages/9', on: { sub: 'api', at: 'merged' } }),
-    place('ticket', 'jira', { type: 'transition', to: 'Done' }, { storyId: 'story', on: { sub: 'api', at: 'deployed' } })]), jiraSite: 'https://x.atlassian.net' } });
+    place('post', 'slack', { type: 'post', text: 'Review: {page.url} for {pr.url}' }, { ref: '#web-platform', by: 'ship', review: true, why: 'The team hears about incidents here' }),
+    place('note', 'confluence', { type: 'comment', text: 'Fixed in {pr.url}' }, { ref: 'https://x.atlassian.net/wiki/pages/9', by: 'ship' }),
+    place('ticket', 'jira', { type: 'transition', to: 'Done' }, { storyId: 'story', by: 'ship' })]), jiraSite: 'https://x.atlassian.net' } });
   const stored = f.store.get(f.job.id).plan;
   assert.equal(stored.jiraSite, 'https://x.atlassian.net');
   assert.deepEqual(stored.subJobs.filter((s) => s.kind === 'write').map((s) => [s.id, s.place.type, s.action.type]),
     [['chart', 'artifact', 'make'], ['k6', 'file', 'make'], ['page', 'confluence', 'make'], ['post', 'slack', 'post'], ['note', 'confluence', 'comment'], ['ticket', 'jira', 'transition']]);
 });
 
-test('a session accounts for every output it makes: a link completes one, missing fails it, and a receipt that forgets one is refused', async (t) => {
+test('a session accounts for every output it makes: a link completes one, failed leaves it to retry, and a receipt that forgets one is refused', async (t) => {
   const f = fixture(t);
   await f.approve(plan([sessionSpec('report'), make('chart', 'artifact', 'report', 'p95 chart'), make('k6', 'file', 'report', 'k6 report'),
     make('page', 'confluence', 'report', 'Incident review', { ref: 'WEB › Incidents' })]));
   const worker = f.workerFor('report', 'session');
   const checks = ['Measured p95'];
   assert.throws(() => f.report({ kind: 'completed', checks }, worker), /still missing: chart, k6, page/);
-  assert.throws(() => f.report({ kind: 'completed', checks, outputs: [{ id: 'chart', url: 'https://claude.ai/artifact/7f3c' }] }, worker), /still missing: k6, page/);
-  assert.throws(() => f.report({ kind: 'completed', checks, outputs: [{ id: 'chart', url: 'https://claude.ai/artifact/7f3c' }, { id: 'k6', url: 'https://example.com/k6' }, { id: 'page', missing: 'x' }] }, worker), /k6: give the file's absolute path/);
-  assert.throws(() => f.report({ kind: 'completed', checks, outputs: [{ id: 'ghost', url: 'https://x' }] }, worker), /ghost is not one of the outputs/);
+  assert.throws(() => f.report(completed([{ id: 'chart', outcome: 'written', url: 'https://claude.ai/artifact/7f3c' }], checks), worker), /still missing: k6, page/);
+  assert.throws(() => f.report(completed([{ id: 'chart', outcome: 'written', url: 'https://claude.ai/artifact/7f3c' }, { id: 'k6', outcome: 'written', url: 'https://example.com/k6' }, { id: 'page', outcome: 'failed', error: 'x' }], checks), worker), /k6: give the file's absolute path/);
+  assert.throws(() => f.report(completed([{ id: 'chart', outcome: 'written' }, { id: 'k6', outcome: 'failed' }, { id: 'page', outcome: 'failed' }], checks), worker), /chart: say where it is/);
+  assert.throws(() => f.report(completed([{ id: 'ghost', outcome: 'written', url: 'https://x' }], checks), worker), /ghost is not one of the writes this session makes/);
   assert.equal(f.store.get(f.job.id).subJobs.find((s) => s.id === 'report').stage, 'session', 'a refused receipt changes nothing');
-  f.report({ kind: 'completed', checks, outputs: [{ id: 'chart', url: 'https://claude.ai/artifact/7f3c', title: 'Checkout p95 by endpoint' },
-    { id: 'k6', missing: 'k6 was not installed on this machine' }, { id: 'page', url: 'https://x.atlassian.net/wiki/pages/42' }] }, worker);
+  f.report({ kind: 'completed', checks, writes: [{ id: 'chart', outcome: 'written', url: 'https://claude.ai/artifact/7f3c', title: 'Checkout p95 by endpoint' }],
+    outputs: [{ id: 'k6', missing: 'k6 was not installed on this machine' }, { id: 'page', url: 'https://x.atlassian.net/wiki/pages/42' }] }, worker);
   await f.tick();
   const job = f.store.get(f.job.id);
   const [chart, k6, page] = ['chart', 'k6', 'page'].map((id) => job.subJobs.find((s) => s.id === id));
   assert.deepEqual([chart.stage, chart.result.url, chart.result.title, chart.result.checks], ['done', 'https://claude.ai/artifact/7f3c', 'Checkout p95 by endpoint', ['Made Checkout p95 by endpoint']]);
-  assert.deepEqual([k6.stage, k6.state, k6.error], ['write', 'failed', 'k6 was not installed on this machine']);
+  assert.deepEqual([k6.stage, k6.state, k6.error], ['write', 'failed', 'k6 was not installed on this machine'], 'the receipt shape of a session launched before every write lived on one still lands');
   assert.equal(page.result.url, 'https://x.atlassian.net/wiki/pages/42');
   assert.equal(job.subJobs.find((s) => s.id === 'report').stage, 'review', 'the session itself completes as usual');
-  assert.equal(f.launched.filter((l) => l.run.phase === 'write').length, 0, 'the batched writer never makes an output');
-  assert.throws(() => f.store.action(f.job.id, 'retry', { subJobId: 'k6' }), /Run its session again, or mark it done with where it is/);
   assert.throws(() => f.store.action(f.job.id, 'mark', { subJobId: 'k6', position: 'done', link: 'not a link' }), /http\(s\) URL or an absolute path/);
   f.store.action(f.job.id, 'mark', { subJobId: 'k6', position: 'done', link: '/Users/me/reports/k6.html', note: 'Ran k6 myself' }); await f.tick();
   const marked = f.store.get(f.job.id).subJobs.find((s) => s.id === 'k6');
@@ -1295,77 +1365,79 @@ test('a session accounts for every output it makes: a link completes one, missin
   assert.throws(() => f.store.action(f.job.id, 'mark', { subJobId: 'report', position: 'done', link: 'https://x' }), /Only a write is marked done with where it is/);
 });
 
-test('a milestone Slack post waits for review, links the page a session made, and keeps the permalink it was posted at', async (t) => {
+test('a reviewed Slack post links the page another session made, is drafted for review, and keeps the permalink it was posted at', async (t) => {
   const f = fixture(t);
   await f.approve(plan([sessionSpec('report'), make('page', 'confluence', 'report', 'Incident review', { ref: 'WEB › Incidents' }),
-    place('post', 'slack', { type: 'post', text: 'Review: {page.url}' }, { ref: '#web-platform', on: { sub: 'report', at: 'deployed' }, review: true })]));
-  f.report({ kind: 'completed', checks: ['Wrote it'], outputs: [{ id: 'page', url: 'https://x.atlassian.net/wiki/pages/42' }] }, f.workerFor('report', 'session'));
+    notifier('announce', null, ['report']), place('post', 'slack', { type: 'post', text: 'Review: {page.url}' }, { ref: '#web-platform', by: 'announce', review: true })]));
+  f.report(completed([{ id: 'page', outcome: 'written', url: 'https://x.atlassian.net/wiki/pages/42' }], ['Wrote it']), f.workerFor('report', 'session'));
   f.store.action(f.job.id, 'approve-session', { subJobId: 'report', sessionReceiptId: f.store.get(f.job.id).subJobs[0].result.receiptId });
   await f.tick(); await f.tick();
-  assert.deepEqual(['stage', 'state'].map((k) => f.store.get(f.job.id).subJobs[2][k]), ['review', 'verified'], 'posted publicly, so it waits for the human');
-  f.store.action(f.job.id, 'edit-write', { subJobId: 'post', write: { action: { text: 'Incident review: {page.url}' } } });
+  const w = f.workerFor('announce');
+  assert.match(jobPrompt(f.store.get(f.job.id), w.sub, w.run), /"text":"Review: https:\/\/x.atlassian.net\/wiki\/pages\/42"/);
+  f.report({ kind: 'drafts', drafts: [{ id: 'post', text: 'Incident review is up: https://x.atlassian.net/wiki/pages/42' }] }, w);
+  assert.deepEqual(['stage', 'state'].map((k) => f.store.get(f.job.id).subJobs[3][k]), ['review', 'verified'], 'posted publicly, so it waits for the human');
   f.store.action(f.job.id, 'approve-write', { subJobId: 'post' }); await f.tick();
-  const run = f.launched.findLast((l) => l.run.phase === 'write');
-  assert.deepEqual(run.run.writes, ['post']);
-  assert.match(jobPrompt(f.store.get(f.job.id), null, run.run), /"text":"Incident review: https:\/\/x.atlassian.net\/wiki\/pages\/42"/);
-  assert.throws(() => f.report({ kind: 'write', writes: [{ id: 'post', outcome: 'written', url: 'slack.com/x' }] }, run), /https permalink/);
-  f.report({ kind: 'write', writes: [{ id: 'post', outcome: 'written', url: 'https://acme.slack.com/archives/C1/p1' }] }, run); await f.tick();
-  const post = f.store.get(f.job.id).subJobs[2];
-  assert.deepEqual([post.stage, post.result.url, post.result.checks, post.result.text], ['done', 'https://acme.slack.com/archives/C1/p1', ['Posted in #web-platform'], 'Incident review: https://x.atlassian.net/wiki/pages/42']);
+  assert.match(f.mailed.at(-1).text, /"text":"Incident review is up: https:\/\/x.atlassian.net\/wiki\/pages\/42","approved":true/);
+  assert.throws(() => f.report(completed([{ id: 'post', outcome: 'written', url: 'slack.com/x' }]), w), /http\(s\) URL|https link/);
+  f.report(completed([{ id: 'post', outcome: 'written', url: 'https://acme.slack.com/archives/C1/p1' }]), w); await f.tick();
+  const post = f.store.get(f.job.id).subJobs[3];
+  assert.deepEqual([post.stage, post.result.url, post.result.checks, post.result.text], ['done', 'https://acme.slack.com/archives/C1/p1', ['Posted in #web-platform'], 'Incident review is up: https://x.atlassian.net/wiki/pages/42']);
 });
 
 test('an other place is named, takes one instruction to write or a session to make it, and may say where in it', async (t) => {
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
   const base = [spec('api'), sessionSpec('report')];
   const bad = (w, message) => assert.throws(() => f.report({ kind: 'plan', plan: plan([...base, w]) }), message);
-  const on = { on: { sub: 'api', at: 'pr' } };
-  bad(place('w', 'other', { type: 'write', text: 'Link {pr.url}' }, on), /name the place \(place.name\)/);
-  bad({ ...place('w', 'slack', { type: 'post', text: 'x' }, { ref: '#web', ...on }), place: { type: 'slack', ref: '#web', name: 'Slack' } }, /only an other place is named/);
-  bad({ ...place('w', 'other', { type: 'write' }, on), place: { type: 'other', name: 'Linear' } }, /say what to write there/);
-  bad({ ...place('w', 'other', { type: 'write', text: 'x', title: 'T' }, on), place: { type: 'other', name: 'Linear' } }, /one instruction \(text\)/);
-  bad({ ...place('w', 'other', { type: 'write', text: 'x', to: 'Done' }, on), place: { type: 'other', name: 'Linear' } }, /only a Jira write moves a ticket/);
-  bad({ ...place('w', 'slack', { type: 'write', text: 'x' }, { ref: '#web', ...on }) }, /a slack write can post, make, not write/);
-  bad({ ...place('w', 'other', { type: 'write', text: 'x' }, on), place: { type: 'other', name: 'x'.repeat(61) } }, /60|too_big|at most/i);
+  const by = { by: 'report' };
+  bad(place('w', 'other', { type: 'write', text: 'Link {pr.url}' }, by), /name the place \(place.name\)/);
+  bad({ ...place('w', 'slack', { type: 'post', text: 'x' }, { ref: '#web', ...by }), place: { type: 'slack', ref: '#web', name: 'Slack' } }, /only an other place is named/);
+  bad({ ...place('w', 'other', { type: 'write' }, by), place: { type: 'other', name: 'Linear' } }, /say what to write there/);
+  bad({ ...place('w', 'other', { type: 'write', text: 'x', title: 'T' }, by), place: { type: 'other', name: 'Linear' } }, /one instruction \(text\)/);
+  bad({ ...place('w', 'other', { type: 'write', text: 'x', to: 'Done' }, by), place: { type: 'other', name: 'Linear' } }, /only a Jira write moves a ticket/);
+  bad({ ...place('w', 'slack', { type: 'write', text: 'x' }, { ref: '#web', ...by }) }, /a slack write can post, make, not write/);
+  bad({ ...place('w', 'other', { type: 'write', text: 'x' }, by), place: { type: 'other', name: 'x'.repeat(61) } }, /60|too_big|at most/i);
   f.report({ kind: 'plan', plan: plan([...base,
-    { ...place('lin', 'other', { type: 'write', text: 'Link {pr.url}' }, on), place: { type: 'other', name: 'Linear', ref: 'ENG-12' } },
-    { ...place('nowhere', 'other', { type: 'write', text: 'Add a row for {pr.title}' }, on), place: { type: 'other', name: 'Google Sheets' } },
+    { ...place('lin', 'other', { type: 'write', text: 'Link {pr.url}' }, by), place: { type: 'other', name: 'Linear', ref: 'ENG-12' } },
+    { ...place('nowhere', 'other', { type: 'write', text: 'Add a row for {pr.title}' }, by), place: { type: 'other', name: 'Google Sheets' } },
     { ...make('sheet', 'other', 'report', 'A results sheet'), place: { type: 'other', name: 'Google Sheets', ref: 'Team drive' } }]) });
   const stored = f.store.get(f.job.id).plan.subJobs.filter((s) => s.kind === 'write');
   assert.deepEqual(stored.map((s) => [s.id, s.place, s.action.type]), [['lin', { type: 'other', name: 'Linear', ref: 'ENG-12' }, 'write'],
     ['nowhere', { type: 'other', name: 'Google Sheets' }, 'write'], ['sheet', { type: 'other', name: 'Google Sheets', ref: 'Team drive' }, 'make']]);
 });
 
-test('a write to an other place is briefed by name, written by the batched writer, and an output made there may be a local path', async (t) => {
+test('a write to an other place is briefed by name to its session, and an output made there may be a local path', async (t) => {
   const f = fixture(t);
   await f.approve(plan([spec('api'), sessionSpec('report'),
-    { ...place('lin', 'other', { type: 'write', text: 'Link {pr.url}' }, { on: { sub: 'api', at: 'started' } }), place: { type: 'other', name: 'Linear' } },
+    { ...place('lin', 'other', { type: 'write', text: 'Link {pr.url}' }, { by: 'report' }), place: { type: 'other', name: 'Linear' } },
     { ...make('notes', 'other', 'report', 'Run notes'), place: { type: 'other', name: 'Obsidian' } }]));
-  const prompt = jobPrompt(f.store.get(f.job.id), null, writer(f).run);
+  const worker = f.workerFor('report', 'session');
+  const prompt = jobPrompt(f.store.get(f.job.id), worker.sub, worker.run);
   assert.match(prompt, /Other place \(`name`, at `where` when given\): do exactly the one instruction/); assert.match(prompt, /never improvise a substitute place/);
   assert.match(prompt, /"place":"other","name":"Linear","write":"write","text":"Link \(not available\)"/);
-  f.report({ kind: 'write', writes: [{ id: 'lin', outcome: 'written' }] }, writer(f));
-  assert.deepEqual(f.store.get(f.job.id).subJobs.find((s) => s.id === 'lin').result.checks, ['Wrote to Linear']);
-  const worker = f.workerFor('report', 'session');
-  assert.match(jobPrompt(f.store.get(f.job.id), worker.sub, worker.run), /- notes: Run notes — made in Obsidian with whatever tool reaches it; give its URL, or its absolute path/);
-  f.report({ kind: 'completed', checks: ['Wrote notes'], outputs: [{ id: 'notes', url: '/Users/me/vault/run.md' }] }, worker);
-  assert.equal(f.store.get(f.job.id).subJobs.find((s) => s.id === 'notes').result.url, '/Users/me/vault/run.md');
+  assert.match(prompt, /- notes: Run notes — made in Obsidian with whatever tool reaches it; give its URL, or its absolute path/);
+  f.report(completed([{ id: 'lin', outcome: 'written' }, { id: 'notes', outcome: 'written', url: '/Users/me/vault/run.md' }]), worker);
+  const job = f.store.get(f.job.id);
+  assert.deepEqual(job.subJobs.find((s) => s.id === 'lin').result.checks, ['Wrote to Linear']);
+  assert.equal(job.subJobs.find((s) => s.id === 'notes').result.url, '/Users/me/vault/run.md');
 });
 
-test('writes are not reviewed by default; a job that reviews them holds each one unless the write says review:false', async (t) => {
+test('writes are not reviewed by default; a job that reviews them has each drafted unless the write says review:false', async (t) => {
   const plain = fixture(t);
   assert.equal(plain.store.get(plain.job.id).reviewWrites, false);
   const f = fixture(t, { ...input, reviewWrites: true });
   assert.equal(f.store.get(f.job.id).reviewWrites, true);
-  await f.approve(plan([spec('api'), write('held', { sub: 'api', at: 'started' }, moveTo('In Progress')), write('free', { sub: 'api', at: 'started' }, moveTo('In Progress'), { review: false })]));
+  await f.approve(plan([notifier('n'), write('held', 'n', moveTo('In Progress')), write('free', 'n', moveTo('In Progress'), { review: false })]));
   const job = f.store.get(f.job.id);
-  assert.deepEqual(job.subJobs.slice(1).map((s) => [s.id, s.stage, s.state]), [['held', 'review', 'verified'], ['free', 'write', 'writing']]);
+  assert.deepEqual(job.subJobs.slice(1).map((s) => [s.id, s.stage, s.state]), [['held', 'write', 'queued'], ['free', 'write', 'queued']]);
+  assert.match(jobPrompt(job, f.workerFor('n').sub, f.workerFor('n').run), /Review is on for held: do NOT make it yet/);
   assert.equal(job.plan.subJobs[2].review, false, 'an explicit false is kept on the plan');
 });
 
 test('a reviewed output is published by its session, then waits in review until Accept; Skip is refused', async (t) => {
   const f = fixture(t);
   await f.approve(plan([sessionSpec('report'), make('chart', 'artifact', 'report', 'p95 chart', { review: true }), make('k6', 'file', 'report', 'k6 report')]));
-  f.report({ kind: 'completed', checks: ['Measured'], outputs: [{ id: 'chart', url: 'https://claude.ai/artifact/1', title: 'p95' }, { id: 'k6', url: '/tmp/k6.html' }] }, f.workerFor('report', 'session'));
+  assert.doesNotMatch(jobPrompt(f.store.get(f.job.id), f.workerFor('report').sub, f.workerFor('report').run), /kind:"drafts"/, 'an output has no draft');
+  f.report(completed([{ id: 'chart', outcome: 'written', url: 'https://claude.ai/artifact/1', title: 'p95' }, { id: 'k6', outcome: 'written', url: '/tmp/k6.html' }], ['Measured']), f.workerFor('report', 'session'));
   await f.tick();
   let job = f.store.get(f.job.id);
   const chart = job.subJobs.find((s) => s.id === 'chart');
@@ -1376,62 +1448,107 @@ test('a reviewed output is published by its session, then waits in review until 
   job = f.store.get(f.job.id);
   assert.deepEqual([job.subJobs[1].stage, job.subJobs[1].result.url], ['done', 'https://claude.ai/artifact/1']);
   assert.equal(job.moves.at(-1).detail, 'Accepted the output “Write chart”');
-  assert.equal(f.launched.filter((l) => l.run.phase === 'write').length, 0, 'no second session publishes it');
+  assert.equal(f.launched.filter((l) => l.sub?.id === 'report').length, 1, 'no second session publishes it');
 });
 
-test('approve-write applies the review panel\'s edit in the same change: a refused edit approves nothing', async (t) => {
+test('approve-write applies the review panel\'s edit to the draft in the same change: a refused edit approves nothing', async (t) => {
   const f = fixture(t);
-  await f.approve(plan([spec('api'), write('w', { sub: 'api', at: 'started' }, moveTo('In Progress'), { review: true })]));
+  await f.approve(plan([notifier('n'), write('w', 'n', moveTo('In Progress'), { review: true })]));
+  f.report({ kind: 'drafts', drafts: [{ id: 'w', to: 'In Progress', comment: 'Starting' }] }, f.workerFor('n'));
   const before = f.store.get(f.job.id);
   assert.throws(() => f.store.action(f.job.id, 'approve-write', { subJobId: 'w', write: { action: { to: null, comment: null } } }), /moves the ticket, comments on it, or both/);
   assert.deepEqual(f.store.get(f.job.id), before, 'nothing changed');
   f.store.action(f.job.id, 'approve-write', { subJobId: 'w', write: { action: { to: 'In Review', comment: 'Picked up' } } }); await f.tick();
   const job = f.store.get(f.job.id);
   assert.deepEqual(job.plan.subJobs[1].action, { type: 'transition', to: 'In Review', comment: 'Picked up' });
-  assert.deepEqual(writer(f).run.writes, ['w']);
-  assert.match(jobPrompt(job, null, writer(f).run), /"to":"In Review","comment":"Picked up","approved":true/);
+  assert.deepEqual(job.subJobs[1].draft.comment, 'Starting', 'what the session drafted stays on record');
+  assert.match(f.mailed.at(-1).text, /"to":"In Review","comment":"Picked up","approved":true/);
   assert.equal(job.moves.at(-1).detail, 'Approved the write “Write w” with edits');
 });
 
-test('a reviewed story create stops in review on approval, where its story is edited and written', async (t) => {
+test('a reviewed story create is drafted by its session, where its story is edited and then created', async (t) => {
   const f = fixture(t, { ...input, reviewWrites: true });
   await f.approve(plan([{ ...spec('web'), storyId: 'audit' }], [{ id: 'audit', project: 'SEC', title: 'Sign-ins are audited', fields: [{ name: 'Components', value: 'Auth' }] }]));
   let job = f.store.get(f.job.id);
-  assert.deepEqual([job.subJobs[0].id, job.subJobs[0].stage, job.subJobs[0].state], ['create-audit', 'review', 'verified']);
+  assert.deepEqual([job.subJobs[1].id, job.subJobs[1].stage, job.subJobs[1].state], ['create-audit', 'write', 'queued']);
+  f.report({ kind: 'drafts', drafts: [{ id: 'create-audit', title: 'Sign-ins are audited, every one', fields: [{ name: 'Components', value: 'Auth' }, { name: 'Labels', value: 'audit' }] }] }, f.workerFor('stories'));
+  job = f.store.get(f.job.id);
+  assert.deepEqual([job.subJobs[1].stage, job.plan.stories[0].title, job.plan.stories[0].fields.length], ['review', 'Sign-ins are audited, every one', 2]);
   assert.throws(() => f.store.action(f.job.id, 'edit-write', { subJobId: 'create-audit', write: { story: { fields: [{ name: 'Summary', value: 'x' }] } } }), /the title is the summary/);
-  assert.throws(() => f.store.action(f.job.id, 'edit-write', { subJobId: 'create-audit', write: { on: { sub: 'web', at: 'pr' } } }), /only change its story/);
+  assert.throws(() => f.store.action(f.job.id, 'edit-write', { subJobId: 'create-audit', write: { on: { sub: 'web', at: 'pr' } } }), /Unrecognized key/);
   f.store.action(f.job.id, 'approve-write', { subJobId: 'create-audit', write: { story: { title: 'Audit every sign-in', fields: [{ name: 'Issue Type', value: 'Story' }] } } }); await f.tick();
   job = f.store.get(f.job.id);
   assert.deepEqual(job.plan.stories[0], { id: 'audit', project: 'SEC', title: 'Audit every sign-in', fields: [{ name: 'Issue Type', value: 'Story' }] });
-  assert.equal(job.subJobs[0].title, 'Create story: Audit every sign-in');
-  const prompt = jobPrompt(job, null, writer(f).run);
-  assert.match(prompt, /"story":"Audit every sign-in","project":"SEC","fields":\[\{"name":"Issue Type","value":"Story"\}\]/);
-  assert.doesNotMatch(prompt, /Components/);
+  assert.equal(job.subJobs[1].title, 'Create story: Audit every sign-in');
+  assert.match(f.mailed.at(-1).text, /"story":"Audit every sign-in","project":"SEC","fields":\[\{"name":"Issue Type","value":"Story"\}\]/);
+  assert.doesNotMatch(f.mailed.at(-1).text, /Components/);
 });
 
-test('dropping a session drops the outputs it would have made', async (t) => {
+test('dropping a session drops the writes it would have made', async (t) => {
   const f = fixture(t);
-  await f.approve(plan([sessionSpec('report'), make('chart', 'artifact', 'report', 'p95 chart')]));
+  await f.approve(plan([sessionSpec('report'), make('chart', 'artifact', 'report', 'p95 chart'), write('w', 'report', moveTo('Done'))]));
   f.store.action(f.job.id, 'drop', { subJobId: 'report' }); await f.tick(); await f.tick();
-  const chart = f.store.get(f.job.id).subJobs[1];
+  const [chart, w] = f.store.get(f.job.id).subJobs.slice(1);
   assert.ok(chart.cancelledAt); assert.equal(chart.stage, 'done');
+  assert.ok(w.cancelledAt);
 });
 
-test('a version-3 file migrates its Jira writes to writes to a Jira place, live run included', () => {
+test('a version-3 file migrates its Jira writes to writes to a Jira place, then fails them as predating session-owned writes', () => {
   const p = plan([spec('api'), { id: 'w', kind: 'jira', title: 'In Review', storyId: 'story', after: [], on: { sub: 'api', at: 'pr' }, action: { type: 'transition', to: 'In Review' } }]);
   const data = migrateJobs({ version: 3, settings: { concurrency: 2, maxRepairs: 2, deploymentStaleMinutes: 30, paused: false }, jobs: [{
     id: 'job_v3', title: 'Old', intent: 'x', repos: [], revision: 1, paused: false, moves: [], stage: 'active', plan: structuredClone(p), previousPlan: structuredClone(p),
     subJobs: [{ ...spec('api'), stage: 'pr', state: 'watching', sessions: [], repairs: [] }, { ...p.subJobs[1], stage: 'jira', state: 'writing', jiraKey: 'AUTH-123', sessions: [], repairs: [] }],
     runs: [{ id: 'run_w', subJobId: null, phase: 'jira', writes: ['w'], sessionId: 'sid', stopped: false, report: null }] }] });
   const [job] = data.jobs;
-  assert.equal(data.version, 4);
+  assert.equal(data.version, 5);
   for (const list of [job.subJobs, job.plan.subJobs, job.previousPlan.subJobs]) assert.deepEqual([list[1].kind, list[1].place], ['write', { type: 'jira' }]);
-  assert.deepEqual([job.subJobs[1].stage, job.subJobs[1].state], ['write', 'writing']);
+  assert.deepEqual([job.subJobs[1].stage, job.subJobs[1].state, job.subJobs[1].error], ['write', 'failed', 'This write predates session-owned writes; drop it or redo it by hand']);
   assert.equal(job.subJobs[0].kind, undefined, 'a PR is untouched');
   assert.equal(job.runs[0].phase, 'write');
 });
 
-test('a version-2 job waiting in the old ticketing stage migrates to a running job with a create write its live run still keys', async (t) => {
+test('a version-4 file: an in-flight milestone write is failed, never run; its writer run stops quietly; a plan awaiting approval is left alone; the job still moves', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-jobs-v4-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'jobs.json');
+  const legacy = (id, extra = {}) => ({ id, kind: 'write', place: { type: 'jira' }, title: `Write ${id}`, storyId: 'story', after: [], on: { sub: 'api', at: 'pr' }, action: moveTo('In Review'), ...extra });
+  const p = plan([spec('api'), spec('web'), legacy('w'), legacy('gone')]);
+  const base = { title: 'Old', intent: 'x', repos: ['/repo'], revision: 3, paused: false, moves: [], reviewSessions: false };
+  const live = (s, extra) => ({ ...s, sessions: [], repairs: [], jiraKey: 'AUTH-123', ...extra });
+  const raw = { version: 4, settings: { concurrency: 4, maxRepairs: 2, deploymentStaleMinutes: 30, paused: false }, jobs: [
+    { ...base, id: 'job_live', stage: 'active', plan: structuredClone(p),
+      subJobs: [live(spec('api'), { stage: 'pr', state: 'watching', pr: { url: PR_URL } }), live(spec('web'), { stage: 'implementation', state: 'queued' }),
+        live(p.subJobs[2], { stage: 'write', state: 'writing' }), live(p.subJobs[3], { stage: 'done', state: 'done', result: { checks: ['Moved'] } })],
+      runs: [{ id: 'run_w', subJobId: null, phase: 'write', writes: ['w'], sessionId: 'sid_w', startedAt: 1, stopped: false, report: null }] },
+    { ...base, id: 'job_planning', stage: 'planning', plan: structuredClone(p), subJobs: [], runs: [] },
+  ] };
+  fs.writeFileSync(file, JSON.stringify(raw));
+  const store = new JobStore(file);
+  let job = store.get('job_live');
+  const w = job.subJobs.find((s) => s.id === 'w');
+  assert.deepEqual([w.stage, w.state, w.error], ['write', 'failed', 'This write predates session-owned writes; drop it or redo it by hand']);
+  assert.deepEqual(job.subJobs.find((s) => s.id === 'gone').state, 'done', 'a write that already landed stays landed');
+  assert.deepEqual([job.plan.subJobs[2].on, job.plan.subJobs[2].by], [{ sub: 'api', at: 'pr' }, undefined], 'the plan is the record and is not rewritten');
+  assert.deepEqual(store.get('job_planning').plan.subJobs[2].on, { sub: 'api', at: 'pr' });
+  assert.throws(() => store.report('sid_w', 'run_w', { kind: 'blocked', summary: 'x' }), /predates session-owned writes/);
+  assert.throws(() => store.action('job_live', 'retry', { subJobId: 'w' }), /predates session-owned writes; drop it or redo it by hand/);
+  assert.throws(() => store.action('job_live', 'edit-write', { subJobId: 'w', write: { action: { to: 'Done' } } }), /predates session-owned writes/);
+  const stopped = [];
+  const runner = new JobRunner({ store, github: { async pr() { return { state: 'OPEN', checkStatus: 'pending', head: 'h' }; }, async comments() { return normaliseComments(resource(), 0); }, async deploys(s, o) { return { head: o.head, expected: true, workflows: [], summary: '' }; } },
+    runtime: { async stop(r) { stopped.push(r.id); }, async isAlive() { return true; }, async exists() { return true; }, async launch(j, s, r, prepared) { prepared(`sid-${r.id}`); }, async cleanup() {}, async cleanupPlanning() {}, releaseImages() {}, attributeSpend() {} } });
+  await runner.tick();
+  job = store.get('job_live');
+  assert.deepEqual(stopped, ['run_w']); assert.equal(job.runs[0].stopped, true);
+  assert.equal(job.error ?? null, null, 'the writer run stopped quietly');
+  assert.ok(!job.runs.some((r) => r.phase === 'write' && !r.stopped), 'and nothing launches a writer again');
+  store.action('job_live', 'reorder', { subJobId: 'api', after: ['web'] });
+  assert.deepEqual(store.get('job_live').subJobs[0].after, ['web'], 'a move still validates the plan around the legacy write');
+  store.action('job_live', 'drop', { subJobId: 'w' });
+  assert.ok(store.get('job_live').subJobs.find((s) => s.id === 'w').cancelledAt);
+  assert.throws(() => store.approvePlan('job_planning', 3), /names the session sub-job that makes it/, 'an unapproved plan is judged afresh on approval');
+});
+
+test('a version-2 job waiting in the old ticketing stage migrates to a running job whose stories session creates the story; the old ticketing run stops quietly', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-jobs-v2-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'jobs.json');
@@ -1446,12 +1563,10 @@ test('a version-2 job waiting in the old ticketing stage migrates to a running j
   for (const id of ['job_ticketing', 'job_running']) {
     const job = store.get(id);
     assert.equal(job.stage, 'active', id);
-    assert.deepEqual(job.subJobs.map((s) => [s.id, s.stage]).sort(), [['api', 'implementation'], ['create-audit', 'write'], ['web', 'implementation']], id);
-    assert.equal(job.plan.subJobs[0].action.type, 'create');
+    assert.deepEqual(job.subJobs.map((s) => [s.id, s.stage, s.state]).sort(), [['api', 'implementation', 'queued'], ['create-audit', 'write', 'queued'], ['stories', 'session', 'queued'], ['web', 'implementation', 'queued']], id);
+    assert.deepEqual(job.plan.subJobs.find((s) => s.id === 'create-audit').by, 'stories');
   }
-  store.report('sid', 'run_t', { kind: 'jira', stories: [{ id: 'audit', key: 'SEC-9' }] });
-  const job = store.get('job_ticketing');
-  assert.deepEqual(job.subJobs.map((s) => [s.id, s.stage, s.jiraKey]), [['create-audit', 'cleanup', 'SEC-9'], ['api', 'implementation', 'AUTH-1'], ['web', 'implementation', 'SEC-9']]);
+  assert.equal(store.get('job_ticketing').runs[0].phase, 'write', 'the ticketing run is the old batched writer, stopped by the runner like one');
 });
 
 test('a plan carries no branch names: only the renaming session\'s own sub-job follows', async (t) => {
@@ -1550,7 +1665,7 @@ test('with session review off a completed session goes straight to done; request
     [['spike', 'revise-session', 'Also check staging'], ['spike', 'approve-session', null]], 'approvals and requests are on the same timeline as the plan moves');
 });
 
-test('with plan review off the plan receipt approves itself; a keyless story is still created by its own write first and a replan still waits', async (t) => {
+test('with plan review off the plan receipt approves itself; a keyless story is still created by its own session first and a replan still waits', async (t) => {
   const f = fixture(t, { ...input, reviewPlan: false });
   assert.equal(f.store.get(f.job.id).reviewPlan, false);
   f.store.action(f.job.id, 'start'); await f.tick();
@@ -1568,9 +1683,9 @@ test('with plan review off the plan receipt approves itself; a keyless story is 
   g.store.action(g.job.id, 'start'); await g.tick();
   g.report({ kind: 'plan', plan: plan([spec('api')], [{ id: 'story', title: 'Reliable sign-in' }]) });
   assert.equal(g.store.get(g.job.id).stage, 'active');
-  assert.deepEqual(g.store.get(g.job.id).subJobs.map((s) => s.id), ['create-story', 'api']);
+  assert.deepEqual(g.store.get(g.job.id).subJobs.map((s) => s.id), ['stories', 'create-story', 'api']);
   await g.tick();
-  assert.deepEqual([g.last().run.phase, g.last().run.writes], ['write', ['create-story']], 'the sub-job naming the story waits for its key');
+  assert.deepEqual([g.last().run.phase, g.last().sub.id], ['session', 'stories'], 'the sub-job naming the story waits for its key');
 
   const h = fixture(t, { ...input, reviewPlan: false });
   h.store.action(h.job.id, 'start'); await h.tick();
@@ -1630,6 +1745,11 @@ test('MCP receipts and context are caller-bound and carry the job and run only',
   await jobReportTool.handler({ host: fakeHost(suggested), caller: s.sid },
     { runId: s.run.id, report: { kind: 'blocked', summary: 'The proto is out of date', move: 'split-out' } });
   assert.equal(suggested.sub().blocked.move, 'split-out');
+  const drafting = fixture(t, { ...input, reviewWrites: true });
+  await drafting.approve(plan([notifier('n'), write('w', 'n', moveTo('In Review'))]));
+  const d = drafting.workerFor('n');
+  const parked = await jobReportTool.handler({ host: fakeHost(drafting), caller: d.sid }, { runId: d.run.id, report: { kind: 'drafts', drafts: [{ id: 'w', to: 'In Review' }] } });
+  assert.match(parked.structuredContent.next, /^End your turn and wait: mail will say which writes to make/, 'drafts do not end the run');
 });
 
 test('job-create acknowledges the creation by broadcast and kicks the runner when it starts one', async (t) => {

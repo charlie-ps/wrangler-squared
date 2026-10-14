@@ -3,7 +3,9 @@ import { summariseComments, commentsBlockMerge } from './job-comments.js';
 import { awaitsTicket } from './jobs-schema.js';
 import { logWarn } from './log.js';
 import { isFrozen } from './job-replan.js';
-import { advanceWrite, dueWrites, failWrites } from './job-writes.js';
+import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from './job-writes.js';
+import { dropSub } from './job-moves.js';
+import { draftsDecidedMail } from './job-prompts.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
@@ -47,13 +49,21 @@ export class JobRunner {
     for (const run of this.store.get(id).runs.filter(runnable)) {
       let error;
       const job = this.store.get(id);
-      // A cancelled job stops its planning or write run the way a dropped
-      // sub-job stops its step: quietly, no missing-receipt error.
-      // So does a re-planning run whose plan change the human discarded.
+      // A cancelled job stops its planning run the way a dropped sub-job stops
+      // its step: quietly, no missing-receipt error. So does a re-planning run
+      // whose plan change the human discarded, and a batched writer run from
+      // before session-owned writes (job-store.js failed its writes on load).
       const cancelled = job.cancelledAt || (run.subJobId && job.subJobs.find((s) => s.id === run.subJobId)?.cancelledAt)
-        || (run.phase === 'planning' && job.stage === 'active' && !job.replan);
+        || (run.phase === 'planning' && job.stage === 'active' && !job.replan) || run.phase === 'write';
       if (!run.report && !cancelled) {
         if (!run.sessionId) error = 'Launch was interrupted. Check for an existing session/worktree before retrying.';
+        // Parked on its drafts, a session sits idle (or goes dormant) by design
+        // until the human decides them and it is mailed: only its card going
+        // away ends it.
+        else if (run.parkedAt && !run.mailedAt) {
+          if (await this.runtime.exists(run)) continue;
+          error = 'Session was closed while its drafts waited for review. Retry to run it again.';
+        }
         else if (!(await this.runtime.isAlive(run))) error = 'Session stopped without a receipt. Open it to see why, then retry.';
         else {
           await this.answerDialogs(run);
@@ -76,7 +86,7 @@ export class JobRunner {
           const s = j.subJobs.find((s) => s.id === r.subJobId);
           // On the run as well as the card: retry clears the card's, and the
           // history a later session reads (job-prompts.js) needs the run's.
-          if (error) { r.error = error; if (r.writes?.length) failWrites(j, r, error); else (s || j).error = error; }
+          if (error) { r.error = error; (s || j).error = error; }
         });
       } catch (e) {
         this.store.update(id, (j) => { j.error = shortError(e); });
@@ -161,8 +171,7 @@ export class JobRunner {
       this.store.update(job.id, (j) => {
         const r = j.runs.find((r) => r.id === run.id);
         r.stopped = true;
-        if (r.writes?.length) failWrites(j, r, shortError(e));
-        else (j.subJobs.find((s) => s.id === sub?.id) || j).error = shortError(e);
+        (j.subJobs.find((s) => s.id === sub?.id) || j).error = shortError(e);
       });
     }
   }
@@ -187,17 +196,23 @@ export class JobRunner {
       if (sub.error) continue;
       try {
         if (sub.stage === 'session') {
-          if (dependenciesSatisfied(job, sub)) await this.launch(job, sub, 'session');
+          // A session starts once its milestone (`on`) and its prerequisites
+          // have come, and every story its writes name has a key. One whose
+          // drafts are still with the human is not run again until they are
+          // decided. An if-dropped one whose trigger landed is not needed.
+          const trigger = triggerStatus(job, sub);
+          if (trigger === 'not-needed' && !job.replan) this.patchSub(id, sub.id, (s) => { dropSub(s, this.now()); s.notNeeded = true; });
+          else if (trigger === 'due' && dependenciesSatisfied(job, sub) && !awaitsKeys(job, sub) && !inReview(job, sub).length) await this.launch(job, sub, 'session');
         } else if (sub.stage === 'human') {
           // The one stage this runner never launches anything for. A human task
           // moves only when the human marks it (job-store.js start-human /
           // finish-human), which is also why no clock or dependency gate applies:
           // the board shows it, and passing it by is the whole behaviour.
         } else if (sub.stage === 'write') {
-          // A write never launches on its own: it falls due here (or stops for
-          // review), and every write due on this tick shares one session below;
-          // a made output waits on its session's receipt. A pending plan change
-          // may still edit or drop it, so it waits.
+          // A write never launches on its own: its session makes it and reports
+          // it. Here it only follows that session out (dropped with it, failed
+          // if it finished without reporting it). A pending plan change may still
+          // edit or drop it, so it waits.
           // Tried on this tick's copy first: an idle tick must not rewrite the file.
           if (!job.replan && advanceWrite(job, sub, this.now())) this.store.update(id, (j) => advanceWrite(j, j.subJobs.find((s) => s.id === sub.id), this.now()));
         } else if (sub.stage === 'implementation') {
@@ -310,18 +325,22 @@ export class JobRunner {
       }
     }
     job = this.store.get(id);
-    // Batched: one short session for every write due now, so a story created on
-    // approval and three transitions on one merge cost one launch, not four.
-    // TODO(host-api jira:write, slack:write): a whole agent session for a
-    // one-line transition or post is the price of having no Jira or Slack
-    // client; a host-side one would make each write a call and its read-first
-    // rule a status compare.
-    const due = dueWrites(job);
-    if (due.length && !job.replan && !job.error && !activeFor(job) && this.allowed(id)) {
-      await this.launch(job, null, 'write', { writes: due.map((s) => s.id) });
-      job = this.store.get(id);
-    }
+    for (const run of job.runs.filter((r) => draftsDecided(job, r))) await this.resumeDrafted(id, run);
+    job = this.store.get(id);
     if (job.subJobs.length && job.subJobs.every((s) => s.stage === 'done')) await this.finish(id);
+  }
+  // Every draft a parked session sent is decided: tell it which writes to make
+  // and with what text, waking its card first if it went dormant meanwhile. A
+  // failed send is tried again next tick, and says so on the card.
+  async resumeDrafted(id, run) {
+    try {
+      await this.runtime.resumeWithMail(run, draftsDecidedMail(this.store.get(id), run));
+      this.patchRun(id, run.id, (r) => { r.mailedAt = this.now(); r.idleSince = null; });
+      this.patchSub(id, run.subJobId, (s) => { s.observationError = null; });
+    } catch (e) {
+      const note = `Could not resume the session with the decided drafts: ${shortError(e)}`;
+      if (this.store.get(id).subJobs.find((s) => s.id === run.subJobId)?.observationError !== note) this.patchSub(id, run.subJobId, (s) => { s.observationError = note; });
+    }
   }
   // Delivered or cancelled, the job ends the same way: planning sessions and
   // worktrees go, then `done`. `cancelledAt` is what tells the two apart.

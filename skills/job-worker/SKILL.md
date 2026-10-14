@@ -36,7 +36,8 @@ the `runId` from your prompt and the receipt kind it names.
   which move the human should make, name it —
   `move:"fix-here"|"split-out"|"new-ticket"|"reorder"|"drop"|"mark"|"accept-red"`. It is a
   suggestion; the human decides.
-- Save your files before reporting: a successful report ends the run.
+- Save your files before reporting: a successful report ends the run (all but
+  `drafts`, which waits for mail; see below).
 - A report that failed on a connection error is **safe to retry identically**.
 - Call `get_job_context` if you have lost the job, the plan or your own step.
 - Keep your final terminal output under 8 short lines — nobody reads it unless
@@ -68,6 +69,16 @@ the `runId` from your prompt and the receipt kind it names.
 
 ## Planning writes
 
+- Every write names the session sub-job that makes it (`by`); never a PR or
+  human sub-job. Group related writes under one session (a ticket, the page
+  that links it and the message that links both are one session owning three
+  writes), and a job whose whole outcome is writes is one or a few sessions.
+- A write due at a milestone of other work gets a small session with
+  `on:{sub, at}` owning it — e.g. moving the ticket to Done when the PR merges
+  is a session `on:{sub:"<pr id>", at:"merged"}`. `on` is only ever a
+  session's.
+- `{<write id>.url}` may name a write the same session makes first, or one made
+  by a session this one waits to finish (`after`, or `on` at `deployed`).
 - Use a preset place (jira, slack, confluence, artifact, file, url) whenever
   one fits. Anything else is `place:{type:"other", name, ref?}`: a `write` is
   one free-text instruction (`text`), or a session `make`s something there.
@@ -76,31 +87,38 @@ the `runId` from your prompt and the receipt kind it names.
   undo; your `true` holds even when the job's default is off. Story fields are
   reviewed with the write that creates the story, not with the plan.
 
-## Write steps (Jira, Slack, Confluence, other places)
+## Session steps with writes
 
-- Make exactly the writes your prompt lists, reading each place first: the
-  ticket's status and comments, the channel's recent messages, the page or the
-  space it goes in. Answer every one in the receipt: `written`, `already` (it
-  was at or past the target, or the same post or page is already there — never
-  post twice), or `failed` with the place's own error message. Give `url`, the
-  permalink, for whatever you posted or created.
-- A write the place refuses is a `failed` result, not a blocked receipt, and
-  never something to work around; blocked is for when you cannot reach Jira,
-  Slack or Confluence at all.
-- A Jira create sets every field it lists, exactly as given; dropping one Jira
-  will not take is a workaround, so that create is `failed`.
-- An `other` place (`name`, and `where` if given): do exactly its one
-  instruction there with whatever MCP tool or CLI reaches it, and report
-  `written` with a `url` if the result has one. If nothing you have reaches
-  that place, report `failed` with the tool's own error verbatim — never
-  substitute another place.
+- If your prompt lists writes, you own them: make each where it says, and
+  answer every one in `completed` as
+  `writes:[{id, outcome:"written"|"already"|"failed", url?, key?, from?, title?, error?}]`.
+  A receipt that leaves one out is refused and names what is missing — fix it
+  and report again.
+- Read each place first: the ticket's status and comments, the channel's recent
+  messages, the page or the space it goes in. `already` means it was at or past
+  the target, or the same post or page is there — never post twice. Give
+  `url`, the permalink, for whatever you posted or created; a created story
+  gives its `key`.
+- Make them in order: a write that links another of yours (`{<id>.url}`, named
+  in your prompt as one you make first) comes after it, with that URL put in.
+- A write the place refuses is a `failed` result with the place's own error,
+  not a blocked receipt, and never something to work around. A Jira create
+  sets every field it lists, exactly as given. An `other` place gets exactly
+  its one instruction with whatever reaches it, or `failed` with the tool's
+  own error — never a substitute place.
+- An output you `make` is published normally even if it is reviewed: the human
+  reviews it after it exists. Report its link (a file's absolute path), or
+  `failed` with why.
 
-## Session steps with outputs
+## Drafts: reviewed writes
 
-- If your prompt lists outputs, make each one where it says and report every
-  one in `completed`: `{id, url, title?}` with its link (a file's absolute
-  path), or `{id, missing:"one line why"}` if you could not. A receipt that
-  leaves one out is refused. An output in an `other` place may be a URL or an
-  absolute path.
-- Publish every output normally even if it is reviewed: the human reviews it
-  after it exists, and there is no draft step.
+- If your prompt says review is on for some writes, do NOT make them. Do your
+  work and any unreviewed writes, then send every reviewed one in one
+  `{kind:"drafts", drafts:[{id, text?, title?, to?, comment?, where?, fields?}]}`
+  receipt — each exactly as you would make it (a story's summary as `title`,
+  with its `fields`).
+- Drafts do not end your run. Wait, doing nothing else: mail arrives saying
+  which writes to make, with their final text (the human may have edited
+  them), and which were skipped. Read it with `read_mail` if it is only
+  announced. Make exactly those, then send `completed` answering for every
+  write still open; a skipped write needs no answer.

@@ -17,7 +17,7 @@ import { JobSpendRefresh } from './job-spend-refresh.js';
 let runner = null;
 export function runnerFor(host) {
   if (!runner) {
-    const runtime = new JobRuntime({ host, statusOf });
+    const runtime = new JobRuntime({ host, statusOf, dormantOf });
     runner = new JobRunner({
       store: host.stores.jobs,
       runtime,
@@ -44,12 +44,19 @@ export function spendFor(host) {
 // the projection `host.sessions.get()` carries no status, so this cache is the
 // only source of "is this worker idle / needs-you" the runner has.
 // TODO(host-api sessions:read status): drop once the projection carries it.
+// `dormant` is the graph's flag for a card with no live pane, which reads as
+// idle by status alone; a parked run's mail must wake one first.
 const lastStatus = new Map();
+const dormant = new Set();
 export function noteGraph(graph) {
-  lastStatus.clear();
-  for (const s of graph?.sessions || []) lastStatus.set(s.sessionId, s.status ?? null);
+  lastStatus.clear(); dormant.clear();
+  for (const s of graph?.sessions || []) {
+    lastStatus.set(s.sessionId, s.status ?? null);
+    if (s.dormant) dormant.add(s.sessionId);
+  }
 }
 export const statusOf = (sessionId) => lastStatus.get(sessionId) ?? null;
+export const dormantOf = (sessionId) => dormant.has(sessionId);
 
 // Whether a session is (or ever was) a job step. Core stamped `automationRun` on
 // the entry at dispatch and every consumer read it back; the extension keeps
@@ -66,4 +73,4 @@ export function runForSession(store, sessionId) {
 export const isAutomated = (store, sessionId) => Boolean(runForSession(store, sessionId));
 
 // Test seam.
-export function _resetForTests() { runner = null; spend = null; lastStatus.clear(); }
+export function _resetForTests() { runner = null; spend = null; lastStatus.clear(); dormant.clear(); }

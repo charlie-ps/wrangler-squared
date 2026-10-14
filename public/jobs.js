@@ -2,8 +2,8 @@ import { esc } from './util.js';
 import { ICONS, PERSON_ICON, PULL_REQUEST_ICON, ROBOT_ICON, TICKET_ICON, SLACK_ICON, CONFLUENCE_ICON, FILE_ICON, GLOBE_ICON, PIN_ICON } from './icons.js';
 export const isSessionSub = (sub) => sub?.kind === 'session';
 export const isHumanSub = (sub) => sub?.kind === 'human';
-// Mirrors server/jobs-schema.js: a write goes to one place, and a make write is
-// an output its session (`by`) produces rather than one the batched writer makes.
+// Mirrors server/jobs-schema.js: a write goes to one place and is made by the
+// session it names (`by`); a make write is an output that session decides.
 export const isWriteSub = (sub) => sub?.kind === 'write';
 export const placeOf = (sub) => isWriteSub(sub) ? sub.place?.type || 'jira' : null;
 export const isJiraWrite = (sub) => placeOf(sub) === 'jira';
@@ -35,7 +35,7 @@ export const CHECKPOINTS = [
     wait: (n) => `${several(n, 'A PR has', 'PRs have')} passing checks and ${n === 1 ? 'is' : 'are'} waiting for Approve merge.`, yes: (n) => `Merge ${several(n, 'the PR', 'PRs')}`, done: (n) => `${several(n, 'The PR merges', 'PRs merge')} on the next poll, unless a reviewer leaves blocking comments` },
   { field: 'reviewSessions', icon: 'robot', name: 'Session results', unit: 'session receipt', you: 'You approve each session’s receipt before it counts as done', auto: 'A session counts as done once it reports',
     wait: (n) => `${several(n, 'A session receipt is', 'session receipts are')} waiting for your approval.`, yes: (n) => `Accept ${several(n, 'the receipt', 'receipts')}`, done: (n) => `${several(n, 'The receipt is', 'receipts are')} accepted` },
-  { field: 'reviewWrites', icon: 'eye', name: 'Writes', you: 'Each write to Jira, Slack, Confluence or another place stops for you before it’s made', auto: 'Writes are made when due, each with a receipt' },
+  { field: 'reviewWrites', icon: 'eye', name: 'Writes', you: 'Each write to Jira, Slack, Confluence or another place stops for you before it’s made', auto: 'Each write is made by its session, with a receipt' },
 ];
 export const checkpoint = (field) => CHECKPOINTS.find((c) => c.field === field);
 export const youReview = (job, field) => field === 'reviewMerge' || field === 'reviewWrites' ? !!job[field] : field === 'reviewCode' ? reviewCode(job) : job[field] ?? true;
@@ -107,11 +107,10 @@ export function kindCountLabel(subJobs) {
   return [count(isPrSub, 'PR'), count(isSessionSub, 'session'), count(isHumanSub, 'human task'), count(isWriteSub, 'write')].filter(Boolean).join(' · ');
 }
 
-// Writes (server/job-writes.js): a write fires when its trigger reaches a
-// milestone. Mirrors milestoneReached there, so the board says what each waits for.
-export const MILESTONES = ['started', 'pr', 'merged', 'deployed', 'dropped'];
+// A session may wait for another sub-job's milestone (`on`), and every write it
+// owns with it (server/job-writes.js). Mirrors milestoneReached there, so the
+// board says what each waits for.
 export const milestoneLabel = (trigger, at) => ({ started: 'started', pr: 'PR opened', merged: 'merged', deployed: isPrSub(trigger) || !trigger ? 'deployed' : 'done', dropped: 'dropped' })[at];
-export const milestonesFor = (trigger) => isPrSub(trigger) ? MILESTONES : MILESTONES.filter((m) => !['pr', 'merged'].includes(m));
 export function milestoneReached(t, at) {
   if (!t) return false;
   if (at === 'dropped') return !!t.cancelledAt;
@@ -121,14 +120,22 @@ export function milestoneReached(t, at) {
   if (at === 'merged') return !!t.mergedAt || (isPrSub(t) && !!t.deployed);
   return !t.cancelledAt && (isPrSub(t) ? !!t.deployed : ['cleanup', 'done'].includes(t.stage));
 }
-export const writeTrigger = (job, sub) => sub?.on ? job.subJobs?.find((s) => s.id === sub.on.sub) || null : null;
-// "when PR opened", "only if dropped", "on approve": what fires it, in the words
-// the hanging tile and the editor both use.
+export const sessionTrigger = (job, sub) => isSessionSub(sub) && sub.on ? job.subJobs?.find((s) => s.id === sub.on.sub) || null : null;
+// "When Passkey API merges", "Only if Passkey API is dropped": what starts a
+// session with `on`, in the words its node, card and dialog all use.
+export function triggerLine(job, sub) {
+  if (!isSessionSub(sub) || !sub.on) return '';
+  const t = sessionTrigger(job, sub);
+  const name = t?.title || sub.on.sub;
+  if (sub.on.at === 'dropped') return `Only if ${name} is dropped`;
+  return `When ${name} ${{ started: 'starts', pr: 'opens its PR', merged: 'merges', deployed: isPrSub(t) || !t ? 'deploys' : 'is done' }[sub.on.at]}`;
+}
+// "drafted for you", "by the session": how a write gets made, in the words the
+// hanging tile uses (it hangs under its session, so never that session's name).
 export function writeWhen(job, sub) {
-  if (isMakeWrite(sub)) return 'by the session';
-  if (!sub.on) return 'on approve';
-  const t = writeTrigger(job, sub);
-  return sub.on.at === 'dropped' ? 'only if dropped' : `when ${milestoneLabel(t, sub.on.at)}`;
+  if (!sub.by) return 'predates sessions';
+  if (isMakeWrite(sub)) return writeReviewed(job, sub) ? 'made, then reviewed' : 'made by the session';
+  return writeReviewed(job, sub) ? 'drafted for your review' : 'by the session';
 }
 // "AUTH-412 → In Review", "Comment on AUTH-412", "Create “Passkey API”",
 // "Post in #web", "Make p95 chart": the write's own title.
@@ -143,14 +150,19 @@ export function writeTarget(plan, sub) {
   if (isStoryCreate(sub)) return `Create ${story?.key || `“${story?.title || 'story'}”`}`;
   return sub.action?.to ? `${key} → ${sub.action.to}` : `Comment on ${key}`;
 }
-// Its trigger was dropped before reaching the milestone: the write can never run
-// (an if-dropped one is exactly what a drop fires).
-export const triggerDropped = (job, sub) => isWriteSub(sub) && !!sub.on && sub.on.at !== 'dropped' && sub.stage === 'write' && sub.state === 'queued'
-  && !!writeTrigger(job, sub)?.cancelledAt && !milestoneReached(writeTrigger(job, sub), sub.on.at);
-export const writeDormant = (job, sub) => isWriteSub(sub) && sub.on?.at === 'dropped' && sub.stage === 'write' && sub.state === 'queued' && !writeTrigger(job, sub)?.cancelledAt;
-export const writeSession = (job, sub) => isMakeWrite(sub) ? job.subJobs?.find((s) => s.id === sub.by) || null : null;
-export const writeWaiting = (job, sub) => isWriteSub(sub) && sub.stage === 'write' && sub.state === 'queued' && (isMakeWrite(sub) || writeDormant(job, sub) || (!!sub.on && !milestoneReached(writeTrigger(job, sub), sub.on.at)) || (!!sub.storyId && !sub.jiraKey && !isStoryCreate(sub)));
+// Its trigger was dropped before reaching the milestone: the session can never
+// start (an if-dropped one is exactly what a drop starts).
+export const triggerDropped = (job, sub) => isSessionSub(sub) && !!sub.on && sub.on.at !== 'dropped' && sub.stage === 'session' && !liveRun(job, sub)
+  && !!sessionTrigger(job, sub)?.cancelledAt && !milestoneReached(sessionTrigger(job, sub), sub.on.at);
+export const sessionDormant = (job, sub) => isSessionSub(sub) && sub.on?.at === 'dropped' && sub.stage === 'session' && !sessionTrigger(job, sub)?.cancelledAt;
+const sessionWaitsOn = (job, sub) => isSessionSub(sub) && !!sub.on && sub.stage === 'session' && !liveRun(job, sub) && !milestoneReached(sessionTrigger(job, sub), sub.on.at);
+export const writeSession = (job, sub) => isWriteSub(sub) && sub.by ? job.subJobs?.find((s) => s.id === sub.by) || null : null;
+export const writeWaiting = (job, sub) => isWriteSub(sub) && sub.stage === 'write' && ['queued', 'approved'].includes(sub.state) && !sub.error;
 export const writeAwaitingReview = (sub) => isWriteSub(sub) && sub.stage === 'review' && !sub.error;
+// A session parked on drafts it sent, until every one is decided and it is told
+// which to make (server/job-writes.js).
+export const parkedRun = (job, sub) => { const run = liveRun(job, sub); return run?.parkedAt && !run.mailedAt ? run : null; };
+export const draftsWaiting = (job, sub) => (parkedRun(job, sub)?.drafts || []).map((id) => job.subJobs.find((s) => s.id === id)).filter((w) => writeAwaitingReview(w));
 // "→ In Review", "Comment", "Post", "Make": a write in a few words, beside the
 // place's glyph that already says where.
 export function writeAction(w) {
@@ -212,7 +224,7 @@ export function workflowFor(plan, sub) {
   const project = storyProject(plan.stories?.find((t) => t.id === sub.storyId));
   return (project && plan.workflows?.[project]) || [];
 }
-export const cancelledDependencies = (job, sub) => triggerDropped(job, sub) ? [sub.on.sub] : sub.after.filter((id) => job.subJobs.find((s) => s.id === id)?.cancelledAt);
+export const cancelledDependencies = (job, sub) => [...(triggerDropped(job, sub) ? [sub.on.sub] : []), ...sub.after.filter((id) => job.subJobs.find((s) => s.id === id)?.cancelledAt)];
 // Mirrors server/job-store.js dependencySatisfied: a PR counts once deployed, a
 // session or human task once it reached done.
 export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : dep.stage === 'done' && !dep.cancelledAt;
@@ -317,7 +329,7 @@ export function movesFor(job, sub) {
   // server refuses them all until it is approved or discarded.
   if (!sub || sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage) || replanPending(job)) return [];
   // A write is edited from its own dialog; the only moves are the two that end it.
-  if (isWriteSub(sub)) return sub.state === 'writing' ? [] : MOVES.filter((m) => ['drop', 'mark'].includes(m.id))
+  if (isWriteSub(sub)) return MOVES.filter((m) => ['drop', 'mark'].includes(m.id))
     .map((m) => (m.id === 'mark' ? { ...m, label: 'Mark done', blurb: isMakeWrite(sub) ? 'You made it yourself. Paste where it is.' : 'Someone already made this write by hand.' } : m));
   const pr = isPrSub(sub);
   const allowed = {
@@ -341,6 +353,7 @@ function eventTitle(sub) {
   if (/repair limit/i.test(sub.error)) return prNumber(sub) ? `Checks failing on #${prNumber(sub)}` : 'Checks failing';
   if (/^Post-merge run failed/i.test(sub.error)) return 'Post-merge run failed';
   if (/without a receipt/i.test(sub.error)) return 'Session stopped early';
+  if (isWriteSub(sub) && !sub.by) return 'Write predates sessions';
   if (isMakeWrite(sub) && sub.state === 'failed') return 'Not made';
   if (isWriteSub(sub) && sub.state === 'failed') return `${placeShort(sub)} refused the write`;
   return 'Needs attention';
@@ -391,12 +404,15 @@ export function jobStatus(job, sub) {
   if (sub?.cancelledAt) { const word = sub.superseded ? 'Superseded' : sub.notNeeded ? 'Not needed' : 'Dropped'; return { tone: sub.stage === 'done' ? 'done' : 'muted', text: sub.stage === 'done' ? word : `${word} · cleaning up` }; }
   if (!sub && job.cancelledAt) return { tone: job.stage === 'done' ? 'done' : 'muted', text: job.stage === 'done' ? 'Cancelled' : 'Cancelled · cleaning up' };
   if (job.paused) return { tone: 'muted', text: 'Paused' };
-  if (sub && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return { tone: 'needs', text: isWriteSub(sub) ? 'Trigger dropped' : 'Depends on a dropped sub-job' };
+  if (sub && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return { tone: 'needs', text: triggerDropped(job, sub) ? 'Trigger dropped' : 'Depends on a dropped sub-job' };
   if (isWriteSub(sub)) return writeStatusLine(job, sub);
   const run = liveRun(job, sub);
   if (run) {
     if (run.status === 'needs-you') return { tone: 'needs', text: 'Waiting on a prompt' };
-    return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: job.stage === 'active' ? 'Re-planning' : 'Planning', write: 'Writing', implementation: reviewCode(job) ? 'Working' : 'Working on the PR', publish: 'Committing & opening the PR', repair: 'Fixing the PR', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };
+    // Its drafts are each the human's to decide (the writes carry the needs-you).
+    if (parkedRun(job, sub)) { const n = draftsWaiting(job, sub).length; return n ? { tone: 'muted', text: `Paused · ${n} draft${n === 1 ? '' : 's'} to review` } : { tone: 'working', text: 'Drafts decided · resuming' }; }
+    if (run.mailedAt && !run.report) return { tone: 'working', text: 'Making the approved writes' };
+    return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: job.stage === 'active' ? 'Re-planning' : 'Planning', implementation: reviewCode(job) ? 'Working' : 'Working on the PR', publish: 'Committing & opening the PR', repair: 'Fixing the PR', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };
   }
   if (sub && heldByReplan(job, sub)) return { tone: 'muted', text: 'Held for the plan change' };
   // The human said they had started; no agent and no clock runs against it, so
@@ -415,10 +431,12 @@ export function jobStatus(job, sub) {
   const waiting = pendingDependencies(job, sub);
   const blocked = ['session', 'human', 'pr'].includes(sub.stage) ? waiting : sub.stage === 'implementation' ? waiting.filter((d) => !isPrSub(d)) : [];
   if (blocked.length) return { tone: 'muted', text: `Waiting for ${blocked.length} ${waitingNoun(blocked)}${blocked.length === 1 ? '' : 's'}` };
-  // A story added by New ticket has no key until its create write runs, and a
+  // A story added by New ticket has no key until its create write is made, and a
   // sub-job that names a story cannot start without one; a storyless sub-job
   // is ticketless by design and never waits.
   if (sub.stage === 'implementation' && sub.storyId && !sub.jiraKey) return { tone: 'muted', text: 'Waiting for a Jira ticket' };
+  if (sessionDormant(job, sub)) return { tone: 'muted', text: triggerLine(job, sub) };
+  if (sessionWaitsOn(job, sub)) return { tone: 'muted', text: triggerLine(job, sub).replace(/^When/, 'Waits until') };
   if (sub.observationError) return { tone: 'needs', text: 'Pipeline polling will retry' };
   // Accepted red: the runner merges, or finishes the landing, on its next tick.
   if (redAccepted(sub)) return { tone: 'working', text: sub.stage === 'pr' ? (sub.mergeRequestedHead ? 'Merge requested' : 'Merging with red checks') : 'Red run accepted · landing' };
@@ -429,20 +447,20 @@ export function jobStatus(job, sub) {
   if (sub.stage === 'done') return { tone: 'done', text: isPrSub(sub) ? 'Delivered' : isSessionSub(sub) ? 'Completed' : 'Done' };
   return { tone: 'muted', text: 'Queued' };
 }
-// A write has no session of its own (a batch run is job-level), so every line
-// comes from its stage and state. Held for a plan change is read before here.
+// A write's own run is its session's, so its line is that session's progress
+// seen from the write. Held for a plan change is read before here.
 function writeStatusLine(job, sub) {
-  if (sub.state === 'writing') return { tone: 'working', text: `Writing to ${placeShort(sub)}` };
+  const session = writeSession(job, sub);
+  const by = session?.title || sub.by;
   if (sub.stage === 'done') return { tone: 'done', text: { already: 'Already there', skipped: 'Skipped' }[sub.result?.outcome] || (sub.result?.receiptId ? (isMakeWrite(sub) ? 'Made' : 'Written') : 'Done') };
   if (sub.stage === 'cleanup') return { tone: 'working', text: 'Finishing' };
   if (heldByReplan(job, sub)) return { tone: 'muted', text: 'Held for the plan change' };
-  if (writeAwaitingReview(sub)) return { tone: 'needs', text: isMakeWrite(sub) ? 'Review the output' : 'Review the write' };
-  if (isMakeWrite(sub)) return { tone: 'muted', text: `Made by ${writeSession(job, sub)?.title || sub.by}` };
-  const t = writeTrigger(job, sub);
-  if (writeDormant(job, sub)) return { tone: 'muted', text: `Only if ${t?.title || sub.on.sub} is dropped` };
-  if (sub.on && !milestoneReached(t, sub.on.at)) return { tone: 'muted', text: `Waits for ${t?.title || sub.on.sub} · ${milestoneLabel(t, sub.on.at)}` };
+  if (writeAwaitingReview(sub)) return { tone: 'needs', text: isMakeWrite(sub) ? 'Review the output' : 'Review the draft' };
+  const running = !!session && !!liveRun(job, session);
+  if (sub.state === 'approved') return { tone: running ? 'working' : 'muted', text: `Approved · ${by} makes it` };
+  if (running) return { tone: 'working', text: `${by} is working` };
   if (sub.storyId && !sub.jiraKey && !isStoryCreate(sub)) return { tone: 'muted', text: 'Waiting for a Jira ticket' };
-  return { tone: 'muted', text: 'Queued to write' };
+  return { tone: 'muted', text: `${isMakeWrite(sub) ? 'Made' : 'Written'} by ${by}` };
 }
 // A job card joins the sub-job cards when the job itself needs attention, and
 // stands alone for a job cancelled before it had any sub-jobs — otherwise that
@@ -458,11 +476,10 @@ export function jobCards(jobs) {
 // Every dependency gates the start: a PR once it deploys, a session or human task
 // once it is done.
 export function dependencyLine(job, sub) {
-  if (isMakeWrite(sub)) return `Made by ${writeSession(job, sub)?.title || sub.by}`;
-  if (isWriteSub(sub)) return sub.on ? `When ${writeTrigger(job, sub)?.title || sub.on.sub} ${sub.on.at === 'dropped' ? 'is dropped' : `reaches ${milestoneLabel(writeTrigger(job, sub), sub.on.at)}`}` : 'On approve';
+  if (isWriteSub(sub)) return sub.by ? `${isMakeWrite(sub) ? 'Made' : 'Written'} by ${writeSession(job, sub)?.title || sub.by}` : 'Predates session-owned writes';
   const deps = sub.after.map((id) => job.subJobs.find((s) => s.id === id) || { id, title: id });
-  if (!deps.length) return '';
-  return `${isPrSub(sub) ? 'Start after' : 'After'} ${deps.map((d) => isPrSub(d) ? `${d.title} deploys` : d.title).join(' + ')}`;
+  const after = deps.length ? `${isPrSub(sub) ? 'Start after' : 'After'} ${deps.map((d) => isPrSub(d) ? `${d.title} deploys` : d.title).join(' + ')}` : '';
+  return [triggerLine(job, sub), after].filter(Boolean).join(' · ');
 }
 // What a job (or one sub-job) cost: planning, every step, CI repairs and the
 // headless comment triage, summed server-side (server/job-spend.js) from every
@@ -486,13 +503,16 @@ export function storyLabel(story, stories = []) {
   return project ? `${project}-NEW-${n}` : `NEW-${n}`;
 }
 export const receiptHtml = (checks = []) => `<ul class="job-receipt">${checks.map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul>`;
+// A session's milestone (`on`) orders it like `after`, so it is a wave past its trigger.
+export const edgesOf = (sub) => [...sub.after, ...(isSessionSub(sub) && sub.on && !sub.after.includes(sub.on.sub) ? [sub.on.sub] : [])];
 export function dependencyLevels(plan) {
   const levels = new Map();
   function level(sub, visiting = new Set()) {
     if (levels.has(sub.id)) return levels.get(sub.id);
     if (visiting.has(sub.id)) return 0;
     visiting.add(sub.id);
-    const n = sub.after.length ? 1 + Math.max(...sub.after.map((id) => {
+    const edges = edgesOf(sub);
+    const n = edges.length ? 1 + Math.max(...edges.map((id) => {
       const parent = plan.subJobs.find((s) => s.id === id); return parent ? level(parent, new Set(visiting)) : 0;
     })) : 0;
     levels.set(sub.id, n); return n;

@@ -26,6 +26,8 @@ export const MOVE_ACTIONS = new Set(Object.keys(moveSchemas));
 const REFUSED_WHILE_LIVE = new Set(['split-out', 'new-ticket', 'reorder', 'mark', 'accept-red']);
 const UNMERGED = ['implementation', 'review', 'pr', 'session', 'human'];
 const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.subJobId === subId);
+// A session that may still take another write: waiting, and never run.
+export const notStarted = (job, id) => { const s = job.subJobs.find((x) => x.id === id); return !!s && s.stage === 'session' && !s.sessions?.length && !s.cancelledAt && !liveRun(job, id); };
 const quoted = (title) => `“${title}”`;
 const both = (job, subId, fn) => {
   fn(job.subJobs.find((s) => s.id === subId));
@@ -38,9 +40,11 @@ const freeId = (taken, make) => { let n = 2; while (taken.has(make(n))) n++; ret
 // the plan and only commits once it passes — nothing here half-edits a plan it
 // is about to refuse. A migrated plan may carry a brief longer than today's cap;
 // it is not what is being changed, so the throwaway projection trims it rather
-// than refusing an unrelated move.
+// than refusing an unrelated move. A write from before session-owned writes
+// names no session (`by`): the store failed it on load (job-store.js), it is
+// never what a move changes, and it must not make every move on its job fail.
 export function validatePlan(plan) {
-  const projected = { ...plan, subJobs: plan.subJobs.map((s) => ({ ...s, brief: String(s.brief || 'x').slice(0, 500) })) };
+  const projected = { ...plan, subJobs: plan.subJobs.filter((s) => !(isWriteSub(s) && !s.by)).map((s) => ({ ...s, brief: String(s.brief || 'x').slice(0, 500) })) };
   const parsed = planSchema.safeParse(projected);
   if (!parsed.success) throw new Error([...new Set(parsed.error.issues.map((i) => i.message))].join('; '));
 }
@@ -109,10 +113,10 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
   if (sub.stage === 'done' || sub.cancelledAt) throw new Error('Sub-job has already finished');
   const data = schema.parse(payload);
   if (liveRun(job, sub.id) && REFUSED_WHILE_LIVE.has(move)) throw new Error('Wait for the session to stop');
-  // A write has no session, PR or order of its own: it is edited (job-writes.js),
-  // dropped, or marked done because someone already made it by hand.
+  // A write has no PR or order of its own (its session has): it is edited
+  // (job-writes.js), dropped, or marked done because someone already made it by
+  // hand. Its session's receipt ignores an answer for a write that is gone.
   if (isWriteSub(sub) && !['drop', 'mark'].includes(move)) throw new Error('A write can only be edited, dropped or marked done');
-  if (isWriteSub(sub) && sub.state === 'writing') throw new Error('Wait for the write to finish');
   if (data.link && !isWriteSub(sub)) throw new Error('Only a write is marked done with where it is');
 
   if (move === 'fix-here') {
@@ -163,9 +167,10 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
     const spec = addPrSubJob(job, sub, data, { storyId: story.id, jiraKey: data.key || null, story, buildSubJob,
       position: UNMERGED.includes(sub.stage) ? data.position : null });
     // The ticket is created the way every keyless story is: by its own write,
-    // due at once, which the new PR waits on for its key.
+    // which the new PR waits on for its key, made by the stories session if it
+    // has not started yet, else by a new one that starts at once.
     const known = new Set(job.plan.subJobs.map((s) => s.id));
-    job.plan = withStoryCreates(job.plan);
+    job.plan = withStoryCreates(job.plan, (id) => notStarted(job, id));
     for (const s of job.plan.subJobs) if (!known.has(s.id)) job.subJobs.push(buildSubJob(job.plan, s));
     sub.error = null; sub.blocked = null;
     if (data.note) sub.note = data.note;

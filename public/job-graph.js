@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS, ROCKET_PATH } from './icons.js';
-import { isPrSub, isWriteSub, isMakeWrite, writeReviewed, writeWhen, writeAction, placeKey, placesOf, webUrl, PLACES, milestoneReached, KIND_TITLE, kindChipHtml, kindIconHtml, kindLabel, kindClass, kindCountLabel, dependencyLevels, dependencyLine, storyLabel, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel } from './jobs.js';
+import { isPrSub, isSessionSub, isWriteSub, isMakeWrite, writeReviewed, writeWhen, writeAction, placeKey, placesOf, webUrl, PLACES, triggerLine, edgesOf, KIND_TITLE, kindChipHtml, kindIconHtml, kindLabel, kindClass, kindCountLabel, dependencyLevels, dependencyLine, storyLabel, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLine, jobState, jobLabel } from './job-state.js';
 
 // A job's sub-jobs drawn as a horizontal stepper: one column per wave (a
@@ -16,20 +16,20 @@ import { STATES, stateIconHtml, stateSolid, subState, subLine, jobState, jobLabe
 // rectangles, not by this markup, so callers re-run it after anything that can
 // move a node.
 //
-// A write is not a step in the order, so it gets no column and no connector: a
-// node's writes fold into one pill per PLACE beneath it (the place's glyph, a
-// short label, a dot per write in that write's state), dashed until the place
-// exists and ringed when a write there needs the human. The pill is a <details>
-// whose popover names the place, opens it once it exists, and has a row per
-// write saying in a word what fires it, never the trigger's title, since the
-// pill hangs under it. A made output hangs under its session; a write with no
-// trigger (a story created on approval) joins its place's pill under the node
-// that place belongs to, else hangs at the top of the first wave. Under review
-// each row opens its editor (`editing` is the open one) and every work node
-// offers "+ place"; live, a row opens its sub-job. Under review each row also
-// carries an eye that flips whether that write stops for review: a sibling of
-// the row's button, since a button cannot hold another. `reviewWrites` is the
-// job's default for a write that does not say.
+// A write is not a step in the order, so it gets no column and no connector:
+// every write hangs under the session that makes it (`by`), folded into one pill
+// per PLACE (the place's glyph, a short label, a dot per write in that write's
+// state), dashed until the place exists and ringed when a write there needs the
+// human. The pill is a <details> whose popover names the place, opens it once it
+// exists, and has a row per write saying in a word how it is made, never the
+// session's title, since the pill hangs under it. A write from before
+// session-owned writes has no session and hangs at the top of the first wave. A
+// session's milestone (`on`) is a connector from its trigger like `after`'s,
+// and a line on its node. Under review each row opens its editor (`editing` is
+// the open one) and every session node offers "+ place"; live, a row opens its
+// sub-job. Under review each row also carries an eye that flips whether that
+// write stops for review: a sibling of the row's button, since a button cannot
+// hold another. `reviewWrites` is the job's default for a write that does not say.
 export const dependencyEditorHtml = (s, others, depKey) => others.filter((d) => !isWriteSub(d)).map((d) => `<label><input type="checkbox" data-dep="${esc(depKey)}" value="${esc(d.id)}" ${s.after.includes(d.id) ? 'checked' : ''}>${kindChipHtml(d)}<span>${esc(d.title)}</span></label>`).join('') || '<span>No other sub-jobs</span>';
 // A place pill's parts, shared by the stepper and the board card: the glyph, a
 // short mono label, a dot per write in its state, and ↗ once the place exists.
@@ -57,21 +57,21 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
   const levels = dependencyLevels(plan);
   const byId = new Map(subs.map((s) => [s.id, s]));
   const work = new Set(subs.filter((s) => !isWriteSub(s)).map((s) => s.id));
-  const hangsOn = (w) => { const id = isMakeWrite(w) ? w.by : w.on?.sub; return work.has(id) ? id : null; };
+  const hangsOn = (w) => (work.has(w.by) ? w.by : null);
   const stateOfWrite = (w) => stateOf ? stateOf(w) : 'planned';
   // Whether a place exists, and what it is called, is the whole job's business:
   // a ticket one node's write created is a ticket under every node.
   const places = new Map(placesOf(plan, subs.filter(isWriteSub)).map((p) => [p.key, p]));
-  // Until its milestone arrives a write reads as the milestone; after, as the runner's line.
-  const pending = (w, state) => ['planned', 'waiting'].includes(state) && (isMakeWrite(w) || (!!w.on && (w.on.at === 'dropped' || !milestoneReached(byId.get(w.on.sub), w.on.at))));
+  // Until its session has it in hand a write reads as how it is made; after, as the runner's line.
+  const pending = (w, state) => ['planned', 'waiting'].includes(state);
   const write = (w) => {
     const i = subs.indexOf(w);
     const state = stateOfWrite(w);
-    const dormant = w.on?.at === 'dropped' && ['planned', 'waiting'].includes(state);
+    const dormant = byId.get(w.by)?.on?.at === 'dropped' && ['planned', 'waiting'].includes(state);
     const cls = `job-write tone-${STATES[state].tone} ${dormant ? 'dormant' : ''} ${markOf ? `job-mark-${markOf(w)}` : ''}`;
-    const line = markOf ? MARKS[markOf(w)] : !stateOf || pending(w, state) ? writeWhen(plan, w) : lineOf ? lineOf(w) : STATES[state].label;
+    const line = markOf ? MARKS[markOf(w)] : !stateOf || pending(w, state) ? writeWhen({ reviewWrites }, w) : lineOf ? lineOf(w) : STATES[state].label;
     const reviewed = writeReviewed({ reviewWrites }, w);
-    const flags = `${reviewed && !editable ? `<span class="job-write-review" title="${isMakeWrite(w) ? 'Reviewed once published' : 'Reviewed before writing'}">${ICONS.eye}</span>` : ''}${editable && !w.added ? `<span class="job-proposed" title="Proposed by the planner">${ICONS.sparkle}</span>` : ''}`;
+    const flags = `${reviewed && !editable ? `<span class="job-write-review" title="${isMakeWrite(w) ? 'Reviewed once published' : 'Drafted for your review before it is written'}">${ICONS.eye}</span>` : ''}${editable && !w.added ? `<span class="job-proposed" title="Proposed by the planner">${ICONS.sparkle}</span>` : ''}`;
     const body = `<span class="job-write-state ${stateSolid(state) ? 'on' : ''}">${stateIconHtml(state)}</span><b>${esc(writeAction(w))}${flags}</b><span class="job-write-line">${esc(line)}</span>`;
     const tip = esc([KIND_TITLE.write, w.title, w.why ? `Why: ${w.why}` : ''].filter(Boolean).join('\n'));
     if (editable) {
@@ -89,15 +89,12 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
       const ref = `${owner}|${key}`;
       const states = g.map(stateOfWrite);
       const open = openTickets.has(ref) || (editing != null && g.includes(subs[editing]));
-      return `<details class="${placePillClass(p, states)}" data-ticket="${esc(ref)}" ${open ? 'open' : ''}><summary title="${esc(placeTip(plan, p, g, states))}">${placeBodyHtml(p, states)}</summary><div class="job-place-pop">${placeHeadHtml(p)}${g.map(write).join('')}</div></details>`;
+      return `<details class="${placePillClass(p, states)}" data-ticket="${esc(ref)}" ${open ? 'open' : ''}><summary title="${esc(placeTip({ ...plan, reviewWrites }, p, g, states))}">${placeBodyHtml(p, states)}</summary><div class="job-place-pop">${placeHeadHtml(p)}${g.map(write).join('')}</div></details>`;
     }).join('');
   };
-  const looseWrites = subs.filter((w) => isWriteSub(w) && !hangsOn(w));
-  const ownerOf = new Map(looseWrites.map((w) => [w, hangsOn(subs.find((s) => isWriteSub(s) && hangsOn(s) && placeKey(s) === placeKey(w)) || {})
-    || subs.find((s) => work.has(s.id) && s.storyId && s.storyId === w.storyId)?.id]));
   const hanging = (s) => {
-    const list = [...looseWrites.filter((w) => ownerOf.get(w) === s.id), ...subs.filter((w) => isWriteSub(w) && hangsOn(w) === s.id)];
-    const add = editable ? `<button type="button" class="job-place-add" data-add-write="${esc(s.id)}" title="Add a place this step writes to">${ICONS.plus}<b>place</b></button>` : '';
+    const list = subs.filter((w) => isWriteSub(w) && hangsOn(w) === s.id);
+    const add = editable && isSessionSub(s) ? `<button type="button" class="job-place-add" data-add-write="${esc(s.id)}" title="Add a place this session writes to">${ICONS.plus}<b>place</b></button>` : '';
     return list.length || add ? `<div class="job-places">${pills(list, s.id)}${add}</div>` : '';
   };
   const waves = Math.max(...levels.values()) + 1;
@@ -108,7 +105,8 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     const tip = [KIND_TITLE[kindClass(s)], story(s), isPrSub(s) ? tildify(s.repo) : '', deps, stateOf ? STATES[state].label : ''].filter(Boolean).join('\n');
     const tile = `<span class="job-node-tile ${stateSolid(state) ? 'on' : ''}">${kindChipHtml(s)}<span class="job-node-state">${stateIconHtml(state)}</span></span>`;
     const cls = `job-node tone-${STATES[state].tone} ${kindClass(s)}`;
-    const repo = isPrSub(s) && s.kind !== 'jira' && s.repo ? `<span class="job-node-repo">${esc(tildify(s.repo).split('/').pop())}</span>` : '';
+    const repo = isPrSub(s) && s.kind !== 'jira' && s.repo ? `<span class="job-node-repo">${esc(tildify(s.repo).split('/').pop())}</span>`
+      : triggerLine(plan, s) ? `<span class="job-node-repo job-node-on" title="Starts at this milestone">${esc(triggerLine(plan, s))}</span>` : '';
     if (editable) {
       const others = subs.filter((d) => d.id !== s.id && !isWriteSub(d));
       return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<textarea class="job-node-title" aria-label="${kindLabel(s)} title ${i + 1}" data-title="${i}" maxlength="180" rows="3">${esc(s.title)}</textarea>${repo}
@@ -118,11 +116,11 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     if (!stateOf) return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}</div>`;
     return `<button type="button" class="${cls} ${state === 'done' ? 'done' : ''}" data-node="${esc(s.id)}" data-open-sub="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}<span class="job-status">${esc(lineOf ? lineOf(s) : STATES[state].label)}</span></button>`;
   };
-  const loose = looseWrites.filter((w) => !ownerOf.get(w));
+  const loose = subs.filter((w) => isWriteSub(w) && !hangsOn(w));
   const columns = Array.from({ length: waves }, (_, w) => `<div class="job-graph-col">${w === 0 && loose.length ? `<div class="job-stack job-stack-loose"><div class="job-places">${pills(loose, '')}</div></div>` : ''}${subs.map((s, i) => levels.get(s.id) === w && !isWriteSub(s) ? `<div class="job-stack">${node(s, i)}${hanging(s)}</div>` : '').join('')}</div>`).join('');
-  const edges = subs.flatMap((s) => s.after.filter((id) => levels.has(id)).map((id) => {
-    const deploy = isPrSub(byId.get(id));
-    return `<path class="${deploy ? 'deploy' : 'start'}" data-from="${esc(id)}" data-to="${esc(s.id)}"/>${deploy ? `<g class="job-edge-glyph" data-glyph="${esc(id)}>${esc(s.id)}"><circle r="12"/><g transform="translate(-9.6 -9.6) scale(.8)">${ROCKET_PATH}</g></g>` : ''}`;
+  const edges = subs.flatMap((s) => edgesOf(s).filter((id) => levels.has(id)).map((id) => {
+    const deploy = isPrSub(byId.get(id)) && s.after.includes(id);
+    return `<path class="${deploy ? 'deploy' : s.after.includes(id) ? 'start' : 'on'}" data-from="${esc(id)}" data-to="${esc(s.id)}"/>${deploy ? `<g class="job-edge-glyph" data-glyph="${esc(id)}>${esc(s.id)}"><circle r="12"/><g transform="translate(-9.6 -9.6) scale(.8)">${ROCKET_PATH}</g></g>` : ''}`;
   })).join('');
   return `<div class="job-graph ${editable ? 'editable' : ''}"><div class="job-graph-scroll"><div class="job-graph-canvas" style="--waves:${waves}"><div class="job-graph-columns">${columns}</div>
     <svg class="job-graph-edges" aria-hidden="true">${edges}</svg></div></div></div>`;
@@ -174,7 +172,7 @@ export function jobTileHtml(job) {
   const plan = live ? { ...job.plan, subJobs: subs } : job.plan || { subJobs: [] };
   const strip = placesOf(plan, subs.filter(isWriteSub)).map((p) => {
     const states = p.writes.map((w) => (live ? subState(job, w) : 'planned'));
-    const tip = placeTip(plan, p, p.writes, states);
+    const tip = placeTip({ ...plan, reviewWrites: job.reviewWrites }, p, p.writes, states);
     const href = p.type === 'file' ? null : webUrl(p.url);
     return href ? `<a class="${placePillClass(p, states, 'job-place-chip')}" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(tip)}">${placeBodyHtml(p, states)}</a>`
       : `<span class="${placePillClass(p, states, 'job-place-chip')}" title="${esc(tip)}">${placeBodyHtml(p, states)}</span>`;

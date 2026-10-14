@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jobPrompt, historyLines, HISTORY_MAX_LINES } from './job-prompts.js';
+import { jobPrompt, historyLines, HISTORY_MAX_LINES, draftsDecidedMail } from './job-prompts.js';
 
 // The prompt half of agent-wrangler's job-runtime.test.js (`job-system` branch).
 // It never touched a SessionManager — the prompts are pure functions of the
@@ -193,7 +193,7 @@ test('the planner is told to write the context once and never to describe a depl
   assert.match(text, /kind:"pr"\|"session"\|"human"/);
   assert.match(text, /kind:"plan", plan:\{context, stories:\[\{id,key\?,project\?,title,fields\?:\[\{name,value\}\]\}\]/);
   assert.doesNotMatch(text, /deployment:\{|pendingChecks|value[?:]|business value/);
-  assert.ok(text.split(/\s+/).length < 800, 'the protocol lives in the job-worker skill, not in every prompt');
+  assert.ok(text.split(/\s+/).length < 850, 'the protocol lives in the job-worker skill, not in every prompt');
 });
 
 test('the planner is told stories are optional, and a ticketless sub-job is told to name its branch without a key', () => {
@@ -204,53 +204,80 @@ test('the planner is told stories are optional, and a ticketless sub-job is told
   assert.match(ticketless, /has no Jira ticket, so use the convention's ticketless form/); assert.doesNotMatch(ticketless, /Jira key is|undefined|null/);
 });
 
-test('the planner proposes writes to the places the outcome produces and returns each project\'s workflow, writing nothing itself', () => {
+test('the planner proposes writes to the places the outcome produces, each owned by a session, and returns each project\'s workflow, writing nothing itself', () => {
   const text = jobPrompt({ ...planned, plan: null }, null, { ...run, phase: 'planning' });
-  assert.match(text, /kind:"pr"\|"session"\|"human"\|"write"/); assert.match(text, /place\?:\{type,ref\?,name\?\},action\?,on\?,by\?,review\?,why\?/);
-  assert.match(text, /on:\{sub, at\}/); assert.match(text, /"started", "pr", "merged", "deployed".*"dropped"/);
+  assert.match(text, /kind:"pr"\|"session"\|"human"\|"write"/); assert.match(text, /on\?:\{sub,at\},place\?:\{type,ref\?,name\?\},action\?,by\?,review\?,why\?/);
+  assert.match(text, /made by the session sub-job named in by:"<session id>"/);
+  assert.match(text, /ONE session, three writes, in order/); assert.match(text, /a job of only writes is one or a few sessions/);
+  assert.match(text, /A write due at a milestone gets a small session with on:\{sub, at\}/); assert.match(text, /"started", "pr", "merged", "deployed".*"dropped"/);
   assert.match(text, /workflows:\{PROJECT:\[statuses in order\]\}/); assert.match(text, /jiraSite/);
-  assert.match(text, /write NOTHING/); assert.match(text, /each write with a short `why`/);
+  assert.match(text, /write NOTHING/); assert.match(text, /each with a short `why`/); assert.match(text, /sessions make every write/);
   assert.match(text, /slack \(ref "#channel"\): \{type:"post", text\}/); assert.match(text, /confluence .*\{type:"create", title, text\?\}/);
-  assert.match(text, /\{type:"make", what:"one line"\} with by:"<session id>"/); assert.match(text, /\{<write id>\.url\}/);
-  assert.match(text, /Writes are unreviewed unless review:true, which you set only where risky \(public, hard to undo\): it overrides the job default/);
+  assert.match(text, /\{type:"make", what:"one line"\}/); assert.match(text, /\{<write id>\.url\} of a write made first by the same session or one it is after/);
+  assert.match(text, /Writes are unreviewed unless review:true, which you set only where risky \(public, hard to undo\), overriding the job default; its session drafts it for the human first/);
   assert.match(jobPrompt({ ...planned, plan: null, reviewWrites: true }, null, { ...run, phase: 'planning' }), /Writes are reviewed unless review:false; set review:true only where risky/);
-  assert.match(text, /No place above fits\? place:\{type:"other", name:"Linear", ref\?\}: \{type:"write", text:"one instruction"\} or a make/); assert.match(text, /A step that only posts or announces is a write/);
+  assert.match(text, /No place above fits\? place:\{type:"other", name:"Linear", ref\?\}: \{type:"write", text:"one instruction"\} or a make/); assert.match(text, /A step that only posts or announces is a write \(below\) made by a session/);
   assert.match(text, /recent stories READ-ONLY and return as `fields` \[\{name, value\}\] every field they usually fill/);
   assert.match(text, /Never invent a value; its create write sets them\./);
+  assert.doesNotMatch(text, /These fire on|batch/);
 });
 
-test('a write run is given exactly its batch, comments filled from the trigger, and the read-first rules', () => {
+test('a session is given every write it owns, filled from its trigger, with the read-first rules for those places only', () => {
   const trigger = { id: 'api', kind: 'pr', title: 'Deliver api', stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/7' } };
+  const session = { id: 'notify', kind: 'session', title: 'Tell Jira', brief: 'Move the ticket and file the audit story', after: [], on: { sub: 'api', at: 'pr' }, stage: 'session' };
   const writes = [
-    { id: 'w1', kind: 'write', place: { type: 'jira' }, title: 'AUTH-1 → In Review', storyId: 'story', jiraKey: 'AUTH-1', action: { type: 'transition', to: 'In Review', comment: 'PR: {pr.url} ({pr.title}) {deploy.run}' }, on: { sub: 'api', at: 'pr' }, why: 'Team uses In Review for open PRs' },
-    { id: 'w2', kind: 'write', place: { type: 'jira' }, title: 'Create', storyId: 'new', action: { type: 'create' }, writeApprovedAt: 1 },
-    { id: 'w3', kind: 'write', place: { type: 'jira' }, title: 'Not in this batch', storyId: 'story', jiraKey: 'AUTH-1', action: { type: 'comment', comment: 'later' } },
+    { id: 'w1', kind: 'write', place: { type: 'jira' }, title: 'AUTH-1 → In Review', storyId: 'story', jiraKey: 'AUTH-1', by: 'notify', stage: 'write', state: 'queued', action: { type: 'transition', to: 'In Review', comment: 'PR: {pr.url} ({pr.title}) {deploy.run}' }, why: 'Team uses In Review for open PRs' },
+    { id: 'w2', kind: 'write', place: { type: 'jira' }, title: 'Create', storyId: 'new', by: 'notify', stage: 'write', state: 'approved', action: { type: 'create' }, writeApprovedAt: 1 },
+    { id: 'w3', kind: 'write', place: { type: 'jira' }, title: 'Someone else\'s', storyId: 'story', jiraKey: 'AUTH-1', by: 'other', stage: 'write', state: 'queued', action: { type: 'comment', comment: 'later' } },
+    { id: 'w4', kind: 'write', place: { type: 'jira' }, title: 'Already made', storyId: 'story', jiraKey: 'AUTH-1', by: 'notify', stage: 'done', action: { type: 'comment', comment: 'made' } },
   ];
   const j = { ...planned, plan: { ...planned.plan, stories: [...planned.plan.stories, { id: 'new', project: 'SEC', title: 'Audit sign-ins', fields: [{ name: 'Issue Type', value: 'Story' }, { name: 'Components', value: 'Auth' }] }], workflows: { AUTH: ['To Do', 'In Review', 'Done'] } },
-    subJobs: [trigger, ...writes] };
-  const text = jobPrompt(j, null, { ...run, phase: 'write', writes: ['w1', 'w2'] });
-  assert.match(text, /READ THE PLACE FIRST/); assert.doesNotMatch(text, /Slack post:|Confluence create:/, 'only the rules for the places in this batch'); assert.match(text, /Never move a ticket backwards unless the write says approved:true/);
+    subJobs: [trigger, session, ...writes] };
+  const text = jobPrompt(j, session, { ...run, phase: 'session' });
+  assert.match(text, /READ THE PLACE FIRST/); assert.doesNotMatch(text, /Slack post:|Confluence create:/, 'only the rules for the places it writes to'); assert.match(text, /Never move a ticket backwards unless the write says approved:true/);
   assert.match(text, /"AUTH":\["To Do","In Review","Done"\]/);
   assert.match(text, /"comment":"PR: https:\/\/github.com\/org\/repo\/pull\/7 \(Deliver api\) \(not available\)"/);
   assert.match(text, /"story":"Audit sign-ins","project":"SEC","fields":\[\{"name":"Issue Type","value":"Story"\},\{"name":"Components","value":"Auth"\}\]/);
   assert.match(text, /setting every one of its `fields`/); assert.match(text, /A field Jira will not take is a failed write/); assert.match(text, /"approved":true/);
-  assert.match(text, /"because":"Deliver api reached pr"/); assert.match(text, /"why":"Team uses In Review/);
-  assert.doesNotMatch(text, /w3|later/, 'only the writes this run was given');
-  assert.match(text, /kind:"write", writes:\[\{id, outcome:"written"\|"already"\|"failed", key\?, from\?, url\?/);
+  assert.match(text, /"why":"Team uses In Review/);
+  assert.doesNotMatch(text, /w3|"later"|w4|"made"/, 'only its own writes still to make');
+  assert.match(text, /kind:"completed", checks:\["what you did and how you know"\], writes:\[\{id, outcome:"written"\|"already"\|"failed", url\?, key\?, from\?, title\?, error\?\}\] for every write above/);
+  assert.doesNotMatch(text, /kind:"drafts"/, 'nothing reviewed, nothing to draft');
 });
 
-test('a Slack post links the page a session made through {<write id>.url}, and is told never to post twice', () => {
+test('a session links a page it makes first by its own hand, a page another session made by its URL, and is told never to post twice', () => {
   const report = { id: 'report', kind: 'session', title: 'Write the incident review', stage: 'done' };
   const page = { id: 'page', kind: 'write', place: { type: 'confluence', ref: 'WEB › Incidents' }, title: 'Incident page', by: 'report', action: { type: 'make', what: 'Incident review page' },
     stage: 'done', result: { outcome: 'written', url: 'https://x.atlassian.net/wiki/spaces/WEB/pages/1' } };
-  const post = { id: 'post', kind: 'write', place: { type: 'slack', ref: '#web-platform' }, title: 'Announce', on: { sub: 'report', at: 'deployed' }, action: { type: 'post', text: 'Review: {page.url} · {gone.url}' }, review: true, writeApprovedAt: 1 };
-  const text = jobPrompt({ ...planned, subJobs: [report, page, post] }, null, { ...run, phase: 'write', writes: ['post'] });
-  assert.match(text, /"place":"slack","where":"#web-platform","write":"post","text":"Review: https:\/\/x.atlassian.net\/wiki\/spaces\/WEB\/pages\/1 · \(not available\)"/);
+  const notify = { id: 'notify', kind: 'session', title: 'Announce', brief: 'Announce it', after: ['report'], stage: 'session' };
+  const summary = { id: 'summary', kind: 'write', place: { type: 'confluence', ref: 'WEB › Notes' }, title: 'Summary', by: 'notify', stage: 'write', state: 'queued', action: { type: 'create', title: 'Summary', text: 'See {page.url}' } };
+  const post = { id: 'post', kind: 'write', place: { type: 'slack', ref: '#web-platform' }, title: 'Announce', by: 'notify', stage: 'write', state: 'queued', action: { type: 'post', text: 'Review: {page.url} · summary {summary.url}' } };
+  const text = jobPrompt({ ...planned, subJobs: [report, page, notify, summary, post] }, notify, { ...run, phase: 'session' });
+  assert.match(text, /"text":"Review: https:\/\/x.atlassian.net\/wiki\/spaces\/WEB\/pages\/1 · summary \{summary\.url\} \(the URL of write summary, which you make first: put it here yourself\)"/);
+  assert.match(text, /Order them so a write that links another of yours \(\{<id>\.url\}\) comes after it/);
   assert.match(text, /Slack post: read the recent messages in channel `where`/); assert.match(text, /report "already" with its permalink/);
-  assert.doesNotMatch(text, /Jira create:|Workflow statuses/, 'no Jira rules for a batch without a Jira write');
+  assert.match(text, /Confluence create: look under `where`/);
+  assert.doesNotMatch(text, /Jira create:|Workflow statuses/, 'no Jira rules for a session without a Jira write');
 });
 
-test('a session is told the outputs it must make and to account for every one in its receipt', () => {
+test('a session drafts its reviewed writes and waits for mail; the mail carries the final text and which were skipped', () => {
+  const session = { id: 'notify', kind: 'session', title: 'Announce', brief: 'Announce it', after: [], stage: 'session' };
+  const post = { id: 'post', kind: 'write', place: { type: 'slack', ref: '#web' }, title: 'Announce', by: 'notify', stage: 'write', state: 'queued', review: true, action: { type: 'post', text: 'Shipped' } };
+  const dm = { id: 'dm', kind: 'write', place: { type: 'slack', ref: '@sam' }, title: 'DM', by: 'notify', stage: 'write', state: 'queued', action: { type: 'post', text: 'FYI' } };
+  const j = { ...planned, subJobs: [session, post, dm] };
+  const text = jobPrompt(j, session, { ...run, phase: 'session' });
+  assert.match(text, /Review is on for post: do NOT make it yet/);
+  assert.match(text, /job_report \{runId:"run1", kind:"drafts", drafts:\[\{id, text\?, title\?, to\?, comment\?, where\?, fields\?\}\]\}/);
+  assert.match(text, /mail will tell you which to make/);
+  const decided = { ...j, subJobs: [session, { ...post, action: { type: 'post', text: 'Shipped today' }, stage: 'write', state: 'approved', writeApprovedAt: 2 }, dm,
+    { id: 'skip', kind: 'write', place: { type: 'slack', ref: '#x' }, by: 'notify', stage: 'cleanup', result: { outcome: 'skipped' }, action: { type: 'post', text: 'no' } }] };
+  const mail = draftsDecidedMail(decided, { id: 'run1', subJobId: 'notify', drafts: ['post', 'skip'] });
+  assert.match(mail, /Make these now, exactly as given here/); assert.match(mail, /"text":"Shipped today","approved":true/);
+  assert.match(mail, /Do not make: skip \(skipped or dropped\)/);
+  assert.match(mail, /job_report \{runId:"run1", kind:"completed".*for post, dm\}/);
+});
+
+test('a session is told the outputs it must make and to account for every write in its receipt', () => {
   const session = { id: 'report', kind: 'session', title: 'Measure p95', brief: 'Measure checkout p95', after: [], stage: 'session' };
   const make = (id, type, what, extra = {}) => ({ id, kind: 'write', place: { type }, title: what, by: 'report', action: { type: 'make', what }, stage: 'write', state: 'queued', ...extra });
   const subs = [session, make('chart', 'artifact', 'p95 chart by endpoint'), make('k6', 'file', 'k6 HTML report'), make('old', 'url', 'Done already', { stage: 'done' })];
@@ -258,6 +285,7 @@ test('a session is told the outputs it must make and to account for every one in
   assert.match(text, /- chart: p95 chart by endpoint — a Claude artifact; publish it and give its claude.ai link/);
   assert.match(text, /- k6: k6 HTML report — a local file; save it outside this scratch workspace and give its absolute path/);
   assert.doesNotMatch(text, /Done already/, 'an output already made is not asked for again');
-  assert.match(text, /outputs:\[\{id, url, title\?\} or \{id, missing:"one line why"\} for every output above\]/);
-  assert.doesNotMatch(jobPrompt({ ...planned, subJobs: [session] }, session, { ...run, phase: 'session' }), /outputs/, 'a session with nothing to make is asked for none');
+  assert.doesNotMatch(text, /READ THE PLACE FIRST/, 'nothing to read first when it only makes outputs');
+  assert.match(text, /writes:\[\{id, outcome:"written"\|"already"\|"failed", url\?.*\] for every write above/);
+  assert.doesNotMatch(jobPrompt({ ...planned, subJobs: [session] }, session, { ...run, phase: 'session' }), /writes:\[/, 'a session with nothing to write is asked for none');
 });

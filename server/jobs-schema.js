@@ -19,10 +19,11 @@ export const briefSchema = z.string().trim().min(1).max(500);
 // ever launched for it — it waits on the board until the human marks it done.
 // A write is ONE write to one place outside the board (a Jira ticket, a Slack
 // channel, a Confluence page, something a session makes: an artifact, a local
-// file, a web page; or any other place an agent can reach, named). A milestone write fires when another sub-job
-// reaches a milestone (`on`) and is made by a short agent session that batches
-// every write falling due on the same tick; a `make` write is an output its
-// session (`by`) must produce and report (job-writes.js).
+// file, a web page; or any other place an agent can reach, named), and every
+// write is made by the session sub-job it names (`by`), whose `completed`
+// receipt must account for it (job-writes.js). So ordering is the sessions':
+// a write tied to a milestone is a small session with `on` owning it, and a
+// write linking another session's write waits for that session (`after`/`on`).
 // None of the non-PR kinds has a repo. Every `after` gates the dependent's
 // START: a PR's once it has deployed, an agentless one's once done.
 //
@@ -44,11 +45,11 @@ export const briefSchema = z.string().trim().min(1).max(500);
 // one Jira write that creates it.
 export const MILESTONES = ['started', 'pr', 'merged', 'deployed', 'dropped'];
 export const PLACE_TYPES = ['jira', 'slack', 'confluence', 'artifact', 'file', 'url', 'other'];
-// What each place can be asked for. `make` is never the batched writer's: the
-// session the write hangs under produces it and reports where it is. `other` is
-// any place no preset covers (a Linear issue, a Notion page, a Google Sheet),
-// named by the planner: its `write` is one free-text instruction the writer
-// carries out with whatever MCP or CLI reaches that place.
+// What each place can be asked for. `make` is an output the session decides the
+// content of and reports where it is; every other action is given in full by
+// the plan. `other` is any place no preset covers (a Linear issue, a Notion
+// page, a Google Sheet), named by the planner: its `write` is one free-text
+// instruction the session carries out with whatever MCP or CLI reaches it.
 export const PLACE_ACTIONS = { jira: ['create', 'transition', 'comment'], slack: ['post', 'make'], confluence: ['create', 'comment', 'make'],
   artifact: ['make'], file: ['make'], url: ['make'], other: ['write', 'make'] };
 export const WRITE_ACTIONS = [...new Set(Object.values(PLACE_ACTIONS).flat())];
@@ -70,11 +71,13 @@ export const subJobSchema = z.object({
   id, title: line, kind: z.enum(['pr', 'session', 'human', 'write']).default('pr'), repo: repoPath.optional(),
   storyId: id.optional(), jiraKey: jira.optional(), after: z.array(id).max(30).default([]),
   brief: briefSchema.optional(), check: line.optional(),
-  // A write's own fields. `review` is tri-state (`writeReviewed`): true or
-  // false is this write's own say, absent is the job's `reviewWrites`. On
-  // stops in the review stage until the human says Write (a made output: after
-  // it is published, until Accept); off writes and shows a receipt.
-  place: placeSchema.optional(), action: writeActionSchema.optional(), on: triggerSchema.optional(), by: id.optional(),
+  // `on` is a session's: it starts once that sub-job reaches the milestone (and
+  // its `after`s are satisfied). The rest is a write's own. `review` is
+  // tri-state (`writeReviewed`): true or false is this write's own say, absent
+  // is the job's `reviewWrites`. On, its session drafts it and waits for the
+  // human's Write / Skip before making it (a made output: reviewed after it is
+  // published, until Accept); off, the session makes it and reports it.
+  on: triggerSchema.optional(), place: placeSchema.optional(), action: writeActionSchema.optional(), by: id.optional(),
   review: z.boolean().optional(), why: line.optional(),
 });
 export const isSessionSub = (sub) => sub?.kind === 'session';
@@ -93,8 +96,9 @@ export const isPrSub = (sub) => !isSessionSub(sub) && !isHumanSub(sub) && !isWri
 // The write that creates a story is what gives it a key, so it is the one
 // sub-job naming a keyless story that never waits for one.
 export const awaitsTicket = (sub) => !!sub?.storyId && !sub?.jiraKey && !isStoryCreate(sub);
-// {pr.url}, {pr.title} and {deploy.run} come from the trigger; {<write id>.url}
-// is another write's result (a page a session made, a ticket a create minted).
+// {pr.url}, {pr.title} and {deploy.run} come from the owning session's trigger;
+// {<write id>.url} is another write's result (a page a session made, a ticket a
+// create minted).
 export const WRITE_REF = /\{([a-zA-Z0-9_-]{1,64})\.url\}/g;
 export const writeRefs = (sub) => [...`${sub.action?.comment || ''} ${sub.action?.text || ''}`.matchAll(WRITE_REF)].map(([, ref]) => ref).filter((ref) => ref !== 'pr');
 // With code review on, a PR sub-job's implementation session leaves the working
@@ -123,18 +127,26 @@ export const storySchema = z.object({ id, key: jira.optional(), project: jiraPro
 export const workflowsSchema = z.record(jiraProject, z.array(line).max(40)).default({});
 export const storyProject = (story) => story?.key ? story.key.split('-')[0] : story?.project || null;
 const freeId = (taken, base) => { if (!taken.has(base)) return base; let n = 2; while (taken.has(`${base}-${n}`)) n++; return `${base}-${n}`; };
+export const STORY_SESSION = { title: 'Create Jira stories', brief: 'Create this job\'s new Jira stories, one per create write you are given, and nothing else.' };
 // The old ticketing stage folded into the plan: every keyless story is created
-// by exactly one write, due on approval (and reviewed then, if it is reviewed). Pure; returns the same plan when
-// nothing was missing.
-export function withStoryCreates(plan) {
+// by exactly one write, owned like every write by a session, which starts on
+// approval. The session that already creates stories takes the rest
+// (`canReuse` says whether it still can, on a running job); else a new one.
+// Pure; returns the same plan when nothing was missing.
+export function withStoryCreates(plan, canReuse = () => true) {
   const missing = plan.stories.filter((t) => !t.key && !plan.subJobs.some((s) => isStoryCreate(s) && s.storyId === t.id));
   if (!missing.length) return plan;
   const taken = new Set(plan.subJobs.map((s) => s.id));
+  const sessions = new Map(plan.subJobs.filter(isSessionSub).map((s) => [s.id, s]));
+  const reuse = [...plan.subJobs.filter(isStoryCreate).map((s) => s.by), 'stories'].find((id) => sessions.has(id) && canReuse(id));
+  const owner = reuse || freeId(taken, 'stories');
+  taken.add(owner);
+  const added = reuse ? [] : [{ id: owner, kind: 'session', title: STORY_SESSION.title, after: [], brief: STORY_SESSION.brief }];
   const creates = missing.map((t) => {
     const sid = freeId(taken, `create-${t.id}`.slice(0, 58)); taken.add(sid);
-    return { id: sid, title: `Create story: ${t.title}`.slice(0, 180).trim(), kind: 'write', place: { type: 'jira' }, storyId: t.id, after: [], action: { type: 'create' } };
+    return { id: sid, title: `Create story: ${t.title}`.slice(0, 180).trim(), kind: 'write', place: { type: 'jira' }, storyId: t.id, after: [], action: { type: 'create' }, by: owner };
   });
-  return { ...plan, subJobs: [...creates, ...plan.subJobs] };
+  return { ...plan, subJobs: [...added, ...creates, ...plan.subJobs] };
 }
 export const planSchema = z.object({
   // Written once for the whole job, the way a human writes a dispatch: every
@@ -158,19 +170,25 @@ export const planSchema = z.object({
     if (isHumanSub(s) && s.check) issue(`${s.id}: a human sub-job has nothing to check after it lands`);
     if (isPrSub(s) && !s.repo) issue(`${s.id}: a PR sub-job needs repo`);
     if (!isWriteSub(s) && !s.brief) issue(`${s.id}: brief is required`);
-    if (!isWriteSub(s) && (s.action || s.on || s.by || s.place)) issue(`${s.id}: only a write has a place, an action or a trigger`);
-    for (const dep of s.after) if (isWriteSub(nodes.get(dep))) issue(`${s.id}: nothing waits on a write (${dep})`);
+    if (!isWriteSub(s) && (s.action || s.by || s.place)) issue(`${s.id}: only a write has a place, an action or a session that makes it (by)`);
+    if (s.on && isWriteSub(s)) issue(`${s.id}: a write is made by its session (by); put the milestone (on) on that session`);
+    else if (s.on && !isSessionSub(s)) issue(`${s.id}: only a session sub-job waits for a milestone (on)`);
+    else if (s.on) triggerRules(s, nodes, issue);
+    for (const dep of s.after) if (isWriteSub(nodes.get(dep))) issue(`${s.id}: nothing waits on a write (${dep}); wait on the session that makes it`);
     if (isWriteSub(s)) writeRules(s, plan, nodes, issue);
   }
+  // `on` orders work exactly as `after` does, so both are edges here.
   const visiting = new Set(), visited = new Set();
+  let cyclic = false;
   function visit(s) {
-    if (visiting.has(s.id)) { issue('Dependency chains must not contain cycles'); return; }
+    if (visiting.has(s.id)) { cyclic = true; issue('Dependency chains must not contain cycles'); return; }
     if (visited.has(s.id)) return;
     visiting.add(s.id);
     for (const dep of s.after) {
       if (!nodes.has(dep)) issue(`Unknown dependency: ${dep}`);
       else visit(nodes.get(dep));
     }
+    if (s.on && nodes.has(s.on.sub)) visit(nodes.get(s.on.sub));
     visiting.delete(s.id); visited.add(s.id);
   }
   for (const t of plan.stories) {
@@ -182,17 +200,76 @@ export const planSchema = z.object({
     if (s.storyId && !stories.has(s.storyId)) issue(`Unknown story: ${s.storyId}`);
     visit(s);
   }
+  if (!cyclic) refRules(plan, nodes, issue);
 });
+// A milestone a trigger can never reach is refused here rather than waited on forever.
+function triggerRules(s, nodes, issue) {
+  const t = nodes.get(s.on.sub);
+  if (!t) issue(`${s.id}: unknown trigger ${s.on.sub}`);
+  else if (t === s || isWriteSub(t)) issue(`${s.id}: a session waits on a PR, session or human sub-job's milestone, not ${t === s ? 'its own' : 'a write\'s'}`);
+  else if (!isPrSub(t) && ['pr', 'merged'].includes(s.on.at)) issue(`${s.id}: ${s.on.sub} opens no PR, so it is never ${s.on.at === 'pr' ? 'opened' : 'merged'}`);
+}
+// What has certainly finished before a sub-job starts: everything it is after
+// (and everything they were after), and a trigger it waits to be done. A
+// trigger it waits to start, open a PR or merge has only had ITS prerequisites
+// finish; one it waits to be dropped guarantees nothing.
+function finishedBefore(nodes) {
+  const memo = new Map();
+  const of = (s) => {
+    if (memo.has(s.id)) return memo.get(s.id);
+    const done = new Set();
+    memo.set(s.id, done);
+    const take = (id, itself) => {
+      const d = nodes.get(id);
+      if (!d) return;
+      if (itself) done.add(id);
+      for (const x of of(d)) done.add(x);
+    };
+    for (const id of s.after) take(id, true);
+    if (s.on && s.on.at !== 'dropped') take(s.on.sub, s.on.at === 'deployed');
+    return done;
+  };
+  return of;
+}
+// {<write id>.url} must exist by the time the linking write is made: made
+// earlier by the same session (which orders its own writes, so two that link
+// each other can never both go first), or by a session the linking one waits
+// to finish. Run only on an acyclic plan, since the walk follows the edges.
+function refRules(plan, nodes, issue) {
+  const finished = finishedBefore(nodes);
+  const links = new Map();
+  for (const s of plan.subJobs.filter(isWriteSub)) {
+    for (const ref of writeRefs(s)) {
+      const r = nodes.get(ref);
+      if (!isWriteSub(r)) { issue(`${s.id}: {${ref}.url} names no write in this plan`); continue; }
+      if (ref === s.id) { issue(`${s.id}: a write cannot link to itself`); continue; }
+      if (!s.by || !r.by || !nodes.has(s.by)) continue;
+      if (r.by === s.by) links.set(s.id, [...(links.get(s.id) || []), ref]);
+      else if (!finished(nodes.get(s.by)).has(r.by)) issue(`${s.id}: {${ref}.url} is made by ${r.by}, so ${s.by} must wait for ${r.by} to finish (after) before it can link it`);
+    }
+  }
+  const state = new Map();
+  const cycle = (id) => {
+    if (state.get(id) === 1) return true;
+    if (state.get(id) === 2) return false;
+    state.set(id, 1);
+    const hit = (links.get(id) || []).some(cycle);
+    state.set(id, 2);
+    return hit;
+  };
+  for (const id of links.keys()) if (cycle(id)) { issue(`${id}: writes in one session link each other in a circle, so none of them can be made first`); break; }
+}
 // A Jira write names its ticket through a story, so the key it writes to is the
-// one the human approved (or the one its own create write mints). A milestone a
-// trigger can never reach is refused here rather than waited on forever, and a
-// made output names the session that makes it.
+// one the human approved (or the one its own create write mints). Every write
+// names the session that makes it.
 function writeRules(s, plan, nodes, issue) {
   const a = s.action;
   const type = placeOf(s);
   if (s.repo) issue(`${s.id}: a write has no repo`);
   if (s.check) issue(`${s.id}: a write has nothing to check after it lands`);
-  if (s.after.length) issue(`${s.id}: a write fires on a milestone (on) or is made by a session (by), not after`);
+  if (s.after.length) issue(`${s.id}: a write is made by its session (by), not after anything; order the session instead`);
+  if (!s.by) issue(`${s.id}: a write names the session sub-job that makes it (by)`);
+  else if (!isSessionSub(nodes.get(s.by))) issue(`${s.id}: ${s.by} is not a session sub-job, so it cannot make it`);
   if (!a) { issue(`${s.id}: a write needs an action`); return; }
   if (!PLACE_ACTIONS[type].includes(a.type)) issue(`${s.id}: a ${type} write can ${PLACE_ACTIONS[type].join(', ')}, not ${a.type}`);
   if (type === 'jira') jiraRules(s, plan, issue);
@@ -212,29 +289,14 @@ function writeRules(s, plan, nodes, issue) {
   if (a.type === 'make') {
     if (!a.what) issue(`${s.id}: say in one line what the session makes (action.what)`);
     if (a.to || a.comment || a.text || a.title) issue(`${s.id}: the session decides what a made output says; give only what it is`);
-    if (s.on) issue(`${s.id}: a made output comes with its session (by), not on a milestone`);
-    if (!s.by) issue(`${s.id}: a made output names the session that makes it (by)`);
-    else if (!isSessionSub(nodes.get(s.by))) issue(`${s.id}: ${s.by} is not a session sub-job, so it cannot make it`);
-  } else {
-    if (a.what) issue(`${s.id}: only a made output has a what`);
-    if (s.by) issue(`${s.id}: only a made output names a session (by); a write fires on a milestone (on)`);
-  }
-  for (const ref of writeRefs(s)) {
-    if (!isWriteSub(nodes.get(ref))) issue(`${s.id}: {${ref}.url} names no write in this plan`);
-    else if (ref === s.id) issue(`${s.id}: a write cannot link to itself`);
-  }
-  if (!s.on) return;
-  const trigger = nodes.get(s.on.sub);
-  if (!trigger) issue(`${s.id}: unknown trigger ${s.on.sub}`);
-  else if (trigger === s || isWriteSub(trigger)) issue(`${s.id}: a write fires on a PR, session or human sub-job`);
-  else if (!isPrSub(trigger) && ['pr', 'merged'].includes(s.on.at)) issue(`${s.id}: ${s.on.sub} opens no PR, so it is never ${s.on.at === 'pr' ? 'opened' : 'merged'}`);
+  } else if (a.what) issue(`${s.id}: only a made output has a what`);
 }
 function jiraRules(s, plan, issue) {
   const a = s.action;
   if (s.place?.ref) issue(`${s.id}: a Jira write names its ticket through its story, not a ref`);
   if (!s.storyId) issue(`${s.id}: a Jira write names the story it writes to`);
   if (a.text || a.title) issue(`${s.id}: a Jira write moves the ticket (to) or comments on it (comment)`);
-  if (a.type === 'create' && (a.to || a.comment || s.on)) issue(`${s.id}: creating a story is the whole write, made on approval`);
+  if (a.type === 'create' && (a.to || a.comment)) issue(`${s.id}: creating a story is the whole write`);
   if (a.type === 'create' && plan.subJobs.some((o) => o !== s && isStoryCreate(o) && o.storyId === s.storyId)) issue(`${s.id}: a story is created once`);
   if (a.type === 'transition' && !a.to) issue(`${s.id}: a transition needs a status to move to`);
   if (a.type === 'comment' && (!a.comment || a.to)) issue(`${s.id}: a comment write posts a comment and moves nothing`);
@@ -284,24 +346,29 @@ export const MOVE_NAMES = ['fix-here', 'split-out', 'new-ticket', 'reorder', 'dr
 const receipt = (shape) => z.object(shape).strict();
 // `already`: the ticket was at or past the target, so nothing moved (a comment
 // is still posted), or the post or page was already there. `failed` carries the
-// place's own error, verbatim. `url` is the permalink to what was written.
+// place's own error, verbatim. `url` is the permalink to what was written, or
+// where a made output is (a file's absolute path); `key` is a created story's.
 export const WRITE_OUTCOMES = ['written', 'already', 'failed'];
 export const writeResultSchema = z.object({ id, outcome: z.enum(WRITE_OUTCOMES), key: jira.optional(), from: line.optional(),
-  url: z.string().trim().regex(/^https:\/\/\S+$/, 'Give the https permalink').max(2000).optional(),
+  url: placeLinkSchema.optional(), title: line.optional(),
   checks: checksSchema.optional(), error: z.string().trim().min(1).max(500).optional() }).strict();
-// What a session made, one per make write it was given: where it is, or why not.
+// What `completed` reported per made output before every write lived on a
+// session; still accepted from a session launched with that prompt.
 export const outputSchema = z.union([z.object({ id, url: placeLinkSchema, title: line.optional() }).strict(), z.object({ id, missing: line }).strict()]);
+// A reviewed write as its session would make it, held for the human: the
+// fields its action carries (a create's story summary and fields), `where`
+// being its channel or page.
+export const draftSchema = z.object({ id, text: commentSchema.optional(), title: line.optional(), to: line.optional(), comment: commentSchema.optional(),
+  where: z.string().trim().min(1).max(500).refine((s) => !/[\r\n]/.test(s), 'Use one line').optional(), fields: z.array(storyFieldSchema).max(25).optional() }).strict();
 export const reportSchema = z.discriminatedUnion('kind', [
   receipt({ kind: z.literal('plan'), plan: planSchema }),
-  // One result per write the run was given (job-writes.js). `jira` with
-  // `stories` is the shape the old ticketing step reported, still accepted from
-  // a run that was live when its job was migrated onto create writes.
-  receipt({ kind: z.literal('write'), writes: z.array(writeResultSchema).min(1).max(50) }),
-  receipt({ kind: z.literal('jira'), stories: z.array(z.object({ id, key: jira })).min(1).max(30) }),
   receipt({ kind: z.literal('ready'), checks: checksSchema }),
   receipt({ kind: z.literal('published'), url: prUrlSchema }),
   receipt({ kind: z.literal('repaired'), changes: checksSchema, checks: checksSchema }),
   receipt({ kind: z.literal('deployed'), checks: checksSchema }),
-  receipt({ kind: z.literal('completed'), checks: checksSchema, outputs: z.array(outputSchema).max(30).optional() }),
+  // A session answers for every write it owns, by id (job-writes.js applyWrites).
+  receipt({ kind: z.literal('completed'), checks: checksSchema, writes: z.array(writeResultSchema).max(50).optional(), outputs: z.array(outputSchema).max(30).optional() }),
+  // Mid-run, not the end of it: the session waits for mail with the human's decisions.
+  receipt({ kind: z.literal('drafts'), drafts: z.array(draftSchema).min(1).max(50) }),
   receipt({ kind: z.literal('blocked'), summary: line, move: z.enum(MOVE_NAMES).optional() }),
 ]);

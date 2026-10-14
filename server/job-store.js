@@ -2,12 +2,12 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR } from './data-dir.js';
 import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
-import { jobInputSchema, settingsSchema, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, isMakeWrite, withStoryCreates, reviewCode } from './jobs-schema.js';
+import { jobInputSchema, settingsSchema, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode } from './jobs-schema.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { applyMove, dropSub, MOVE_ACTIONS } from './job-moves.js';
 import { requestReplan, discardReplan, proposeReplan, approveReplan } from './job-replan.js';
-import { applyWriteReceipt, applyOutputs, approveWrite, skipWrite, editWrite, failWrites } from './job-writes.js';
+import { applyWrites, applyDrafts, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
 
 const activeForSub = (job, sub) => job.runs.some((r) => !r.stopped && r.subJobId === sub.id);
 const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
@@ -106,7 +106,7 @@ function setReview(j, { field, you, release, plan, revision }, now) {
 }
 const HELD_BY_REPLAN = new Set(['approve-code', 'approve-merge', 'approve-session', 'revise-session', 'start-human', 'finish-human', 'approve-write', 'skip-write', 'edit-write']);
 export const MERGE_IS_DELIVERY = 'Merged; nothing runs on push for these paths';
-export const CURRENT_VERSION = 4;
+export const CURRENT_VERSION = 5;
 
 const drop = (obj, ...keys) => { for (const k of keys) delete obj[k]; };
 // Version 1 named the plan's edges `dependsOn` and its text `instructions`, and
@@ -134,9 +134,9 @@ function migratePlan(plan) {
 }
 // Version 2 created keyless stories in a job-level `jira` stage (approved, no
 // sub-jobs yet) and again whenever New ticket added one to a running job. Both
-// become create writes: the waiting job is activated with them, a running one
-// gains them beside the PR waiting for the key. A ticketing run still live
-// keeps its slot; its `stories` receipt keys the same writes (job-writes.js).
+// become create writes under a stories session: the waiting job is activated
+// with them, a running one gains them beside the PR waiting for the key. A
+// ticketing run still live is stopped quietly, like the batched writer's.
 function migrateTicketing(job) {
   if (!job.plan || job.cancelledAt || !['jira', 'active'].includes(job.stage)) return;
   const known = new Set(job.plan.subJobs.map((s) => s.id));
@@ -155,9 +155,23 @@ function migratePlaces(job) {
   for (const s of [...(job.subJobs || []), ...(job.plan?.subJobs || []), ...(job.previousPlan?.subJobs || [])]) migrateWrite(s);
   for (const r of job.runs || []) if (r.phase === 'jira') r.phase = 'write';
 }
+// Version 4 fired a write on a milestone (`on`) through one batched writer
+// session (a `write`-phase run); every write is now its session's (`by`). A
+// running job's milestone write is failed in place, never guessed onto a
+// session or rewritten: the human drops it or makes it by hand. Its plan entry
+// is left as it was (job-moves.js validatePlan looks past it), and a plan still
+// awaiting approval is re-judged on approval. A live writer run is stopped
+// quietly by the runner (job-runner.js settle).
+function migrateSessionWrites(job) {
+  if (job.stage !== 'active' || job.cancelledAt) return;
+  for (const s of job.subJobs || []) {
+    if (!isLegacyWrite(s) || s.cancelledAt || ['cleanup', 'done'].includes(s.stage)) continue;
+    s.stage = 'write'; s.state = 'failed'; s.error = LEGACY_WRITE; s.blocked = null;
+  }
+}
 export function migrateJobs(raw) {
   if (!raw) return null;
-  if (![1, 2, 3, CURRENT_VERSION].includes(raw.version) || !Array.isArray(raw.jobs)) throw new Error('Unsupported jobs.json; refusing to discard jobs');
+  if (![1, 2, 3, 4, CURRENT_VERSION].includes(raw.version) || !Array.isArray(raw.jobs)) throw new Error('Unsupported jobs.json; refusing to discard jobs');
   const data = structuredClone(raw);
   data.version = CURRENT_VERSION;
   if (data.settings) drop(data.settings, 'maxRunMinutes');
@@ -169,6 +183,7 @@ export function migrateJobs(raw) {
     for (const s of job.subJobs || []) migrateSub(s);
     if (raw.version < 3) migrateTicketing(job);
     if (raw.version < 4) migratePlaces(job);
+    if (raw.version < 5) migrateSessionWrites(job);
   }
   return data;
 }
@@ -218,8 +233,9 @@ export class JobStore {
     });
   }
   // Approval authorises every write in the plan and the implementation. A
-  // keyless story is created by its own write, due at once; a sub-job naming
-  // it waits for the key, since its card eyebrow and branch name are that key.
+  // keyless story is created by its own write, which the stories session makes
+  // at once; a sub-job naming it waits for the key, since its card eyebrow and
+  // branch name are that key.
   approvePlan(id, revision, editedPlan) {
     return this.update(id, (j) => {
       if (j.revision !== revision) throw new Error('The plan changed. Review the latest version before approving.');
@@ -282,9 +298,9 @@ export class JobStore {
         const target = s || j;
         if (!target.error) throw new Error('Nothing is blocked');
         if (j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null))) throw new Error('The previous session is still stopping');
-        // A made output only ever comes from its session's receipt: run that
-        // again, or mark this done with where it is.
-        if (isMakeWrite(s)) throw new Error('Run its session again, or mark it done with where it is');
+        // A write is only ever made by its session: retrying one runs that
+        // session again for it (job-writes.js).
+        if (isWriteSub(s)) { reopenWrite(j, s); record(j, s, 'retry', note, `Retried ${quoted(s.title)}`); return; }
         target.error = null; target.blocked = null;
         // Under review the only run that can have failed is publish, and the tree
         // the human approved is unchanged: keep the approval so publish runs
@@ -355,8 +371,6 @@ export class JobStore {
       throw new Error('Unknown job action');
     });
   }
-  // `extra.writes` is a write run's batch: claimed with the slot, so those
-  // writes read as Writing from the same persisted change.
   claim(jobId, subJobId, phase, extra = {}) {
     const job = this.data.jobs.find((j) => j.id === jobId);
     if (!job || job.paused || job.cancelledAt || this.data.settings.paused
@@ -368,7 +382,6 @@ export class JobStore {
       if (!j || j.paused || j.cancelledAt || d.settings.paused || active.length >= d.settings.concurrency) return null;
       if (j.runs.some((r) => runnable(r) && r.subJobId === subJobId)) return null;
       const run = { id: uid('run'), subJobId, phase, model: launchModel(j), effort: launchEffort(j), startedAt: Date.now(), sessionId: null, stopped: false, report: null, ...extra };
-      for (const s of j.subJobs) if (run.writes?.includes(s.id)) s.state = 'writing';
       j.runs.push(run); j.revision++;
       return run;
     });
@@ -413,10 +426,25 @@ export class JobStore {
       // Implementation lands EITHER receipt: which one its prompt asked for
       // depends on `reviewCode`, and a session launched before that flag flipped
       // (or one that pushed anyway) must still be able to land what it did — a
-      // PR that exists is a PR, whatever the board expected.
-      const expected = { planning: ['plan'], write: ['write', 'jira'], implementation: ['ready', 'published'], publish: ['published'], repair: ['repaired'], verify: ['deployed'], session: ['completed'] }[r.phase];
+      // PR that exists is a PR, whatever the board expected. A `write` run is
+      // the batched writer's, which no longer exists: nothing it says is taken.
+      const expected = { planning: ['plan'], write: [], implementation: ['ready', 'published'], publish: ['published'], repair: ['repaired'], verify: ['deployed'], session: ['completed', 'drafts'] }[r.phase];
+      if (!expected.length) throw new Error('This run predates session-owned writes; stop now');
       if (!expected.includes(report.kind) && report.kind !== 'blocked') throw new Error(`This run must submit ${expected.join(' or ')}`);
       const s = j.subJobs.find((s) => s.id === r.subJobId);
+      // Drafts park the run rather than end it: the session waits for mail with
+      // the human's decision (job-runner.js), then completes. Its receipt is the
+      // draft set, kept apart from `report`, which is what ends a run.
+      if (report.kind === 'drafts') {
+        if (r.parkedAt) {
+          if (JSON.stringify(r.draftReport) === JSON.stringify(report)) return;
+          throw new Error('This run already sent its drafts; wait for mail with the human\'s decision');
+        }
+        if (!j.cancelledAt && !s?.cancelledAt) applyDrafts(j, r, s, report, Date.now());
+        r.draftReport = report; r.parkedAt ??= Date.now();
+        return;
+      }
+      if (report.kind === 'completed' && r.parkedAt && !r.mailedAt) throw new Error('Your drafts are with the human: wait for mail saying which writes to make, then complete');
       r.report = report; r.reportedAt = Date.now();
       // A receipt racing a cancel is kept on the run for the record but never
       // moves the sub-job: a late `published` must not pull it back out of cleanup,
@@ -438,10 +466,6 @@ export class JobStore {
       if (!reviewPlan(j) && j.stage === 'planning') approve(j, report.plan);
       else { j.plan = withStoryCreates(report.plan); j.repos = planRepos(report.plan); }
     }
-    // A write run answers for each write it was given. A created story's key
-    // is set on the plan and on every sub-job naming it, which is what releases
-    // them; an approved key is part of what the human agreed to and never swaps.
-    if (report.kind === 'write' || report.kind === 'jira') applyWriteReceipt(j, r, report, Date.now());
     // A fresh head (new PR or repair push) is first observed after the comment
     // settle, so reviewers posting seconds after it lands are in that first read.
     // The working tree is the deliverable and nothing is committed: the card
@@ -457,17 +481,15 @@ export class JobStore {
     if (report.kind === 'repaired') { s.repairs.push({ ...report, at: Date.now() }); s.state = 'watching'; s.mergeApprovedHead = null; s.pr.checkStatus = 'pending'; s.fixRequested = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
     // A session's receipt is the whole deliverable; with review on it waits for a
     // human, otherwise cleanup (archive its session) takes it straight to done.
-    // Every output its make writes asked for is accounted for first: a receipt
-    // that forgets one is refused whole, and the session corrects it.
-    if (report.kind === 'completed') applyOutputs(j, r, s, report, Date.now());
+    // Every write it owns is accounted for first: a receipt that forgets one is
+    // refused whole, and the session corrects it. A created story's key is set
+    // on the plan and on every sub-job naming it, which is what releases them;
+    // an approved key is part of what the human agreed to and never swaps.
+    if (report.kind === 'completed') applyWrites(j, r, s, report, Date.now());
     if (report.kind === 'completed') { s.result = { ...report, receiptId: r.id, at: Date.now() }; s.feedback = null; s.note = null; s.stage = reviewSessions(j) ? 'review' : 'cleanup'; s.state = reviewSessions(j) ? 'verified' : 'queued'; }
     if (report.kind === 'deployed') { s.deployed = { checks: report.checks, at: Date.now(), commit: s.pr?.mergeCommit || null }; s.stage = 'cleanup'; s.state = 'queued'; }
     // The event box on the card: the agent's own sentence, plus the move it
     // suggests (never applied — a human decides).
-    if (report.kind === 'blocked' && r.writes?.length) {
-      failWrites(j, r, report.summary, { summary: report.summary, move: report.move || null, phase: r.phase, at: Date.now() });
-      return;
-    }
     if (report.kind === 'blocked') {
       const target = s || j;
       target.error = report.summary;
