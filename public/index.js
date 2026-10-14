@@ -2,6 +2,7 @@ import { initJobsView } from './jobs-view.js';
 import { jobCards, jobNeedsReview } from './jobs.js';
 import { diffReturnTarget } from './diff-return.js';
 import { createIntro } from './intro.js';
+import { createUpdates } from './updates.js';
 
 // The client half: one `view` slot contribution (agent-wrangler public/slots.js),
 // which the board draws a rail button, a `#view=ext:jobs:board` route and a
@@ -118,8 +119,14 @@ export default {
     // who has never seen it gets it on whatever view the board opens on — the
     // intro is what tells them the Jobs button exists. Same storage object either
     // way: the board builds one api per extension.
-    const intro = createIntro({ storage: slots.api?.storage, onNewJob: startJob });
-    intro.maybeShow();
+    // A first-run reader gets the intro and never an update splash on top of it;
+    // the intro already shows Jobs as it is today, so closing it counts every
+    // current update as seen. Anyone else gets their unseen updates instead.
+    const updates = createUpdates({ storage: slots.api?.storage });
+    let firstRun = false;
+    const intro = createIntro({ storage: slots.api?.storage, onNewJob: startJob, onClose: () => { if (firstRun) updates.markAllSeen(); firstRun = false; } });
+    firstRun = intro.maybeShow();
+    if (!firstRun) updates.maybeShow();
 
     slots.register('view', {
       id: 'board',
@@ -149,6 +156,7 @@ export default {
           onSession: (sid) => api.openSession(sid),
           onDiff: (sid, from) => reviewDiff(api, sid, from),
           onIntro: () => intro.open(0),
+          updates,
         });
         if (newJobOnMount) { newJobOnMount = false; view.newJob(); }
       },

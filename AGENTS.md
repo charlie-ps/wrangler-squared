@@ -90,6 +90,7 @@ feature).
   publish run (the one that pushes). `noteDispatch` discards the adopted record
   (`pendingLaunch.adopt`) so the store's copy keeps its `cleanupHead` and rename.
 - **New job's model picker is `public/model-picker.js` over `public/model-plates.js`.** It owns no form state: it reports `{ agent, model, effort }` through `onChange` into hidden inputs, so `form.onsubmit` and the `job-create` payload are untouched, and creating a job saves `settings.usualPick`. `describe()` must never invent a version from an alias (gap 18 in `docs/PORTING.md`). A galaxy plate is exactly one rAF loop, stopped by `dispose()`/re-render; art colours are fixed, chrome is board variables, except Claude's cabinet and ticket, whose launch-page near-black/ivory follows core's `body.light`. Each Claude plate declares its own noise filters (`fx()`), so plates never share an SVG id.
+- **What's new is `public/updates.js`'s `UPDATES`, oldest first.** A bigger release appends `{ id, date, title, body }` (our own copy; optional `icon`, `tone`, `figure`, `anim`); every unseen one opens in one run, oldest first, and closing it records them all under `updatesSeen`. A first-run reader gets the intro instead, and closing that counts every current update seen, so an id must never be reused.
 - **Client modules import their leaves RELATIVELY** (`./util.js`, `./icons.js`,
   vendored) rather than from the board by absolute URL, so the same files load
   under node for `public/*.test.js`. Don't switch them to `/util.js`.

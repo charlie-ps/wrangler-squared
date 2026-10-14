@@ -121,8 +121,9 @@ export const INTRO_STEPS = [
 
 // `storage` is the client api's namespaced storage (null in a test, or on a board
 // without it: then the intro never opens by itself, since nothing could record
-// that it had been seen). `onNewJob` is the last step's button.
-export function createIntro({ storage, onNewJob = () => {} }) {
+// that it had been seen). `onNewJob` is the last step's button; `onClose` runs on
+// every way out.
+export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }) {
   let dialog = null;
   let at = 0;
   let timer = null;
@@ -167,7 +168,7 @@ export function createIntro({ storage, onNewJob = () => {} }) {
     });
     // Every way out (close, Skip, Escape, finishing) is the reader saying they
     // have seen it; a reload while it is still open is not.
-    dialog.addEventListener('close', () => { stop(); storage?.set(SEEN_KEY, '1'); });
+    dialog.addEventListener('close', () => { stop(); storage?.set(SEEN_KEY, '1'); onClose(); });
     win()?.addEventListener('resize', relayout);
   }
 
@@ -217,7 +218,7 @@ export function createIntro({ storage, onNewJob = () => {} }) {
 
   return {
     open,
-    maybeShow() { if (storage && !storage.get(SEEN_KEY)) open(0); },
+    maybeShow() { if (!storage || storage.get(SEEN_KEY)) return false; open(0); return true; },
     remove() { stop(); win()?.removeEventListener('resize', relayout); dialog?.remove(); dialog = null; },
   };
 }
