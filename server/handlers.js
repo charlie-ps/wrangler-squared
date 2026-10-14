@@ -2,6 +2,7 @@ import { execFile as defaultExecFile } from 'node:child_process';
 import { access as defaultAccess } from 'node:fs/promises';
 import { kick, makeCreateJob } from './job-create.js';
 import { settingsSchema } from './jobs-schema.js';
+import { runFile } from './job-github.js';
 
 // Control-WS handlers in the EXTENSION signature: `handler(msg, host)` — no
 // `ctx`, and therefore no `ctx.reply`. Core's control/handlers/jobs.js replied
@@ -105,4 +106,53 @@ export const jobImagesHandler = {
   },
 };
 
-export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler];
+// The board's "Have an idea?" corner: a request becomes a PUBLIC issue on this
+// repo, filed by the reader's own `gh` login so it is theirs to follow. Title and
+// body travel as argv items through execFile, never a shell. `rid` is echoed so
+// only the tab that asked acts on the answer; every board tab gets the frame.
+export const FEATURE_REPO = 'charlie-ps/wrangler-squared';
+const FEATURE_LABEL = 'feature-request';
+const ISSUE_URL = new RegExp(`^https://github\\.com/${FEATURE_REPO}/issues/(\\d+)$`);
+// gh exits 4 when it needs `gh auth login`; older builds only say so in stderr.
+const ghFailure = (e) => {
+  if (e?.code === 'ENOENT') return { reason: 'missing', error: 'The GitHub CLI (gh) is not installed' };
+  const said = String(e?.stderr || e?.message || e).trim();
+  if (e?.code === 4 || /gh auth login|not logged in|authentication required|HTTP 401/i.test(said)) return { reason: 'auth', error: 'The GitHub CLI is not signed in' };
+  return { reason: 'error', error: said.split('\n').find(Boolean) || 'gh failed' };
+};
+export function makeFeatureRequestHandlers({ run = runFile } = {}) {
+  return [{
+    type: 'feature-request-whoami',
+    async handler(msg, host) {
+      try {
+        const login = await run('gh', ['api', 'user', '--jq', '.login']);
+        host.broadcast({ event: 'feature-request-gh', rid: msg.rid, login });
+      } catch (e) { host.broadcast({ event: 'feature-request-gh', rid: msg.rid, ...ghFailure(e) }); }
+    },
+  }, {
+    type: 'feature-request',
+    async handler(msg, host) {
+      const fail = (f) => host.broadcast({ event: 'feature-request-failed', rid: msg.rid, ...f });
+      const title = String(msg.title || '').trim().slice(0, 120);
+      if (!title) return fail({ reason: 'error', error: 'Give the idea a title' });
+      const body = `${String(msg.body || '').trim().slice(0, 4000)}\n\n---\n_Sent from the Wrangler² Jobs board._`.trimStart();
+      const args = ['issue', 'create', '-R', FEATURE_REPO, '--title', title, '--body', body];
+      // Labelled only when the repo already has the label; a reader without
+      // triage rights may still be refused it, so that attempt falls back to none.
+      const labels = await run('gh', ['label', 'list', '-R', FEATURE_REPO, '--json', 'name', '--limit', '200']).then((out) => JSON.parse(out).map((l) => l.name), () => []);
+      let out;
+      try {
+        try { out = await run('gh', labels.includes(FEATURE_LABEL) ? [...args, '--label', FEATURE_LABEL] : args); } catch (e) {
+          if (!labels.includes(FEATURE_LABEL) || ghFailure(e).reason !== 'error') throw e;
+          out = await run('gh', args);
+        }
+      } catch (e) { return fail(ghFailure(e)); }
+      const url = String(out).trim().split('\n').at(-1);
+      const number = url.match(ISSUE_URL)?.[1];
+      if (!number) return fail({ reason: 'error', error: `gh did not return an issue link: ${url}` });
+      host.broadcast({ event: 'feature-request-created', rid: msg.rid, url, number: Number(number), title });
+    },
+  }];
+}
+
+export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler, ...makeFeatureRequestHandlers()];

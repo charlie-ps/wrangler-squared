@@ -1368,3 +1368,68 @@ test('a job’s Outcome shows its pictures as a numbered strip, asks for the byt
   assert.equal(thumbs[0].querySelector('img').getAttribute('src'), 'data:image/png;base64,eA==');
   assert.equal(thumbs[1].querySelector('img'), null, 'a picture the store lost stays a numbered blank');
 });
+
+// The "Have an idea?" corner: a quiet pill until opened, then a form whose
+// public-issue notice is on screen before anything can be sent.
+const ideaOpen = (f) => { f.q('.jobs-idea-teaser').click(); return f.sent.at(-1); };
+const ideaType = (f, title, body = '') => {
+  f.q('.jobs-idea [name=title]').value = title;
+  f.q('.jobs-idea [name=body]').value = body;
+  f.q('.jobs-idea form').dispatchEvent(f.event('submit'));
+  return f.sent.at(-1);
+};
+
+test('the idea corner says where the text goes before it is sent, and files it as the reader’s own GitHub issue', (t) => {
+  const f = fixture(t);
+  assert.match(f.q('.jobs-idea-teaser').textContent, /Have an idea\?.*Help make Wrangler² better/);
+  const who = ideaOpen(f);
+  assert.equal(who.type, 'feature-request-whoami', 'opening asks gh who the reader is');
+  const notice = f.q('.jobs-idea-notice').textContent;
+  assert.match(notice, /public GitHub issue/);
+  assert.match(notice, /charlie-ps\/wrangler-squared/);
+  assert.match(notice, /secrets/);
+  f.q('.jobs-idea [name=title]').value = 'half-typed';
+  f.view.idea({ event: 'feature-request-gh', rid: who.rid, login: 'octo<b>' });
+  assert.match(f.q('.jobs-idea-notice').textContent, /posted as @octo<b>/, 'the login is text, never markup');
+  assert.equal(f.q('.jobs-idea [name=title]').value, 'half-typed', 'the login arriving does not redraw over what is typed');
+  assert.equal(f.q('.jobs-idea [type=submit]').textContent.trim(), 'Post');
+  const sent = ideaType(f, '  Clone a job  ', 'Most of my jobs repeat.');
+  assert.deepEqual({ ...sent, rid: undefined }, { type: 'feature-request', rid: undefined, title: 'Clone a job', body: 'Most of my jobs repeat.' });
+  assert.ok(f.q('.jobs-idea [name=title]').disabled, 'fields lock while it posts');
+  f.view.idea({ event: 'feature-request-created', rid: 'another-tab', url: 'https://github.com/charlie-ps/wrangler-squared/issues/1', number: 1, title: 'x' });
+  assert.equal(f.q('.jobs-idea').dataset.view, 'sending', 'an answer to another tab is ignored');
+  f.view.idea({ event: 'feature-request-created', rid: sent.rid, url: 'https://github.com/charlie-ps/wrangler-squared/issues/47', number: 47, title: 'Clone a job' });
+  const link = f.q('.jobs-idea-issue');
+  assert.equal(link.getAttribute('href'), 'https://github.com/charlie-ps/wrangler-squared/issues/47');
+  assert.match(link.textContent, /#47.*Clone a job/);
+  f.q('[data-idea="again"]').click();
+  assert.equal(f.q('.jobs-idea [name=title]').value, '', 'Send another starts from a blank draft');
+});
+
+test('a missing or signed-out gh says how to fix it, keeps the draft, and nothing is sent without a title', (t) => {
+  const f = fixture(t);
+  const who = ideaOpen(f);
+  const count = f.sent.length;
+  ideaType(f, '   ');
+  assert.equal(f.sent.length, count, 'a blank title sends nothing');
+  f.q('.jobs-idea [name=title]').value = 'Keep me';
+  f.view.idea({ event: 'feature-request-gh', rid: who.rid, reason: 'auth', error: 'The GitHub CLI is not signed in' });
+  assert.equal(f.q('.jobs-idea').dataset.view, 'auth');
+  assert.equal(f.q('.jobs-idea-cmd code').textContent, 'gh auth login');
+  f.q('[data-idea="retry"]').click();
+  assert.equal(f.q('.jobs-idea [name=title]').value, 'Keep me', 'the draft survives the detour');
+  const sent = ideaType(f, 'Keep me');
+  f.view.idea({ event: 'feature-request-failed', rid: sent.rid, reason: 'missing', error: 'not installed' });
+  assert.match(f.q('.jobs-idea-result').textContent, /isn’t installed[^]*cli\.github\.com/);
+  f.q('[data-idea="retry"]').click();
+  const again = ideaType(f, 'Keep me');
+  f.view.idea({ event: 'feature-request-failed', rid: again.rid, reason: 'error', error: 'error connecting to api.github.com' });
+  assert.equal(f.q('.jobs-idea-error').textContent, 'error connecting to api.github.com');
+  assert.equal(f.q('.jobs-idea [name=title]').value, 'Keep me');
+  f.q('.jobs-idea-close').click();
+  assert.equal(f.q('.jobs-idea').dataset.view, 'teaser');
+  ideaOpen(f);
+  assert.equal(f.q('.jobs-idea [name=title]').value, 'Keep me', 'closing keeps the draft too');
+  f.view.update(f.data);
+  assert.ok(f.q('.jobs-idea form'), 'a graph tick leaves the open panel alone');
+});

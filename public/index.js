@@ -107,6 +107,8 @@ export default {
         toast(`Opened in ${msg.app}`);
       } else if (msg.event === 'job-ide-failed') {
         toast(msg.error);
+      } else if (msg.event?.startsWith('feature-request-')) {
+        view?.idea(msg);
       }
     });
 

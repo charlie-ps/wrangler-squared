@@ -6,6 +6,7 @@ import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel,
 import { createJobImages, imagesPanelHtml, openZoom } from './job-images.js';
 import { mountModelPicker } from './model-picker.js';
 import { whatsNewHtml } from './updates.js';
+import { createIdeaCorner } from './idea-corner.js';
 const checkTone = (state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED', 'passing'].includes(state) ? 'passed' : ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'failing'].includes(state) ? 'failed' : '';
 const checkMark = (state) => checkTone(state) === 'passed' ? '✓' : checkTone(state) === 'failed' ? '×' : '○';
 const link = (url, title) => /^https:\/\/github\.com\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(title)} ↗</a>` : esc(title);
@@ -111,6 +112,9 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     <div class="jobs-filters"><select id="jobs-filter" aria-label="Show one job"><option value="">Every job</option></select><label class="jobs-chip jobs-chip-needs" title="Only jobs waiting on you"><input id="jobs-needs" type="checkbox">${ICONS.eye}Needs me <span id="jobs-review-count">0</span></label><label class="jobs-chip" title="Include delivered and cancelled jobs"><input id="jobs-done" type="checkbox">${ICONS.check}Finished</label></div>
     <div class="jobs-toolbar"><span id="jobs-active-count" aria-live="polite"></span><label class="jobs-chip" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="8" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-icon"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="primary" id="job-new">${ICONS.plus}New job</button></div></header>
     <div id="jobs-boards" class="jobs-grid"></div>`;
+  // Outside #jobs-boards, so a graph tick's redraw never touches a half-typed idea.
+  const idea = createIdeaCorner({ send });
+  root.appendChild(idea.el);
   const q = (s) => root.querySelector(s);
   function update(snapshot) {
     data = snapshot || data;
@@ -737,7 +741,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     flags.note = { field: cp.field, head: job ? checkpointLabel(cp, youReview(job, cp.field)) : cp.name, body: msg.error, undo: false };
     paintFooter();
   }
-  return { update, newJob: createJob, reviewFailed, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
+  return { update, newJob: createJob, reviewFailed, idea: idea.message, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
     // A checkpoint switch keeps the dialog: the footer is where it was made.
     if (msg?.action === 'set-review') {
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }
