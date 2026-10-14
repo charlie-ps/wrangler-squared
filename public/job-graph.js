@@ -35,7 +35,14 @@ export const dependencyEditorHtml = (s, others, depKey) => others.filter((d) => 
 // short mono label, a dot per write in its state, and ↗ once the place exists.
 const urgentOf = (states) => ['failing', 'needs'].find((st) => states.includes(st));
 const placePillClass = (p, states, base = 'job-place') => { const u = urgentOf(states); return `${base} ${p.exists ? '' : 'ghost'} ${p.type === 'other' ? 'other' : ''} ${u ? `tone-${STATES[u].tone} urgent` : ''}`; };
-const placeBodyHtml = (p, states) => `${PLACES[p.type].icon}<b>${esc(p.label)}</b><span class="job-place-dots">${states.map((st) => `<span class="job-place-dot tone-${STATES[st].tone} ${stateSolid(st) ? 'on' : ''}"></span>`).join('')}</span>${p.exists ? '<span class="job-place-go" aria-hidden="true">↗</span>' : ''}`;
+// On a pill the ↗ is its own link straight to the place (a link inside a
+// summary follows without toggling it); inside a chip, itself a link, it is only
+// a mark.
+const placeBodyHtml = (p, states, link = false) => {
+  const href = link && p.type !== 'file' ? webUrl(p.url) : null;
+  const go = href ? `<a class="job-place-go" href="${esc(href)}" target="_blank" rel="noopener" title="Open ${esc(p.name)}">↗</a>` : p.exists ? '<span class="job-place-go" aria-hidden="true">↗</span>' : '';
+  return `${PLACES[p.type].icon}<b>${esc(p.label)}</b><span class="job-place-dots">${states.map((st) => `<span class="job-place-dot tone-${STATES[st].tone} ${stateSolid(st) ? 'on' : ''}"></span>`).join('')}</span>${go}`;
+};
 const placeTip = (plan, p, writes, states) => [`${PLACES[p.type].name} · ${p.name}${p.type === 'file' && p.url ? `\n${p.url}` : ''}`,
   ...writes.map((w, i) => `${STATES[states[i]].label}: ${writeAction(w)} (${writeWhen(plan, w)})`)].join('\n');
 // The popover's header: the whole name, and Open ↗ once there is somewhere to
@@ -89,7 +96,7 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
       const ref = `${owner}|${key}`;
       const states = g.map(stateOfWrite);
       const open = openTickets.has(ref) || (editing != null && g.includes(subs[editing]));
-      return `<details class="${placePillClass(p, states)}" data-ticket="${esc(ref)}" ${open ? 'open' : ''}><summary title="${esc(placeTip({ ...plan, reviewWrites }, p, g, states))}">${placeBodyHtml(p, states)}</summary><div class="job-place-pop">${placeHeadHtml(p)}${g.map(write).join('')}</div></details>`;
+      return `<details class="${placePillClass(p, states)}" data-ticket="${esc(ref)}" ${open ? 'open' : ''}><summary title="${esc(placeTip({ ...plan, reviewWrites }, p, g, states))}">${placeBodyHtml(p, states, true)}</summary><div class="job-place-pop">${placeHeadHtml(p)}${g.map(write).join('')}</div></details>`;
     }).join('');
   };
   const hanging = (s) => {

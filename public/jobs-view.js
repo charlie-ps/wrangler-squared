@@ -373,8 +373,9 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     });
     graph.querySelectorAll('[data-add-write]').forEach((b) => b.onclick = () => { writeEdit = addWrite(b.dataset.addWrite); renderDetail(); });
     // A ticket stays open across redraws; closing the one holding the open editor closes that too.
+    // One place open at a time: opening one closes the rest (their own toggles then forget them).
     graph.querySelectorAll('details[data-ticket]').forEach((d) => d.ontoggle = () => {
-      if (d.open) openTickets.add(d.dataset.ticket); else openTickets.delete(d.dataset.ticket);
+      if (d.open) { openTickets.add(d.dataset.ticket); graph.querySelectorAll('details[data-ticket][open]').forEach((o) => { if (o !== d) o.open = false; }); } else openTickets.delete(d.dataset.ticket);
       if (!d.open && d.querySelector('[aria-pressed="true"]')) { writeEdit = null; renderDetail(); } else layoutGraphEdges(graph);
     });
     graph.querySelectorAll('details[data-deps]').forEach((d) => d.ontoggle = () => { if (d.open) openDeps.add(d.dataset.deps); else openDeps.delete(d.dataset.deps); layoutGraphEdges(graph); });

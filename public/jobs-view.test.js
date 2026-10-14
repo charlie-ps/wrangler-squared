@@ -1609,6 +1609,12 @@ test('the stepper folds a session\'s writes into one pill per place: dots per wr
   assert.ok(!pill('w-pr').classList.contains('ghost'), 'a ticket with a key exists');
   const open = pill('w-pr').querySelector('.job-place-head a');
   assert.deepEqual([open.getAttribute('href'), open.target, open.rel], ['https://x.atlassian.net/browse/AUTH-1', '_blank', 'noopener'], 'a ticket opens on the site the planner read');
+  const go = pill('w-pr').querySelector('summary a.job-place-go');
+  assert.deepEqual([go.getAttribute('href'), go.target], ['https://x.atlassian.net/browse/AUTH-1', '_blank'], 'the pill\'s own arrow opens the place');
+  assert.equal(pill('chart').querySelector('summary a'), null, 'nothing to open before it is made');
+  pill('w-pr').open = true; pill('w-pr').ontoggle();
+  pill('chart').open = true; pill('chart').ontoggle();
+  assert.deepEqual([pill('w-pr').open, pill('chart').open], [false, true], 'one place open at a time');
   assert.notEqual(pill('chart'), pill('k6'), 'each made output is its own place');
   assert.equal(f.q('[data-node="chart"]').closest('.job-stack'), f.q('[data-node="report"]').closest('.job-stack'), 'a made output hangs under its session');
   assert.ok(pill('chart').classList.contains('ghost')); assert.match(pill('chart').querySelector('.job-place-head em').textContent, /not made yet/);
