@@ -2059,3 +2059,29 @@ test('Land on is optional: left blank the job carries no base, filled it is sent
   form.dispatchEvent(f.event('submit'));
   assert.equal(f.sent.at(-1).job.base, 'next');
 });
+
+test('a refused cleanup on a dropped sub-job shows what would be lost, and Discard echoes back exactly the list it showed', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active'; job.cancelledAt = 1;
+  const refusal = { path: '/wt/api', branch: 'job-api', base: 'main', head: 'cc47137aaaa', fingerprint: 'fp1',
+    commits: [{ sha: 'abc12345ffff', subject: '<b>Local</b> work', pushed: false }], commitCount: 1,
+    files: [{ change: 'untracked', path: 'server/mcp/tools/list-models.js' }], fileCount: 3 };
+  job.subJobs = [{ ...sub('api'), stage: 'cleanup', state: 'cancelled', cancelledAt: 1, worktree: { path: '/wt/api', branch: 'job-api' },
+    error: 'Worktree has work that would be lost (1 commit not on origin/main, 3 uncommitted files); preserve it for review', cleanupRefusal: refusal }];
+  f.view.update(f.data);
+  assert.equal(eventFor(job, job.subJobs[0]).title, 'Worktree kept');
+  assert.equal(jobNeedsReview(job, job.subJobs[0]), true);
+  f.view.openDetail('job1', 'api');
+  const text = () => f.q('#job-dialog').textContent;
+  assert.match(text(), /1 commit not on origin\/main/); assert.match(text(), /<b>Local<\/b> work/, 'agent-written subjects are text, not markup');
+  assert.match(text(), /list-models\.js/); assert.match(text(), /and 2 more/);
+  f.q('#job-discard').click();
+  assert.equal(f.sent.length, 0, 'discarding needs a confirmation first');
+  assert.ok(f.q('#job-discard-form'), 'a form, so a live graph tick leaves the question alone');
+  assert.equal(primaryAction(f.q('#job-dialog')), null, 'Cmd+Enter cannot discard work');
+  assert.match(text(), /lost for good/); assert.match(text(), /list-models\.js/);
+  f.q('[data-discard]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'discard-worktree', discardHead: 'cc47137aaaa', fingerprint: 'fp1' });
+  job.subJobs[0] = { ...job.subJobs[0], error: null, discard: { head: 'cc47137aaaa', fingerprint: 'fp1' } }; f.view.update(f.data);
+  f.view.openDetail('job1', 'api');
+  assert.equal(f.q('#job-discard'), null, 'a discard already chosen is not offered twice');
+});

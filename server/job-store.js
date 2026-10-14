@@ -17,6 +17,9 @@ const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 const launchModel = (job) => job.model || null;
 const launchEffort = (job) => job.effort || null;
 const quoted = (title) => `“${title}”`;
+const listed = (items, total, label) => `${items.slice(0, 5).map(label).join(', ')}${total > 5 ? ` and ${total - 5} more` : ''}`;
+const lossLine = (r) => [r.commitCount && `${r.commitCount} commit${r.commitCount === 1 ? '' : 's'} (${listed(r.commits, r.commitCount, (c) => `${c.sha.slice(0, 8)} ${c.subject}`)})`,
+  r.fileCount && `${r.fileCount} file${r.fileCount === 1 ? '' : 's'} (${listed(r.files, r.fileCount, (f) => f.path)})`].filter(Boolean).join(' and ') || `branch ${r.branch}`;
 // Every human intervention lands in `moves`, plan moves and approvals alike: it
 // is the one timeline the next session's prompt (job-prompts.js history) and
 // the detail view's Moves panel both read, so an approve or retry recorded
@@ -268,9 +271,9 @@ export class JobStore {
       const s = subJobId ? j.subJobs.find((s) => s.id === subJobId) : null;
       if (subJobId && !s) throw new Error('Sub-job not found');
       if (action === 'cancel-job') { cancelJob(j, Date.now()); return; }
-      // Retry is the one thing left to do on a cancelled job: a refused cleanup
-      // (a worktree with unpushed commits) is still the human's to clear.
-      if (j.cancelledAt && action !== 'retry') throw new Error('Job was cancelled');
+      // Retry and Discard are what is left to do on a cancelled job: a refused
+      // cleanup (a worktree with work not on GitHub) is still the human's to clear.
+      if (j.cancelledAt && !['retry', 'discard-worktree'].includes(action)) throw new Error('Job was cancelled');
       // `cancel` is Drop's old name and still arrives from an older board.
       const move = action === 'cancel' ? 'drop' : action;
       // A pending plan change freezes the job where it stands: a sub-job that
@@ -315,6 +318,7 @@ export class JobStore {
         // session again for it (job-writes.js).
         if (isWriteSub(s)) { reopenWrite(j, s); record(j, s, 'retry', note, `Retried ${quoted(s.title)}`); return; }
         target.error = null; target.blocked = null;
+        if (s) { s.cleanupRefusal = null; s.discard = null; }
         // Under review the only run that can have failed is publish, and the tree
         // the human approved is unchanged: keep the approval so publish runs
         // again. `queued` here would strand the card — the runner launches only
@@ -325,6 +329,19 @@ export class JobStore {
           if (note) s.note = note;
         }
         record(j, s, 'retry', note, s ? `Retried ${quoted(s.title)}` : 'Retried the job');
+        return;
+      }
+      // The human's "I don't care" on a refused cleanup. Pinned to the head and
+      // tree fingerprint the board showed, so a refusal that has since been
+      // replaced by a newer one is not discarded unseen; the runtime checks the
+      // disk against the same pair before it deletes anything.
+      if (action === 'discard-worktree') {
+        const shown = s?.cleanupRefusal;
+        if (!shown || s.stage !== 'cleanup' || s.discard) throw new Error('Nothing is waiting to be discarded');
+        if (payload.discardHead !== shown.head || payload.fingerprint !== shown.fingerprint) throw new Error('The worktree changed since you looked. Review it again before discarding.');
+        s.discard = { head: shown.head, fingerprint: shown.fingerprint, at: Date.now() };
+        s.error = null; s.blocked = null;
+        record(j, s, 'discard-worktree', note, `Discarded ${lossLine(shown)} from ${quoted(s.title)}`);
         return;
       }
       if (action === 'revise-session') {

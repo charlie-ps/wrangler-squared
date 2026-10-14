@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 //
 // These two survive because nothing on the façade does them. Cleanup is a
 // compare-and-delete the extension owns (job-runtime.js cleanupWorktree): it
-// verifies the branch head against what the merged PR retains and only then
+// verifies nothing on the branch or in the tree would be lost and only then
 // removes the worktree, and core's archive-time offer is a UI prompt to a human,
 // not something an extension can drive. `gitRepoRoot` answers "which checkout is
 // this" for the `updateMain` fast-forward, which never runs in a worktree.
@@ -29,9 +29,9 @@ export async function gitRepoRoot(cwd) {
 }
 
 // Uncommitted and untracked files included: every caller has already decided the
-// work is disposable (cleanup verified the branch head is what the merged PR
-// retains — commits are guarded there, working-tree dirt is not). A missing dir
-// is a no-op success.
+// work is disposable (cleanup checked the head and a clean tree, or the human
+// chose Discard for exactly the state it was shown). A missing dir is a no-op
+// success.
 export async function removeWorktree({ worktreePath, repoRoot = '' }) {
   if (!worktreePath) throw new WorktreeError('No worktree path');
   if (!fs.existsSync(worktreePath)) return { ok: true, alreadyGone: true };

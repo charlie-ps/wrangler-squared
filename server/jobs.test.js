@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { JobStore, migrateJobs, MERGE_IS_DELIVERY } from './job-store.js';
 import { JobRunner, IDLE_RECEIPT_GRACE_MS } from './job-runner.js';
-import { JobRuntime } from './job-runtime.js';
+import { JobRuntime, CleanupRefused } from './job-runtime.js';
 import { jobPrompt } from './job-prompts.js';
 import { JobGithub, prSummary } from './job-github.js';
 import { normaliseComments, commentsBlockMerge } from './job-comments.js';
@@ -914,6 +914,49 @@ test('a sub-job already delivered or refused cleanup is left alone by a cancel, 
   const job = f.store.get(f.job.id);
   assert.deepEqual(job.subJobs.map((s) => s.state), ['done', 'cancelled']);
   assert.equal(job.stage, 'done'); assert.ok(job.cancelledAt);
+});
+
+test('Discard on a refused cleanup is pinned to what the board showed, recorded as a move, and lets a cancelled job finish', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api')]));
+  f.store.action(f.job.id, 'cancel-job');
+  const refusal = { path: '/worktree/api', branch: 'branch-api', base: 'main', head: 'cc47137', fingerprint: 'fp1',
+    commits: [], commitCount: 0, files: [{ change: 'untracked', path: 'server/mcp/tools/list-models.js' }], fileCount: 1 };
+  const seen = [];
+  f.runtime.cleanup = async (j, s) => {
+    seen.push(s.discard);
+    if (!s.discard) throw new CleanupRefused('Worktree has work that would be lost (1 uncommitted file); preserve it for review', refusal);
+  };
+  await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().cleanupRefusal], ['cleanup', refusal]);
+  assert.equal(f.store.get(f.job.id).stage, 'active', 'the cancelled job waits on the human while a cleanup is refused');
+  assert.throws(() => f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'older', fingerprint: 'fp1' }), /changed since you looked/);
+  assert.throws(() => f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'cc47137', fingerprint: 'stale' }), /changed since you looked/);
+  f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'cc47137', fingerprint: 'fp1' });
+  assert.equal(f.sub().error, null);
+  assert.deepEqual([f.sub().discard.head, f.sub().discard.fingerprint], ['cc47137', 'fp1']);
+  assert.throws(() => f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'cc47137', fingerprint: 'fp1' }), /Nothing is waiting/, 'one discard per refusal');
+  const move = f.store.get(f.job.id).moves.at(-1);
+  assert.equal(move.move, 'discard-worktree'); assert.match(move.detail, /1 file \(server\/mcp\/tools\/list-models\.js\)/);
+  await f.tick();
+  const job = f.store.get(f.job.id);
+  assert.deepEqual([job.subJobs[0].stage, job.subJobs[0].state, job.subJobs[0].cleanupRefusal, job.subJobs[0].discard], ['done', 'cancelled', null, null]);
+  assert.equal(job.stage, 'done'); assert.ok(job.cancelledAt);
+  assert.equal(seen.at(-1).head, 'cc47137', 'the runtime is handed the pinned head to re-check on disk');
+});
+
+test('a Discard the disk no longer matches is spent: the fresh refusal replaces it and must be chosen again', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api')]));
+  f.store.action(f.job.id, 'drop', { subJobId: 'api' });
+  let refusal = { head: 'h1', fingerprint: 'fp1', branch: 'b', base: 'main', commits: [], commitCount: 0, files: [], fileCount: 0 };
+  f.runtime.cleanup = async () => { throw new CleanupRefused('refused', refusal); };
+  await f.tick();
+  f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'h1', fingerprint: 'fp1' });
+  refusal = { ...refusal, head: 'h2' };
+  await f.tick();
+  assert.deepEqual([f.sub().discard, f.sub().cleanupRefusal.head, f.sub().error], [null, 'h2', 'refused']);
+  assert.throws(() => f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'h1', fingerprint: 'fp1' }), /changed since you looked/);
+  f.store.action(f.job.id, 'retry', { subJobId: 'api' });
+  assert.equal(f.sub().cleanupRefusal, null, 'Retry clears the old refusal; the next attempt writes a fresh one');
 });
 
 test('cancelling before there are sub-jobs stops the planner quietly, ignores its late plan and finishes without launching anything', async (t) => {

@@ -48,7 +48,7 @@ façade exposes nothing equivalent.
 | `server/tools.js` | `server/mcp/tools/job-report.js` | rewritten | three tools in the extension signature `({host, caller}, args)`: `job_report`, `get_job_context` (omits unrelated HUMAN output) and the new `create_job`, the New job form for any agent session (no broadcast, so a human's open form stays open); `syncBranch` reads a `name_branch` rename back off the projection; `hideTool` also hides `create_job` from job steps so a job cannot start jobs |
 | `server/handlers.js` | `server/control/handlers/jobs.js` | rewritten | `(msg, host)`; `job-create` is a broadcast wrapper over `job-create.js`; no `ctx.reply` → `host.broadcast`; adds `job-open-ide` (macOS `open -na <ideApp>` on a sub-job's worktree, result broadcast as `job-ide-opened` / `job-ide-failed`); `job-settings` keeps job settings in this extension's own store |
 | `server/job-runtime.js` | `server/job-runtime.js` | **rewritten** | the only session-facing module: spawns through the façade with 1.4's `worktree`/`addDirs`/`taskId`/PR-automation options, bills a triage with 1.6's `sessions:bill`, and resumes a session parked on its drafts (`resumeWithMail`: `sessions:wake` when the graph says the card is dormant, then `mail:send`). Most open gaps are marked here |
-| `server/git.js` | `server/worktree.js` (subset) | new | down to `gitRepoRoot` + `removeWorktree --force`: the wrangler cuts and renames worktrees now, cleanup's compare-and-delete is still ours |
+| `server/git.js` | `server/worktree.js` (subset) | new | down to `gitRepoRoot` + `removeWorktree --force`: the wrangler cuts and renames worktrees now, cleanup's compare-and-delete (and the board's Discard override of a refused one) is still ours |
 | `server/job-store.js` | same | modified | `./data-dir.js`, `./atomic-json.js` are local copies; HUMAN completion stores optional multiline `result.output` separately from the 180-character move note |
 | `server/job-runner.js` | same | modified | `./log.js` is a local leaf; launches a re-planning run, and while a plan change is pending holds every unfrozen sub-job's launches and merges |
 | `server/job-replan.js` | — | new | changing a running job's plan: `replan` on an active job launches a planning run whose receipt is stored as `job.replan.proposal`; `approve-replan` (pinned to the proposal id) merges it, `discard-replan` drops it. Frozen sub-jobs are locked, removed ones are dropped as `superseded`, and a pending change freezes the job: unfrozen sub-jobs launch, merge, take approvals and moves only once it is approved or discarded (running steps carry on) |
@@ -185,7 +185,8 @@ files, so the `.mjs` dodge was obsolete and both remaining suites are ported.
   the fake host: `stop()`'s archive-then-confirm, the `isAlive` truth table over
   `archived` + the cached graph status, `noteDispatch` with nothing pending, and
   the compare-and-delete git rules driven through the constructor's injected
-  `run`. The launch options live in `manifest.test.js` because the hook is the
+  `run`, plus real-git cases (a bare origin, clone and worktree under the
+  redirected `DATA_DIR`) for what a refusal lists and what Discard deletes. The launch options live in `manifest.test.js` because the hook is the
   only place they are observable. Dropped as core-only: the
   `SessionManager.refreshAlive` races, the tmux `list-panes` probe and its error
   taxonomy, `automationRun`/`SESSIONS_DIR`/`resumeEntry` stamping, the Codex

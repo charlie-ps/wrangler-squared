@@ -375,6 +375,7 @@ export function movesFor(job, sub) {
 // the detail line — the agent's own sentence, or the observation — do the work.
 export const prNumber = (sub) => (sub?.pr?.url || '').split('/').filter(Boolean).pop();
 function eventTitle(sub) {
+  if (sub.cleanupRefusal) return 'Worktree kept';
   if (sub.blocked?.summary && sub.blocked.summary === sub.error) return 'Worker blocked';
   if (/closed without merging/i.test(sub.error)) return 'PR was closed';
   if (/repair limit/i.test(sub.error)) return prNumber(sub) ? `Checks failing on #${prNumber(sub)}` : 'Checks failing';
@@ -390,7 +391,8 @@ function eventTitle(sub) {
 // guesses a move on the human's behalf.
 export function eventFor(job, sub) {
   if (!sub) return job.error ? { title: 'Job needs attention', detail: job.error, suggested: null } : null;
-  if (sub.cancelledAt) return null;
+  // A dropped sub-job's only event is a refused cleanup: the one thing left for a human.
+  if (sub.cancelledAt && !sub.error) return null;
   const suggested = sub.blocked?.move || null;
   if (sub.error) return { title: eventTitle(sub), detail: sub.error, suggested };
   if (deploymentStalled(sub)) return { title: 'Nothing deployed', detail: `No post-merge run has started for merge commit ${(sub.pr?.mergeCommit || '').slice(0, 8)}.`, suggested };

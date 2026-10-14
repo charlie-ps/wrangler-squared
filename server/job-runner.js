@@ -318,11 +318,13 @@ export class JobRunner {
           }
         } else if (sub.stage === 'cleanup') {
           await this.runtime.cleanup(job, sub);
-          this.patchSub(id, sub.id, (s) => { s.stage = 'done'; s.state = s.cancelledAt ? 'cancelled' : 'done'; });
+          this.patchSub(id, sub.id, (s) => { s.stage = 'done'; s.state = s.cancelledAt ? 'cancelled' : 'done'; s.cleanupRefusal = null; s.discard = null; });
         }
       } catch (e) {
         this.patchSub(id, sub.id, (s) => {
-          if (s.stage === 'cleanup') s.error = shortError(e);
+          // A refusal keeps what would be lost for the board; a Discard is spent
+          // either way, so a changed tree has to be looked at and chosen again.
+          if (s.stage === 'cleanup') { s.error = shortError(e); s.cleanupRefusal = e.refusal || null; s.discard = null; }
           else { s.observationError = shortError(e); s.nextPollAt = this.now() + 60000; }
         });
       }

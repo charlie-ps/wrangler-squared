@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { JobRuntime, LAUNCH_GRACE_MS } from './job-runtime.js';
+import { JobRuntime, LAUNCH_GRACE_MS, CleanupRefused, parseStatus } from './job-runtime.js';
 import { DATA_DIR } from './data-dir.js';
 import { fakeHost } from './test-helpers.js';
 
@@ -24,7 +24,8 @@ const runtimeWith = (host, { statusOf = () => null, now, run } = {}) => new JobR
 // The git/gh fake that suite used, adapted to the current argv: every call
 // is recorded, `for-each-ref` answers with the branch head the repo is pretending
 // to have and everything else with the empty string a quiet git command gives.
-function fakeRun({ head = '', remote = '', overrides = {} } = {}) {
+// `log` is the branch's commits that origin/main lacks, as `%H<TAB>%s` lines.
+function fakeRun({ head = '', remote = '', log = '', overrides = {} } = {}) {
   const calls = [];
   const run = async (bin, args, cwd) => {
     calls.push(args);
@@ -32,6 +33,8 @@ function fakeRun({ head = '', remote = '', overrides = {} } = {}) {
     if (override) return override(args, cwd);
     if (args[0] === 'for-each-ref') return head;
     if (args[0] === 'ls-remote') return remote;
+    if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'origin/main';
+    if (args[0] === 'log') return log;
     return '';
   };
   return { calls, run };
@@ -197,8 +200,8 @@ test('cleanup deletes only the ref value it verified, and refuses extra commits'
   const verified = fakeRun({ head: 'verified' });
   await runtimeWith(host, { run: verified.run }).cleanupWorktree(wt, 'verified');
   assert.deepEqual(verified.calls.at(-1), ['update-ref', '-d', 'refs/heads/job-api', 'verified']);
-  const moved = fakeRun({ head: 'verified' });
-  await assert.rejects(runtimeWith(host, { run: moved.run }).cleanupWorktree(wt, 'older'), /additional commits/);
+  const moved = fakeRun({ head: 'verified', log: 'verified\tAdd the endpoint' });
+  await assert.rejects(runtimeWith(host, { run: moved.run }).cleanupWorktree(wt, 'older'), /1 commit not on origin\/main/);
   assert.ok(!moved.calls.some((c) => c[0] === 'update-ref'));
   const never = fakeRun();
   await assert.rejects(runtimeWith(host, { run: never.run }).cleanupWorktree(wt, ''), /verified branch head/);
@@ -210,7 +213,7 @@ test('cleanup preserves a worktree that moved on since verification, and a branc
   const dir = fs.mkdtempSync(path.join(DATA_DIR, 'worktree-'));
   const wt = { path: dir, repoRoot: '/repo', branch: 'job-api' };
   for (const [ref, head] of [['refs/heads/somewhere-else', 'verified'], ['refs/heads/job-api', 'newer']]) {
-    const f = fakeRun({ overrides: { 'symbolic-ref': () => ref, 'rev-parse': () => head } });
+    const f = fakeRun({ log: `${head}\tLocal work`, overrides: { 'symbolic-ref': () => ref, 'rev-parse': (args) => args[1] === '--abbrev-ref' ? 'origin/main' : head } });
     await assert.rejects(runtimeWith(host, { run: f.run }).cleanupWorktree(wt, 'verified'), /preserve it for review/);
     assert.ok(!f.calls.some((c) => c[0] === 'worktree'), 'nothing is removed once the tree has changed');
   }
@@ -255,11 +258,11 @@ test('cleanup of a PR sub-job still preserves a local commit the merged head doe
   const { host } = fakeHost();
   const notAncestor = { 'merge-base': () => { throw Object.assign(new Error('exit 1'), { code: 1 }); } };
   const sub = { ...merged, worktree: { ...merged.worktree, path: missing() } };
-  const branch = fakeRun({ head: 'local-extra', overrides: notAncestor });
-  await assert.rejects(runtimeWith(host, { run: branch.run }).cleanup({}, sub), /additional commits/);
+  const branch = fakeRun({ head: 'local-extra', log: 'local-extra\tExtra', overrides: notAncestor });
+  await assert.rejects(runtimeWith(host, { run: branch.run }).cleanup({}, sub), /1 commit not on origin\/main/);
   assert.ok(!branch.calls.some((c) => ['update-ref', 'push'].includes(c[0])));
   const dir = fs.mkdtempSync(path.join(DATA_DIR, 'worktree-'));
-  const tree = fakeRun({ overrides: { ...notAncestor, 'symbolic-ref': () => 'refs/heads/job-api', 'rev-parse': () => 'local-extra' } });
+  const tree = fakeRun({ log: 'local-extra\tExtra', overrides: { ...notAncestor, 'symbolic-ref': () => 'refs/heads/job-api', 'rev-parse': (args) => args[1] === '--abbrev-ref' ? 'origin/main' : 'local-extra' } });
   await assert.rejects(runtimeWith(host, { run: tree.run }).cleanup({}, { ...sub, worktree: { ...sub.worktree, path: dir } }), /preserve it for review/);
   assert.ok(!tree.calls.some((c) => c[0] === 'worktree'));
 });
@@ -283,8 +286,8 @@ test('cleanup of a cancelled sub-job archives its sessions, keeps unpushed commi
   assert.deepEqual(archived, ['sid'], 'an archived card is not re-stamped and a purged one is not adopted back');
   assert.deepEqual(f.calls.at(-1), ['update-ref', '-d', 'refs/heads/job-api', 'base'], 'a cancelled sub-job never pushed, so the base it was cut from is what may be deleted');
   assert.ok(!f.calls.some((c) => ['merge', 'ls-remote', 'push'].includes(c[0])), 'nothing merged: main and origin are left alone');
-  const committed = fakeRun({ head: 'unpushed' });
-  await assert.rejects(runtimeWith(host, { run: committed.run }).cleanup({}, cancelled), /additional commits/);
+  const committed = fakeRun({ head: 'unpushed', log: 'unpushed\tWork in progress' });
+  await assert.rejects(runtimeWith(host, { run: committed.run }).cleanup({}, cancelled), /1 commit not on origin\/main/);
 });
 
 test('cleanup of a PR sub-job marked done by hand before it ever got a PR falls back to the worktree\'s cut point', async () => {
@@ -384,4 +387,109 @@ test('updateMain leaves main alone when the job landed on a non-default base', a
   const home = fakeRun({ overrides: { status: () => '', branch: () => 'next', repo: () => JSON.stringify({ defaultBranchRef: { name: 'next' } }) } });
   await runtimeWith(host, { run: home.run }).cleanup({ updateMain: true, base: 'next' }, sub);
   assert.deepEqual(home.calls.at(-1), ['merge', '--ff-only', 'refs/remotes/origin/next'], 'a base that IS the default still fast-forwards');
+});
+
+// A real origin, clone and job worktree, because the refusal rules read real git
+// output (status v2, log/rev-list against origin) that the fake cannot stand in for.
+async function gitRepo() {
+  const dir = fs.mkdtempSync(path.join(DATA_DIR, 'cleanup-'));
+  const git = (cwd, ...args) => exec('git', ['-C', cwd, ...args]).then((r) => r.stdout.trim());
+  const origin = path.join(dir, 'origin.git'), repo = path.join(dir, 'repo'), wtPath = path.join(dir, 'repo-worktree-job-api');
+  await exec('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+  await exec('git', ['clone', '-q', origin, repo]);
+  const commit = async (cwd, file, message) => { fs.writeFileSync(path.join(cwd, file), `${message}\n`); await git(cwd, 'add', file); await git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', message); };
+  await commit(repo, 'README.md', 'Initial');
+  await git(repo, 'push', '-q', 'origin', 'HEAD:main');
+  await git(repo, 'remote', 'set-head', 'origin', 'main');
+  const cleanupHead = await git(repo, 'rev-parse', 'HEAD');
+  await git(repo, 'worktree', 'add', '-q', '-b', 'job-api', wtPath, 'refs/remotes/origin/main');
+  const wt = { path: wtPath, repoRoot: repo, branch: 'job-api', cleanupHead };
+  const branchExists = async () => Boolean(await git(repo, 'for-each-ref', '--format=%(objectname)', 'refs/heads/job-api'));
+  return { git, repo, wt, commit, branchExists, runtime: runtimeWith(fakeHost().host) };
+}
+
+test('a worktree rebased onto newer main with no commits of its own is cleaned up', async () => {
+  const r = await gitRepo();
+  await r.commit(r.repo, 'other.js', 'Someone else lands on main');
+  await r.git(r.repo, 'push', '-q', 'origin', 'HEAD:main');
+  await r.git(r.wt.path, 'fetch', '-q', 'origin');
+  await r.git(r.wt.path, 'rebase', '-q', 'refs/remotes/origin/main');
+  assert.notEqual(await r.git(r.wt.path, 'rev-parse', 'HEAD'), r.wt.cleanupHead);
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead);
+  assert.equal(fs.existsSync(r.wt.path), false);
+  assert.equal(await r.branchExists(), false);
+});
+
+test('a branch with its own commits is refused with the commit list, and says which are pushed', async () => {
+  const r = await gitRepo();
+  await r.commit(r.wt.path, 'a.js', 'Pushed to its own branch');
+  await r.git(r.wt.path, 'push', '-q', 'origin', 'job-api');
+  await r.commit(r.wt.path, 'b.js', 'Only on this machine');
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused);
+  assert.match(e.message, /2 commits not on origin\/main/);
+  assert.deepEqual(e.refusal.commits.map((c) => [c.subject, c.pushed]), [['Only on this machine', false], ['Pushed to its own branch', true]]);
+  assert.deepEqual([e.refusal.commitCount, e.refusal.fileCount, e.refusal.base], [2, 0, 'main']);
+  assert.equal(e.refusal.head, await r.git(r.wt.path, 'rev-parse', 'HEAD'));
+  assert.ok(fs.existsSync(r.wt.path)); assert.ok(await r.branchExists());
+});
+
+test('a dirty tree at the verified head is refused with the file list, untracked files included', async () => {
+  const r = await gitRepo();
+  fs.writeFileSync(path.join(r.wt.path, 'README.md'), 'edited\n');
+  fs.mkdirSync(path.join(r.wt.path, 'new dir'));
+  fs.writeFileSync(path.join(r.wt.path, 'new dir', 'list models.js'), 'x\n');
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused);
+  assert.match(e.message, /2 uncommitted files/);
+  assert.deepEqual(e.refusal.files, [{ change: 'modified', path: 'README.md' }, { change: 'untracked', path: 'new dir/list models.js' }]);
+  assert.equal(e.refusal.commitCount, 0);
+  assert.ok(fs.existsSync(r.wt.path));
+});
+
+test('untracked files alone are enough to refuse, even with no origin/HEAD to compare against', async () => {
+  const r = await gitRepo();
+  await r.git(r.repo, 'remote', 'set-head', 'origin', '--delete');
+  await r.git(r.repo, 'remote', 'set-url', 'origin', path.join(DATA_DIR, 'no-such-origin'));
+  fs.writeFileSync(path.join(r.wt.path, 'notes.txt'), 'x\n');
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused);
+  assert.deepEqual(e.refusal.files, [{ change: 'untracked', path: 'notes.txt' }]);
+  assert.ok(fs.existsSync(r.wt.path));
+});
+
+test('Discard removes exactly the state it was shown, and refuses again once the worktree has moved on', async () => {
+  const r = await gitRepo();
+  await r.commit(r.wt.path, 'a.js', 'Local work');
+  fs.writeFileSync(path.join(r.wt.path, 'scratch.txt'), 'x\n');
+  const shown = (await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e)).refusal;
+  await r.commit(r.wt.path, 'b.js', 'Committed after the human looked');
+  const stale = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: shown }).catch((e) => e);
+  assert.ok(stale instanceof CleanupRefused);
+  assert.match(stale.message, /changed after you chose to discard/);
+  assert.equal(stale.refusal.commitCount, 2);
+  assert.ok(fs.existsSync(r.wt.path) && await r.branchExists(), 'nothing is deleted on a stale discard');
+  fs.appendFileSync(path.join(r.wt.path, 'scratch.txt'), 'more\n');
+  const edited = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: stale.refusal }).catch((e) => e);
+  assert.ok(edited instanceof CleanupRefused, 'an edit to an already-dirty file changes the fingerprint');
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: edited.refusal });
+  assert.equal(fs.existsSync(r.wt.path), false);
+  assert.equal(await r.branchExists(), false);
+});
+
+test('Discard of a branch whose worktree is already gone deletes it only at the head shown', async () => {
+  const r = await gitRepo();
+  await r.commit(r.wt.path, 'a.js', 'Local work');
+  await r.git(r.repo, 'worktree', 'remove', r.wt.path);
+  const shown = (await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e)).refusal;
+  assert.equal(shown.commitCount, 1);
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: shown });
+  assert.equal(await r.branchExists(), false);
+});
+
+test('parseStatus reads porcelain v2: renames carry their old path as the next entry, and paths keep their spaces', () => {
+  const out = ['1 .M N... 100644 100644 100644 aaa bbb src/app.js', '2 R. N... 100644 100644 100644 aaa bbb R100 new name.js', 'old name.js',
+    'u UU N... 100644 100644 100644 100644 aaa bbb ccc conflict.js', '? notes/todo list.md', ''].join('\0');
+  assert.deepEqual(parseStatus(out), [{ change: 'modified', path: 'src/app.js' }, { change: 'renamed', path: 'new name.js' },
+    { change: 'conflicted', path: 'conflict.js' }, { change: 'untracked', path: 'notes/todo list.md' }]);
 });

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { runFile } from './job-github.js';
 import { jobPrompt, placeholderBranch } from './job-prompts.js';
@@ -35,6 +36,45 @@ export function writableDirsFor(job) {
 }
 
 export const expandRepo = (repo) => path.resolve(repo.startsWith('~/') ? path.join(os.homedir(), repo.slice(2)) : repo);
+
+// A cleanup that would lose work. `refusal` is what the board shows the human
+// and what a Discard must echo back: the head and dirty-state fingerprint pin
+// the override to exactly what was seen.
+export class CleanupRefused extends Error {
+  constructor(message, refusal) { super(message); this.refusal = refusal; }
+}
+const LOSS_LIST_CAP = 50;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const changeOf = (type, xy) => type === '?' ? 'untracked' : type === 'u' ? 'conflicted'
+  : /D/.test(xy) ? 'deleted' : /A/.test(xy) ? 'added' : /R/.test(xy) ? 'renamed' : 'modified';
+// `git status --porcelain=v2 -z`: a path may contain spaces, so it is everything
+// after the fixed fields, and a rename carries its old path as the next entry.
+export function parseStatus(out) {
+  const entries = out.split('\0');
+  const files = [];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const fixed = { 1: 8, 2: 9, u: 10 }[e[0]];
+    if (e[0] === '?') files.push({ change: 'untracked', path: e.slice(2) });
+    else if (fixed) {
+      const f = e.split(' ');
+      files.push({ change: changeOf(e[0], f[1]), path: f.slice(fixed).join(' ') });
+      if (e[0] === '2') i++;
+    }
+  }
+  return files;
+}
+// Size and mtime stand in for content: any edit after the human looked moves
+// one of them, and hashing a large tree's bytes is not worth the wait.
+function fingerprintOf(dir, head, files) {
+  const h = crypto.createHash('sha256').update(String(head));
+  for (const f of files) {
+    let st = null;
+    try { st = fs.lstatSync(path.join(dir, f.path)); } catch {}
+    h.update(`\0${f.change}\0${f.path}\0${st ? `${st.size}:${st.mtimeMs}` : '-'}`);
+  }
+  return h.digest('hex').slice(0, 16);
+}
 
 export class JobRuntime {
   // `statusOf(sessionId)` and `dormantOf(sessionId)` answer from the graph the
@@ -240,7 +280,7 @@ export class JobRuntime {
     // A sub-job with no PR — cancelled, or marked done by hand before it ever
     // opened one — merged nothing. Its bytes are retained only if the branch
     // was pushed (the PR head) or never left the base it was cut from.
-    if (sub.worktree) await this.cleanupWorktree(sub.worktree, sub.pr?.head || sub.worktree.cleanupHead, { mergedHead: sub.pr?.head });
+    if (sub.worktree) await this.cleanupWorktree(sub.worktree, sub.pr?.head || sub.worktree.cleanupHead, { mergedHead: sub.pr?.head, base: sub.pr?.base, discard: sub.discard });
     if (sub.worktree && sub.pr && !sub.cancelledAt) await this.deleteRemoteBranch(sub.worktree, sub.pr.head);
     if (job.updateMain && !sub.cancelledAt && sub.pr && await this.landedOnDefault(job, sub)) {
       const root = await gitRepoRoot(expandRepo(sub.repo));
@@ -279,24 +319,73 @@ export class JobRuntime {
     }
   }
 
-  // Verbatim from core: compare-and-delete, so a racing local commit is refused.
-  async cleanupWorktree(wt, expectedHead, { mergedHead } = {}) {
-    if (!expectedHead) throw new Error('Cannot clean up without the verified branch head');
-    const accepts = async (local) => local === expectedHead
-      || (!!mergedHead && await this.isMergedAncestor(local, mergedHead, wt.repoRoot));
+  // Compare-and-delete: the worktree and branch go only if nothing on them would
+  // be lost — a clean tree whose head is the verified one, or one whose commits
+  // are all on origin's default branch or behind the merged PR head already (a
+  // rebase onto newer main moves the head without adding work). The ref is
+  // deleted at the value inspected, so a racing local commit is refused.
+  // `discard` is the human's override, pinned to the head and fingerprint shown.
+  async cleanupWorktree(wt, expectedHead, { mergedHead, base, discard } = {}) {
+    if (!expectedHead && !discard) throw new Error('Cannot clean up without the verified branch head');
     const ref = `refs/heads/${wt.branch}`;
+    let head = null;
     if (fs.existsSync(wt.path)) {
       const branch = await this.run('git', ['symbolic-ref', 'HEAD'], wt.path);
-      const head = await this.run('git', ['rev-parse', 'HEAD'], wt.path);
-      if (branch !== ref || !(await accepts(head))) throw new Error('Worktree has changed since verification; preserve it for review');
+      if (branch !== ref) throw new Error('Worktree has changed since verification; preserve it for review');
+      head = await this.run('git', ['rev-parse', 'HEAD'], wt.path);
+      const files = parseStatus(await this.run('git', ['status', '--porcelain=v2', '-z', '--untracked-files=all'], wt.path));
+      await this.assertDisposable(wt, { head, files }, expectedHead, { mergedHead, base, discard });
       await removeWorktree({ worktreePath: wt.path, repoRoot: wt.repoRoot });
     }
     const trees = await this.run('git', ['worktree', 'list', '--porcelain'], wt.repoRoot);
     if (trees.split('\n').includes(`branch ${ref}`)) throw new Error('Branch is in use by another worktree');
     const existing = await this.run('git', ['for-each-ref', '--format=%(objectname)', ref], wt.repoRoot);
     if (!existing) return;
-    if (!(await accepts(existing))) throw new Error('Branch has additional commits; preserve it for review');
+    if (existing !== head) await this.assertDisposable(wt, { head: existing, files: [] }, expectedHead, { mergedHead, base, discard });
     await this.run('git', ['update-ref', '-d', ref, existing], wt.repoRoot);
+  }
+
+  async assertDisposable(wt, { head, files }, expectedHead, { mergedHead, base, discard }) {
+    const fingerprint = fingerprintOf(wt.path, head, files);
+    if (discard) {
+      if (discard.head === head && discard.fingerprint === fingerprint) return;
+    } else if (!files.length && head === expectedHead) return;
+    // At the verified head, or behind the merged one, there is nothing to
+    // compare, so a dirty tree is refused (with its Discard) even when origin's
+    // default branch is unknowable.
+    const retained = head === expectedHead || (!!mergedHead && await this.isMergedAncestor(head, mergedHead, wt.repoRoot));
+    const target = retained ? base || null : base || await this.defaultBranch(wt.repoRoot);
+    const commits = retained ? [] : await this.unmergedCommits(wt.repoRoot, head, target);
+    if (!discard && !files.length && !commits.length) return;
+    const lost = [commits.length && `${plural(commits.length, 'commit')} not on origin/${target}`, files.length && plural(files.length, 'uncommitted file')].filter(Boolean).join(', ');
+    const message = discard ? `Worktree changed after you chose to discard it${lost ? ` (${lost})` : ''}; review it again`
+      : `Worktree has work that would be lost (${lost}); preserve it for review`;
+    throw new CleanupRefused(message, { path: wt.path, branch: wt.branch, base: target, head, fingerprint,
+      commits: commits.slice(0, LOSS_LIST_CAP), commitCount: commits.length, files: files.slice(0, LOSS_LIST_CAP), fileCount: files.length });
+  }
+
+  // Commits on `head` that origin's default branch does not have, after a fetch
+  // (a failed fetch only leaves origin staler, which can add commits here, never
+  // hide one). Each says whether some other origin branch carries it — pushed
+  // work survives a local delete, but is not on the branch that ships.
+  async unmergedCommits(repoRoot, head, target) {
+    await this.run('git', ['fetch', 'origin'], repoRoot).catch(() => {});
+    const log = await this.run('git', ['log', '--format=%H%x09%s', head, '--not', `refs/remotes/origin/${target}`], repoRoot);
+    if (!log) return [];
+    const unpushed = new Set((await this.run('git', ['rev-list', head, '--not', '--remotes=origin'], repoRoot)).split('\n').filter(Boolean));
+    return log.split('\n').map((line) => {
+      const [sha, ...subject] = line.split('\t');
+      return { sha, subject: subject.join('\t'), pushed: !unpushed.has(sha) };
+    });
+  }
+
+  async defaultBranch(repoRoot) {
+    const local = await this.run('git', ['rev-parse', '--abbrev-ref', 'refs/remotes/origin/HEAD'], repoRoot).catch(() => '');
+    if (local.startsWith('origin/')) return local.slice('origin/'.length);
+    const remote = await this.run('git', ['ls-remote', '--symref', 'origin', 'HEAD'], repoRoot);
+    const branch = remote.match(/^ref: refs\/heads\/(\S+)\s+HEAD/m)?.[1];
+    if (!branch) throw new Error('Cannot tell which branch origin delivers to; preserve it for review');
+    return branch;
   }
 
   // Verbatim from core: the merged PR's branch on origin, only while it still
