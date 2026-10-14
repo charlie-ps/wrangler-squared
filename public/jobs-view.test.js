@@ -540,7 +540,7 @@ test('green and amber verdicts, a pending summary and no comments each read dist
 
 test('new-job form sends chosen model, repositories and the four review checkpoints', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
-  assert.equal(form.elements.reviewCode.value, 'you', 'the human reads each diff before it is committed, unless they opt out');
+  assert.equal(form.elements.reviewCode.checked, true, 'the human reads each diff before it is committed, unless they opt out');
   assert.equal(form.elements.amendmentAuthority, undefined, 'agents never change the plan, so there is no authority to grant');
   form.elements.intent.value = 'Deliver something useful';
   form.elements.repos.value = '/repo\n/repo\n/second';
@@ -571,10 +571,14 @@ test('the Plan checkpoint can be set to Auto in the new-job form, and is a flag 
   f.q('#job-dialog').close();
   f.q('#job-new').click(); const form = f.q('#job-create-form');
   const row = form.querySelector('.job-review[data-checkpoint="reviewPlan"]');
-  assert.equal(row.querySelector('[role="radiogroup"]').getAttribute('aria-label'), 'Plan');
-  assert.deepEqual([...row.querySelectorAll('label')].map((l) => [l.textContent, l.querySelector('input').checked]), [['You review', true], ['Auto', false]]);
+  const toggle = row.querySelector('.job-review-toggle'); const input = form.elements.reviewPlan;
+  assert.equal(row.querySelectorAll('input').length, 1, 'one click-to-toggle control, not a pair');
+  assert.deepEqual([input.type, input.getAttribute('role'), input.checked, input.getAttribute('aria-label'), toggle.title, toggle.textContent], ['checkbox', 'switch', true, 'Plan: You review', 'Plan: You review', '']);
+  assert.ok(row.querySelector('.job-review-row').contains(toggle), 'on the same row as the name and hint');
   assert.equal(row.querySelector('small').textContent, 'You approve the plan before any ticket, PR or session starts');
-  const auto = row.querySelector('input[value="auto"]'); auto.checked = true; auto.dispatchEvent(f.event('change'));
+  toggle.click();
+  assert.equal(input.checked, false);
+  assert.deepEqual([input.getAttribute('aria-label'), toggle.title], ['Plan: Auto', 'Plan: Auto']);
   assert.equal(row.querySelector('small').textContent, 'Work starts as soon as the plan is drafted', 'the hint follows the choice');
   form.elements.intent.value = 'Deliver it'; form.dispatchEvent(f.event('submit'));
   assert.equal(f.sent.at(-1).job.reviewPlan, false);
@@ -656,8 +660,8 @@ test('new job is a brief beside a property sidebar, with the planning extras fol
   assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Review checkpoints', 'Images', 'After delivery']);
   for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'shareImages', 'updateMain']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
   assert.ok(props.querySelector('#job-pick').querySelector('.pick-ticket') && props.querySelector('#job-pick .pick-meter'), 'the picker is a ticket with an effort meter in the sidebar');
-  assert.deepEqual([...props.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].value, r.querySelector('small').textContent]),
-    [['reviewPlan', 'Plan', 'you', 'You approve the plan before any ticket, PR or session starts'], ['reviewCode', 'Code', 'you', 'You read each PR’s diff before it’s committed'], ['reviewMerge', 'Merge', 'you', 'You approve each PR once its checks pass'], ['reviewSessions', 'Session results', 'you', 'You approve each session’s receipt before it counts as done']]);
+  assert.deepEqual([...props.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].checked, r.querySelector('small').textContent]),
+    [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts'], ['reviewCode', 'Code', true, 'You read each PR’s diff before it’s committed'], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass'], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done']]);
   assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('small')?.textContent]),
     [['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, undefined]]);
   assert.match(form.querySelector('.job-create-foot').textContent, /nothing touches Jira until you approve/);

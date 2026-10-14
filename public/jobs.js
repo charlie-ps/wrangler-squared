@@ -29,9 +29,18 @@ export const checkpointFlagHtml = (cp, you) => {
   const text = esc(`${checkpointLabel(cp, you)}. ${checkpointHint(cp, you)}`);
   return `<span class="job-flag ${you ? 'you' : 'auto'}" role="img" aria-label="${text}" title="${text}">${ICONS[cp.icon]}<span class="job-flag-badge">${you ? ICONS.hand : ICONS.ff}</span></span>`;
 };
-// Native radios, so the arrow keys move between You review and Auto as they do in
-// any radio group; `name` lets the intro's picture keep out of a form's fields.
-export const checkpointSegHtml = (cp, you, name = cp.field) => `<span class="job-review-seg" role="radiogroup" aria-label="${esc(cp.name)}">${[['you', true, ICONS.hand, 'You review'], ['auto', false, ICONS.ff, 'Auto']].map(([value, on, icon, text]) => `<label class="${value}"><input type="radio" name="${esc(name)}" value="${value}"${you === on ? ' checked' : ''}>${icon}<span>${text}</span></label>`).join('')}</span>`;
+// One native checkbox (checked is You review), so a click or Space flips it and
+// an unchecked box submits nothing, which reads as Auto. The words live in the
+// title and the accessible name, both rewritten by whoever handles the change;
+// `name` lets the intro's picture keep out of a form's fields.
+export const checkpointToggleHtml = (cp, you, name = cp.field) => {
+  const text = esc(checkpointLabel(cp, you));
+  return `<label class="job-review-toggle" title="${text}"><input type="checkbox" role="switch" name="${esc(name)}" value="you" aria-label="${text}"${you ? ' checked' : ''}><span class="you">${ICONS.hand}</span><span class="auto">${ICONS.ff}</span></label>`;
+};
+export const syncCheckpointToggle = (input, cp) => {
+  const text = checkpointLabel(cp, input.checked);
+  input.setAttribute('aria-label', text); input.closest('label').title = text;
+};
 // A sub-job is one of exactly three kinds, drawn as the same glyph everywhere one
 // appears (stepper badge, dependency editor, detail chip) and named only in its
 // tooltip: a PR, an agent session on this machine (no PR), or a human task.

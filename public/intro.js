@@ -1,6 +1,6 @@
 import { ICONS, ROCKET_PATH } from './icons.js';
 import { layoutGraphEdges } from './job-graph.js';
-import { CHECKPOINTS, checkpointFlagHtml, checkpointHint, checkpointSegHtml } from './jobs.js';
+import { CHECKPOINTS, checkpointFlagHtml, checkpointHint, checkpointToggleHtml } from './jobs.js';
 
 // The "How Jobs works" walkthrough: shown once to every browser that has not
 // dismissed it (installed today or long ago), then only on request from the Jobs
@@ -81,10 +81,10 @@ function board(phase) {
 }
 
 // The checkpoints are a picture the reader can poke, not settings: each job sets
-// its own on the New job form. The radios' names keep them out of any form's fields.
+// its own on the New job form. The toggles' names keep them out of any form's fields.
 const YOU = `<b class="intro-cp you">${ICONS.hand}You review</b>`;
 const AUTO = `<b class="intro-cp">${ICONS.ff}Auto</b>`;
-const checkpointsFigure = (reviews) => `<div class="intro-checkpoints">${CHECKPOINTS.map((cp) => `<div class="job-review intro-checkpoint" data-checkpoint="${cp.field}"><div class="job-review-row">${checkpointFlagHtml(cp, reviews[cp.field])}<span class="job-review-name">${cp.name}<small>${checkpointHint(cp, reviews[cp.field])}</small></span>${checkpointSegHtml(cp, reviews[cp.field], `intro-${cp.field}`)}</div></div>`).join('')}</div>`;
+const checkpointsFigure = (reviews) => `<div class="intro-checkpoints">${CHECKPOINTS.map((cp) => `<div class="job-review intro-checkpoint" data-checkpoint="${cp.field}"><div class="job-review-row">${checkpointFlagHtml(cp, reviews[cp.field])}<span class="job-review-name">${cp.name}<small>${checkpointHint(cp, reviews[cp.field])}</small></span>${checkpointToggleHtml(cp, reviews[cp.field], `intro-${cp.field}`)}</div></div>`).join('')}</div>`;
 
 // `anim` steps redraw their figure every `ms`; `still` is the frame shown with
 // reduced motion. `stack` puts the figure under the heading at full width.
@@ -157,12 +157,11 @@ export function createIntro({ storage, onNewJob = () => {} }) {
     dialog.querySelector('.intro-body').onchange = (e) => {
       const field = e.target.closest('[data-checkpoint]')?.dataset.checkpoint;
       if (!field) return;
-      reviews[field] = e.target.value === 'you';
+      reviews[field] = e.target.checked;
       render();
-      dialog.querySelector(`[name="intro-${field}"]:checked`).focus();
+      dialog.querySelector(`[name="intro-${field}"]`).focus();
     };
     dialog.addEventListener('keydown', (e) => {
-      if (e.target.closest?.('.job-review-seg')) return;
       if (e.key === 'ArrowRight' && at < INTRO_STEPS.length - 1) go(at + 1);
       if (e.key === 'ArrowLeft' && at > 0) go(at - 1);
     });

@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, youReview, checkpointHint, checkpointFlagHtml, checkpointSegHtml, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan } from './jobs.js';
+import { CHECKPOINTS, checkpoint, youReview, checkpointHint, checkpointFlagHtml, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml, jobTileHtml } from './job-graph.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 import { createJobImages, imagesPanelHtml, openZoom } from './job-images.js';
@@ -64,7 +64,7 @@ function depsHtml(job, sub) {
 
 // New job's review checkpoints: every one starts on You review, and its hint
 // follows the choice (the form's change handler rewrites it).
-const REVIEW_POINTS = CHECKPOINTS.map((cp) => `<div class="job-review" data-checkpoint="${cp.field}"><div class="job-review-row"><span class="job-review-stage">${ICONS[cp.icon]}</span><span class="job-review-name">${cp.name}<small>${checkpointHint(cp, true)}</small></span>${checkpointSegHtml(cp, true)}</div></div>`).join('');
+const REVIEW_POINTS = CHECKPOINTS.map((cp) => `<div class="job-review" data-checkpoint="${cp.field}"><div class="job-review-row"><span class="job-review-stage">${ICONS[cp.icon]}</span><span class="job-review-name">${cp.name}<small>${checkpointHint(cp, true)}</small></span>${checkpointToggleHtml(cp, true)}</div></div>`).join('');
 
 // The board's own Cmd/Ctrl+Enter handlers only reach the elements they own, and
 // this dialog hangs off <body> outside every one of them, so the chord is matched
@@ -575,7 +575,8 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     };
     form.querySelectorAll('.job-review').forEach((row) => row.onchange = () => {
       const cp = checkpoint(row.dataset.checkpoint);
-      row.querySelector('small').textContent = checkpointHint(cp, form.elements[cp.field].value === 'you');
+      const input = form.elements[cp.field]; syncCheckpointToggle(input, cp);
+      row.querySelector('small').textContent = checkpointHint(cp, input.checked);
     });
     form.onsubmit = (e) => {
       e.preventDefault(); if (images.busy()) return; const values = new FormData(form);

@@ -187,24 +187,21 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
 .job-flag-badge { position:absolute; right:-4px; bottom:-4px; display:grid; place-items:center; width:13px; height:13px; border-radius:50%; font-size:9px; background:var(--surface); }
 .job-flag.you .job-flag-badge { color:var(--st-warn-fg); box-shadow:0 0 0 1px var(--st-warn); }
 .job-flag.auto .job-flag-badge { color:var(--fg-subtle); box-shadow:0 0 0 1px var(--border); }
-/* A review checkpoint: stage glyph, name and the hint for the current choice, then
-   You review / Auto. The row is its own container so the control drops under the
-   name in the narrow New job sidebar and sits beside it where there is room. */
+/* A review checkpoint on one row: stage glyph, name over the hint for the current
+   choice, then a single icon that flips between You review (hand) and Auto (ff). */
 .job-prop:has(>.job-review) { gap:10px; }
-.job-review { container-type:inline-size; }
-.job-review-row { display:grid; grid-template-columns:auto minmax(0,1fr); grid-template-areas:"stage name" ". seg"; align-items:center; gap:6px 10px; font-size:13px; }
-@container (min-width:380px) { .job-review-row { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:"stage name seg"; } }
-.job-review-row>:first-child { grid-area:stage; }
+.job-review-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; font-size:13px; }
 .job-review-stage { display:grid; place-items:center; width:20px; font-size:16px; color:var(--fg-muted); }
-.job-review-name { grid-area:name; min-width:0; font-weight:600; }
+.job-review-name { min-width:0; font-weight:600; }
 .job-review-name small { display:block; font-size:11.5px; font-weight:400; color:var(--fg-subtle); }
-.job-review-seg { grid-area:seg; justify-self:start; display:inline-flex; gap:2px; padding:2px; border-radius:8px; background:var(--surface-2); }
-.job-review-seg label { position:relative; display:inline-flex; align-items:center; gap:5px; margin:0; transition:background .12s, color .12s; padding:4px 9px; border-radius:6px; font-size:12px; color:var(--fg-muted); white-space:nowrap; cursor:pointer; }
-.job-review-seg label:hover { color:var(--fg); }
-.job-review-seg input { position:absolute; opacity:0; width:1px; height:1px; margin:0; pointer-events:none; }
-.job-review-seg label:has(input:focus-visible) { outline:2px solid var(--blue); outline-offset:1px; }
-.job-review-seg label.you:has(input:checked) { background:color-mix(in srgb, var(--st-warn) 15%, var(--surface)); color:var(--st-warn-fg); font-weight:600; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 45%, transparent); }
-.job-review-seg label.auto:has(input:checked) { background:var(--surface); color:var(--fg); font-weight:600; box-shadow:0 0 0 1px var(--border); }
+.job-review-toggle { position:relative; display:grid; place-items:center; width:30px; height:30px; margin:0; border-radius:8px; font-size:15px; transition:background .12s, color .12s; cursor:pointer; }
+.job-review-toggle input { position:absolute; opacity:0; width:1px; height:1px; margin:0; pointer-events:none; }
+.job-review-toggle:has(input:focus-visible) { outline:2px solid var(--blue); outline-offset:1px; }
+.job-review-toggle:has(input:checked) { background:color-mix(in srgb, var(--st-warn) 15%, var(--surface)); color:var(--st-warn-fg); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 45%, transparent); }
+.job-review-toggle:not(:has(input:checked)) { background:var(--surface-2); color:var(--fg-muted); box-shadow:inset 0 0 0 1px var(--border); }
+.job-review-toggle:not(:has(input:checked)):hover { color:var(--fg); }
+.job-review-toggle:has(input:checked) .auto,.job-review-toggle:not(:has(input:checked)) .you { display:none; }
+.job-review-toggle span { display:grid; place-items:center; }
 
 .job-stories { display:grid; gap:6px; }
 .job-stories>*:is(div,label) { display:flex; align-items:center; gap:10px; background:var(--surface-2); border-radius:10px; padding:8px 10px; font-size:12px; }
@@ -412,7 +409,7 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
   .intro-graph .job-graph-columns { gap:28px; }
   .job-node-repo { display:none; }
 }
-@media(prefers-reduced-motion:reduce) { .job-review-seg label,.job-switch,.job-switch::after,.intro-figure .job-node-tile,.intro-graph path,.intro-goal,.intro-goal .job-avatar,.intro-mini-job,.intro-mini-job .job-avatar,.intro-rail-badge { transition:none; } .intro-rail-badge.bump { animation:none; } }
+@media(prefers-reduced-motion:reduce) { .job-review-toggle,.job-switch,.job-switch::after,.intro-figure .job-node-tile,.intro-graph path,.intro-goal,.intro-goal .job-avatar,.intro-mini-job,.intro-mini-job .job-avatar,.intro-rail-badge { transition:none; } .intro-rail-badge.bump { animation:none; } }
 
 /* Images on a job: the New job tray under the outcome, and the strip in the job dialog. */
 .job-outcome>label { margin:14px 0 0; }
