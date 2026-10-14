@@ -1196,6 +1196,73 @@ test('a reviewed write is drafted by its session, which stays parked until every
   assert.deepEqual(job.moves.map((m) => m.move), ['approve-write', 'skip-write']);
 });
 
+test('Writes switched to Auto with drafts waiting: release approves each without a review of its own, and the parked session is mailed once all are decided', async (t) => {
+  const f = fixture(t, { ...noSessionReview, reviewWrites: true });
+  await f.approve(plan([notifier('n'),
+    write('post', 'n', { type: 'post', text: 'Planned post' }, { place: { type: 'slack', ref: '#web' }, storyId: undefined }),
+    write('move', 'n', moveTo('In Review'), { review: true })]));
+  const w = f.workerFor('n');
+  f.report({ kind: 'drafts', drafts: [{ id: 'post', text: 'Shipped it' }, { id: 'move', to: 'In Review' }] }, w);
+  const write_ = (id) => f.store.get(f.job.id).subJobs.find((s) => s.id === id);
+  setReview(f, 'reviewWrites', false, { release: true });
+  let job = f.store.get(f.job.id);
+  assert.equal(job.reviewWrites, false);
+  assert.deepEqual([write_('post').stage, write_('post').state, !!write_('post').writeApprovedAt], ['write', 'approved', true]);
+  assert.deepEqual([write_('move').stage, write_('move').state], ['review', 'verified'], 'its own review:true beats the job default');
+  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['approve-write', 'post', 'Approved the write “Write post”'], ['set-review', null, 'Switched Writes to Auto, releasing what was waiting']]);
+  await f.tick();
+  assert.deepEqual(f.mailed, [], 'the parked session still has a draft with the human');
+  f.store.action(f.job.id, 'approve-write', { subJobId: 'move' }); await f.tick();
+  assert.equal(f.mailed.length, 1);
+  assert.match(f.mailed[0].text, /"id":"post".*"text":"Shipped it","approved":true/);
+  assert.match(f.mailed[0].text, /"id":"move".*"approved":true/);
+
+  const g = fixture(t, { ...noSessionReview, reviewWrites: true });
+  await g.approve(plan([notifier('n'), write('move', 'n', moveTo('In Review'))]));
+  g.report({ kind: 'drafts', drafts: [{ id: 'move', to: 'In Review' }] }, g.workerFor('n'));
+  g.store.action(g.job.id, 'set-review', { field: 'reviewWrites', you: false });
+  assert.equal(g.store.get(g.job.id).subJobs[1].stage, 'review', 'a draft already waiting is not let through unasked');
+  await g.tick();
+  assert.deepEqual(g.mailed, []);
+});
+
+test('drafts landing after Writes went to Auto are approved as they land; a session launched under Auto is not made to draft when it goes back on', async (t) => {
+  const f = fixture(t, { ...noSessionReview, reviewWrites: true });
+  await f.approve(plan([notifier('n'),
+    write('post', 'n', { type: 'post', text: 'Planned post' }, { place: { type: 'slack', ref: '#web' }, storyId: undefined }),
+    write('move', 'n', moveTo('In Review'), { review: true })]));
+  const w = f.workerFor('n');
+  assert.match(jobPrompt(f.store.get(f.job.id), w.sub, w.run), /Review is on for post, move: do NOT make them yet/);
+  setReview(f, 'reviewWrites', false);
+  assert.match(jobPrompt(f.store.get(f.job.id), w.sub, w.run), /Review is on for post, move/, 'the prompt it was launched with stands');
+  f.report({ kind: 'drafts', drafts: [{ id: 'post', text: 'Shipped it' }, { id: 'move', to: 'In Review' }] }, w);
+  const job = f.store.get(f.job.id);
+  const [post, move] = ['post', 'move'].map((id) => job.subJobs.find((s) => s.id === id));
+  assert.deepEqual([post.stage, post.state, post.action.text, !!post.writeApprovedAt], ['write', 'approved', 'Shipped it', true]);
+  assert.equal(move.stage, 'review');
+  assert.deepEqual(job.moves.at(-1), { ...job.moves.at(-1), move: 'approve-write', subJobId: 'post', detail: 'Approved the write “Write post”: Writes is on Auto' });
+  f.store.action(f.job.id, 'skip-write', { subJobId: 'move' }); await f.tick();
+  assert.equal(f.mailed.length, 1, 'mailed as soon as nothing is left in review');
+  assert.match(f.mailed[0].text, /Do not make: move/);
+
+  const h = fixture(t, { ...noSessionReview, reviewWrites: true });
+  await h.approve(plan([notifier('n'), write('move', 'n', moveTo('In Review'))]));
+  const u = h.workerFor('n');
+  setReview(h, 'reviewWrites', false);
+  h.report({ kind: 'drafts', drafts: [{ id: 'move', to: 'In Review' }] }, u);
+  await h.tick();
+  assert.equal(h.mailed.length, 1, 'every draft approved as it landed: the session is told at once');
+  assert.match(h.mailed[0].text, /"id":"move".*"approved":true/);
+
+  const g = fixture(t, noSessionReview);
+  await g.approve(plan([notifier('n'), write('move', 'n', moveTo('In Review'))]));
+  const v = g.workerFor('n');
+  setReview(g, 'reviewWrites', true);
+  assert.doesNotMatch(jobPrompt(g.store.get(g.job.id), v.sub, v.run), /kind:"drafts"/);
+  g.report(completed([{ id: 'move', outcome: 'written', from: 'To Do' }]), v);
+  assert.equal(g.store.get(g.job.id).subJobs[1].stage, 'cleanup', 'what it made under Auto is not pulled back');
+});
+
 test('a parked session whose card goes away errors; until then nothing relaunches it', async (t) => {
   const f = fixture(t, { ...noSessionReview, reviewWrites: true });
   await f.approve(plan([notifier('n'), write('w', 'n', moveTo('In Review'))]));

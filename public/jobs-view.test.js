@@ -1810,3 +1810,36 @@ test('a write elsewhere in review is approved as Write to its name, sending only
   panel.querySelector('[name="name"]').value = 'Statuspage'; panel.requestSubmit();
   assert.deepEqual(f.sent.at(-1).write, { action: { text: 'Post a resolved notice' }, name: 'Statuspage' });
 });
+
+test('the Writes checkpoint is in the footer only with writes, asks before releasing the drafts that follow it, and locks once none does', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation' }];
+  f.view.update(f.data); f.view.openDetail('job1');
+  assert.equal(footerButton(f, 'reviewWrites'), null, 'no writes, no Writes switch');
+  f.q('#job-dialog').close();
+  job.reviewWrites = true;
+  job.subJobs = [{ ...sub('api'), stage: 'implementation' }, sessionNode('n', { stage: 'session', state: 'running' }),
+    jiraWrite('post', 'n', { type: 'comment', comment: 'Shipped' }, { stage: 'review', state: 'verified' }),
+    jiraWrite('move', 'n', { type: 'transition', to: 'Done' }, { stage: 'review', state: 'verified', review: true }),
+    jiraWrite('later', 'n', { type: 'comment', comment: 'Later' }, { stage: 'write', state: 'queued' })];
+  f.view.update(f.data); f.view.openDetail('job1');
+  const writes = () => footerButton(f, 'reviewWrites');
+  assert.deepEqual([writes().getAttribute('aria-pressed'), writes().getAttribute('aria-label'), writes().getAttribute('aria-disabled')], ['true', 'Writes: You review. Switch to Auto', null]);
+  const before = f.sent.length;
+  writes().click();
+  assert.equal(f.sent.length, before, 'a draft is waiting, so it asks first');
+  assert.match(f.q('#job-review-confirm').textContent, /Switch Writes to Auto\?A write is waiting for your review\. Auto lets it through now/, 'a write with its own review is not counted');
+  assert.equal(f.q('#job-review-confirm button.primary').textContent, 'Approve the write');
+  f.q('#job-review-confirm').dispatchEvent(f.event('submit'));
+  assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewWrites', you: false, release: true });
+  assert.match(footerHint(f), /Writes: Auto The write is approved; each session makes what it drafted\. Released work can’t be pulled back\./);
+  job.reviewWrites = false; f.view.update(f.data);
+  writes().click();
+  assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewWrites', you: true }, 'nothing waits on Auto, so back on applies at once');
+  assert.match(footerHint(f), /Writes: You review From the next write on\./);
+  job.reviewWrites = true;
+  for (const w of job.subJobs.filter((s) => s.kind === 'write' && s.id !== 'move')) Object.assign(w, { stage: 'done', state: 'done' });
+  f.view.update(f.data);
+  assert.equal(writes().getAttribute('aria-disabled'), 'true');
+  assert.match(writes().getAttribute('aria-label'), /^Writes: You review\. Every write is made, decided, or has its own review setting$/);
+});

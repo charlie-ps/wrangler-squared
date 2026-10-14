@@ -65,6 +65,11 @@ export const ownedWrites = (job, session) => (job.subJobs || []).filter((w) => i
 export const openWrites = (job, session) => ownedWrites(job, session).filter((w) => !w.cancelledAt && w.stage === 'write' && ['queued', 'approved'].includes(w.state) && !w.error);
 // The reviewed writes it must draft before it may make them.
 export const toDraft = (job, session) => openWrites(job, session).filter((w) => !isMakeWrite(w) && writeReviewed(job, w) && !w.writeApprovedAt);
+// The writes a run was told to draft: fixed when it was claimed (`run.drafting`,
+// job-store.js), so a Writes switch mid-run changes the next launch, never the
+// prompt this one is working to. A run from before the field reads the job.
+export const draftingFor = (job, run, session) => (run?.drafting
+  ? openWrites(job, session).filter((w) => run.drafting.includes(w.id) && !isMakeWrite(w) && !w.writeApprovedAt) : toDraft(job, session));
 // Drafted and still with the human: the session is not run again until each is decided.
 export const inReview = (job, session) => ownedWrites(job, session).filter((w) => !w.cancelledAt && !isMakeWrite(w) && w.stage === 'review');
 // A session writing to a story nobody has created yet waits for its key, as a
@@ -166,7 +171,8 @@ export function applyWrites(job, run, session, report, now) {
   const asked = openWrites(job, session);
   const owned = ownedWrites(job, session);
   const results = [...(report.writes || []), ...fromOutputs(report.outputs)];
-  const undrafted = toDraft(job, session).map((w) => w.id);
+  const told = new Set(draftingFor(job, run, session).map((w) => w.id));
+  const undrafted = toDraft(job, session).filter((w) => told.has(w.id)).map((w) => w.id);
   if (undrafted.length) throw new Error(`Review is on for ${undrafted.join(', ')}: report them as kind:"drafts" first, then wait for mail with the human's decision`);
   const seen = new Set();
   for (const r of results) {
@@ -204,9 +210,13 @@ export function applyWrites(job, run, session, report, now) {
 // The session's drafts of the reviewed writes it owns: exactly those, each laid
 // onto its write the way the human's own edit would be (and validated the same
 // way), then held in review. A draft the plan's rules refuse is refused to the
-// session, which can still fix it.
+// session, which can still fix it. One no longer reviewed (Writes switched to
+// Auto while the session worked to its draft-first prompt) is approved as it
+// lands, as a ready receipt is under Code on Auto: the caller records the
+// [write, detail] pairs returned, and a run with nothing left in review is
+// mailed on the next tick.
 export function applyDrafts(job, run, session, report, now) {
-  const asked = toDraft(job, session);
+  const asked = draftingFor(job, run, session);
   const seen = new Set();
   for (const d of report.drafts) {
     if (!asked.some((w) => w.id === d.id)) throw new Error(`${d.id} is not a reviewed write of yours still to draft; draft only ${asked.map((w) => w.id).join(', ') || 'none'}`);
@@ -226,6 +236,7 @@ export function applyDrafts(job, run, session, report, now) {
   }
   run.drafts = report.drafts.map((d) => d.id);
   run.parkedAt = now;
+  return asked.filter((w) => !writeReviewed(job, w)).map((w) => [w, approveWrite(job, w, now)]);
 }
 // Every draft the parked run is waiting on has been approved, skipped or dropped.
 export const draftsDecided = (job, run) => !!run.parkedAt && !run.mailedAt && !run.stopped

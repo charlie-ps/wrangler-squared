@@ -7,7 +7,7 @@ import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { applyMove, dropSub, MOVE_ACTIONS } from './job-moves.js';
 import { requestReplan, discardReplan, proposeReplan, approveReplan } from './job-replan.js';
-import { applyWrites, applyDrafts, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
+import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
 
 const activeForSub = (job, sub) => job.runs.some((r) => !r.stopped && r.subJobId === sub.id);
 const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
@@ -75,8 +75,11 @@ function cancelJob(j, now) {
 // a board a tick behind must never let through something nobody saw waiting.
 // Merge has nothing to release here: the runner's next poll merges a green PR
 // once the flag is off. Plan locks once approved: a replan always waits anyway.
-export const REVIEW_POINTS = { reviewPlan: 'Plan', reviewCode: 'Code', reviewMerge: 'Merge', reviewSessions: 'Session results' };
-const flagOf = (j, field) => field === 'reviewCode' ? reviewCode(j) : field === 'reviewMerge' ? !!j.reviewMerge : j[field] ?? true;
+// Writes is only the default: a write's own `review` (true or false) beats it
+// (`writeReviewed`), so only writes without one are released, and a session
+// already drafting under it lands its drafts approved (job-writes.js applyDrafts).
+export const REVIEW_POINTS = { reviewPlan: 'Plan', reviewCode: 'Code', reviewMerge: 'Merge', reviewSessions: 'Session results', reviewWrites: 'Writes' };
+const flagOf = (j, field) => field === 'reviewCode' ? reviewCode(j) : field === 'reviewMerge' || field === 'reviewWrites' ? !!j[field] : j[field] ?? true;
 function releaseWaiting(j, field, { plan, revision }, now) {
   if (field === 'reviewPlan') {
     if (j.stage !== 'planning' || !j.plan || j.runs.some(runnable)) return 0;
@@ -86,10 +89,12 @@ function releaseWaiting(j, field, { plan, revision }, now) {
   }
   const waiting = j.subJobs.filter((s) => !s.error && s.stage === 'review' && (field === 'reviewCode'
     ? isPrSub(s) && s.state === 'verified' && s.ready && !s.ready.approvedAt
-    : field === 'reviewSessions' && isSessionSub(s) && s.result));
+    : field === 'reviewWrites' ? isWriteSub(s) && !s.cancelledAt && s.review !== true
+      : field === 'reviewSessions' && isSessionSub(s) && s.result));
   if (waiting.length && j.replan) throw new Error('A plan change is pending. Approve or discard it first.');
   for (const s of waiting) {
     if (field === 'reviewCode') { s.ready = { ...s.ready, approvedAt: now }; s.state = 'approved'; record(j, s, 'approve-code', null, `Approved the working tree of ${quoted(s.title)}`); }
+    else if (field === 'reviewWrites') record(j, s, 'approve-write', null, approveWrite(j, s, now));
     else { s.sessionApprovedAt = now; s.stage = 'cleanup'; s.state = 'queued'; record(j, s, 'approve-session', null, `Approved the result of ${quoted(s.title)}`); }
   }
   return waiting.length;
@@ -382,6 +387,9 @@ export class JobStore {
       if (!j || j.paused || j.cancelledAt || d.settings.paused || active.length >= d.settings.concurrency) return null;
       if (j.runs.some((r) => runnable(r) && r.subJobId === subJobId)) return null;
       const run = { id: uid('run'), subJobId, phase, model: launchModel(j), effort: launchEffort(j), startedAt: Date.now(), sessionId: null, stopped: false, report: null, ...extra };
+      // What its prompt tells it to draft, kept so a Writes switch mid-run
+      // reaches the next launch rather than refusing this one's receipt.
+      if (phase === 'session') run.drafting = toDraft(j, j.subJobs.find((s) => s.id === subJobId)).map((w) => w.id);
       j.runs.push(run); j.revision++;
       return run;
     });
@@ -440,7 +448,7 @@ export class JobStore {
           if (JSON.stringify(r.draftReport) === JSON.stringify(report)) return;
           throw new Error('This run already sent its drafts; wait for mail with the human\'s decision');
         }
-        if (!j.cancelledAt && !s?.cancelledAt) applyDrafts(j, r, s, report, Date.now());
+        if (!j.cancelledAt && !s?.cancelledAt) for (const [w, detail] of applyDrafts(j, r, s, report, Date.now())) record(j, w, 'approve-write', null, `${detail}: Writes is on Auto`);
         r.draftReport = report; r.parkedAt ??= Date.now();
         return;
       }

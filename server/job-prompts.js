@@ -2,7 +2,7 @@ import path from 'node:path';
 import { ATTRIBUTION, isHumanSub, reviewCode } from './jobs-schema.js';
 import { checkoutsDir, displayPath } from './data-dir.js';
 import { isFrozen, replanStatus } from './job-replan.js';
-import { writeBrief, openWrites, toDraft, WRITE_RESULT_SHAPE } from './job-writes.js';
+import { writeBrief, openWrites, draftingFor, WRITE_RESULT_SHAPE } from './job-writes.js';
 import { placeOf, isMakeWrite } from './jobs-schema.js';
 
 // The worktree starts on a placeholder branch (job-runtime.js). The session
@@ -82,7 +82,7 @@ const placeRules = (job, writes) => [...new Set(writes.filter((w) => !isMakeWrit
 const writesBlock = (job, sub, run) => {
   const open = sub ? openWrites(job, sub) : [];
   if (!open.length) return '';
-  const drafts = toDraft(job, sub);
+  const drafts = draftingFor(job, run, sub);
   const outputs = open.filter(isMakeWrite);
   return lines(
     'Writes you own, each answered by id in your receipt. Make them with your own tools and authenticated setup (the Atlassian MCP for Jira and Confluence, the Slack MCP for Slack); never print credentials. The human approved each with the plan; make exactly these and nothing else. Order them so a write that links another of yours ({<id>.url}) comes after it, and put in that URL yourself. A write marked approved:true is a draft the human approved: make it exactly as given.',

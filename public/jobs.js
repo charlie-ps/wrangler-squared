@@ -35,7 +35,8 @@ export const CHECKPOINTS = [
     wait: (n) => `${several(n, 'A PR has', 'PRs have')} passing checks and ${n === 1 ? 'is' : 'are'} waiting for Approve merge.`, yes: (n) => `Merge ${several(n, 'the PR', 'PRs')}`, done: (n) => `${several(n, 'The PR merges', 'PRs merge')} on the next poll, unless a reviewer leaves blocking comments` },
   { field: 'reviewSessions', icon: 'robot', name: 'Session results', unit: 'session receipt', you: 'You approve each session’s receipt before it counts as done', auto: 'A session counts as done once it reports',
     wait: (n) => `${several(n, 'A session receipt is', 'session receipts are')} waiting for your approval.`, yes: (n) => `Accept ${several(n, 'the receipt', 'receipts')}`, done: (n) => `${several(n, 'The receipt is', 'receipts are')} accepted` },
-  { field: 'reviewWrites', icon: 'eye', name: 'Writes', you: 'Each write to Jira, Slack, Confluence or another place stops for you before it’s made', auto: 'Each write is made by its session, with a receipt' },
+  { field: 'reviewWrites', icon: 'eye', name: 'Writes', unit: 'write', you: 'Each write to Jira, Slack, Confluence or another place stops for you before it’s made', auto: 'Each write is made by its session, with a receipt',
+    wait: (n) => `${several(n, 'A write is', 'writes are')} waiting for your review.`, yes: (n) => `Approve ${several(n, 'the write', 'writes')}`, done: (n) => `${several(n, 'The write is', 'writes are')} approved; each session makes what it drafted` },
 ];
 export const checkpoint = (field) => CHECKPOINTS.find((c) => c.field === field);
 export const youReview = (job, field) => field === 'reviewMerge' || field === 'reviewWrites' ? !!job[field] : field === 'reviewCode' ? reviewCode(job) : job[field] ?? true;
@@ -55,11 +56,16 @@ export const checkpointButtonHtml = (cp, you, { lock = null, saving = false } = 
   const aria = esc(`${label}. ${lock || `Switch to ${you ? 'Auto' : 'You review'}`}`);
   return `<button type="button" class="job-flag ${you ? 'you' : 'auto'}" data-review="${cp.field}" aria-pressed="${you}" aria-label="${aria}" title="${esc(`${label}. ${checkpointHint(cp, you)}`)}"${lock ? ' aria-disabled="true"' : ''}${saving ? ' aria-busy="true"' : ''}>${ICONS[cp.icon]}<span class="job-flag-badge">${you ? ICONS.hand : ICONS.ff}</span></button>`;
 };
-// Why a checkpoint can no longer change. Mirrors server/job-store.js setReview.
+// Why a checkpoint can no longer change. Mirrors server/job-store.js setReview,
+// plus Writes once no write is left that the job's default still decides (its
+// own `review` beats it, and one approved or made is past it): the server would
+// take the switch, but nothing would follow from it.
+const followsWritesDefault = (w) => isWriteSub(w) && !w.cancelledAt && w.review == null && !w.writeApprovedAt && !['cleanup', 'done'].includes(w.stage);
 export function checkpointLock(job, field) {
   if (job.cancelledAt) return 'The job was cancelled: there is nothing left to review';
   if (job.stage === 'done') return 'The job is finished: there is nothing left to review';
   if (field === 'reviewPlan' && !['backlog', 'planning'].includes(job.stage)) return 'The plan is already approved. A replan always waits for you';
+  if (field === 'reviewWrites' && !(job.subJobs.length ? job.subJobs : job.plan?.subJobs || []).some(followsWritesDefault)) return 'Every write is made, decided, or has its own review setting';
   return null;
 }
 // What switching a You review checkpoint to Auto would let through right now,
@@ -71,7 +77,8 @@ export function checkpointWaiting(job, field) {
   if (field === 'reviewPlan') return job.stage === 'planning' && job.plan && !job.runs.some((r) => !r.stopped) ? 1 : 0;
   return job.subJobs.filter((s) => !s.error && (field === 'reviewCode' ? codeAwaitingReview(s) && !s.ready?.approvedAt
     : field === 'reviewMerge' ? s.stage === 'pr' && s.pr?.checkStatus === 'passing' && s.mergeApprovedHead !== s.pr.head && !pendingDependencies(job, s).length
-      : isSessionSub(s) && s.stage === 'review' && !!s.result)).length;
+      : field === 'reviewWrites' ? writeAwaitingReview(s) && !s.cancelledAt && s.review !== true
+        : isSessionSub(s) && s.stage === 'review' && !!s.result)).length;
 }
 // One native checkbox (checked is You review), so a click or Space flips it and
 // an unchecked box submits nothing, which reads as Auto. The words live in the
