@@ -87,6 +87,25 @@ test('a just-launched card with no status yet is alive for the launch grace, the
   assert.equal(await at(0).isAlive(run), false, 'an archived card gets no grace');
 });
 
+test('a parked session is held only to its card existing; its mail wakes a dormant card first, and the launch grace restarts from the mail', async () => {
+  const { host, mailed, woken, sessions } = fakeHost();
+  let dormant = true, clock = 1000;
+  const runtime = new JobRuntime({ host, statusOf: () => null, dormantOf: () => dormant, now: () => clock });
+  const { sessionId } = await host.sessions.spawn({ cwd: '' });
+  const run = { id: 'run_1', sessionId, startedAt: 0 };
+  assert.equal(await runtime.exists(run), true);
+  await runtime.resumeWithMail(run, 'Make post');
+  assert.deepEqual([woken, mailed], [[sessionId], [{ to: sessionId, text: 'Make post' }]]);
+  dormant = false;
+  await runtime.resumeWithMail(run, 'Again');
+  assert.equal(woken.length, 1, 'a live card is never relaunched to read its mail');
+  clock = LAUNCH_GRACE_MS + 10;
+  assert.equal(await runtime.isAlive(run), false, 'long past its launch, with no status');
+  assert.equal(await runtime.isAlive({ ...run, mailedAt: 20 }), true, 'just woken for its mail');
+  sessions.get(sessionId).archived = true;
+  assert.equal(await runtime.exists(run), false);
+});
+
 test('a dispatch with no launch of ours pending is left to the board', () => {
   const { host } = fakeHost();
   assert.equal(runtimeWith(host).noteDispatch({ sessionId: 'someone-elses', worktree: null }), false);
@@ -115,9 +134,9 @@ const withCheckouts = async (dir, fn) => {
   try { return await fn(); } finally { if (prev === undefined) delete process.env.AW_CHECKOUTS_DIR; else process.env.AW_CHECKOUTS_DIR = prev; }
 };
 
-test('a jira or session step gets the same scratch workspace as planning: no repository, no branch', async () => {
+test('a session step gets the same scratch workspace as planning: no repository, no branch', async () => {
   const checkouts = fs.mkdtempSync(path.join(os.tmpdir(), 'checkouts-'));
-  for (const phase of ['jira', 'session']) await withCheckouts(checkouts, async () => {
+  for (const phase of ['session']) await withCheckouts(checkouts, async () => {
     const { host, spawned } = fakeHost();
     const runtime = runtimeWith(host, { run: async () => assert.fail(`${phase} has no repository to fetch`) });
     let prepared = 'unset';
@@ -267,17 +286,17 @@ test('updateMain fast-forwards the main checkout only when it is clean and on th
   await assert.rejects(runtimeWith(host, { run: nowhere.run }).cleanup({ updateMain: true }, { ...sub, repo: missing() }), /Cannot resolve main checkout/);
 });
 
-test('cleanupPlanning stops the planning and ticketing steps and removes the worktrees they were given', async () => {
+test('cleanupPlanning stops the planning and write steps and removes the worktrees they were given', async () => {
   const { host, archived, sessions } = fakeHost();
-  for (const id of ['plan', 'jira']) sessions.set(id, { sessionId: id, archived: false });
+  for (const id of ['plan', 'write']) sessions.set(id, { sessionId: id, archived: false });
   const job = {
-    runs: [{ phase: 'planning', sessionId: 'plan' }, { phase: 'jira', sessionId: 'jira' },
+    runs: [{ phase: 'planning', sessionId: 'plan' }, { phase: 'write', sessionId: 'write' },
       { phase: 'planning', sessionId: null }, { phase: 'implementation', sessionId: 'worker' }],
     planningWorktrees: [{ path: missing(), repoRoot: '/repo', branch: 'job-plan', cleanupHead: 'base' }],
   };
   const f = fakeRun({ head: 'base' });
   await runtimeWith(host, { run: f.run }).cleanupPlanning(job);
-  assert.deepEqual(archived, ['plan', 'jira'], 'a sub-job\'s own step is cleaned up with the sub-job, not with the plan');
+  assert.deepEqual(archived, ['plan', 'write'], 'a sub-job\'s own step is cleaned up with the sub-job, not with the plan');
   assert.deepEqual(f.calls.at(-1), ['update-ref', '-d', 'refs/heads/job-plan', 'base']);
 });
 

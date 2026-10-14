@@ -145,6 +145,7 @@ a.job-chip:hover { border-color:var(--border); }
 .job-graph-edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
 .job-graph-edges path { fill:none; stroke:var(--border); stroke-width:2; }
 .job-graph-edges path.deploy { stroke-dasharray:5 4; }
+.job-graph-edges path.on { stroke-dasharray:1 4; stroke-linecap:round; }
 .job-edge-glyph circle { fill:var(--surface); }
 .job-edge-glyph path,.job-edge-glyph circle+g circle { fill:none; stroke:var(--fg-muted); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
 .job-node { display:flex; flex-direction:column; align-items:center; gap:8px; width:100%; box-sizing:border-box; padding:4px; background:transparent; border:0; border-radius:12px; color:var(--fg); font:inherit; text-align:center; }
@@ -169,6 +170,106 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
 .job-node-deps label { display:flex; align-items:center; gap:6px; margin:6px 0 0; color:var(--fg); text-align:left; }
 .job-node-deps label>span:last-child { line-height:1.3; }
 .job-node-deps>span { display:block; margin-top:6px; }
+/* Writes fold into one pill per place beneath the node that fires or makes
+   them; the pill opens to its place and a row per write (job-graph.js). */
+.job-stack { display:flex; flex-direction:column; align-items:center; gap:8px; min-width:0; }
+.job-stack-loose { margin-bottom:10px; }
+.job-places { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:6px; max-width:100%; }
+.job-place { display:flex; flex-direction:column; align-items:center; max-width:100%; }
+.job-place>summary,.job-place-chip,.job-place-add { display:inline-flex; align-items:center; gap:6px; max-width:100%; box-sizing:border-box; padding:3px 9px 3px 7px; border:1px solid var(--border); border-radius:99px; background:var(--surface); color:var(--fg); font:inherit; font-size:11px; text-decoration:none; cursor:pointer; list-style:none; }
+.job-place>summary::-webkit-details-marker { display:none; }
+.job-place>summary .icon,.job-place-chip .icon,.job-place-add .icon { flex:none; width:13px; height:13px; }
+.job-place>summary b,.job-place-chip b,.job-place-add b { min-width:0; max-width:16ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; font-size:10.5px; font-variant-numeric:tabular-nums; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+.job-place>summary:hover,a.job-place-chip:hover { background:var(--surface-2); }
+.job-place>summary:focus-visible,.job-place-chip:focus-visible,.job-place-add:focus-visible { outline:2px solid var(--blue); outline-offset:1px; }
+.job-place.ghost>summary,.job-place-chip.ghost { border-style:dashed; background:transparent; color:var(--fg-muted); }
+.job-place.ghost>summary b,.job-place-chip.ghost b { font-weight:500; }
+.job-place.urgent>summary,.job-place-chip.urgent { border-color:var(--c); box-shadow:0 0 0 2px color-mix(in srgb, var(--c) 25%, transparent); }
+.job-place[open]>summary { border-color:var(--blue); }
+.job-place-go { font-size:10px; color:var(--fg-subtle); text-decoration:none; }
+a.job-place-go { margin:-3px -5px -3px -2px; padding:3px 5px; border-radius:99px; }
+a.job-place-go:hover { background:var(--surface-2); color:var(--fg); }
+.job-place-add { border-style:dashed; background:transparent; color:var(--blue-fg); }
+.job-place-add:hover { background:color-mix(in srgb, var(--blue) 12%, transparent); }
+.job-place-dots { display:inline-flex; gap:3px; }
+.job-place-dot { width:7px; height:7px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--c); }
+.job-place-dot.on { background:var(--c); box-shadow:none; }
+/* Zero-width margin box: the open pop overhangs its pill, centred, so the row
+   never reflows and its neighbours stay where they were. */
+.job-place-pop { position:relative; z-index:3; display:flex; flex-direction:column; gap:2px; width:250px; box-sizing:border-box; margin:6px -125px 0; padding:6px; border:1px solid var(--border); border-radius:12px; background:var(--surface); box-shadow:0 10px 30px var(--shadow); }
+.job-place-head { display:flex; align-items:center; gap:7px; min-width:0; padding:5px 6px 7px; margin-bottom:3px; border-bottom:1px solid var(--border-muted); font-size:12px; }
+.job-place-head .icon { flex:none; width:14px; height:14px; }
+.job-place-head b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.job-place-head a { flex:none; padding:3px 8px; border-radius:7px; background:color-mix(in srgb, var(--green) 15%, var(--surface)); color:var(--fg); font-size:11px; text-decoration:none; }
+.job-place-head em { flex:none; font-style:normal; font-size:11px; color:var(--fg-subtle); }
+.job-place-path { display:flex; align-items:center; gap:6px; min-width:0; padding:0 6px 6px; }
+.job-place-path code { flex:1; min-width:0; overflow-wrap:anywhere; font-size:10.5px; color:var(--fg-muted); user-select:all; }
+.job-place-path button { flex:none; display:inline-flex; align-items:center; gap:4px; padding:2px 7px; border:1px solid var(--border); border-radius:7px; background:transparent; color:var(--fg); font:inherit; font-size:11px; cursor:pointer; }
+.job-place-path .icon { width:12px; height:12px; }
+/* The board card's strip: every place across the job, above the card's
+   stretched open button the way .job-progress is. */
+.job-card-places { position:relative; z-index:1; display:flex; flex-wrap:wrap; gap:6px; margin-top:-6px; }
+.job-card-places .job-place-chip { border-color:transparent; cursor:default; }
+.job-card-places a.job-place-chip { cursor:pointer; }
+.job-card-places .job-place-chip.ghost { border-color:color-mix(in srgb, var(--fg-subtle) 50%, transparent); }
+.job-card-places .job-place-chip.urgent { border-color:var(--c); }
+.job-write { display:grid; grid-template-columns:16px auto minmax(0,1fr); gap:7px; align-items:center; width:100%; box-sizing:border-box; padding:5px 6px; border:0; border-radius:8px; background:transparent; color:var(--fg); font:inherit; font-size:12px; text-align:left; }
+button.job-write { cursor:pointer; }
+button.job-write:hover,button.job-write[aria-pressed="true"] { background:var(--surface-2); }
+button.job-write:focus-visible { outline:2px solid var(--c); outline-offset:1px; }
+.job-write.dormant { opacity:.7; }
+.job-write-state { width:16px; height:16px; border-radius:50%; display:grid; place-items:center; box-shadow:inset 0 0 0 1.5px var(--c); color:var(--c-fg); font-size:9px; }
+.job-write-state.on { background:var(--c); box-shadow:none; color:var(--c-on); }
+.job-write b { display:inline-flex; align-items:center; gap:4px; font-weight:500; white-space:nowrap; }
+.job-write-line { font-size:11px; color:var(--fg-muted); text-align:right; }
+.job-write:not(.tone-idle) .job-write-line { color:var(--c-fg); }
+.job-write-review { display:inline-flex; color:var(--snooze-fg); font-size:11px; }
+.job-proposed { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:600; color:var(--purple) !important; }
+.job-write-count { margin:-4px 0 6px; }
+/* Under plan review a write's eye sits beside its row: amber while it stops for review. */
+.job-write-row { display:flex; align-items:center; gap:2px; }
+.job-write-row>.job-write { flex:1; min-width:0; }
+.job-write-eye { flex:none; display:grid; place-items:center; width:24px; height:24px; padding:0; border:1px solid transparent; border-radius:50%; background:transparent; color:var(--fg-subtle); cursor:pointer; }
+.job-write-eye .icon { width:13px; height:13px; }
+.job-write-eye:hover { background:var(--surface-2); color:var(--fg-muted); }
+.job-write-eye.on { color:var(--snooze-fg); background:color-mix(in srgb, var(--snooze) 15%, transparent); border-color:color-mix(in srgb, var(--snooze) 40%, transparent); }
+.job-write-eye:focus-visible { outline:2px solid var(--blue); outline-offset:1px; }
+/* A place the human named rather than one of the presets: always dashed. */
+.job-place.other>summary,.job-place-chip.other { border-style:dashed; }
+.job-place-pick { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 !important; padding:0 !important; border:0 !important; }
+.job-place-pick legend { width:100%; margin-bottom:6px; padding:0; }
+.job-dialog .job-place-pick label.job-place-opt { display:inline-flex; align-items:center; gap:5px; margin:0; padding:4px 10px 4px 8px; border:1px solid var(--border); border-radius:99px; background:var(--surface); color:var(--fg); font-size:11px; cursor:pointer; }
+.job-place-opt input { position:absolute; opacity:0; pointer-events:none; }
+.job-place-opt .icon { width:13px; height:13px; }
+.job-place-opt:has(input:checked) { border-color:var(--blue); background:color-mix(in srgb, var(--blue) 12%, var(--surface)); }
+.job-place-opt:has(input:focus-visible) { outline:2px solid var(--blue); outline-offset:1px; }
+.job-dialog .job-place-pick label.job-place-opt.other { border-style:dashed; background:transparent; color:var(--fg-muted); }
+.job-dialog .job-place-pick label.job-place-opt.other:has(input:checked) { border-color:var(--blue); color:var(--fg); }
+/* Where a published output is, above its receipt. */
+.job-write-where { display:flex; align-items:center; gap:8px; margin:10px 0; font-size:12px; }
+.job-write-where .icon { flex:none; width:14px; height:14px; color:var(--fg-muted); }
+.job-write-where code { min-width:0; overflow-wrap:anywhere; color:var(--fg-muted); user-select:all; }
+.job-write-panel .job-story-fields { margin:6px 0; }
+/* The plan's write editor and a live write's body. */
+.job-write-editor { display:flex; flex-direction:column; gap:4px; margin:0 0 18px; padding:14px 16px; border-radius:16px; background:var(--surface-2); font-size:12px; }
+.job-write-editor h4 { display:flex; align-items:center; gap:8px; margin:0; font-size:13px; }
+.job-write-editor>label,.job-write-editor .job-form-row>label { display:flex; flex-direction:column; gap:6px; margin:8px 0; }
+.job-write-editor .job-actions { margin-top:8px; }
+.job-write-why { font-size:11px; line-height:1.5; color:var(--fg-muted) !important; border-left:2px solid var(--purple); padding-left:10px; margin:4px 0; }
+.job-write-why b { color:var(--purple); font-weight:600; }
+.job-dialog label.job-write-toggle { flex-direction:row; align-items:flex-start; gap:10px; padding:10px; border-radius:10px; background:var(--surface); cursor:pointer; }
+.job-write-toggle input { margin-top:2px; accent-color:var(--snooze); }
+.job-write-toggle span { display:flex; flex-direction:column; gap:2px; }
+.job-write-toggle small { color:var(--fg-muted); }
+.job-write-hint { display:flex; align-items:flex-start; gap:8px; font-size:12px; line-height:1.55; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
+.job-write-hint .icon { margin-top:2px; color:var(--fg-muted); }
+.job-write-spec { margin:6px 0 16px; border:1px solid var(--border-muted); border-radius:12px; overflow:hidden; font-size:12px; }
+.job-write-spec>div { display:grid; grid-template-columns:96px minmax(0,1fr); gap:10px; padding:9px 12px; border-top:1px solid var(--border-muted); }
+.job-write-spec>div:first-child { border-top:0; }
+.job-write-spec dt { color:var(--fg-muted); }
+.job-write-spec dd { margin:0; min-width:0; overflow-wrap:anywhere; }
+.job-write-from { color:var(--fg-muted); }
+.job-write-quote { display:block; white-space:pre-wrap; border-left:2px solid var(--border); padding-left:10px; color:var(--fg-muted); font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; }
 
 /* One extended FAB in the step's state colour; everything else is a text button. */
 .job-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:20px 0 8px; }
@@ -223,7 +324,15 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-review-toggle span { display:grid; place-items:center; }
 
 .job-stories { display:grid; gap:6px; }
-.job-stories>*:is(div,label) { display:flex; align-items:center; gap:10px; background:var(--surface-2); border-radius:10px; padding:8px 10px; font-size:12px; }
+.job-story { display:grid; gap:8px; background:var(--surface-2); border-radius:10px; padding:8px 10px; }
+.job-story>:is(div,label) { display:flex; align-items:center; gap:10px; font-size:12px; }
+.job-story-fields { margin:0; background:var(--bg); }
+.job-story-fields dd { display:flex; align-items:flex-start; gap:6px; }
+.job-story-fields textarea { flex:1; min-width:0; font-size:12px; resize:vertical; }
+.job-story-field-remove { flex:none; padding:2px 6px; color:var(--fg-muted); }
+.job-story-field-add { display:flex; gap:6px; }
+.job-story-field-add input { flex:1; min-width:0; font-size:12px; }
+.job-story-field-add input:first-child { flex:0 1 160px; }
 .job-stories label input { flex:1; min-width:0; font-size:12px; font-weight:600; }
 .job-story-key { flex:none; color:var(--blue-fg); font-size:11px; font-variant-numeric:tabular-nums; }
 .job-story-key.job-story-new { color:var(--fg-muted); border:1px dashed var(--border-muted); border-radius:5px; padding:1px 6px; }
@@ -592,10 +701,64 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .update-item-end { display:flex; align-items:center; gap:8px; }
 .update-new { padding:1px 7px; border-radius:8px; font-size:10.5px; font-weight:600; letter-spacing:.04em; background:color-mix(in srgb, var(--blue) 18%, transparent); color:var(--blue-fg); }
 .update-empty { margin:0; padding:16px; text-align:center; font-size:12px; line-height:1.6; color:var(--fg-subtle); border:1px dashed var(--border-muted); border-radius:12px; }
+/* The Writes figures: a row of graph stacks, place pills under the session that
+   writes them, and fixed heights so frames never move the buttons below. */
+.wn-row3 { display:grid; grid-template-columns:minmax(0,1fr) 40px minmax(0,1fr) 40px minmax(0,1fr); align-items:start; }
+.wn-row2 { display:grid; grid-template-columns:minmax(0,1fr) 56px minmax(0,1.6fr); align-items:start; }
+.wn-stack { display:flex; flex-direction:column; align-items:center; gap:4px; min-width:0; }
+.wn-stack .job-places { width:100%; }
+.wn-row3 .job-places { min-height:54px; align-content:flex-start; }
+.wn-edge { height:2px; margin-top:35px; background:var(--border); transition:background .3s; }
+.wn-edge.landed { background:var(--st-ok); }
+.intro-figure .wn-stack .job-node-title { font-weight:500; max-width:17ch; }
+.wn-under { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:14px; }
+.wn-art { display:flex; flex-direction:column; min-width:0; border-radius:16px; overflow:hidden; background:var(--surface); border:1px solid var(--border-muted); transition:opacity .3s; }
+.wn-art.pending { opacity:.55; border-style:dashed; }
+.wn-art-bar { display:flex; align-items:center; gap:8px; min-width:0; padding:8px 12px; border-bottom:1px solid var(--border-muted); font-size:11.5px; color:var(--fg-muted); }
+.wn-art-bar code { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10.5px; }
+.wn-art-bar em { margin-left:auto; font-style:normal; color:var(--fg-subtle); white-space:nowrap; }
+.wn-art-open { margin-left:auto; color:var(--blue-fg); font-weight:500; white-space:nowrap; }
+.wn-art-body { flex:1; display:grid; gap:7px; align-content:start; min-height:184px; padding:14px; }
+.wn-art-title { font-size:13px; font-weight:600; }
+.wn-art-sk { height:8px; border-radius:4px; background:var(--surface-2); }
+.wn-art-mock { display:grid; gap:6px; }
+.wn-art-cp { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:9px; background:var(--bg); font-size:11.5px; }
+.wn-art-cp>span:nth-of-type(1) { flex:1; }
+.wn-art-cp i { width:16px; height:16px; border-radius:5px; background:var(--c); }
+.wn-art-tg { position:relative; width:26px; height:15px; border-radius:99px; background:var(--border); }
+.wn-art-tg::after { content:""; position:absolute; top:2px; left:2px; width:11px; height:11px; border-radius:50%; background:var(--fg-muted); }
+.wn-art-tg.on { background:var(--st-warn); }
+.wn-art-tg.on::after { left:13px; background:var(--surface); }
+.wn-note { display:flex; flex-direction:column; gap:10px; min-width:0; padding:14px 16px; border-radius:16px; background:var(--cb); transition:background .3s, opacity .3s; }
+.wn-note.tone-idle { opacity:.55; }
+.wn-note header { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--c-fg); }
+.wn-note header span:last-child { margin-left:auto; font-weight:500; }
+.wn-note blockquote { margin:0; font-size:14px; line-height:1.5; color:var(--fg); }
+.wn-note blockquote.ph { color:var(--fg-muted); }
+.wn-note footer { margin-top:auto; display:flex; flex-wrap:wrap; gap:6px; }
+.wn-note footer span { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:8px; border:1px solid var(--border-muted); font-size:12px; font-weight:500; color:var(--fg-muted); }
+.wn-note footer span.go { background:var(--c); border-color:transparent; color:var(--c-on); }
+.wn-writes { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.wn-write { display:flex; align-items:center; gap:12px; min-width:0; min-height:104px; padding:12px; border-radius:14px; background:var(--surface); }
+.intro-figure .wn-write .job-node-tile { width:42px; height:42px; border-radius:13px; box-shadow:inset 0 0 0 2px var(--c); }
+.intro-figure .wn-write .job-node-tile.on { box-shadow:none; }
+.intro-figure .wn-write .job-node-tile .icon { font-size:20px; }
+.intro-figure .wn-write .job-node-state { width:20px; height:20px; right:-6px; bottom:-6px; border-color:var(--surface); }
+.intro-figure .wn-write .job-node-state .icon { font-size:10px; }
+.wn-write>span:last-child { min-width:0; }
+.wn-write b { display:block; font-size:13.5px; font-weight:500; line-height:1.35; }
+.wn-write small { display:block; margin-top:2px; font-size:12px; font-weight:500; color:var(--c-fg); }
+.wn-write small u { text-decoration:none; color:var(--blue-fg); font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; }
+.wn-fade { animation:wn-fade .35s ease-out; }
+@keyframes wn-fade { from { opacity:0; transform:translateY(4px); } }
+@media(prefers-reduced-motion:reduce) { .wn-fade { animation:none; } .wn-edge,.wn-art,.wn-note { transition:none; } }
 @media(max-width:700px) {
   .jobs-update { padding:22px 20px; border-radius:20px; }
   .jobs-update h2 { font-size:24px; }
   .update-body p { font-size:14px; }
+  .wn-row3 { grid-template-columns:minmax(0,1fr) 14px minmax(0,1fr) 14px minmax(0,1fr); }
+  .wn-row2 { grid-template-columns:minmax(0,1fr) 14px minmax(0,1.4fr); }
+  .wn-under,.wn-writes { grid-template-columns:1fr; }
 }
 
 /* The "Have an idea?" corner (idea-corner.js). Purple, so it never reads as a

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isFrozen, mergeReplan, approveReplan } from './job-replan.js';
+import { isFrozen, mergeReplan, approveReplan, replanStatus } from './job-replan.js';
 
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, kind: 'pr', repo: '/repo', after, brief: `Implement ${id}`, ...extra });
 const live = (s, extra = {}) => ({ ...s, stage: 'implementation', state: 'queued', ...extra });
@@ -47,4 +47,104 @@ test('an approved brief or landing-order change sends code already written back 
   const k = fresh(true); approveReplan(k, 'p1', { now: 5 });
   assert.equal(at(k, 'b').stage, 'implementation', 'under code review the rework comes back through review');
   assert.equal(at(k, 'b').fixRequested, null); assert.match(at(k, 'b').note, /^Land b after a/);
+});
+
+const write = (id, by, action, extra = {}) => ({ id, kind: 'write', place: { type: 'jira' }, title: `Write ${id}`, storyId: 's', after: [], by, action, ...extra });
+const session = (id, extra = {}) => ({ id, title: `Run ${id}`, kind: 'session', after: [], brief: `Do ${id}`, ...extra });
+const liveOf = (subs) => subs.map((s) => live(s, s.kind === 'write' ? { stage: 'write' } : s.kind === 'session' ? { stage: 'session' } : {}));
+
+test('a Jira write edits like a brief: its action, session, review and why change in place, a session\'s milestone with it; its story does not', () => {
+  const subs = [spec('a', [], { storyId: 's' }), session('n', { on: { sub: 'a', at: 'pr' } }), session('m'), write('w', 'n', { type: 'transition', to: 'In Review' })];
+  const j = job(subs, subs.map((s) => live(s, s.kind === 'write' ? { stage: 'review', state: 'verified', writeApprovedAt: 1, draft: { id: 'w' } } : s.kind === 'session' ? { stage: 'session' } : {})));
+  const { plan, changes } = mergeReplan(j, { context: '', subJobs: [subs[0], { ...subs[1], on: { sub: 'a', at: 'merged' } }, subs[2], write('w', 'm', { type: 'transition', to: 'Done', comment: 'Merged {pr.url}' }, { review: true, why: 'Done on merge here' })] });
+  assert.deepEqual(changes.edited, [{ id: 'n', fields: ['on'] }, { id: 'w', fields: ['action', 'by', 'review', 'why'] }]);
+  assert.deepEqual(plan.subJobs[1].on, { sub: 'a', at: 'merged' }); assert.equal(plan.subJobs[3].review, true);
+  assert.deepEqual(mergeReplan(j, { context: '', subJobs: [...subs.slice(0, 3), { ...subs[3], review: false }] }).changes.edited, [{ id: 'w', fields: ['review'] }], 'an explicit review:false overrides the job default, so it is an edit');
+  assert.throws(() => mergeReplan(j, { context: '', stories: [{ id: 't', title: 'Other' }], subJobs: [...subs.slice(0, 3), { ...subs[3], storyId: 't' }] }), /storyId cannot change/);
+  assert.throws(() => mergeReplan(j, { context: '', subJobs: [...subs.slice(0, 3), { ...subs[3], on: { sub: 'a', at: 'pr' } }] }), /put the milestone \(on\) on that session/);
+  const replan = { feedback: 'x', proposal: { id: 'p', plan: { context: '', subJobs: [...subs.slice(0, 3), { ...subs[3], action: { type: 'transition', to: 'QA' } }] } } };
+  const busy = { ...structuredClone(j), runs: [{ subJobId: 'n', stopped: false, parkedAt: 1 }], replan: structuredClone(replan) };
+  assert.throws(() => approveReplan(busy, 'p', { now: 1, buildSubJob: (p, s) => s }), /Wait for the running step on “Write w” to stop/, 'its session was told the write as it stood');
+  const approved = { ...j, replan };
+  approveReplan(approved, 'p', { now: 1, buildSubJob: (p, s) => s });
+  const w = approved.subJobs[3];
+  assert.deepEqual([w.stage, w.state, w.writeApprovedAt, w.draft], ['write', 'queued', undefined, undefined], 'an edited write goes back to its session, and a reviewed one is drafted again');
+});
+
+test('cancelling a trigger strands every session on it but an if-dropped one, unless its milestone already came; a session takes its writes with it', () => {
+  const subs = [spec('a', [], { storyId: 's' }), spec('b', [], { storyId: 's' }), session('n', { on: { sub: 'a', at: 'pr' } }), session('wont', { on: { sub: 'a', at: 'dropped' } }),
+    write('w', 'n', { type: 'comment', comment: 'x' }), write('ww', 'wont', { type: 'transition', to: "Won't Do" })];
+  const j = job(subs, liveOf(subs));
+  assert.throws(() => mergeReplan(j, { context: '', subJobs: [subs[1], ...subs.slice(2)] }), /n would wait forever on a/);
+  assert.deepEqual(mergeReplan(j, { context: '', subJobs: [subs[1], subs[3], subs[5]] }).changes.removed.sort(), ['a', 'n', 'w'], 'the if-dropped session is what removing its trigger starts');
+  j.subJobs[0].pr = { url: 'https://github.com/o/r/pull/1' };
+  assert.doesNotThrow(() => mergeReplan(j, { context: '', subJobs: [subs[1], ...subs.slice(2)] }), 'a PR that already opened has reached pr');
+});
+
+test('a create write and its session outlive a proposal that leaves them out; a new keyless story joins that session while it has not started', () => {
+  const stories = session('stories', { title: 'Create Jira stories' });
+  const create = write('create-n', 'stories', { type: 'create' }, { storyId: 'n' });
+  const subs = [stories, create, spec('a', [], { storyId: 'n' })];
+  const j = { ...job(subs, liveOf(subs)), plan: { context: 'ctx', stories: [{ id: 'n', title: 'New' }], subJobs: subs } };
+  const { plan, changes } = mergeReplan(j, { context: '', stories: [{ id: 'm', project: 'SEC', title: 'More' }], subJobs: [subs[2], spec('b', [], { storyId: 'm' })] });
+  assert.ok(changes.kept.includes('create-n')); assert.ok(changes.kept.includes('stories')); assert.deepEqual(changes.removed, []);
+  assert.deepEqual(changes.added, ['b', 'create-m']);
+  assert.deepEqual(plan.subJobs.find((s) => s.id === 'create-m'), { id: 'create-m', title: 'Create story: More', kind: 'write', place: { type: 'jira' }, storyId: 'm', after: [], action: { type: 'create' }, by: 'stories' });
+  assert.match(replanStatus(j, j.subJobs[1]), /\(write\) "Write create-n": write\/queued · \{"type":"jira"\} \{"type":"create"\} by stories/);
+  j.subJobs[0].sessions = ['s1'];
+  const later = mergeReplan(j, { context: '', stories: [{ id: 'm', project: 'SEC', title: 'More' }], subJobs: [subs[2], spec('b', [], { storyId: 'm' })] });
+  assert.deepEqual(later.changes.added, ['b', 'stories-2', 'create-m'], 'a stories session that has run takes no more');
+  assert.equal(later.plan.subJobs.find((s) => s.id === 'create-m').by, 'stories-2');
+});
+
+test('a write may change its channel, page or making session but not its place type; a write goes with its session', () => {
+  const post = { id: 'post', kind: 'write', title: 'Announce', place: { type: 'slack', ref: '#web' }, after: [], by: 'r2', action: { type: 'post', text: 'Out: {page.url}' }, review: true };
+  const page = { id: 'page', kind: 'write', title: 'Report', place: { type: 'artifact' }, after: [], by: 'r', action: { type: 'make', what: 'p95 chart' } };
+  const subs = [session('r'), session('r2', { after: ['r'] }), post, page];
+  const j = job(subs, liveOf(subs));
+  const moved = mergeReplan(j, { context: '', subJobs: [subs[0], subs[1], { ...post, place: { type: 'slack', ref: '#web-platform' } }, page] });
+  assert.deepEqual(moved.changes.edited, [{ id: 'post', fields: ['place'] }]);
+  assert.throws(() => mergeReplan(j, { context: '', subJobs: [subs[0], subs[1], { ...post, place: { type: 'confluence', ref: 'WEB' } }, page] }), /place.type cannot change/);
+  assert.throws(() => mergeReplan(j, { context: '', subJobs: [subs[0], { ...subs[1], after: [] }, post, page] }), /\{page\.url\} is made by r, so r2 must wait for r to finish/);
+  const { changes } = mergeReplan(j, { context: '', subJobs: [session('r2'), { ...post, action: { type: 'post', text: 'Out' } }, page] });
+  assert.deepEqual(changes.removed.sort(), ['page', 'r'], 'the write its session would have made is cancelled with it');
+  assert.throws(() => mergeReplan(j, { context: '', subJobs: [session('r2'), { ...post, action: { type: 'post', text: 'Out' } }, page, { ...page, id: 'page2' }] }), /page2 would never be made: r is being cancelled/);
+  assert.match(replanStatus(j, j.subJobs[3]), /\{"type":"artifact"\} \{"type":"make","what":"p95 chart"\} by r/);
+});
+
+test('a new keyless story keeps the fields the planner read for it, and an approved story keeps the fields it was approved with', () => {
+  const fields = [{ name: 'Issue Type', value: 'Story' }, { name: 'Components', value: 'Auth' }];
+  const subs = [spec('a', [], { storyId: 's' })];
+  const j = job(subs, subs.map((s) => live(s)));
+  j.plan.stories[0].fields = [{ name: 'Labels', value: 'sso' }];
+  const { plan } = mergeReplan(j, { context: '', stories: [{ id: 's', key: 'A-1', title: 'Story', fields: [{ name: 'Labels', value: 'other' }] }, { id: 'm', project: 'SEC', title: 'More', fields }], subJobs: [subs[0], spec('b', [], { storyId: 'm' })] });
+  assert.deepEqual(plan.stories.find((t) => t.id === 'm').fields, fields);
+  assert.deepEqual(plan.stories.find((t) => t.id === 's').fields, [{ name: 'Labels', value: 'sso' }]);
+});
+
+test('a write added or moved to a session that has finished is refused; to one running it waits; to one in review it sends it back to work', () => {
+  const w = write('w', 'r', { type: 'comment', comment: 'Hi' });
+  const subs = [session('r'), session('r2'), session('done'), w];
+  const at = (j, id) => j.subJobs.find((s) => s.id === id);
+  const fresh = () => {
+    const j = job(subs, liveOf(subs));
+    at(j, 'done').stage = 'done';
+    return j;
+  };
+  const added = write('w2', 'done', { type: 'comment', comment: 'Late' });
+  assert.throws(() => mergeReplan(fresh(), { context: '', subJobs: [...subs, added] }), /w2: done has already finished, so it would never make this write/);
+  assert.throws(() => mergeReplan(fresh(), { context: '', subJobs: [...subs.slice(0, 3), { ...w, by: 'done' }] }), /w: done has already finished/);
+  const rerun = fresh(); at(rerun, 'done').stage = 'session'; at(rerun, 'done').writesOnly = { from: 'done' };
+  assert.throws(() => mergeReplan(rerun, { context: '', subJobs: [...subs, added] }), /done has already finished/, 'a rerun for its writes alone takes no new ones');
+  const propose = (j, plan) => { j.replan = { feedback: 'More', proposal: { id: 'p1', plan } }; return j; };
+  const toR2 = { context: '', subJobs: [...subs.slice(0, 3), { ...w, by: 'r2' }, write('w3', 'r2', { type: 'comment', comment: 'New' })] };
+  const busy = propose(fresh(), toR2);
+  busy.runs.push({ subJobId: 'r2', stopped: false, parkedAt: 1 });
+  assert.throws(() => approveReplan(busy, 'p1', { now: 2, buildSubJob: (p, s) => ({ ...s }) }), /Wait for the running step on “Write w” · “Write w3” to stop/, 'a parked run is still live');
+  const review = propose(fresh(), toR2);
+  Object.assign(at(review, 'r2'), { stage: 'review', state: 'verified', result: { checks: ['Done'] } });
+  const { lines } = approveReplan(review, 'p1', { now: 3, buildSubJob: (p, s) => ({ ...s, stage: 'write', state: 'queued' }) });
+  assert.deepEqual([at(review, 'r2').stage, at(review, 'r2').state, at(review, 'r2').result], ['session', 'queued', null]);
+  assert.equal(lines.filter((l) => l.sub.id === 'r2').length, 1, 'said once, however many writes it gained');
+  assert.match(lines.find((l) => l.sub.id === 'r2').detail, /sent “Run r2” back to work/);
 });

@@ -29,14 +29,18 @@ function syncBranch(host, caller) {
 
 export const jobReportTool = {
   name: 'job_report',
-  description: 'Submit the receipt for your assigned automated job run, then stop. One receipt per run: plan, jira, ready (the working tree awaits the human\'s code review, nothing committed), published (the PR url), repaired, deployed or completed. Checks are normally 1–3 bullets of a few words, e.g. "Build passed"; keep the detail in the transcript. Only the assigned session can report; identical retries are safe, and a terminal recap does not advance the job. If you cannot finish, submit {kind:"blocked", summary:"one sentence"} and optionally name the move a human should make: move:"fix-here" (a new commit on this PR), "split-out" (a second PR on this ticket), "new-ticket" (scope nobody knew about), "reorder" (this must land after something else), "drop", "mark" (it is already done elsewhere) or "accept-red" (the failing check or post-merge run is noise; merge or count it as landed anyway). You never change the plan yourself; the human clicks the move.',
+  description: 'Submit the receipt for your assigned automated job run, then stop. One receipt per run: plan, ready (the working tree awaits the human\'s code review, nothing committed), published (the PR url), repaired, deployed or completed (with writes: one result per write your prompt lists — written, already, or failed with the place\'s own error — with its link, or a made output\'s location). A session whose prompt puts writes under review first sends drafts (each reviewed write as it would make it) and waits for mail with the human\'s decision before it completes. Checks are normally 1–3 bullets of a few words, e.g. "Build passed"; keep the detail in the transcript. Only the assigned session can report; identical retries are safe, and a terminal recap does not advance the job. If you cannot finish, submit {kind:"blocked", summary:"one sentence"} and optionally name the move a human should make: move:"fix-here" (a new commit on this PR), "split-out" (a second PR on this ticket), "new-ticket" (scope nobody knew about), "reorder" (this must land after something else), "drop", "mark" (it is already done elsewhere) or "accept-red" (the failing check or post-merge run is noise; merge or count it as landed anyway). You never change the plan yourself; the human clicks the move.',
   inputSchema: { runId: z.string(), report: reportSchema },
   async handler({ host, caller }, { runId, report }) {
     try {
       syncBranch(host, caller);
       const job = host.stores.jobs.report(caller, runId, report);
       await host.rebuild();
-      return result({ accepted: true, jobId: job.id, next: 'Stop now. Wrangler coordinates the next step.' });
+      // Drafts leave the run open: the session ends its turn, but its work is
+      // not done until the mail with the human's decision has been acted on.
+      const next = report.kind === 'drafts' ? 'End your turn and wait: mail will say which writes to make, with their final text. Make exactly those, then send kind:"completed".'
+        : 'Stop now. Wrangler coordinates the next step.';
+      return result({ accepted: true, jobId: job.id, next });
     } catch (e) { return errorResult(e.message); }
   },
 };

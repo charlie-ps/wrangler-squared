@@ -127,12 +127,21 @@ export default {
     // way: the board builds one api per extension.
     // A first-run reader gets the intro and never an update splash on top of it;
     // the intro already shows Jobs as it is today, so closing it counts every
-    // current update as seen. Anyone else gets their unseen updates instead.
+    // current update as seen. Anyone else gets their unseen updates, but only on
+    // the Jobs view: they announce Jobs features, so they wait until the reader
+    // opens it. Core mirrors the active view into the hash, and the view host is
+    // mounted whether or not it is showing, so the hash is the signal.
     const updates = createUpdates({ storage: slots.api?.storage });
     let firstRun = false;
     const intro = createIntro({ storage: slots.api?.storage, onNewJob: startJob, onClose: () => { if (firstRun) updates.markAllSeen(); firstRun = false; } });
     firstRun = intro.maybeShow();
-    if (!firstRun) updates.maybeShow();
+    const win = document.defaultView;
+    const showUpdates = () => {
+      if (firstRun || win?.location.hash !== VIEW_HASH) return;
+      if (updates.maybeShow()) win.removeEventListener('hashchange', showUpdates);
+    };
+    win?.addEventListener('hashchange', showUpdates);
+    showUpdates();
 
     slots.register('view', {
       id: 'board',

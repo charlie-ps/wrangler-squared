@@ -4,7 +4,7 @@ Developer notes for Wrangler² — the Agent Wrangler automated-jobs system as a
 installable extension. Only the non-obvious, durable things; point at code rather
 than re-deriving it. **Read `docs/PORTING.md` first**: the port is functionally
 complete on host API 1.31.0, and that file is the map (what came from where, what
-stands in for what, and which of the five open host-API gaps block which
+stands in for what, and which of the eight open host-API gaps block which
 feature).
 
 ## What this is
@@ -18,16 +18,20 @@ feature).
   uninstall path disagree. `package.json`'s `wranglerExtension` block is what the
   human consents to BEFORE any code runs, so it and `server/manifest.js` are
   duplicated by design and must agree (`id`, and `requires` in the manifest may
-  not be WIDER than the block's). `requires` is the four `sessions:*` (read, spawn,
-  archive, bill) plus `tasks:read`/`tasks:write`, `usage:read` and
+  not be WIDER than the block's). `requires` is the five `sessions:*` (read, spawn,
+  archive, bill, wake) plus `mail:send`, `tasks:read`/`tasks:write`, `usage:read`,
   `board:rebuild`/`board:broadcast` and `images:keep`. Task read/write lets New job validate a
   selected Task or create one; spawn's `taskId` still binds task memory and
-  assigns the card itself. `engines.wranglerApi` is
+  assigns the card itself. `mail:send` and `sessions:wake` (both host API 1.0)
+  resume a session parked on its drafts once the human has decided them:
+  mail carries the final writes, and a card gone dormant meanwhile is woken
+  first. `engines.wranglerApi` is
   `^1.31.0`: 1.4 added the worktree/`addDirs`/`taskId`/PR-automation spawn
   options this repo depends on, 1.6 the `usage:read`/`sessions:bill` pair the
   Jobs board's prices and triage billing depend on, 1.8 the client
   `api.openSession(sid)` behind the sub-job dialog's Open/Restore session button
-  (there is no `sessions:wake` any more: the board resumes the card itself),
+  (the board resumes a card the human opens; `sessions:wake` is only the
+  drafts resume above),
   1.7 the `view` `badge()` core draws the needs-you count from, 1.25 the
   client `api.agents()` the New job form reads its models and efforts from,
   1.27 the client `api.openDiff` behind Review code in Wrangler, and 1.31 the
@@ -89,6 +93,17 @@ feature).
   `adopt` and stamps the record, which is what lets `name_branch` work on the
   publish run (the one that pushes). `noteDispatch` discards the adopted record
   (`pendingLaunch.adopt`) so the store's copy keeps its `cleanupHead` and rename.
+- **Every write is made by the session it names (`by`)**, and that session's
+  `completed` receipt must answer for each one it owns (`job-writes.js
+  applyWrites`; a missing one refuses the receipt). There is no batched writer:
+  a milestone (`on`) is a session's, and a write due at one is a small session.
+  A reviewed write is drafted: the `drafts` receipt PARKS the run
+  (`run.parkedAt`, no `run.report`), and `settle()` holds a parked run only to
+  its card existing — never to status or the idle grace — until every draft is
+  decided and the runner mails it (`run.mailedAt`). Don't let a new liveness or
+  idle rule reach a parked run. A stored write with no `by` predates this and is
+  failed on load (`job-store.js migrateSessionWrites`), never run;
+  `validatePlan` looks past it so moves still work on that job.
 - **New job's model picker is `public/model-picker.js` over `public/model-plates.js`.** It owns no form state: it reports `{ agent, model, effort }` through `onChange` into hidden inputs, so `form.onsubmit` and the `job-create` payload are untouched, and creating a job saves `settings.usualPick`. `describe()` must never invent a version from an alias (gap 18 in `docs/PORTING.md`). A galaxy plate is exactly one rAF loop, stopped by `dispose()`/re-render; art colours are fixed, chrome is board variables, except Claude's cabinet and ticket, whose launch-page near-black/ivory follows core's `body.light`. Each Claude plate declares its own noise filters (`fx()`), so plates never share an SVG id.
 - **What's new is `public/updates.js`'s `UPDATES`, oldest first.** A bigger release appends `{ id, date, title, body }` (our own copy; optional `icon`, `tone`, `figure`, `anim`); every unseen one opens in one run, oldest first, and closing it records them all under `updatesSeen`. A first-run reader gets the intro instead, and closing that counts every current update seen, so an id must never be reused.
 - **Client modules import their leaves RELATIVELY** (`./util.js`, `./icons.js`,

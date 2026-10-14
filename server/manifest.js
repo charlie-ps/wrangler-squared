@@ -36,9 +36,11 @@ export default {
   homepage: 'https://github.com/charlie-ps/wrangler-squared',
   defaultEnabled: true,
   dir,
+  // `sessions:wake` and `mail:send` resume a session parked on its drafts once
+  // the human has decided them (job-runtime.js resumeWithMail).
   requires: [
-    'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:bill',
-    'tasks:read', 'tasks:write',
+    'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:bill', 'sessions:wake',
+    'mail:send', 'tasks:read', 'tasks:write',
     'usage:read', 'board:rebuild', 'board:broadcast', 'images:keep',
   ],
   engines: { wranglerApi: '^1.31.0' },

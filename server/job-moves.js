@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { line, id, jira, jiraProject, briefSchema, prUrlSchema, planSchema, isHumanSub, isPrSub, reviewCode } from './jobs-schema.js';
+import { line, id, jira, jiraProject, briefSchema, prUrlSchema, planSchema, placeLinkSchema, isHumanSub, isPrSub, isWriteSub, isJiraWrite, isStoryCreate, reviewCode, withStoryCreates, freeId } from './jobs-schema.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 
 // The seven moves a human would make by hand when a job goes wrong. Agents never
@@ -15,7 +15,9 @@ export const moveSchemas = {
     title: line, brief: briefSchema, check: line.optional(), position: position.optional(), note }),
   reorder: z.object({ after: z.array(id).max(30) }),
   drop: z.object({}),
-  mark: z.object({ position: z.enum(['pr', 'merged', 'done']), url: prUrlSchema.optional(), note }),
+  // `link` is where a write's place is, when the human made it by hand; `key`
+  // the ticket a story's create write made (else read off a browse `link`).
+  mark: z.object({ position: z.enum(['pr', 'merged', 'done']), url: prUrlSchema.optional(), link: placeLinkSchema.optional(), key: jira.optional(), note }),
   'accept-red': z.object({ note }),
 };
 export const MOVE_ACTIONS = new Set(Object.keys(moveSchemas));
@@ -25,21 +27,25 @@ export const MOVE_ACTIONS = new Set(Object.keys(moveSchemas));
 const REFUSED_WHILE_LIVE = new Set(['split-out', 'new-ticket', 'reorder', 'mark', 'accept-red']);
 const UNMERGED = ['implementation', 'review', 'pr', 'session', 'human'];
 const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.subJobId === subId);
+// A session that may still take another write: waiting, and never run.
+export const notStarted = (job, id) => { const s = job.subJobs.find((x) => x.id === id); return !!s && s.stage === 'session' && !s.sessions?.length && !s.cancelledAt && !liveRun(job, id); };
 const quoted = (title) => `“${title}”`;
+const browseKey = (link) => { const key = /\/browse\/([^/?#\s]+)/.exec(link || '')?.[1]; return key && jira.safeParse(key).success ? key : null; };
 const both = (job, subId, fn) => {
   fn(job.subJobs.find((s) => s.id === subId));
   const p = job.plan?.subJobs.find((s) => s.id === subId);
   if (p) fn(p);
 };
-const freeId = (taken, make) => { let n = 2; while (taken.has(make(n))) n++; return make(n); };
 // planSchema is the same judge the plan was approved under (unique ids, unknown
 // story/dependency, cycles, repo rules), so a move reuses it on a projection of
 // the plan and only commits once it passes — nothing here half-edits a plan it
 // is about to refuse. A migrated plan may carry a brief longer than today's cap;
 // it is not what is being changed, so the throwaway projection trims it rather
-// than refusing an unrelated move.
+// than refusing an unrelated move. A write from before session-owned writes
+// names no session (`by`): the store failed it on load (job-store.js), it is
+// never what a move changes, and it must not make every move on its job fail.
 export function validatePlan(plan) {
-  const projected = { ...plan, subJobs: plan.subJobs.map((s) => ({ ...s, brief: String(s.brief || 'x').slice(0, 500) })) };
+  const projected = { ...plan, subJobs: plan.subJobs.filter((s) => !(isWriteSub(s) && !s.by)).map((s) => ({ ...s, brief: String(s.brief || 'x').slice(0, 500) })) };
   const parsed = planSchema.safeParse(projected);
   if (!parsed.success) throw new Error([...new Set(parsed.error.issues.map((i) => i.message))].join('; '));
 }
@@ -49,7 +55,7 @@ export function validatePlan(plan) {
 function addPrSubJob(job, sub, data, { storyId, jiraKey, story, position, buildSubJob }) {
   if (!isPrSub(sub)) throw new Error('This sub-job has no repository to open a PR in');
   const taken = new Set(job.plan.subJobs.map((s) => s.id));
-  const spec = { id: freeId(taken, (n) => `${sub.id}-${n}`), title: data.title, kind: 'pr', repo: sub.repo,
+  const spec = { id: freeId(taken, sub.id, 2), title: data.title, kind: 'pr', repo: sub.repo,
     ...(storyId ? { storyId } : {}), after: [], brief: data.brief, ...(data.check ? { check: data.check } : {}), ...(jiraKey ? { jiraKey } : {}) };
   const projected = { ...job.plan, stories: [...job.plan.stories, ...(story ? [story] : [])],
     subJobs: [...job.plan.subJobs.map((s) => ({ ...s })), spec] };
@@ -65,10 +71,39 @@ function addPrSubJob(job, sub, data, { storyId, jiraKey, story, position, buildS
 // Straight to cleanup. The runner stops any live step; nothing merged, so
 // cleanup keeps every commit it cannot prove is retained elsewhere. Shared by
 // Drop (one sub-job) and a whole-job cancel (job-store.js), so the two can
-// never disagree about what dropping means.
-export function dropSub(sub, now) {
+// never disagree about what dropping means. Given the job, a story's create
+// takes the story with it (`unlinkStory`); a whole-job cancel has no need.
+export function dropSub(sub, now, job = null) {
   sub.cancelledAt = now; sub.stage = 'cleanup'; sub.state = 'cancelled';
   sub.error = null; sub.blocked = null; sub.observationError = null;
+  if (job && isStoryCreate(sub)) unlinkStory(job, sub.storyId, now);
+}
+// A created story's key, from its create's receipt or the human's Mark done: on
+// the plan and on every sub-job naming it, which is what releases them. An
+// approved key is part of what the human agreed to and never swaps.
+export function keyStory(job, storyId, key) {
+  const story = job.plan.stories.find((t) => t.id === storyId);
+  if (!story) throw new Error(`Unknown story: ${storyId}`);
+  if (story.key && story.key !== key) throw new Error(`${storyId} was approved as ${story.key}; keep that key`);
+  story.key = key;
+  for (const sub of [...job.subJobs, ...job.plan.subJobs]) if (sub.storyId === storyId && !sub.jiraKey) sub.jiraKey = key;
+}
+// Its create dropped before it minted a key, a story will never have one: what
+// named it goes ahead ticketless (its branch and commits carry no key), except a
+// Jira write to it, which has no ticket to write to and is dropped too. Plan
+// entries follow their live sub-job; the story stays as the record, `dropped`
+// so nothing creates it again.
+function unlinkStory(job, storyId, now) {
+  const story = job.plan?.stories.find((t) => t.id === storyId);
+  if (!story || story.key) return;
+  story.dropped = true;
+  const unlinked = new Set();
+  for (const s of job.subJobs) {
+    if (s.storyId !== storyId || s.jiraKey || s.cancelledAt) continue;
+    if (isJiraWrite(s)) dropSub(s, now);
+    else { delete s.storyId; unlinked.add(s.id); }
+  }
+  for (const p of job.plan.subJobs) if (unlinked.has(p.id)) delete p.storyId;
 }
 // A sub-job whose plan just changed goes back to work: the same retry semantics
 // the Retry button carries, including the extra repair attempt.
@@ -108,6 +143,11 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
   if (sub.stage === 'done' || sub.cancelledAt) throw new Error('Sub-job has already finished');
   const data = schema.parse(payload);
   if (liveRun(job, sub.id) && REFUSED_WHILE_LIVE.has(move)) throw new Error('Wait for the session to stop');
+  // A write has no PR or order of its own (its session has): it is edited
+  // (job-writes.js), dropped, or marked done because someone already made it by
+  // hand. Its session's receipt ignores an answer for a write that is gone.
+  if (isWriteSub(sub) && !['drop', 'mark'].includes(move)) throw new Error('A write can only be edited, dropped or marked done');
+  if (data.link && !isWriteSub(sub)) throw new Error('Only a write is marked done with where it is');
 
   if (move === 'fix-here') {
     if (sub.stage === 'pr') {
@@ -150,12 +190,18 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
 
   if (move === 'new-ticket') {
     const taken = new Set(job.plan.stories.map((s) => s.id));
-    // Keyless unless the human already made the ticket: the runner then runs the
-    // ordinary Jira step for it, and the new sub-job waits for that key.
-    const story = { id: freeId(taken, (n) => `s-${n}`), ...(data.key ? { key: data.key } : {}),
+    // Keyless unless the human already made the ticket: its create write (below)
+    // makes it, and the new sub-job waits for that key.
+    const story = { id: freeId(taken, 's', 2), ...(data.key ? { key: data.key } : {}),
       ...(data.project ? { project: data.project } : {}), title: data.storyTitle };
     const spec = addPrSubJob(job, sub, data, { storyId: story.id, jiraKey: data.key || null, story, buildSubJob,
       position: UNMERGED.includes(sub.stage) ? data.position : null });
+    // The ticket is created the way every keyless story is: by its own write,
+    // which the new PR waits on for its key, made by the stories session if it
+    // has not started yet, else by a new one that starts at once.
+    const known = new Set(job.plan.subJobs.map((s) => s.id));
+    job.plan = withStoryCreates(job.plan, (id) => notStarted(job, id));
+    for (const s of job.plan.subJobs) if (!known.has(s.id)) job.subJobs.push(buildSubJob(job.plan, s));
     sub.error = null; sub.blocked = null;
     if (data.note) sub.note = data.note;
     return { detail: `New ticket ${quoted(story.title)} with PR ${quoted(spec.title)}${data.position ? ` to land ${data.position} this` : ''}` };
@@ -172,11 +218,12 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
 
   if (move === 'drop') {
     if (sub.stage === 'cleanup') throw new Error('Sub-job has already finished');
-    dropSub(sub, now);
+    dropSub(sub, now, job);
     return { detail: `Dropped ${quoted(sub.title)}` };
   }
 
   if (move === 'mark') {
+    if (data.key && !isStoryCreate(sub)) throw new Error('Only the write that creates a story is marked done with its key');
     if (data.position === 'pr') {
       if (sub.pr || !['implementation', 'review'].includes(sub.stage)) throw new Error('This sub-job already has a PR');
       if (!data.url) throw new Error('Give the PR url');
@@ -194,7 +241,14 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
     }
     if (sub.stage === 'cleanup') throw new Error('Sub-job has already finished');
     const checks = [data.note || 'Marked done by hand'];
-    if (!isPrSub(sub)) sub.result = { checks, at: now, receiptId: null };
+    // A story's create is what gives the story its key, so marking one done must
+    // say which ticket it made, exactly as its session's receipt would.
+    const key = isStoryCreate(sub) ? data.key || browseKey(data.link) : null;
+    if (isStoryCreate(sub)) {
+      if (!key) throw new Error('Give the key of the ticket you created (or its link)');
+      keyStory(job, sub.storyId, key);
+    }
+    if (!isPrSub(sub)) sub.result = { checks, at: now, receiptId: null, ...(data.link ? { url: data.link } : {}), ...(key ? { key } : {}) };
     else sub.deployed = { at: now, checks, commit: sub.pr?.mergeCommit || null };
     sub.error = null; sub.blocked = null; sub.stage = 'cleanup'; sub.state = 'queued';
     return { detail: `Marked done: ${checks[0]}` };

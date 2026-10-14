@@ -21,16 +21,17 @@ import { checkoutsDir } from './data-dir.js';
 //
 // Same shape as core so job-runner.js is a verbatim copy: launch / stop / isAlive /
 // acceptTrustDialog / attributeSpend / cleanup / cleanupPlanning, plus
-// `noteDispatch` (new — see launch()).
+// `noteDispatch` (new — see launch()) and `exists` / `resumeWithMail`, which a
+// session parked on its drafts needs (job-writes.js).
 export const LAUNCH_GRACE_MS = 2 * 60 * 1000;
 export const expandRepo = (repo) => path.resolve(repo.startsWith('~/') ? path.join(os.homedir(), repo.slice(2)) : repo);
 
 export class JobRuntime {
-  // `statusOf(sessionId)` answers from the graph the contributor last saw
-  // (server/jobs.js): core read `lastGraph` directly; the projection
-  // `host.sessions.get()` carries no status (TODO(host-api sessions:read status)).
-  constructor({ host, statusOf = () => null, now = Date.now }, run = runFile) {
-    Object.assign(this, { host, statusOf, now, run });
+  // `statusOf(sessionId)` and `dormantOf(sessionId)` answer from the graph the
+  // contributor last saw (server/jobs.js): core read `lastGraph` directly; the
+  // projection `host.sessions.get()` carries neither (TODO(host-api sessions:read status)).
+  constructor({ host, statusOf = () => null, dormantOf = () => false, now = Date.now }, run = runFile) {
+    Object.assign(this, { host, statusOf, dormantOf, now, run });
     this.pendingLaunch = null;
   }
 
@@ -38,7 +39,7 @@ export class JobRuntime {
   // longer has is dropped here rather than handed to spawn, which refuses an
   // unknown image before launching anything and would wedge the step forever.
   imagesFor(job, phase) {
-    const wanted = phase === 'planning' || (phase !== 'jira' && job.shareImages !== false);
+    const wanted = phase === 'planning' || job.shareImages !== false;
     return wanted ? (job.images || []).filter((n) => this.host.images.read(n)) : [];
   }
 
@@ -51,10 +52,10 @@ export class JobRuntime {
       const task = this.host.tasks.get(job.taskId);
       if (!task || task.archived) throw new Error('The Job task is no longer active. Restore it before retrying.');
     }
-    // Planning discovers its repositories, ticketing only talks to Jira and a
-    // session sub-job has none: blank cwd asks the wrangler for a fresh scratch
-    // workspace (dispatch's own rule), without fetching or branching a repo.
-    const planning = ['planning', 'jira', 'session'].includes(run.phase);
+    // Planning discovers its repositories and a session sub-job has none: blank
+    // cwd asks the wrangler for a fresh scratch workspace (dispatch's own rule),
+    // without fetching or branching a repo.
+    const planning = ['planning', 'session'].includes(run.phase);
     const repo = planning ? '' : expandRepo(sub.repo);
     const existing = sub?.worktree;
     if (existing && !fs.existsSync(existing.path)) throw new Error('Worktree is missing; restore it before retrying');
@@ -169,12 +170,30 @@ export class JobRuntime {
   // "visible, never idle") or is not in the cached graph at all; reading either as
   // dead reaped Jira steps seconds after launch. No status counts only for
   // LAUNCH_GRACE_MS, so a card that never reaches the graph still errors.
+  //
+  // A parked run woken to read its mail is starting again, so the grace runs
+  // from the mail as well as from the launch.
   async isAlive(run) {
-    const s = run.sessionId && this.host.sessions.get(run.sessionId);
-    if (!s || s.archived) return false;
+    if (!(await this.exists(run))) return false;
     const status = this.statusOf(run.sessionId);
     if (['working', 'needs-you', 'idle', 'unknown'].includes(status)) return true;
-    return status == null && Number.isFinite(run.startedAt) && this.now() - run.startedAt < LAUNCH_GRACE_MS;
+    const since = Math.max(run.startedAt || 0, run.mailedAt || 0);
+    return status == null && since > 0 && this.now() - since < LAUNCH_GRACE_MS;
+  }
+
+  // The card is still on the board, live or dormant: what a parked run (which
+  // may idle or be suspended for as long as the human takes) is held to.
+  async exists(run) {
+    const s = run.sessionId && this.host.sessions.get(run.sessionId);
+    return !!s && !s.archived;
+  }
+
+  // The human's decisions on a parked session's drafts reach it as mail, which
+  // the wrangler pastes in once the card is live and idle; a dormant card is
+  // woken first (resume relaunches a live pane, so only a dormant one is).
+  async resumeWithMail(run, text) {
+    if (this.dormantOf(run.sessionId)) await this.host.sessions.wake(run.sessionId);
+    this.host.mail.send(run.sessionId, text);
   }
 
   // TODO(host-api pane:capture/pane:keys): core answered Claude's first-launch
@@ -270,8 +289,9 @@ export class JobRuntime {
     await this.run('git', ['push', 'origin', `--force-with-lease=${ref}:${mergedHead}`, '--delete', ref], wt.repoRoot);
   }
 
+  // A `write` run is the batched writer's from before session-owned writes.
   async cleanupPlanning(job) {
-    for (const run of job.runs.filter((r) => (r.phase === 'planning' || r.phase === 'jira') && r.sessionId)) {
+    for (const run of job.runs.filter((r) => (r.phase === 'planning' || r.phase === 'write') && r.sessionId)) {
       await this.stop(run);
     }
     for (const wt of job.planningWorktrees || []) {
