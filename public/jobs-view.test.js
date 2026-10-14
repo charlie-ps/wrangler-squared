@@ -1580,7 +1580,28 @@ test('a refused write shows its place\'s error with Retry and Pick another statu
   assert.match(f.q('.job-write-spec').textContent, /In Review → In Progress/);
   at('n').stage = 'done'; f.view.update(f.data);
   f.q('[data-open-job]').click(); f.q('[data-open-sub="w-fail"]').click();
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), [], 'its session has finished: only Mark done or Drop are left');
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Pick another status'], 'a finished session still runs again for its writes alone');
+  at('n').cancelledAt = 2; f.view.update(f.data);
+  f.q('[data-open-job]').click(); f.q('[data-open-sub="w-fail"]').click();
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), [], 'its session was dropped: only Mark done or Drop are left');
+});
+
+test('Mark done on a story\'s create asks for the ticket: a key, or a browse link it is read from', (t) => {
+  const f = fixture(t);
+  withWrites(f, [], { stage: 'active', subJobs: [sessionNode('n', { stage: 'session', state: 'queued' }),
+    jiraWrite('mk', 'n', { type: 'create' }, { storyId: 'story', jiraKey: null, stage: 'write', state: 'failed', error: 'Jira refused it' })] });
+  f.q('[data-board="job1"] .job-card-open').click(); f.q('[data-open-sub="mk"]').click(); f.q('.job-move[data-move="mark"]').click();
+  const form = f.q('#job-move-form');
+  assert.ok(form.elements.ticket.required); assert.equal(form.elements.link, undefined);
+  form.elements.ticket.value = 'not a key';
+  form.dispatchEvent(f.event('submit'));
+  assert.equal(f.sent.length, 0); assert.match(f.q('#job-move-error').textContent, /ticket key/);
+  form.elements.ticket.value = 'AUTH-9';
+  form.dispatchEvent(f.event('submit'));
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'mk', action: 'mark', position: 'done', key: 'AUTH-9' });
+  form.elements.ticket.value = 'https://x.atlassian.net/browse/AUTH-9';
+  form.dispatchEvent(f.event('submit'));
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'mk', action: 'mark', position: 'done', link: 'https://x.atlassian.net/browse/AUTH-9' });
 });
 
 const made = (id, type, by, what, extra = {}) => ({ id, kind: 'write', place: { type }, title: `Make ${what}`, by, after: [], action: { type: 'make', what }, sessions: [], repairs: [], ...extra });

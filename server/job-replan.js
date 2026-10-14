@@ -9,10 +9,11 @@ import { milestoneReached } from './job-writes.js';
 // job-store.js is about to persist, like job-moves.js.
 //
 // Frozen is delivered or past the point of no return: merged (deployment onward),
-// a session or human task that finished, or already dropped. A proposal may not
-// touch one, and one it leaves out is carried over as it stands — the plan is the
-// record of what this job did, not only of what it still will.
-export const isFrozen = (sub) => !!sub.cancelledAt || ['deployment', 'cleanup', 'done'].includes(sub.stage) || !!sub.mergedAt || !!sub.deployed;
+// a session or human task that finished (a session rerun only for its writes
+// included), or already dropped. A proposal may not touch one, and one it leaves
+// out is carried over as it stands — the plan is the record of what this job
+// did, not only of what it still will.
+export const isFrozen = (sub) => !!sub.cancelledAt || ['deployment', 'cleanup', 'done'].includes(sub.stage) || !!sub.mergedAt || !!sub.deployed || !!sub.writesOnly;
 // A session's milestone, and a write's action, making session, review flag,
 // reason and the channel or page it names are what it IS, so they edit like a
 // brief: same place, different write.
@@ -69,6 +70,12 @@ export function mergeReplan(job, proposal) {
     const had = stories.find((x) => x.id === t.id);
     if (!had) stories.push(t);
     else if (t.key && had.key && t.key !== had.key) throw new Error(`${t.id} was approved as ${had.key}; keep that key`);
+  }
+  // A write handed to a session that has already finished would never be made.
+  const moved = new Set([...changes.added, ...changes.edited.filter((e) => e.fields.includes('by')).map((e) => e.id)]);
+  for (const s of subJobs) {
+    if (!isWriteSub(s) || !moved.has(s.id) || !live.has(s.by) || !isFrozen(live.get(s.by))) continue;
+    throw new Error(`${s.id}: ${s.by} has already finished, so it would never make this write; give it to a session still to run, or add a new one`);
   }
   const gone = new Set([...changes.removed, ...job.subJobs.filter((s) => s.cancelledAt).map((s) => s.id)]);
   // A write goes with the session that would have made it.
@@ -140,9 +147,12 @@ export function approveReplan(job, proposalId, { now, buildSubJob }) {
   const proposal = job.replan?.proposal;
   if (!proposal || proposal.id !== proposalId) throw new Error('The proposal changed. Review the latest version before approving.');
   const { plan, changes } = mergeReplan(job, proposal.plan);
-  // A write is busy while its session runs: that session was told the write
-  // as it stood, and a parked one is waiting on its draft.
-  const busy = changes.edited.filter((e) => liveRun(job, e.id) || liveRun(job, job.subJobs.find((s) => s.id === e.id)?.by)).map((e) => job.subJobs.find((s) => s.id === e.id).title);
+  // A write is busy while its session runs, the one it leaves or the one it
+  // goes to: that session was told its writes as they stood, and a parked one is
+  // waiting on its drafts.
+  const specOf = (id) => plan.subJobs.find((s) => s.id === id);
+  const busy = [...changes.edited.map((e) => e.id), ...changes.added].filter((id) => liveRun(job, id) || liveRun(job, job.subJobs.find((s) => s.id === id)?.by)
+    || (isWriteSub(specOf(id)) && liveRun(job, specOf(id).by))).map((id) => (job.subJobs.find((s) => s.id === id) || specOf(id)).title);
   if (busy.length) throw new Error(`Wait for the running step on ${busy.map(quoted).join(' · ')} to stop`);
   const lines = [];
   for (const { id, fields } of changes.edited) {
@@ -159,16 +169,28 @@ export function approveReplan(job, proposalId, { now, buildSubJob }) {
       lines.push({ sub, detail: reworkSub(job, sub, `${job.replan.feedback}\n\nNew brief: ${spec.brief}`, now) });
     }
   }
+  // Installed first: a story's create dropped here unlinks the story on it.
+  job.plan = plan;
   for (const id of changes.removed) {
     const sub = job.subJobs.find((s) => s.id === id);
-    dropSub(sub, now); sub.superseded = true;
+    dropSub(sub, now, job); sub.superseded = true;
     lines.push({ sub, detail: `Plan change cancelled ${quoted(sub.title)}${sub.pr?.url ? `; its PR stays open on GitHub` : ''}` });
   }
-  job.plan = plan;
   for (const id of changes.added) {
     const sub = buildSubJob(plan, plan.subJobs.find((s) => s.id === id));
     job.subJobs.push(sub);
     lines.push({ sub, detail: `Plan change added ${quoted(sub.title)}` });
+  }
+  // A session waiting on review of its result runs again for a write it now has
+  // to make, as Retry on a failed write sends it (job-writes.js reopenWrite).
+  const reopened = new Set();
+  for (const id of [...changes.added, ...changes.edited.map((e) => e.id)]) {
+    const w = job.subJobs.find((s) => s.id === id);
+    const session = isWriteSub(w) && w.stage === 'write' && !w.cancelledAt ? job.subJobs.find((s) => s.id === w.by) : null;
+    if (session?.stage !== 'review' || reopened.has(session.id)) continue;
+    session.stage = 'session'; session.state = 'queued'; session.result = null;
+    reopened.add(session.id);
+    lines.push({ sub: session, detail: `Plan change sent ${quoted(session.title)} back to work to make ${quoted(w.title)}` });
   }
   const summary = [changes.added.length && `${changes.added.length} added`, changes.edited.length && `${changes.edited.length} edited`,
     changes.removed.length && `${changes.removed.length} cancelled`].filter(Boolean).join(', ') || 'no sub-job changed';

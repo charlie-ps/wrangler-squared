@@ -23,10 +23,15 @@ const quoted = (title) => `“${title}”`;
 // anywhere else would be invisible to the agent it most concerns.
 const record = (j, s, move, note, detail) => (j.moves ||= []).push({ id: uid('mv'), at: Date.now(), subJobId: s?.id || null, move, note: note || null, detail });
 export const runnable = (run) => run && !run.stopped;
+// A run parked on its drafts is idle until the human decides them: still live
+// for its own sub-job (never launched twice), but no agent is working, so it
+// holds no concurrency slot.
+export const holdsSlot = (run) => runnable(run) && !(run.parkedAt && !run.mailedAt);
 // A PR dependency is satisfied once deployed; a session or human dependency once
 // it reached done (a cancelled one never satisfies) — an approved receipt for the
-// one, the human's own mark for the other.
-export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : dep.stage === 'done' && !dep.cancelledAt;
+// one, the human's own mark for the other. A done session rerun only for its
+// writes (job-writes.js reopenWrite) stays done for whatever waits on it.
+export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : (dep.stage === 'done' || dep.writesOnly?.from === 'done') && !dep.cancelledAt;
 export const dependenciesSatisfied = (job, sub) => sub.after.every((id) => dependencySatisfied(job.subJobs.find((s) => s.id === id)));
 const reviewSessions = (job) => job.reviewSessions ?? true;
 const reviewPlan = (job) => job.reviewPlan ?? true;
@@ -380,10 +385,10 @@ export class JobStore {
     const job = this.data.jobs.find((j) => j.id === jobId);
     if (!job || job.paused || job.cancelledAt || this.data.settings.paused
       || job.runs.some((r) => runnable(r) && r.subJobId === subJobId)
-      || this.data.jobs.flatMap((j) => j.runs).filter(runnable).length >= this.data.settings.concurrency) return null;
+      || this.data.jobs.flatMap((j) => j.runs).filter(holdsSlot).length >= this.data.settings.concurrency) return null;
     return this.change((d) => {
       const j = d.jobs.find((j) => j.id === jobId);
-      const active = d.jobs.flatMap((j) => j.runs).filter(runnable);
+      const active = d.jobs.flatMap((j) => j.runs).filter(holdsSlot);
       if (!j || j.paused || j.cancelledAt || d.settings.paused || active.length >= d.settings.concurrency) return null;
       if (j.runs.some((r) => runnable(r) && r.subJobId === subJobId)) return null;
       const run = { id: uid('run'), subJobId, phase, model: launchModel(j), effort: launchEffort(j), startedAt: Date.now(), sessionId: null, stopped: false, report: null, ...extra };
@@ -493,8 +498,15 @@ export class JobStore {
     // refused whole, and the session corrects it. A created story's key is set
     // on the plan and on every sub-job naming it, which is what releases them;
     // an approved key is part of what the human agreed to and never swaps.
+    // A rerun only for its writes keeps the result it finished with and goes
+    // back to cleanup. The stories session never waits for review: its writes,
+    // each with its own receipt, are its whole result.
     if (report.kind === 'completed') applyWrites(j, r, s, report, Date.now());
-    if (report.kind === 'completed') { s.result = { ...report, receiptId: r.id, at: Date.now() }; s.feedback = null; s.note = null; s.stage = reviewSessions(j) ? 'review' : 'cleanup'; s.state = reviewSessions(j) ? 'verified' : 'queued'; }
+    if (report.kind === 'completed' && s.writesOnly) { delete s.writesOnly; s.stage = 'cleanup'; s.state = 'queued'; }
+    else if (report.kind === 'completed') {
+      const review = reviewSessions(j) && !s.stories;
+      s.result = { ...report, receiptId: r.id, at: Date.now() }; s.feedback = null; s.note = null; s.stage = review ? 'review' : 'cleanup'; s.state = review ? 'verified' : 'queued';
+    }
     if (report.kind === 'deployed') { s.deployed = { checks: report.checks, at: Date.now(), commit: s.pr?.mergeCommit || null }; s.stage = 'cleanup'; s.state = 'queued'; }
     // The event box on the card: the agent's own sentence, plus the move it
     // suggests (never applied — a human decides).

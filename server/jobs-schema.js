@@ -79,6 +79,9 @@ export const subJobSchema = z.object({
   // published, until Accept); off, the session makes it and reports it.
   on: triggerSchema.optional(), place: placeSchema.optional(), action: writeActionSchema.optional(), by: id.optional(),
   review: z.boolean().optional(), why: line.optional(),
+  // The session `withStoryCreates` adds: its writes carry their own receipts,
+  // so its result never stops for Session results review (job-store.js).
+  stories: z.boolean().optional(),
 });
 export const isSessionSub = (sub) => sub?.kind === 'session';
 export const isHumanSub = (sub) => sub?.kind === 'human';
@@ -119,14 +122,19 @@ export const ATTRIBUTION = 'Made with Agent Wrangler and the charlie-ps/wrangler
 // the team's own: name as Jira labels it. They are reviewed with that write,
 // like any other (edit-write `story`), not with the plan.
 export const storyFieldSchema = z.object({ name: line, value: z.string().trim().min(1).max(2000) });
+// `dropped`: its create write was dropped before it had a key, so whatever named
+// it went ahead ticketless (job-moves.js `unlinkStory`); it stays as the record,
+// and nothing creates it again.
 export const storySchema = z.object({ id, key: jira.optional(), project: jiraProject.optional(), title: line,
-  fields: z.array(storyFieldSchema).max(25).optional() });
+  fields: z.array(storyFieldSchema).max(25).optional(), dropped: z.boolean().optional() });
 // Read by the planner from Jira, project by project, in workflow order: the
 // board offers exactly these statuses for a write, so it needs no Jira client
 // and a typo can never reach Jira.
 export const workflowsSchema = z.record(jiraProject, z.array(line).max(40)).default({});
 export const storyProject = (story) => story?.key ? story.key.split('-')[0] : story?.project || null;
-const freeId = (taken, base) => { if (!taken.has(base)) return base; let n = 2; while (taken.has(`${base}-${n}`)) n++; return `${base}-${n}`; };
+// `base` itself if it is free and `from` is 1, else the first free base-<n>.
+export const freeId = (taken, base, from = 1) => { let n = from; while (taken.has(n === 1 ? base : `${base}-${n}`)) n++; return n === 1 ? base : `${base}-${n}`; };
+export const storyCreateTitle = (title) => `Create story: ${title}`.slice(0, 180).trim();
 export const STORY_SESSION = { title: 'Create Jira stories', brief: 'Create this job\'s new Jira stories, one per create write you are given, and nothing else.' };
 // The old ticketing stage folded into the plan: every keyless story is created
 // by exactly one write, owned like every write by a session, which starts on
@@ -134,20 +142,21 @@ export const STORY_SESSION = { title: 'Create Jira stories', brief: 'Create this
 // (`canReuse` says whether it still can, on a running job); else a new one.
 // Pure; returns the same plan when nothing was missing.
 export function withStoryCreates(plan, canReuse = () => true) {
-  const missing = plan.stories.filter((t) => !t.key && !plan.subJobs.some((s) => isStoryCreate(s) && s.storyId === t.id));
+  const missing = plan.stories.filter((t) => !t.key && !t.dropped && !plan.subJobs.some((s) => isStoryCreate(s) && s.storyId === t.id));
   if (!missing.length) return plan;
   const taken = new Set(plan.subJobs.map((s) => s.id));
   const sessions = new Map(plan.subJobs.filter(isSessionSub).map((s) => [s.id, s]));
   const reuse = [...plan.subJobs.filter(isStoryCreate).map((s) => s.by), 'stories'].find((id) => sessions.has(id) && canReuse(id));
   const owner = reuse || freeId(taken, 'stories');
   taken.add(owner);
-  const added = reuse ? [] : [{ id: owner, kind: 'session', title: STORY_SESSION.title, after: [], brief: STORY_SESSION.brief }];
+  const added = reuse ? [] : [{ id: owner, kind: 'session', title: STORY_SESSION.title, after: [], brief: STORY_SESSION.brief, stories: true }];
   const creates = missing.map((t) => {
     const sid = freeId(taken, `create-${t.id}`.slice(0, 58)); taken.add(sid);
-    return { id: sid, title: `Create story: ${t.title}`.slice(0, 180).trim(), kind: 'write', place: { type: 'jira' }, storyId: t.id, after: [], action: { type: 'create' }, by: owner };
+    return { id: sid, title: storyCreateTitle(t.title), kind: 'write', place: { type: 'jira' }, storyId: t.id, after: [], action: { type: 'create' }, by: owner };
   });
   return { ...plan, subJobs: [...added, ...creates, ...plan.subJobs] };
 }
+export const MAX_SUB_JOBS = 80;
 export const planSchema = z.object({
   // Written once for the whole job, the way a human writes a dispatch: every
   // brief refers to it rather than repeating the background, which is what keeps
@@ -157,13 +166,19 @@ export const planSchema = z.object({
   workflows: workflowsSchema,
   // The Jira site the planner read, so a ticket on the board links to it.
   jiraSite: z.string().trim().regex(/^https:\/\/[^\s/]+\/?$/, 'Give the site root, e.g. https://x.atlassian.net').max(200).optional(),
-  subJobs: z.array(subJobSchema).min(1).max(80),
+  subJobs: z.array(subJobSchema).min(1).max(MAX_SUB_JOBS),
 }).superRefine((plan, ctx) => {
   const stories = new Set(plan.stories.map((s) => s.id));
   const nodes = new Map(plan.subJobs.map((s) => [s.id, s]));
   const issue = (message) => ctx.addIssue({ code: z.ZodIssueCode.custom, message });
   if (stories.size !== plan.stories.length || nodes.size !== plan.subJobs.length) issue('IDs must be unique');
+  // Approval adds a create (and maybe their session) for each keyless story, so
+  // the cap holds for the plan as it will run, not only as proposed.
+  const creates = withStoryCreates(plan).subJobs.length - plan.subJobs.length;
+  if (creates && plan.subJobs.length <= MAX_SUB_JOBS && plan.subJobs.length + creates > MAX_SUB_JOBS) issue(`Too many sub-jobs: ${plan.subJobs.length} planned plus ${creates} to create stories exceeds ${MAX_SUB_JOBS}; merge some, or reference existing stories by key`);
   for (const s of plan.subJobs) {
+    if (s.stories && !isSessionSub(s)) issue(`${s.id}: only a session creates the job's stories`);
+    if (isWriteSub(s) && !isStoryCreate(s) && nodes.get(s.by)?.stories) issue(`${s.id}: ${s.by} only creates the job's stories; give this write to another session`);
     if (isSessionSub(s) && s.repo) issue(`${s.id}: a session sub-job has no repo`);
     if (isSessionSub(s) && s.check) issue(`${s.id}: a session sub-job's receipt is its own check`);
     if (isHumanSub(s) && s.repo) issue(`${s.id}: a human sub-job has no repo`);

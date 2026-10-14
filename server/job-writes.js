@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { line, commentSchema, storyFieldSchema, isWriteSub, isPrSub, isHumanSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, awaitsTicket, storyProject, writeReviewed, WRITE_REF, placeNameSchema } from './jobs-schema.js';
-import { dropSub, validatePlan } from './job-moves.js';
+import { line, commentSchema, storyFieldSchema, isWriteSub, isPrSub, isHumanSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, awaitsTicket, storyProject, writeReviewed, WRITE_REF, placeNameSchema, storyCreateTitle } from './jobs-schema.js';
+import { dropSub, keyStory, validatePlan } from './job-moves.js';
 
 // Writes (a `write` sub-job, jobs-schema.js): one write to one place outside the
 // board, made by the session sub-job it names (`by`). Pure over the job draft
@@ -34,7 +34,8 @@ export const isLegacyWrite = (sub) => isWriteSub(sub) && !sub.by;
 
 // Whether a trigger has reached a milestone. Started is any session having run
 // for it (a human task marked in progress counts); merged includes a PR marked
-// done by hand; deployed is the same bar `after` holds a dependant to.
+// done by hand; deployed is the same bar `after` holds a dependant to (a
+// session rerun only for its writes has already done its work).
 export function milestoneReached(t, at) {
   if (!t) return false;
   if (at === 'dropped') return !!t.cancelledAt;
@@ -42,7 +43,7 @@ export function milestoneReached(t, at) {
     || (!t.cancelledAt && !['implementation', 'session', 'human'].includes(t.stage));
   if (at === 'pr') return !!t.pr;
   if (at === 'merged') return !!t.mergedAt || (isPrSub(t) && !!t.deployed);
-  return !t.cancelledAt && (isPrSub(t) ? !!t.deployed : FINISHED.includes(t.stage));
+  return !t.cancelledAt && (isPrSub(t) ? !!t.deployed : FINISHED.includes(t.stage) || !!t.writesOnly);
 }
 
 // Where a session with a milestone stands this tick: `wait` for it, `due`,
@@ -84,7 +85,7 @@ export const awaitsKeys = (job, session) => openWrites(job, session).some((w) =>
 export function advanceWrite(job, sub, now) {
   if (!isWriteSub(sub) || sub.stage !== 'write' || !['queued', 'approved'].includes(sub.state) || sub.error || sub.cancelledAt || isLegacyWrite(sub)) return false;
   const session = sessionOf(job, sub);
-  if (!session || session.cancelledAt) { dropSub(sub, now); return true; }
+  if (!session || session.cancelledAt) { dropSub(sub, now, job); return true; }
   if (!FINISHED.includes(session.stage)) return false;
   sub.state = 'failed'; sub.error = `${session.title} finished without reporting it`; sub.blocked = null;
   return true;
@@ -138,13 +139,6 @@ export function writeBrief(job, sub) {
     write: a.type, ...(a.to ? { to: a.to } : {}), ...(a.comment ? { comment: fill(a.comment) } : {}), ...tail };
 }
 
-const keyStory = (job, storyId, key) => {
-  const story = job.plan.stories.find((t) => t.id === storyId);
-  if (!story) throw new Error(`Unknown story: ${storyId}`);
-  if (story.key && story.key !== key) throw new Error(`${storyId} was approved as ${story.key}; keep that key`);
-  story.key = key;
-  for (const sub of [...job.subJobs, ...job.plan.subJobs]) if (sub.storyId === storyId && !sub.jiraKey) sub.jiraKey = key;
-};
 function doneLine(sub, r) {
   const a = sub.action;
   if (isMakeWrite(sub)) return `Made ${r.title || r.url}`;
@@ -262,17 +256,24 @@ export function skipWrite(sub, now) {
 }
 
 // A failed write is made again by its session: retried, it reopens and its
-// session runs again (one waiting on review goes back to work). Once the session
-// has finished nothing is left to make it, so it is the human's to make by hand
-// and mark done, or drop.
+// session runs again (one waiting on review goes back to work). A session that
+// has already finished runs once more for its open writes alone (`writesOnly`:
+// its prompt gives its work as done, job-prompts.js) and goes straight back to
+// cleanup on its receipt, with no second review of work nobody redid. A
+// session scratch workspace is fresh per run, so nothing cleanup removed is
+// needed again. A dropped session is gone: the write is the human's to make by
+// hand and mark done, or drop.
 export function reopenWrite(job, sub) {
   if (isLegacyWrite(sub)) throw new Error(LEGACY_WRITE);
   const session = sessionOf(job, sub);
   if (!session || session.cancelledAt) throw new Error('Its session was dropped; make it by hand and mark it done, or drop it');
   if (job.runs.some((r) => !r.stopped && r.subJobId === session.id)) throw new Error('Wait for its session to stop');
-  if (FINISHED.includes(session.stage)) throw new Error(`${session.title} has finished, so nothing will make it now: make it by hand and mark it done, or drop it`);
   sub.error = null; sub.blocked = null; sub.state = sub.writeApprovedAt ? 'approved' : 'queued';
   if (session.stage === 'review') { session.stage = 'session'; session.state = 'queued'; session.result = null; }
+  else if (FINISHED.includes(session.stage)) {
+    session.writesOnly ??= { from: session.stage };
+    session.stage = 'session'; session.state = 'queued'; session.error = null; session.blocked = null;
+  }
 }
 
 // Edit (in review, or waiting for its session), Pick another status (failed),
@@ -288,7 +289,6 @@ export const writeEditSchema = z.object({
   review: z.boolean().optional(),
   story: z.object({ title: line.optional(), fields: z.array(storyFieldSchema).max(25).optional() }).strict().optional(),
 }).strict();
-const createTitle = (title) => `Create story: ${title}`.slice(0, 180).trim();
 function applyEdit(job, sub, payload) {
   if (!isWriteSub(sub)) throw new Error('Only a write can be edited this way');
   if (sub.cancelledAt || FINISHED.includes(sub.stage)) throw new Error('This write has already finished');
@@ -325,7 +325,7 @@ function reshape(job, sub, data) {
       if (!story.fields?.length) delete story.fields;
       return story;
     });
-    if (data.story.title) next.title = createTitle(data.story.title);
+    if (data.story.title) next.title = storyCreateTitle(data.story.title);
   }
   const spec = job.plan.subJobs.find((s) => s.id === sub.id);
   validatePlan({ ...job.plan, stories, subJobs: job.plan.subJobs.map((s) => (s === spec ? { ...s, ...next } : s)) });

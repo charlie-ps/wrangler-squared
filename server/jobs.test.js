@@ -1016,6 +1016,18 @@ test('concurrency applies to all jobs and paused work never starts a session', a
   f.store.settings({ paused: false }); await f.tick(); assert.equal(f.launched.length, 2);
 });
 
+test('a run parked on its drafts holds no concurrency slot, yet its own sub-job is not launched twice', async (t) => {
+  const f = fixture(t); f.store.settings({ concurrency: 1 });
+  const second = f.store.create(input); f.store.action(f.job.id, 'start'); f.store.action(second.id, 'start');
+  await f.tick(); assert.equal(f.launched.length, 1);
+  const [run] = f.store.get(f.job.id).runs;
+  f.store.update(f.job.id, (j) => { j.runs[0].parkedAt = 1; });
+  assert.equal(f.store.claim(f.job.id, null, 'planning'), null, 'still live for its own work');
+  await f.tick(); assert.equal(f.launched.length, 2, 'the other job takes the slot it is not using');
+  f.store.update(f.job.id, (j) => { j.runs.find((r) => r.id === run.id).mailedAt = 2; });
+  assert.equal(f.store.claim(second.id, 'x', 'session'), null, 'mailed, it is working again and the slots are full');
+});
+
 test('idle ticks and exhausted claims do not rewrite state or trigger extra graph rebuilds', async (t) => {
   const f = fixture(t); let rebuilt = 0; f.runner.onChange = async () => { rebuilt++; };
   const before = f.store.data; await f.tick(); assert.equal(rebuilt, 0); assert.equal(f.store.data, before);
@@ -1052,7 +1064,7 @@ test('approving a plan with a keyless story creates it under a stories session, 
     [{ id: 'story', key: 'AUTH-123', title: 'Reliable sign-in' }, { id: 'audit', project: 'SEC', title: 'Sign-ins are audited' }]);
   f.report({ kind: 'plan', plan: proposed }); await f.tick();
   assert.deepEqual(f.store.get(f.job.id).plan.subJobs.slice(0, 2), [
-    { id: 'stories', kind: 'session', title: 'Create Jira stories', after: [], brief: 'Create this job\'s new Jira stories, one per create write you are given, and nothing else.' },
+    { id: 'stories', kind: 'session', title: 'Create Jira stories', after: [], brief: 'Create this job\'s new Jira stories, one per create write you are given, and nothing else.', stories: true },
     { id: 'create-audit', title: 'Create story: Sign-ins are audited', kind: 'write', place: { type: 'jira' }, storyId: 'audit', after: [], action: { type: 'create' }, by: 'stories' }],
   'the human reviews the create and the session that makes it with the plan');
   f.store.approvePlan(f.job.id, f.store.get(f.job.id).revision); await f.tick();
@@ -1071,6 +1083,7 @@ test('approving a plan with a keyless story creates it under a stories session, 
   assert.equal(job.plan.stories[1].key, 'SEC-42');
   assert.deepEqual(job.subJobs.map((s) => s.jiraKey), [null, 'SEC-42', 'AUTH-123', 'SEC-42']);
   assert.deepEqual(job.subJobs[1].result.checks, ['Created SEC-42']); assert.equal(job.subJobs[1].stage, 'done');
+  assert.equal(job.subJobs[0].stage, 'done', 'its writes are its result: no Session results review, though the job has it on');
   assert.deepEqual([f.last().run.phase, f.last().sub.id], ['implementation', 'web']);
 });
 
@@ -1297,10 +1310,24 @@ test('a refused write shows its place\'s error; Retry and Pick another status ru
   assert.equal(job.subJobs[1].stage, 'done'); assert.deepEqual(job.subJobs[1].result.checks, ['Moved it by hand']);
   assert.equal(f.launched.filter((l) => l.sub?.id === 'n').length, 3);
   f.store.action(f.job.id, 'approve-session', { subJobId: 'n', sessionReceiptId: job.subJobs[0].result.receiptId }); await f.tick(); await f.tick();
-  const done = fixture(t, noSessionReview);
+  const done = fixture(t);
   await done.approve(plan([notifier('n'), write('w', 'n', moveTo('In Review'))]));
-  done.report(completed([{ id: 'w', outcome: 'failed', error: 'No' }]), done.workerFor('n')); await done.tick(); await done.tick();
-  assert.throws(() => done.store.action(done.job.id, 'retry', { subJobId: 'w' }), /has finished, so nothing will make it now/);
+  done.report(completed([{ id: 'w', outcome: 'failed', error: 'No' }]), done.workerFor('n')); await done.tick();
+  done.store.action(done.job.id, 'approve-session', { subJobId: 'n', sessionReceiptId: done.store.get(done.job.id).subJobs[0].result.receiptId }); await done.tick(); await done.tick();
+  job = done.store.get(done.job.id);
+  assert.equal(job.subJobs[0].stage, 'done');
+  const firstResult = job.subJobs[0].result;
+  done.store.action(done.job.id, 'retry', { subJobId: 'w' }); await done.tick();
+  const rerun = done.workerFor('n');
+  assert.equal(done.launched.filter((l) => l.sub?.id === 'n').length, 2, 'Retry reruns the finished session for the write');
+  const prompt = jobPrompt(done.store.get(done.job.id), rerun.sub, rerun.run);
+  assert.match(prompt, /already done/); assert.match(prompt, /only task now is to make/); assert.doesNotMatch(prompt, /^This session: /m);
+  assert.match(prompt, /"id":"w"/);
+  assert.equal(done.store.get(done.job.id).subJobs[0].stage, 'session');
+  done.report(completed([{ id: 'w', outcome: 'written', from: 'To Do' }]), rerun); await done.tick(); await done.tick();
+  job = done.store.get(done.job.id);
+  assert.deepEqual([job.subJobs[0].stage, job.subJobs[0].writesOnly, job.subJobs[1].stage], ['done', undefined, 'done'], 'back to done, never to review');
+  assert.deepEqual(job.subJobs[0].result, firstResult, 'it keeps the result it finished with');
 });
 
 test('an if-dropped session is dormant: it starts when its trigger is dropped and is dropped itself when it deploys; any other session on a dropped trigger can never start', async (t) => {

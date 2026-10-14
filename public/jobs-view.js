@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
+import { CHECKPOINTS, checkpoint, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml, jobTileHtml } from './job-graph.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 import { createJobImages, imagesPanelHtml, openZoom } from './job-images.js';
@@ -229,7 +229,7 @@ export function authorityText(job, plan) {
     : ` Of the ${n} new Jira stories, ${n - heldStories} ${n - heldStories === 1 ? 'is' : 'are'} created in Jira straight away and ${heldStories} ${heldStories === 1 ? 'is' : 'are'} held for your review first.`;
   const fired = given.length ? ` ${given.length === 1 ? 'Its session makes the write' : `Their sessions make the ${given.length} writes`}${held(given) ? `; ${held(given)} ${held(given) === 1 ? 'is' : 'are'} drafted for your review first` : ''}.` : '';
   const outputs = made.length ? ` ${made.length === 1 ? 'Its session makes the output and says where it is' : `Their sessions make the ${made.length} outputs and say where each is`}${held(made) ? `; ${waits(held(made))} for your review once published` : ''}.` : '';
-  const sessions = plan.subJobs.some(isSessionSub), humans = plan.subJobs.some(isHumanSub);
+  const sessions = plan.subJobs.some(reviewedSession), humans = plan.subJobs.some(isHumanSub);
   return `Approve starts work in dedicated worktrees.${stories}${fired}${outputs} ${['reviewCode', 'reviewMerge', ...(sessions ? ['reviewSessions'] : [])].map((f) => `${checkpoint(f).name}: ${checkpointHint(checkpoint(f), youReview(job, f))}.`).join(' ')}${humans ? ' Nothing starts a human task: you mark it done, and that releases whatever waits on it.' : ''}`;
 }
 
@@ -295,7 +295,8 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   function render() {
     const cards = jobCards(data.jobs);
     const needs = new Set(cards.filter((c) => jobNeedsReview(c.job, c.sub)).map((c) => c.job));
-    const active = data.jobs.flatMap((j) => j.runs).filter((r) => !r.stopped).length;
+    // A run parked on its drafts holds no slot (server/job-store.js holdsSlot).
+    const active = data.jobs.flatMap((j) => j.runs).filter((r) => !r.stopped && !(r.parkedAt && !r.mailedAt)).length;
     q('#jobs-active-count').textContent = `${active} / ${data.settings.concurrency} agents · ${cards.filter((c) => c.sub?.stage === 'done' && !c.sub.cancelledAt).length} delivered`;
     q('#jobs-review-count').textContent = cards.filter((c) => jobNeedsReview(c.job, c.sub)).length;
     if (document.activeElement !== q('#jobs-concurrency')) q('#jobs-concurrency').value = data.settings.concurrency;
@@ -620,7 +621,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     // Before approval the sub-jobs exist only in the plan, and Session results and
     // Writes are still switchable there.
     const planned = (planDraft || job.plan)?.subJobs || [];
-    const sessions = hasSessionSubs(job) || planned.some(isSessionSub);
+    const sessions = hasSessionSubs(job) || planned.some(reviewedSession);
     const writes = hasWrites(job) || planned.some(isWriteSub);
     const cps = CHECKPOINTS.filter((cp) => (cp.field !== 'reviewSessions' || sessions) && (cp.field !== 'reviewWrites' || writes));
     const buttons = cps.map((cp) => checkpointButtonHtml(cp, shownYou(job, cp.field), { lock: checkpointLock(job, cp.field), saving: flags.pending?.field === cp.field })).join('');
@@ -852,15 +853,15 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       const made = isMakeWrite(sub);
       const panel = review && !made;
       body = `${box(review || sub.result?.outcome === 'already' ? hints.find((h) => /^(Review is on|.* reached |.* was already )/.test(h)) : orphan)}${review && made ? madeWhereHtml(sub) : ''}${sub.result ? `<h3>Reported</h3>${receiptHtml(sub.result.checks)}` : ''}${panel ? writeReviewHtml(job, sub, state) : writeSpecHtml(job, sub)}`;
-      // A write whose session has finished can only be marked done or dropped:
-      // nothing is left to make it.
-      const madeTooLate = ['cleanup', 'done'].includes(writeSession(job, sub)?.stage);
-      const editable = !sub.cancelledAt && !['cleanup', 'done'].includes(sub.stage) && !held && !madeTooLate && !!sub.by
-        && !(sub.stage === 'write' && job.runs.some((r) => !r.stopped && r.subJobId === sub.by));
+      // A write is only ever made by its session, so Retry (and an edit of a
+      // failed one) runs that again for it, a finished session for its writes
+      // alone; a dropped session leaves it to be marked done or dropped.
+      const owner = writeSession(job, sub);
       const failed = sub.state === 'failed' && !isStoryCreate(sub);
-      // A write is only ever made by its session, so Retry runs that again for
-      // it, which only a session that has not finished can do.
-      const again = madeTooLate || !sub.by ? '' : retry;
+      const unowned = !owner || !!owner.cancelledAt || (['cleanup', 'done'].includes(owner.stage) && sub.state !== 'failed');
+      const editable = !sub.cancelledAt && !['cleanup', 'done'].includes(sub.stage) && !held && !unowned && !!sub.by
+        && !(sub.stage === 'write' && job.runs.some((r) => !r.stopped && r.subJobId === sub.by));
+      const again = unowned || !sub.by ? '' : retry;
       // A made output is already published: it can only be accepted or dropped.
       actions = `${review && made ? `<button class="primary" data-action="approve-write" title="Accept it as published and finish it">${ICONS.check}Accept</button>` : ''}${fabMove}${again}
         ${editable && !review ? `<button id="job-write-edit">${ICONS.edit}${failed && isJiraWrite(sub) && sub.action?.to ? 'Pick another status' : 'Edit'}</button>` : ''}`;
@@ -1051,15 +1052,18 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       const options = markOptions(sub);
       const form = moveForm(job, sub, id, `<fieldset><legend>What is true</legend>${options.map((o, i) => `<label><input type="radio" name="position" value="${esc(o.value)}" ${i === 0 ? 'checked' : ''}> ${esc(o.label)}</label>`).join('')}</fieldset>
         ${options.some((o) => o.value === 'pr') ? '<label>Pull request URL<input name="url" maxlength="300" placeholder="https://github.com/org/repo/pull/12"></label>' : ''}
-        ${isWriteSub(sub) ? `<label>Where it is <small>${isMakeWrite(sub) ? 'The link, or the absolute path of a file' : 'Optional · a link to what you wrote'}</small><input name="link" maxlength="2000" ${isMakeWrite(sub) ? 'required' : ''} placeholder="${placeOf(sub) === 'file' ? '/Users/you/report.html' : 'https://…'}"></label>` : ''}
+        ${isStoryCreate(sub) ? '<label>Ticket <small>The key of the story you created, or its link</small><input name="ticket" maxlength="2000" required placeholder="ABC-123"></label>' : isWriteSub(sub) ? `<label>Where it is <small>${isMakeWrite(sub) ? 'The link, or the absolute path of a file' : 'Optional · a link to what you wrote'}</small><input name="link" maxlength="2000" ${isMakeWrite(sub) ? 'required' : ''} placeholder="${placeOf(sub) === 'file' ? '/Users/you/report.html' : 'https://…'}"></label>` : ''}
         <label>Note <small>Optional · recorded with the move, and as the receipt line when you mark it done</small><input name="note" maxlength="180"></label>`, 'Mark it');
       return submit(form, (f) => {
         const position = f.get('position');
         const url = trimmed(f, 'url');
         if (position === 'pr' && !url) return fail('Paste the pull request URL');
-        const link = trimmed(f, 'link');
+        const ticket = trimmed(f, 'ticket');
+        const key = /^[A-Z][A-Z0-9]*-\d+$/.test(ticket) ? ticket : '';
+        if (isStoryCreate(sub) && !key && !/^https?:\/\/\S+\/browse\/[A-Z][A-Z0-9]*-\d+/.test(ticket)) return fail('Give the ticket key (ABC-123) or its Jira link');
+        const link = key ? '' : ticket || trimmed(f, 'link');
         if (link && !/^(https?:\/\/\S|\/|~\/)/.test(link)) return fail('Paste a link starting https:// or an absolute path');
-        action('mark', { position, ...only({ url: position === 'pr' ? url : '', link, note: trimmed(f, 'note') }) });
+        action('mark', { position, ...only({ url: position === 'pr' ? url : '', link, key, note: trimmed(f, 'note') }) });
       });
     }
   }

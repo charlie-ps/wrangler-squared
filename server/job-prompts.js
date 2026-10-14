@@ -1,9 +1,8 @@
 import path from 'node:path';
-import { ATTRIBUTION, isHumanSub, reviewCode } from './jobs-schema.js';
+import { ATTRIBUTION, isHumanSub, reviewCode, placeOf, isMakeWrite } from './jobs-schema.js';
 import { checkoutsDir, displayPath } from './data-dir.js';
 import { isFrozen, replanStatus } from './job-replan.js';
 import { writeBrief, openWrites, draftingFor, WRITE_RESULT_SHAPE } from './job-writes.js';
-import { placeOf, isMakeWrite } from './jobs-schema.js';
 
 // The worktree starts on a placeholder branch (job-runtime.js). The session
 // working inside the repository is the one that can read its convention, so
@@ -281,7 +280,23 @@ export function jobPrompt(job, sub, run) {
       '',
       report('kind:"deployed", checks:["what you confirmed"]'),
     ),
-    session: lines(
+    // Retry on a write whose session had finished (job-writes.js reopenWrite):
+    // the work is not redone, only the writes still open are made.
+    session: sub?.writesOnly ? lines(
+      heading(job, sub),
+      '',
+      contextLine(job),
+      '',
+      `This session's work is already done, so do not redo or re-verify it. For context only, it was: ${sub.brief}`,
+      sub.result?.checks?.length ? `It reported: ${joinChecks(sub.result.checks)}` : '',
+      historyBlock(job, sub, run),
+      '',
+      'Your only task now is to make the writes below, which are still open (one failed or was reopened by the human), and report a completed receipt answering for each of them.',
+      '',
+      writesBlock(job, sub, run),
+      '',
+      report(`kind:"completed", checks:["what you wrote and how you know"], ${WRITE_RESULT_SHAPE} for every write above`),
+    ) : lines(
       heading(job, sub),
       '',
       contextLine(job),

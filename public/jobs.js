@@ -15,7 +15,10 @@ export const writeReviewed = (job, sub) => sub?.review ?? job?.reviewWrites ?? f
 // Mirrors server/jobs-schema.js isPrSub: a PR is the only kind with a repository,
 // a pipeline and a deploy gate, so "not a PR" is what those rules turn on.
 export const isPrSub = (sub) => !isSessionSub(sub) && !isHumanSub(sub) && !isWriteSub(sub);
-export const hasSessionSubs = (job) => job.subJobs.some(isSessionSub);
+// The stories session never stops for Session results review: its writes are
+// its result (server/job-store.js), so it alone does not make the switch matter.
+export const reviewedSession = (sub) => isSessionSub(sub) && !sub.stories;
+export const hasSessionSubs = (job) => job.subJobs.some(reviewedSession);
 export const hasHumanSubs = (job) => job.subJobs.some(isHumanSub);
 // Mirrors server/jobs-schema.js reviewCode: a job from before the flag reviews.
 export const reviewCode = (job) => job.reviewCode ?? true;
@@ -337,7 +340,7 @@ export function movesFor(job, sub) {
   if (!sub || sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage) || replanPending(job)) return [];
   // A write is edited from its own dialog; the only moves are the two that end it.
   if (isWriteSub(sub)) return MOVES.filter((m) => ['drop', 'mark'].includes(m.id))
-    .map((m) => (m.id === 'mark' ? { ...m, label: 'Mark done', blurb: isMakeWrite(sub) ? 'You made it yourself. Paste where it is.' : 'Someone already made this write by hand.' } : m));
+    .map((m) => (m.id === 'mark' ? { ...m, label: 'Mark done', blurb: isMakeWrite(sub) ? 'You made it yourself. Paste where it is.' : isStoryCreate(sub) ? 'You created the ticket yourself. Give its key.' : 'Someone already made this write by hand.' } : m));
   const pr = isPrSub(sub);
   const allowed = {
     'fix-here': ['pr', 'implementation', 'review', 'session'].includes(sub.stage),

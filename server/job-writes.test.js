@@ -201,7 +201,10 @@ test('drafts: exactly the reviewed writes, laid on as edits; the run parks until
   reopenWrite(job, post);
   assert.deepEqual([post.state, post.error, n.stage], ['approved', null, 'session'], 'retrying it sends its session back to make it, still approved');
   n.stage = 'done'; post.state = 'failed'; post.error = 'again';
-  assert.throws(() => reopenWrite(job, post), /has finished, so nothing will make it now/);
+  reopenWrite(job, post);
+  assert.deepEqual([post.state, n.stage, n.state, n.writesOnly], ['approved', 'session', 'queued', { from: 'done' }], 'a finished session runs again for its writes alone');
+  n.stage = 'done'; delete n.writesOnly; n.cancelledAt = 7; post.state = 'failed'; post.error = 'again';
+  assert.throws(() => reopenWrite(job, post), /Its session was dropped/);
 });
 
 test('a session that creates a story does not wait for its key; one that only uses it does', () => {

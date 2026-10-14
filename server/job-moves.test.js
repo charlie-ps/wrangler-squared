@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyMove, moveSchemas, MOVE_ACTIONS } from './job-moves.js';
+import { applyMove, moveSchemas, MOVE_ACTIONS, validatePlan } from './job-moves.js';
+import { awaitsTicket, withStoryCreates } from './jobs-schema.js';
 import { buildSubJob } from './job-store.js';
 
 // The pure surface: job-store.js hands applyMove the draft it is about to
@@ -153,4 +154,55 @@ test('a move clears the event it answers', () => {
   Object.assign(j.subJobs[0], { error: 'Worker blocked' });
   move(j, 'api', 'reorder', { after: [] });
   assert.equal(j.subJobs[0].error, 'Worker blocked');
+});
+
+const session = (id, extra = {}) => ({ id, title: `Run ${id}`, kind: 'session', after: [], brief: `Do ${id}`, ...extra });
+const jiraW = (id, by, action, extra = {}) => ({ id, kind: 'write', title: `Write ${id}`, place: { type: 'jira' }, storyId: 'new', after: [], by, action, ...extra });
+const keyless = () => job({ stories: [{ id: 'new', project: 'SEC', title: 'Audit' }],
+  subs: [session('stories', { stories: true }), jiraW('create-new', 'stories', { type: 'create' }), jiraW('move', 'ship', { type: 'transition', to: 'Done' }),
+    planSub('api', { storyId: 'new' }), session('ship')] });
+
+test('Mark done on a story\'s create records the key, from the move or its browse link, and releases what names the story', () => {
+  const j = keyless();
+  assert.throws(() => move(j, 'create-new', 'mark', { position: 'done' }), /Give the key of the ticket you created \(or its link\)/);
+  assert.throws(() => move(j, 'create-new', 'mark', { position: 'done', link: 'https://x.atlassian.net/browse/not-a-key' }), /Give the key/);
+  assert.throws(() => move(j, 'move', 'mark', { position: 'done', key: 'SEC-4' }), /Only the write that creates a story/);
+  assert.throws(() => move(j, 'create-new', 'mark', { position: 'done', key: 'sec-4' }));
+  move(j, 'create-new', 'mark', { position: 'done', link: 'https://x.atlassian.net/browse/SEC-4?focus=1' });
+  const at = (id) => j.subJobs.find((s) => s.id === id);
+  assert.equal(j.plan.stories[0].key, 'SEC-4');
+  assert.deepEqual([at('create-new').result.key, at('create-new').result.url, at('api').jiraKey, at('move').jiraKey], ['SEC-4', 'https://x.atlassian.net/browse/SEC-4?focus=1', 'SEC-4', 'SEC-4']);
+  assert.equal(j.plan.subJobs.find((s) => s.id === 'api').jiraKey, 'SEC-4');
+  const typed = keyless();
+  move(typed, 'create-new', 'mark', { position: 'done', key: 'SEC-5' });
+  assert.equal(typed.plan.stories[0].key, 'SEC-5');
+});
+
+test('dropping a story\'s create before it has a key unlinks the story: its work goes ahead ticketless, its Jira writes are dropped, and nothing creates it again', () => {
+  const j = keyless();
+  const at = (id) => j.subJobs.find((s) => s.id === id);
+  assert.equal(awaitsTicket(at('api')), true);
+  move(j, 'create-new', 'drop');
+  assert.equal(j.plan.stories[0].dropped, true);
+  assert.equal(at('api').storyId, undefined); assert.equal(awaitsTicket(at('api')), false);
+  assert.equal(j.plan.subJobs.find((s) => s.id === 'api').storyId, undefined);
+  assert.equal(at('move').cancelledAt, 1000, 'a write to the ticket has nothing to write to');
+  assert.equal(j.plan.subJobs.find((s) => s.id === 'move').storyId, 'new', 'its plan entry stays the record');
+  assert.doesNotThrow(() => validatePlan(j.plan));
+  assert.equal(withStoryCreates({ ...j.plan, subJobs: j.plan.subJobs.filter((s) => s.id !== 'create-new') }).subJobs.length, j.plan.subJobs.length - 1, 'a dropped story is never created again');
+  const keyed = job({ stories: [{ id: 'new', key: 'SEC-1', title: 'Audit' }], subs: [session('stories'), jiraW('create-new', 'stories', { type: 'create' }), planSub('api', { storyId: 'new' })] });
+  move(keyed, 'create-new', 'drop');
+  assert.deepEqual([keyed.plan.stories[0].dropped, keyed.subJobs[2].storyId], [undefined, 'new'], 'a story with its key is unaffected');
+});
+
+test('the sub-job cap counts the story creates approval would add, once', () => {
+  const plan = (n, stories) => ({ context: '', stories, subJobs: Array.from({ length: n }, (_, i) => planSub(`p${i}`, { storyId: stories[i % stories.length].id })) });
+  const keyless = [{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }];
+  assert.doesNotThrow(() => validatePlan(plan(77, keyless)), '77 + a stories session + 2 creates is 80');
+  assert.throws(() => validatePlan(plan(78, keyless)), /Too many sub-jobs: 78 planned plus 3 to create stories exceeds 80/);
+  assert.doesNotThrow(() => validatePlan(withStoryCreates(plan(77, keyless))), 'creates already in the plan are not counted again');
+  assert.doesNotThrow(() => validatePlan(plan(80, [{ id: 'a', key: 'A-1', title: 'A' }])));
+  const stories = withStoryCreates(plan(1, keyless));
+  assert.throws(() => validatePlan({ ...stories, subJobs: [...stories.subJobs, { id: 'post', kind: 'write', title: 'Post', place: { type: 'slack', ref: '#x' }, after: [], by: 'stories', action: { type: 'post', text: 'Hi' } }] }),
+    /post: stories only creates the job's stories/, 'the session that skips result review does nothing else');
 });

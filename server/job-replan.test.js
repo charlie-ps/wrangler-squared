@@ -121,3 +121,30 @@ test('a new keyless story keeps the fields the planner read for it, and an appro
   assert.deepEqual(plan.stories.find((t) => t.id === 'm').fields, fields);
   assert.deepEqual(plan.stories.find((t) => t.id === 's').fields, [{ name: 'Labels', value: 'sso' }]);
 });
+
+test('a write added or moved to a session that has finished is refused; to one running it waits; to one in review it sends it back to work', () => {
+  const w = write('w', 'r', { type: 'comment', comment: 'Hi' });
+  const subs = [session('r'), session('r2'), session('done'), w];
+  const at = (j, id) => j.subJobs.find((s) => s.id === id);
+  const fresh = () => {
+    const j = job(subs, liveOf(subs));
+    at(j, 'done').stage = 'done';
+    return j;
+  };
+  const added = write('w2', 'done', { type: 'comment', comment: 'Late' });
+  assert.throws(() => mergeReplan(fresh(), { context: '', subJobs: [...subs, added] }), /w2: done has already finished, so it would never make this write/);
+  assert.throws(() => mergeReplan(fresh(), { context: '', subJobs: [...subs.slice(0, 3), { ...w, by: 'done' }] }), /w: done has already finished/);
+  const rerun = fresh(); at(rerun, 'done').stage = 'session'; at(rerun, 'done').writesOnly = { from: 'done' };
+  assert.throws(() => mergeReplan(rerun, { context: '', subJobs: [...subs, added] }), /done has already finished/, 'a rerun for its writes alone takes no new ones');
+  const propose = (j, plan) => { j.replan = { feedback: 'More', proposal: { id: 'p1', plan } }; return j; };
+  const toR2 = { context: '', subJobs: [...subs.slice(0, 3), { ...w, by: 'r2' }, write('w3', 'r2', { type: 'comment', comment: 'New' })] };
+  const busy = propose(fresh(), toR2);
+  busy.runs.push({ subJobId: 'r2', stopped: false, parkedAt: 1 });
+  assert.throws(() => approveReplan(busy, 'p1', { now: 2, buildSubJob: (p, s) => ({ ...s }) }), /Wait for the running step on “Write w” · “Write w3” to stop/, 'a parked run is still live');
+  const review = propose(fresh(), toR2);
+  Object.assign(at(review, 'r2'), { stage: 'review', state: 'verified', result: { checks: ['Done'] } });
+  const { lines } = approveReplan(review, 'p1', { now: 3, buildSubJob: (p, s) => ({ ...s, stage: 'write', state: 'queued' }) });
+  assert.deepEqual([at(review, 'r2').stage, at(review, 'r2').state, at(review, 'r2').result], ['session', 'queued', null]);
+  assert.equal(lines.filter((l) => l.sub.id === 'r2').length, 1, 'said once, however many writes it gained');
+  assert.match(lines.find((l) => l.sub.id === 'r2').detail, /sent “Run r2” back to work/);
+});
