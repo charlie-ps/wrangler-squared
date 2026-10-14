@@ -150,8 +150,8 @@ test('Automation settings shows an empty state when there are no updates', (t) =
   assert.ok(p.q('.update-empty'), 'and without the updates dependency at all');
 });
 
-// The client wires these to the shipped registry; only the hand-off to the
-// intro is observable from here.
+// The client wires these to the shipped registry; the hand-off to the intro and
+// the wait for the Jobs view are what is observable from here.
 test('the client never opens an update on top of the first-run intro', (t) => {
   const p = page(t);
   const storage = memoryStorage();
@@ -161,4 +161,18 @@ test('the client never opens an update on top of the first-run intro', (t) => {
   p.click('.jobs-intro .job-dialog-close');
   assert.equal(storage.get(SEEN_KEY), '1');
   assert.deepEqual(seenIds(storage), ['writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
+});
+
+test('the client holds unseen updates until the reader opens the Jobs view', (t) => {
+  const p = page(t);
+  const storage = memoryStorage({ [SEEN_KEY]: '1' });
+  client.register({ register: () => {}, onMessage: () => {}, api: { storage } });
+  assert.equal(p.q('#jobs-update'), null, 'not on the sessions board');
+  p.window.location.hash = '#view=search';
+  p.window.dispatchEvent(new p.window.Event('hashchange'));
+  assert.equal(p.q('#jobs-update'), null, 'nor on another view');
+  p.window.location.hash = '#view=ext:jobs:board';
+  p.window.dispatchEvent(new p.window.Event('hashchange'));
+  assert.ok(p.q('#jobs-update').open);
+  assert.equal(p.title(), 'See the design before anything is built');
 });
