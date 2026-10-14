@@ -25,23 +25,25 @@ const SAMPLE = [
   { id: 'c', date: '2026-11-01', title: 'Third release', body: '<p>Third body</p>' },
 ];
 
-test('the shipped registry is the two Writes pages, and every frame of their figures draws', (t) => {
+test('the shipped registry is the two Writes pages and review defaults, and every frame of their figures draws', (t) => {
   const p = page(t);
-  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places']);
-  for (const u of UPDATES) {
+  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places', 'review-defaults']);
+  for (const u of UPDATES.filter((u) => u.anim)) {
     for (let i = 0; i < u.anim.frames; i++) assert.match(u.figure(i), /job-node/, `${u.id} frame ${i}`);
     assert.ok(u.anim.still < u.anim.frames, u.id);
   }
   const storage = memoryStorage();
   assert.equal(createUpdates({ storage }).maybeShow(), true);
   assert.equal(p.title(), 'See the design before anything is built');
-  assert.equal(p.q('.intro-count').textContent, '1 of 2');
+  assert.equal(p.q('.intro-count').textContent, '1 of 3');
   assert.ok(p.q('.update-panel .wn-row3'));
   p.click('[data-update="next"]');
   assert.match(p.title(), /^Jira, Slack and Confluence/);
   assert.ok(p.q('.update-panel .wn-writes'));
   p.click('[data-update="next"]');
-  assert.deepEqual(seenIds(storage), ['writes-designs', 'writes-places']);
+  assert.equal(p.title(), 'Choose where every new job’s checkpoints start');
+  p.click('[data-update="next"]');
+  assert.deepEqual(seenIds(storage), ['review-defaults', 'writes-designs', 'writes-places']);
 });
 
 test('a reader behind on several releases steps through each unseen one, oldest first, with Next and Back', (t) => {
@@ -160,7 +162,7 @@ test('the client never opens an update on top of the first-run intro', (t) => {
   assert.equal(p.q('#jobs-update'), null);
   p.click('.jobs-intro .job-dialog-close');
   assert.equal(storage.get(SEEN_KEY), '1');
-  assert.deepEqual(seenIds(storage), ['writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
+  assert.deepEqual(seenIds(storage), ['review-defaults', 'writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
 });
 
 test('the client holds unseen updates until the reader opens the Jobs view', (t) => {

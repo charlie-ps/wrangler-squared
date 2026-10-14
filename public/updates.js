@@ -117,6 +117,13 @@ export const UPDATES = [
       '<b>The Writes checkpoint</b> starts on Auto. Set it to You review to get a draft you can edit, write or skip.',
     ])}`,
     anim: { frames: 6, ms: 1400, still: 3 }, figure: (phase) => tellFigure(phase) },
+  { id: 'review-defaults', date: '2026-10-14', icon: 'hand', tone: 'warn',
+    title: 'Choose where every new job’s checkpoints start',
+    body: `<p><b>Automation settings</b> now has the five review checkpoints. Set them once and every New job form opens on your choice, so you no longer flip the same toggles on each job.</p>${done([
+      '<b>Nothing changes until you edit them</b>: they start where New job always started.',
+      '<b>Jobs agents create</b> use them too, unless the agent picks a checkpoint itself.',
+      '<b>Jobs already on the board keep their own.</b> Change one from its detail footer.',
+    ])}` },
 ];
 
 const dateLabel = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });

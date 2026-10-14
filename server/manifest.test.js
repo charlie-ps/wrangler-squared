@@ -7,6 +7,7 @@ import { placeholderBranch } from './job-prompts.js';
 import { checkoutsDir } from './data-dir.js';
 import { _resetForTests, runnerFor, spendFor, statusOf } from './jobs.js';
 import { fakeHost } from './test-helpers.js';
+import { REVIEW_DEFAULTS, settingsSchema } from './jobs-schema.js';
 
 const tool = (name) => manifest.tools.find((t) => t.name === name);
 const handler = (type) => manifest.handlers.find((h) => h.type === type);
@@ -49,6 +50,21 @@ test('job-create and create_job carry reviewWrites, which is off unless asked fo
   assert.ok('reviewWrites' in tool('create_job').inputSchema);
   await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, reviewWrites: true, start: false });
   assert.deepEqual(host.stores.jobs.snapshot().jobs.map((j) => j.reviewWrites), [false, true, true]);
+});
+
+test('a job created without review flags takes the saved review defaults; a flag it passes wins', async () => {
+  _resetForTests();
+  const { host } = fakeHost();
+  runnerFor(host).tick = async () => {};
+  assert.deepEqual(settingsSchema.parse({}).reviewDefaults, REVIEW_DEFAULTS, 'settings saved before the key parse to the original form');
+  await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, start: false });
+  await handler('job-settings').handler({ patch: { reviewDefaults: { reviewPlan: false, reviewCode: true, reviewMerge: false, reviewSessions: true, reviewWrites: true } } }, host);
+  await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, start: false });
+  await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, reviewPlan: true, reviewWrites: false, start: false });
+  const flags = (j) => Object.keys(REVIEW_DEFAULTS).map((f) => j[f]);
+  assert.deepEqual(host.stores.jobs.snapshot().jobs.map(flags), [
+    [true, true, true, true, false], [false, true, false, true, true], [true, true, false, true, false],
+  ]);
 });
 
 test('job-create creates a named task and stores it on the job', async () => {

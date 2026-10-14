@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isPrimaryActionKey, primaryAction } from './jobs-view.js';
-import { jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, movesFor, eventFor, writeReviewed } from './jobs.js';
+import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, movesFor, eventFor, writeReviewed } from './jobs.js';
 import { planGraphHtml } from './job-graph.js';
 import { plateHtml } from './job-plates.js';
 
@@ -769,6 +769,26 @@ test('the plan review shows discovered checkout paths before approval', (t) => {
   assert.deepEqual(f.sent[0].plan.subJobs.map((s) => s.repo), job.repos);
 });
 
+test('Automation settings holds the review defaults New job starts from', (t) => {
+  const f = fixture(t);
+  assert.deepEqual(reviewDefaultsOf({}), { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false }, 'a graph from before the setting seeds the original form');
+  f.q('#jobs-settings').click(); const form = f.q('#job-settings-form');
+  const plan = form.querySelector('[data-checkpoint="reviewPlan"]'); const note = plan.querySelector('.job-review-note');
+  assert.equal(form.querySelector('.job-settings-review legend').textContent, 'Review checkpoints for new jobs');
+  assert.equal(note.hidden, true, 'the agent warning shows only while Plan is on Auto');
+  form.elements.reviewPlan.checked = false; plan.dispatchEvent(f.event('change'));
+  assert.equal(note.hidden, false); assert.equal(plan.querySelector('small').textContent, 'Work starts as soon as the plan is drafted');
+  assert.equal(form.elements.reviewPlan.getAttribute('aria-label'), 'Plan: Auto');
+  form.elements.reviewWrites.checked = true; form.dispatchEvent(f.event('submit'));
+  const reviewDefaults = f.sent.at(-1).patch.reviewDefaults;
+  assert.deepEqual(reviewDefaults, { reviewPlan: false, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: true });
+  f.data.settings.reviewDefaults = reviewDefaults; f.view.update(f.data);
+  f.q('#job-new').click(); const create = f.q('#job-create-form');
+  assert.deepEqual(CHECKPOINTS.map((cp) => create.elements[cp.field].checked), [false, true, true, true, true]);
+  assert.equal(create.querySelector('.job-review-note'), null, 'New job is per job, so it carries no warning');
+  assert.equal(create.querySelector('[data-checkpoint="reviewPlan"] small').textContent, 'Work starts as soon as the plan is drafted');
+});
+
 test('global concurrency, pause and repair limits are explicit controls, and no step is on a clock', (t) => {
   const f = fixture(t); f.q('#jobs-concurrency').value = '4'; f.q('#jobs-concurrency').dispatchEvent(f.event('change'));
   assert.deepEqual(f.sent[0], { type: 'job-settings', patch: { concurrency: 4 } });
@@ -776,7 +796,7 @@ test('global concurrency, pause and repair limits are explicit controls, and no 
   f.q('#jobs-settings').click(); const form = f.q('#job-settings-form');
   assert.equal(form.elements.maxRunMinutes, undefined, 'a step ends with a receipt or an idle session, not a timeout');
   form.elements.maxRepairs.value = '1'; form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA', plateArt: 'quiet' });
+  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA', plateArt: 'quiet', reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false } });
 });
 
 test('dependency waves, session waits and escaped titles remain compact', () => {

@@ -2,7 +2,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR } from './data-dir.js';
 import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
-import { jobInputSchema, settingsSchema, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode } from './jobs-schema.js';
+import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode } from './jobs-schema.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { applyMove, dropSub, MOVE_ACTIONS } from './job-moves.js';
@@ -228,7 +228,10 @@ export class JobStore {
   }
   create(input, extra = {}) {
     const parsed = jobInputSchema.parse(input);
-    const job = { ...parsed, title: parsed.title || fallbackTitle(parsed.intent), id: uid('job'), stage: 'backlog', revision: 0,
+    // Parsed here, not trusted: the store parses settings only for a fresh file.
+    const { reviewDefaults } = settingsSchema.parse(this.data.settings ?? {});
+    const reviews = Object.fromEntries(Object.keys(REVIEW_DEFAULTS).map((f) => [f, parsed[f] ?? reviewDefaults[f]]));
+    const job = { ...parsed, ...reviews, title: parsed.title || fallbackTitle(parsed.intent), id: uid('job'), stage: 'backlog', revision: 0,
       createdAt: Date.now(), updatedAt: Date.now(), paused: false, plan: null, subJobs: [], runs: [], moves: [], ...extra };
     return this.change((d) => { d.jobs.push(job); return job; });
   }

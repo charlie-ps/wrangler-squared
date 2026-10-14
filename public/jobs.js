@@ -42,6 +42,10 @@ export const CHECKPOINTS = [
     wait: (n) => `${several(n, 'A write is', 'writes are')} waiting for your review.`, yes: (n) => `Approve ${several(n, 'the write', 'writes')}`, done: (n) => `${several(n, 'The write is', 'writes are')} approved; each session makes what it drafted` },
 ];
 export const checkpoint = (field) => CHECKPOINTS.find((c) => c.field === field);
+// server/jobs-schema.js REVIEW_DEFAULTS, read key by key so a graph from before
+// `settings.reviewDefaults` existed still seeds New job the way it always did.
+export const REVIEW_DEFAULTS = { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false };
+export const reviewDefaultsOf = (settings) => Object.fromEntries(CHECKPOINTS.map(({ field }) => [field, typeof settings?.reviewDefaults?.[field] === 'boolean' ? settings.reviewDefaults[field] : REVIEW_DEFAULTS[field]]));
 export const youReview = (job, field) => field === 'reviewMerge' || field === 'reviewWrites' ? !!job[field] : field === 'reviewCode' ? reviewCode(job) : job[field] ?? true;
 export const checkpointLabel = (cp, you) => `${cp.name}: ${you ? 'You review' : 'Auto'}`;
 export const checkpointHint = (cp, you) => you ? cp.you : cp.auto;

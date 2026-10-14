@@ -425,6 +425,11 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-review-stage { display:grid; place-items:center; width:20px; font-size:16px; color:var(--fg-muted); }
 .job-review-name { min-width:0; font-weight:600; }
 .job-review-name small { display:block; font-size:11.5px; font-weight:400; color:var(--fg-subtle); }
+.job-review-note { display:block; margin-top:3px; font-size:11.5px; font-weight:400; color:var(--st-warn-fg); }
+.job-review-note[hidden] { display:none; }
+/* Automation settings: the checkpoint rows sit between the plain fields and the actions. */
+.job-dialog .job-settings-review { margin:18px 0 0; padding:14px 0 0; border-top:1px solid var(--border-muted); border-bottom:0; }
+.job-settings-review p { margin:-4px 0 2px; font-size:11.5px; }
 .job-review-toggle { position:relative; display:grid; place-items:center; width:30px; height:30px; margin:0; border-radius:8px; font-size:15px; transition:background .12s, color .12s; cursor:pointer; }
 .job-review-toggle input { position:absolute; opacity:0; width:1px; height:1px; margin:0; pointer-events:none; }
 .job-review-toggle:has(input:focus-visible) { outline:2px solid var(--blue); outline-offset:1px; }

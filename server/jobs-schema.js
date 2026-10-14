@@ -319,15 +319,20 @@ function jiraRules(s, plan, issue) {
 // A name the wrangler minted (paste-<ms>-<hex>.<ext>), never a path.
 export const MAX_IMAGES = 8;
 const imageName = z.string().regex(/^paste-\d{1,20}-[a-f0-9]{4,32}\.(?:png|jpg|gif|webp)$/);
+// The checkpoints a new job starts with when nobody chose: New job's original form.
+export const REVIEW_DEFAULTS = { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false };
 export const jobInputSchema = z.object({
   title: line.optional(), intent: z.string().trim().min(1).max(16000),
   repos: z.array(repoPath).max(30).default([]),
   agent: z.enum(['claude', 'codex']).default('claude'), model: z.string().max(150).default(''),
   effort: z.string().max(40).default(''),
   planningPrompt: z.string().max(8000).default(''),
-  reviewPlan: z.boolean().default(true), reviewCode: z.boolean().default(true), reviewMerge: z.boolean().default(true), reviewSessions: z.boolean().default(true),
+  // Left out, a flag takes the human's `settings.reviewDefaults` (JobStore.create).
+  // No zod default here: create_job spreads this shape, and the MCP SDK would fill
+  // an omitted flag before the handler could tell it was omitted.
+  reviewPlan: z.boolean().optional(), reviewCode: z.boolean().optional(), reviewMerge: z.boolean().optional(), reviewSessions: z.boolean().optional(),
   // The default for a write with no `review` of its own (`writeReviewed`).
-  reviewWrites: z.boolean().default(false),
+  reviewWrites: z.boolean().optional(),
   updateMain: z.boolean().default(false), taskId: z.string().nullable().default(null),
   // Names of images the job keeps in the host's per-extension store (`images:keep`),
   // already staged by the client's `api.images.stage`. `shareImages` decides whether
@@ -354,6 +359,9 @@ export const settingsSchema = z.object({
   usualPick: z.object({
     agent: z.enum(['claude', 'codex']), model: z.string().max(150), effort: z.string().max(40).default(''),
   }).nullable().default(null),
+  // What New job's checkpoints start on, and what a create_job that leaves one out
+  // gets. The board always sends all five: `settings(patch)` merges shallowly.
+  reviewDefaults: z.object(Object.fromEntries(Object.entries(REVIEW_DEFAULTS).map(([f, v]) => [f, z.boolean().default(v)]))).default({}),
 });
 // A worker never changes the plan: `move` is a SUGGESTION on a blocked receipt,
 // which the board offers the human as the pre-selected button (job-moves.js).
