@@ -25,11 +25,23 @@ const SAMPLE = [
   { id: 'c', date: '2026-11-01', title: 'Third release', body: '<p>Third body</p>' },
 ];
 
-test('the registry ships empty, so nothing opens by itself', (t) => {
+test('the shipped registry is the two Writes pages, and every frame of their figures draws', (t) => {
   const p = page(t);
-  assert.deepEqual(UPDATES, []);
-  assert.equal(createUpdates({ storage: memoryStorage() }).maybeShow(), false);
-  assert.equal(p.q('#jobs-update'), null);
+  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places']);
+  for (const u of UPDATES) {
+    for (let i = 0; i < u.anim.frames; i++) assert.match(u.figure(i), /job-node/, `${u.id} frame ${i}`);
+    assert.ok(u.anim.still < u.anim.frames, u.id);
+  }
+  const storage = memoryStorage();
+  assert.equal(createUpdates({ storage }).maybeShow(), true);
+  assert.equal(p.title(), 'See the design before anything is built');
+  assert.equal(p.q('.intro-count').textContent, '1 of 2');
+  assert.ok(p.q('.update-panel .wn-row3'));
+  p.click('[data-update="next"]');
+  assert.match(p.title(), /^Jira, Slack and Confluence/);
+  assert.ok(p.q('.update-panel .wn-writes'));
+  p.click('[data-update="next"]');
+  assert.deepEqual(seenIds(storage), ['writes-designs', 'writes-places']);
 });
 
 test('a reader behind on several releases steps through each unseen one, oldest first, with Next and Back', (t) => {
@@ -91,9 +103,11 @@ test('with no storage it never opens by itself, and unreadable storage counts as
 test('an animated figure redraws itself, and holds its still frame with reduced motion', async (t) => {
   const p = page(t);
   createUpdates({ storage: memoryStorage(), updates: SAMPLE }).maybeShow();
-  assert.equal(p.q('.fig').textContent, 'frame 0');
+  const fig = p.q('.fig');
+  assert.equal(fig.textContent, 'frame 0');
   await new Promise((r) => p.window.setTimeout(r, 70));
   assert.equal(p.q('.fig').textContent, 'frame 1');
+  assert.equal(p.q('.fig'), fig, 'redrawn in place, not rebuilt, so the figure does not flash');
   const q = page(t);
   q.window.matchMedia = (m) => ({ matches: m.includes('reduce') });
   createUpdates({ storage: memoryStorage(), updates: SAMPLE }).open('a');
@@ -128,7 +142,7 @@ test('Automation settings lists past updates newest first, and each reopens its 
 
 test('Automation settings shows an empty state when there are no updates', (t) => {
   const p = page(t);
-  settings(p, createUpdates({ storage: memoryStorage() }));
+  settings(p, createUpdates({ storage: memoryStorage(), updates: [] }));
   assert.match(p.q('.update-section h3').textContent, /What’s new/);
   assert.equal(document.querySelectorAll('.update-item').length, 0);
   assert.match(p.q('.update-empty').textContent, /Nothing here yet/);
@@ -136,8 +150,8 @@ test('Automation settings shows an empty state when there are no updates', (t) =
   assert.ok(p.q('.update-empty'), 'and without the updates dependency at all');
 });
 
-// The client wires these to the shipped (empty) registry; only the hand-off to
-// the intro is observable from here.
+// The client wires these to the shipped registry; only the hand-off to the
+// intro is observable from here.
 test('the client never opens an update on top of the first-run intro', (t) => {
   const p = page(t);
   const storage = memoryStorage();
@@ -146,5 +160,5 @@ test('the client never opens an update on top of the first-run intro', (t) => {
   assert.equal(p.q('#jobs-update'), null);
   p.click('.jobs-intro .job-dialog-close');
   assert.equal(storage.get(SEEN_KEY), '1');
-  assert.deepEqual(seenIds(storage), [], 'closing the intro counts every current update (none yet) as seen');
+  assert.deepEqual(seenIds(storage), ['writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
 });
