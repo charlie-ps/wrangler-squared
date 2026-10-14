@@ -167,7 +167,7 @@ test('starting a HUMAN task keeps its output draft open through the board reply 
   const human = { id: 'key', kind: 'human', title: 'Get key', brief: 'Request the key', after: [], sessions: [], repairs: [], stage: 'human', state: 'queued' };
   const work = job({ stage: 'active', plan: { context: '', stories: [], subJobs: [human] }, subJobs: [human] });
   c.update(el, null, graphWith([work]));
-  el.querySelector('[data-sub="key"]').click();
+  el.querySelector('.job-plate-graph [data-sub="key"]').dispatchEvent(new window.Event('click', { bubbles: true }));
   const dialog = window.document.getElementById('job-dialog');
   dialog.querySelector('textarea[name="output"]').value = 'ssh-ed25519 AAAA\nuser@host';
   dialog.querySelector('[data-action="start-human"]').click();

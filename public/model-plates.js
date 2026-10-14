@@ -121,14 +121,14 @@ const FX = {
   b4: ['-30%', '-30%', '160%', '160%', '<feGaussianBlur stdDeviation="3.5"/>'],
   b6: ['-30%', '-100%', '160%', '300%', '<feGaussianBlur stdDeviation="6"/>'],
 };
-function fx() {
+export function fx() {
   const id = `p${uid++}`, used = new Set();
   return {
     id, f: (n) => (used.add(n), `url(#${id}${n})`),
     defs: () => [...used].map((n) => { const [x, y, w, h, body] = Array.isArray(FX[n]) ? FX[n] : ['0', '0', '100%', '100%', FX[n]]; return `<filter id="${id}${n}" x="${x}" y="${y}" width="${w}" height="${h}">${body}</filter>`; }).join(''),
   };
 }
-const grainRect = (k, o, blend = 'overlay') => `<rect width="320" height="200" fill="#fff" filter="${k.f('grain')}" style="mix-blend-mode:${blend}" opacity="${o}"/>`;
+export const grainRect = (k, o, blend = 'overlay') => `<rect width="320" height="200" fill="#fff" filter="${k.f('grain')}" style="mix-blend-mode:${blend}" opacity="${o}"/>`;
 const idLine = (t, y, fill) => `<text x="160" y="${y}" text-anchor="middle" font-family="${SANS}" font-weight="600" font-size="5.6" letter-spacing="1.5" fill="${fill}">${esc(t)}</text>`;
 const fit = (name, size) => (name.length > 17 ? Math.round(size * 17 / name.length) : size);
 const title = (name, y, size, fill, extra = '') => `<text x="160" y="${y}" text-anchor="middle" font-family="${SERIF}" font-weight="500" font-size="${fit(name, size)}" letter-spacing="-.5" fill="${fill}" ${extra}>${esc(name)}</text>`;
@@ -216,6 +216,9 @@ function plan(d, lvl, mode) {
     ${mode === 'full' ? idLine(d.tag, 68, '#f4ede2cc') : ''}${mode ? title(d.name, 98, 28, '#f4ede2', 'stroke="#0c0b0a" stroke-width="3" paint-order="stroke" stroke-opacity=".6"') : ''}`;
 }
 const CLAUDE_PLATES = { opus, sonnet, haiku, fable, plan };
+// The Jobs board draws a job's plate from the same art, bare (mode ''), with its plan over it.
+export const SCENES = ['opus', 'sonnet', 'fable', 'haiku'];
+export const sceneArt = (scene, seed, lvl) => CLAUDE_PLATES[scene]({ seed }, lvl, '');
 const claudePlate = (d, lvl, mode) => `<svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="${esc(d.name)}">${CLAUDE_PLATES[d.plate](d, lvl, mode)}</svg>`;
 
 // ——— the board's own colours for an agent we have no art for ———

@@ -345,6 +345,10 @@ export const settingsSchema = z.object({
   // (`open -na <ideApp> --args <path>`, server/handlers.js). An app NAME, not a
   // command: nothing typed here ever reaches a shell.
   ideApp: z.string().trim().min(1).max(120).default('IntelliJ IDEA'),
+  // What the board's plates are drawn over: each job's skyline or its launch-page
+  // scene (public/job-plates.js PLATE_ART). A hover mode, 'peek', was dropped and
+  // reads as the skyline.
+  plateArt: z.preprocess((v) => (v === 'peek' ? 'quiet' : v), z.enum(['quiet', 'full']).default('quiet')),
   // The agent/model/effort the last created job used: New job's picker opens on it
   // while the catalog still offers that model. Same bounds as the job's own fields.
   usualPick: z.object({

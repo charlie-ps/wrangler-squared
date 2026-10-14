@@ -1,0 +1,90 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { assignScenes, plateAsk, plateHtml, placePopHtml, levelOf, inkFor } from './job-plates.js';
+
+const sub = (id, extra = {}) => ({ id, title: `Deliver ${id}`, repo: '/Users/me/repo', after: [], sessions: [], repairs: [], ...extra });
+const job = (extra = {}) => ({ id: 'job1', title: 'Sign-in', intent: 'x', repos: ['/Users/me/repo'], stage: 'active', subJobs: [], runs: [], moves: [], reviewMerge: true, createdAt: 1, ...extra });
+
+test('scenes are picked oldest first, never repeat the job before or four back, and stay put', () => {
+  const jobs = Array.from({ length: 24 }, (_, i) => job({ id: `j${i}`, createdAt: i }));
+  const memo = assignScenes([...jobs].reverse());
+  const seq = jobs.map((j) => memo.get(j.id));
+  seq.forEach((s, i) => { if (i) assert.notEqual(s, seq[i - 1]); if (i > 3) assert.notEqual(s, seq[i - 4]); });
+  assert.ok(new Set(seq).size >= 3, 'the wall mixes scenes');
+  assignScenes(jobs.slice(5), memo);
+  assert.deepEqual(jobs.map((j) => memo.get(j.id)), seq, 'a job leaving the list never reshuffles the rest');
+});
+
+test('the scene brightens as the job lands, and ink follows the art', () => {
+  assert.equal(levelOf(job({ stage: 'backlog' })), 1);
+  assert.equal(levelOf(job({ subJobs: [sub('a', { stage: 'done' }), sub('b', { stage: 'pr' })] })), 4);
+  assert.equal(levelOf(job({ stage: 'done' })), 5);
+  assert.equal(inkFor('haiku', 3, 160, 70), 'dk', 'dark ink on the ivory page');
+  assert.equal(inkFor('sonnet', 3, 160, 40), 'lt', 'light ink in space');
+});
+
+test('the stub names the one thing a job needs from you, and nothing when it needs nothing', () => {
+  assert.deepEqual(['label', 'button', 'act', 'sub'].map((k) => plateAsk(job({ stage: 'planning', plan: { stories: [], subJobs: [sub('a'), sub('b', { kind: 'session' })] } }))[k]), ['Plan ready', 'Review plan', 'open', '']);
+  assert.equal(plateAsk(job({ stage: 'planning', plan: { stories: [], subJobs: [sub('a')] } })).detail, '1 PR');
+  const green = sub('api', { stage: 'pr', pr: { url: 'https://github.com/o/r/pull/7', head: 'h7', checkStatus: 'passing', checks: [] } });
+  assert.deepEqual(['label', 'button', 'act', 'sub', 'tone'].map((k) => plateAsk(job({ subJobs: [green] }))[k]), ['Merge #7', 'Merge', 'merge', 'api', 'warn']);
+  const review = sub('api', { stage: 'review', state: 'verified' });
+  assert.deepEqual(['label', 'button', 'act'].map((k) => plateAsk(job({ subJobs: [review] }))[k]), ['Review code', 'Review', 'open']);
+  const blocked = sub('api', { stage: 'pr', error: 'Automatic repair limit reached', blocked: { move: 'split-out' }, pr: { url: 'https://github.com/o/r/pull/9', head: 'h9', checkStatus: 'failing', checks: [] } });
+  const failing = plateAsk(job({ subJobs: [blocked] }));
+  assert.deepEqual([failing.tone, failing.act, failing.detail], ['bad', 'move:split-out', '#9 · Deliver api'], 'the agent’s suggested move is the button');
+  const prompt = sub('s', { kind: 'session', stage: 'session', sessions: ['card-1'] });
+  assert.deepEqual(['button', 'act'].map((k) => plateAsk(job({ subJobs: [prompt], runs: [{ id: 'r', subJobId: 's', stopped: false, status: 'needs-you' }] }))[k]), ['Answer', 'session']);
+  assert.equal(plateAsk(job({ subJobs: [sub('api', { stage: 'implementation' })], runs: [{ id: 'r', subJobId: 'api', stopped: false, status: 'working' }] })), null);
+  assert.equal(plateAsk(job({ paused: true, subJobs: [green] })), null, 'a paused job asks nothing');
+});
+
+test('a plate draws its plan as kind shapes in the sky, dashed where work waits for a deploy, and escapes what agents wrote', () => {
+  const j = job({ title: '<script>x</script>', subJobs: [sub('api', { stage: 'done', deployed: { at: 1 } }), sub('web', { after: ['api'], stage: 'implementation' }), sub('s', { kind: 'session', after: ['web'], stage: 'session' }), sub('h', { kind: 'human', after: ['s'], stage: 'human' })], runs: [{ id: 'r', subJobId: 'web', stopped: false, status: 'working' }] });
+  const html = plateHtml(j, 'opus');
+  assert.ok(!html.includes('<script>x') && html.includes('&lt;script&gt;'));
+  assert.equal((html.match(/class="edge deploy/g) || []).length, 2, 'an edge out of a PR waits for its deploy');
+  assert.equal((html.match(/class="edge  /g) || []).length, 1, 'one out of a session starts once it is done');
+  assert.match(html, /class="edge deploy lit/, 'a deployed prerequisite lights its edge once the work behind it moves');
+  assert.equal((html.match(/<circle class="core"/g) || []).length, 2);
+  assert.match(html, /<rect class="core"[^>]*rx="2"/);
+  assert.match(html, /transform="rotate\(45/);
+  assert.match(html, /class="job-plate-tag lt">repo</);
+  assert.match(html, /1 of 4 landed/);
+});
+
+test('plate art: the skyline alone, the scene behind it on hover, or the scene alone with ink that follows it', () => {
+  const j = job({ subJobs: [sub('api', { stage: 'implementation' })] });
+  const quiet = plateHtml(j, 'haiku', 'quiet'), full = plateHtml(j, 'haiku', 'full');
+  assert.ok(quiet.includes('class="skyline"') && !quiet.includes('class="scene"'));
+  assert.ok(!full.includes('class="skyline"') && full.includes('class="scene"') && full.includes('class="scrim"'));
+  assert.match(quiet, /job-plate-tag lt/, 'light ink on the night sky whatever the scene');
+  assert.match(full, /job-plate-tag dk/, 'dark ink on the ivory page');
+});
+
+test('a write is a moon off the session that makes it, its place a chip under the title, and a draft in review the stub', () => {
+  const draft = { id: 'w', kind: 'write', place: { type: 'slack', ref: '#web<b>' }, title: 'Post it', by: 's', after: [], action: { type: 'post', text: 'hi' }, review: true, stage: 'review', state: 'verified', sessions: [], repairs: [] };
+  const j = job({ subJobs: [sub('api', { stage: 'implementation' }), sub('s', { kind: 'session', after: ['api'], stage: 'session', sessions: ['c1'] }), draft],
+    runs: [{ id: 'r', subJobId: 's', stopped: false, sessionId: 'c1', parkedAt: 1, drafts: ['w'] }] });
+  const html = plateHtml(j, 'opus');
+  const svg = html.match(/<svg class="job-plate-graph"[\s\S]*?<\/svg>/)[0];
+  assert.deepEqual([...svg.matchAll(/<g class="node ([a-z]+)[^"]*"[^>]*data-sub="([^"]+)"/g)].map((m) => [m[1], m[2]]), [['pr', 'api'], ['session', 's'], ['moon', 'w']], 'two steps, and the write hangs off its session');
+  assert.match(svg, /class="tether /);
+  assert.match(svg, /aria-label="Post in #web&lt;b&gt;: Review write"/);
+  assert.equal((svg.match(/class="edge /g) || []).length, 1, 'only api → s is an edge; a write joins by its tether');
+  assert.match(html, /<div class="job-plate-places"><button type="button" class="job-plate-place tone-warn urgent ghost" data-place-job="job1" data-place="0" aria-haspopup="true" title="Slack channel · #web&lt;b&gt;\nPost in #web&lt;b&gt;: Review write \(you review it first\)">/);
+  const pop = placePopHtml(j, 0);
+  assert.match(pop, /<em>not made yet<\/em>/);
+  assert.match(pop, /<button type="button" class="job-plate-pop-write" data-job="job1" data-sub="w"><i class="tone-warn"><\/i><span><b>Post in #web&lt;b&gt;<\/b><small>Review write · you review it first<\/small>/);
+  assert.equal(placePopHtml(j, 5), '');
+  assert.match(html, /<span class="job-plate-place-name">#web&lt;b&gt;<\/span><i class="tone-warn"><\/i>/);
+  assert.ok(!html.includes('#web<b>'));
+  const ask = plateAsk(j);
+  assert.deepEqual([ask.label, ask.detail, ask.button, ask.act, ask.sub, ask.alt], ['Draft ready', '', 'Post to Slack', 'approve-write', 'w', { label: 'Skip', act: 'skip-write' }]);
+  assert.match(html, /<button type="button" class="job-plate-alt" data-ask="skip-write" data-job="job1" data-sub="w">Skip<\/button><button type="button" class="job-plate-go" data-ask="approve-write" data-job="job1" data-sub="w">Post to Slack<\/button>/);
+  const made = { ...draft, place: { type: 'artifact' }, action: { type: 'make', what: 'chart' }, result: { url: 'https://claude.ai/artifact/1', at: 1 } };
+  const output = plateAsk(job({ ...j, subJobs: [j.subJobs[0], j.subJobs[1], made] }));
+  assert.deepEqual([output.label, output.button, output.alt], ['Check output', 'Accept', null], 'a made output is accepted, never skipped');
+  const failing = plateAsk(job({ ...j, subJobs: [sub('api', { stage: 'implementation', error: 'boom' }), j.subJobs[1], draft] }));
+  assert.equal(failing.tone, 'bad', 'failing still wins over a draft');
+});

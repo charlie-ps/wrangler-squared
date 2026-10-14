@@ -182,6 +182,17 @@ export function writeAction(w) {
   return { post: 'Post', create: 'Create page', comment: 'Comment', write: 'Write' }[a.type] || a.type || 'Write';
 }
 
+// What approving a write in review does, in the place's own words; a made
+// output is already there, so approving it accepts it.
+export function writeVerb(sub) {
+  const a = sub.action || {};
+  const type = placeOf(sub);
+  if (a.type === 'make') return 'Accept';
+  if (type === 'jira') return a.type === 'create' ? 'Create in Jira' : a.to ? 'Move in Jira' : 'Comment in Jira';
+  if (type === 'other') return `Write to ${placeShort(sub)}`;
+  return ({ slack: 'Post to Slack', confluence: a.type === 'create' ? 'Create the page' : 'Comment on the page' })[type] || 'Write';
+}
+
 // Where a job writes, outside the board (server/jobs-schema.js PLACE_TYPES):
 // a glyph and a name per type, never a brand's logo.
 export const PLACES = {
@@ -266,6 +277,8 @@ export const redComments = (sub) => commentVerdict(sub)?.tone === 'red';
 // so it is the human's to act on, unlike an ordinary slow deploy.
 export const deploymentStalled = (sub) => sub?.stage === 'deployment' && !!sub.deploymentStale;
 export const mergeHeldByComments = (job, sub) => sub?.stage === 'pr' && !job.reviewMerge && sub.pr?.checkStatus === 'passing' && redComments(sub) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
+// Mirrors server/job-store.js approve-merge: nothing merges before its prerequisites deploy.
+export const mergeApprovable = (job, sub) => sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && (job.reviewMerge || redComments(sub)) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 export const sessionReviewLabel = (job) => checkpointLabel(checkpoint('reviewSessions'), youReview(job, 'reviewSessions'));
 export const hasWrites = (job) => (job.subJobs?.length ? job.subJobs : job.plan?.subJobs || []).some(isWriteSub);
 // The checkpoints a job's own flags show: Session results and Writes only where

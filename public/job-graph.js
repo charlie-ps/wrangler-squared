@@ -1,7 +1,7 @@
 import { esc, tildify } from './util.js';
 import { ICONS, ROCKET_PATH } from './icons.js';
-import { isPrSub, isSessionSub, isWriteSub, isMakeWrite, writeReviewed, writeWhen, writeAction, placeKey, placesOf, webUrl, PLACES, triggerLine, edgesOf, KIND_TITLE, kindChipHtml, kindIconHtml, kindLabel, kindClass, kindCountLabel, dependencyLevels, dependencyLine, storyLabel, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel } from './jobs.js';
-import { STATES, stateIconHtml, stateSolid, subState, subLine, jobState, jobLabel } from './job-state.js';
+import { isPrSub, isSessionSub, isWriteSub, isMakeWrite, writeReviewed, writeWhen, writeAction, placeKey, placesOf, webUrl, PLACES, triggerLine, edgesOf, KIND_TITLE, kindChipHtml, kindLabel, kindClass, dependencyLevels, dependencyLine, storyLabel } from './jobs.js';
+import { STATES, stateIconHtml, stateSolid } from './job-state.js';
 
 // A job's sub-jobs drawn as a horizontal stepper: one column per wave (a
 // sub-job's wave is one past its deepest prerequisite, `dependencyLevels`), a
@@ -31,15 +31,14 @@ import { STATES, stateIconHtml, stateSolid, subState, subLine, jobState, jobLabe
 // write stops for review: a sibling of the row's button, since a button cannot
 // hold another. `reviewWrites` is the job's default for a write that does not say.
 export const dependencyEditorHtml = (s, others, depKey) => others.filter((d) => !isWriteSub(d)).map((d) => `<label><input type="checkbox" data-dep="${esc(depKey)}" value="${esc(d.id)}" ${s.after.includes(d.id) ? 'checked' : ''}>${kindChipHtml(d)}<span>${esc(d.title)}</span></label>`).join('') || '<span>No other sub-jobs</span>';
-// A place pill's parts, shared by the stepper and the board card: the glyph, a
-// short mono label, a dot per write in its state, and ↗ once the place exists.
+// A place pill's parts: the glyph, a short mono label, a dot per write in its
+// state, and ↗ once the place exists.
 const urgentOf = (states) => ['failing', 'needs'].find((st) => states.includes(st));
 const placePillClass = (p, states, base = 'job-place') => { const u = urgentOf(states); return `${base} ${p.exists ? '' : 'ghost'} ${p.type === 'other' ? 'other' : ''} ${u ? `tone-${STATES[u].tone} urgent` : ''}`; };
-// On a pill the ↗ is its own link straight to the place (a link inside a
-// summary follows without toggling it); inside a chip, itself a link, it is only
-// a mark.
-const placeBodyHtml = (p, states, link = false) => {
-  const href = link && p.type !== 'file' ? webUrl(p.url) : null;
+// The ↗ is its own link straight to the place: a link inside a summary follows
+// without toggling it.
+const placeBodyHtml = (p, states) => {
+  const href = p.type !== 'file' ? webUrl(p.url) : null;
   const go = href ? `<a class="job-place-go" href="${esc(href)}" target="_blank" rel="noopener" title="Open ${esc(p.name)}">↗</a>` : p.exists ? '<span class="job-place-go" aria-hidden="true">↗</span>' : '';
   return `${PLACES[p.type].icon}<b>${esc(p.label)}</b><span class="job-place-dots">${states.map((st) => `<span class="job-place-dot tone-${STATES[st].tone} ${stateSolid(st) ? 'on' : ''}"></span>`).join('')}</span>${go}`;
 };
@@ -96,7 +95,7 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
       const ref = `${owner}|${key}`;
       const states = g.map(stateOfWrite);
       const open = openTickets.has(ref) || (editing != null && g.includes(subs[editing]));
-      return `<details class="${placePillClass(p, states)}" data-ticket="${esc(ref)}" ${open ? 'open' : ''}><summary title="${esc(placeTip({ ...plan, reviewWrites }, p, g, states))}">${placeBodyHtml(p, states, true)}</summary><div class="job-place-pop">${placeHeadHtml(p)}${g.map(write).join('')}</div></details>`;
+      return `<details class="${placePillClass(p, states)}" data-ticket="${esc(ref)}" ${open ? 'open' : ''}><summary title="${esc(placeTip({ ...plan, reviewWrites }, p, g, states))}">${placeBodyHtml(p, states)}</summary><div class="job-place-pop">${placeHeadHtml(p)}${g.map(write).join('')}</div></details>`;
     }).join('');
   };
   const hanging = (s) => {
@@ -154,39 +153,4 @@ export function layoutGraphEdges(graph) {
     path.setAttribute('d', `M${x1} ${y1} C${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`);
     glyph?.setAttribute('transform', `translate(${(x1 + x2) / 2} ${(y1 + y2) / 2})`);
   }
-}
-
-// The board's tonal card: the whole surface is the job's rolled-up state, the
-// progress bar one segment per sub-job in that sub-job's own state, its kind icon above it, in
-// dependency-wave order like the graph (a reorder or replan edits `after`, not the array). The open
-// button stretches over the card; the segments sit above it and open their
-// sub-job directly.
-export function jobTileHtml(job) {
-  const state = jobState(job);
-  const label = jobLabel(job);
-  const cost = jobCostLabel(job.usd, job.usdEstimated);
-  const live = job.stage === 'active' || job.stage === 'done';
-  const all = { subJobs: live ? job.subJobs : job.plan?.subJobs || [] };
-  const levels = dependencyLevels(all);
-  const subs = [...all.subJobs].sort((a, b) => levels.get(a.id) - levels.get(b.id));
-  // Writes are not work, so they add no segment; they ride below as places.
-  const segs = subs.filter((s) => !isWriteSub(s)).map((s) => {
-    const st = live ? subState(job, s) : 'planned';
-    const tip = `${s.title} · ${live ? subLine(job, s) : 'Planned'}`;
-    return live ? `<button type="button" class="job-seg tone-${STATES[st].tone} ${st}" data-job="${esc(job.id)}" data-sub="${esc(s.id)}" title="${esc(tip)}" aria-label="${esc(tip)}">${kindIconHtml(s)}</button>`
-      : `<span class="job-seg tone-idle planned" title="${esc(tip)}">${kindIconHtml(s)}</span>`;
-  }).join('');
-  const plan = live ? { ...job.plan, subJobs: subs } : job.plan || { subJobs: [] };
-  const strip = placesOf(plan, subs.filter(isWriteSub)).map((p) => {
-    const states = p.writes.map((w) => (live ? subState(job, w) : 'planned'));
-    const tip = placeTip({ ...plan, reviewWrites: job.reviewWrites }, p, p.writes, states);
-    const href = p.type === 'file' ? null : webUrl(p.url);
-    return href ? `<a class="${placePillClass(p, states, 'job-place-chip')}" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(tip)}">${placeBodyHtml(p, states)}</a>`
-      : `<span class="${placePillClass(p, states, 'job-place-chip')}" title="${esc(tip)}">${placeBodyHtml(p, states)}</span>`;
-  }).join('');
-  const tip = [subs.length ? kindCountLabel(subs) : '', reviewFlagsLabel(job)].filter(Boolean).join(' · ');
-  return `<article class="job-card tone-${STATES[state].tone} ${state}" data-board="${esc(job.id)}">
-    <button class="job-card-open" data-job="${esc(job.id)}" data-sub="" title="${esc(tip)}"><span class="job-avatar ${state}" role="img" aria-label="${esc(STATES[state].label)}">${stateIconHtml(state)}</span><strong>${esc(job.title)}</strong></button>
-    ${segs ? `<div class="job-progress">${segs}</div>` : ''}${strip ? `<div class="job-card-places">${strip}</div>` : ''}
-    <footer><span class="job-status">${esc(label)}</span>${cost ? `<span class="job-card-cost" title="${esc(JOB_COST_TITLE)}${job.usdEstimated ? ' · includes an estimate for Codex sessions' : ''}">${esc(cost)}</span>` : ''}</footer></article>`;
 }

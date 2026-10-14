@@ -1,8 +1,19 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
-import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml, jobTileHtml } from './job-graph.js';
+import { CHECKPOINTS, checkpoint, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
+import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml } from './job-graph.js';
+import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
+
+// The board's filter rail: what each shows, and the one an empty view explains.
+const FILTERS = [
+  ['all', 'In flight', (job) => job.stage !== 'done'],
+  ['needs', 'Needs you', (job, needs) => needs.has(job)],
+  ['running', 'Running', (job) => jobState(job) === 'running'],
+  ['waiting', 'Waiting', (job) => ['queued', 'waiting', 'paused'].includes(jobState(job))],
+  ['backlog', 'Backlog', (job) => job.stage === 'backlog'],
+  ['done', 'Finished', (job) => job.stage === 'done'],
+];
 import { createJobImages, imagesPanelHtml, openZoom } from './job-images.js';
 import { mountModelPicker } from './model-picker.js';
 import { whatsNewHtml } from './updates.js';
@@ -16,8 +27,6 @@ const chip = (icon, text, { cls = '', title = '' } = {}) => `<span class="job-ch
 // The state chip carries every explanatory sentence the step has, so they cost a
 // hover rather than a paragraph; the info glyph says there is something to read.
 const stateChip = (state, text, hints = []) => `<span class="job-chip job-chip-state tone-${STATES[state].tone}"${hints.length ? ` title="${esc(hints.join('\n\n'))}"` : ''}>${stateIconHtml(state)}<span>${esc(text)}</span>${hints.length ? ICONS.info : ''}</span>`;
-// Mirrors server/job-store.js approve-merge: nothing merges before its prerequisites deploy.
-const mergeApprovable = (job, sub) => sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && (job.reviewMerge || redComments(sub)) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 // Comment text is written by reviewers and bots: escaped, never trusted HTML.
 // A body is only rendered once asked for — a long review thread otherwise buries
 // the verdict and the actions under it — and the expanded keys are passed in from
@@ -254,11 +263,13 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, deploymentStaleMinutes: 30 } };
-  let filter = '', needsOnly = false, showDone = false, selected = null, planDraft = null, revision = null, basePlan = null, writeEdit = null;
+  let filter = 'all', selected = null, planDraft = null, revision = null, basePlan = null, writeEdit = null;
   // A story create in review: its summary and fields as the panel holds them,
   // so adding or removing a field (which redraws) keeps what was typed.
   let storyDraft = null;
   const commentsShown = new Set();
+  // Each job's plate scene, kept for the life of the view.
+  const scenes = new Map();
   // The New job dialog's model picker while that dialog is open.
   let picker = null;
   // Kept images by name, filled by `job-images` frames; asked once per job.
@@ -279,10 +290,11 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   const resetFlags = (jobId = null) => { flags = { jobId, hover: null, note: null, pending: null, confirm: null, inside: false, painting: false }; };
   resetFlags();
   const openTickets = new Set();
-  root.innerHTML = `<header class="jobs-header"><h1>Jobs</h1>
-    <div class="jobs-filters"><select id="jobs-filter" aria-label="Show one job"><option value="">Every job</option></select><label class="jobs-chip jobs-chip-needs" title="Only jobs waiting on you"><input id="jobs-needs" type="checkbox">${ICONS.eye}Needs me <span id="jobs-review-count">0</span></label><label class="jobs-chip" title="Include delivered and cancelled jobs"><input id="jobs-done" type="checkbox">${ICONS.check}Finished</label></div>
-    <div class="jobs-toolbar"><span id="jobs-active-count" aria-live="polite"></span><label class="jobs-chip" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="8" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-icon"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="primary" id="job-new">${ICONS.plus}New job</button></div></header>
-    <div id="jobs-boards" class="jobs-grid"></div>`;
+  root.innerHTML = `<header class="jobs-mast"><div class="jobs-top"><div><div class="jobs-kicker" id="jobs-date">Wrangler² · Jobs</div><h1>Jobs</h1></div>
+      <div class="jobs-telemetry"><span class="jobs-beacon" id="jobs-active-count" aria-live="polite"></span><span class="jobs-bays" id="jobs-bays" aria-hidden="true"></span><span id="jobs-spend"></span><span id="jobs-delivered"></span></div>
+      <div class="jobs-tools"><label class="jobs-ghost" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="8" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-ghost"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="jobs-newjob" id="job-new">${ICONS.plus}New job</button></div></div>
+      <nav class="jobs-rail" aria-label="Show jobs">${FILTERS.map(([key, label]) => `<button type="button" data-filter="${key}" aria-pressed="${key === filter}">${label}<span class="jobs-rail-n" ${key === 'needs' ? 'id="jobs-review-count"' : ''}></span></button>`).join('')}<span class="jobs-rail-sort">Newest first</span></nav></header>
+    <div id="jobs-boards" class="jobs-plates" aria-live="polite"></div>`;
   // Outside #jobs-boards, so a graph tick's redraw never touches a half-typed idea.
   const idea = createIdeaCorner({ send });
   root.appendChild(idea.el);
@@ -301,20 +313,35 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     const needs = new Set(cards.filter((c) => jobNeedsReview(c.job, c.sub)).map((c) => c.job));
     // A run parked on its drafts holds no slot (server/job-store.js holdsSlot).
     const active = data.jobs.flatMap((j) => j.runs).filter((r) => !r.stopped && !(r.parkedAt && !r.mailedAt)).length;
-    q('#jobs-active-count').textContent = `${active} / ${data.settings.concurrency} agents · ${cards.filter((c) => c.sub?.stage === 'done' && !c.sub.cancelledAt).length} delivered`;
-    q('#jobs-review-count').textContent = cards.filter((c) => jobNeedsReview(c.job, c.sub)).length;
-    if (document.activeElement !== q('#jobs-concurrency')) q('#jobs-concurrency').value = data.settings.concurrency;
     const paused = !!data.settings.paused;
+    const { concurrency } = data.settings;
+    root.classList.toggle('jobs-paused', paused);
+    q('#jobs-date').textContent = `Wrangler² · ${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}`;
+    q('#jobs-active-count').innerHTML = `<b>${active}</b> of ${concurrency} agents ${paused ? 'paused' : 'working'}`;
+    q('#jobs-bays').innerHTML = Array.from({ length: Math.max(concurrency, active) }, (_, i) => `<i class="${i < active ? 'on' : ''}"></i>`).join('');
+    const spend = data.jobs.filter((j) => j.stage !== 'done').reduce((a, j) => a + (j.usd || 0), 0);
+    q('#jobs-spend').innerHTML = spend > 0 ? `<b>$${spend.toFixed(2)}</b> on open jobs` : '';
+    q('#jobs-delivered').innerHTML = `<b>${cards.filter((c) => c.sub?.stage === 'done' && !c.sub.cancelledAt).length}</b> delivered`;
+    if (document.activeElement !== q('#jobs-concurrency')) q('#jobs-concurrency').value = concurrency;
     const pause = q('#jobs-pause');
-    pause.innerHTML = paused ? `${ICONS.play}<span>Paused</span>` : ICONS.pause;
+    pause.innerHTML = paused ? `${ICONS.play}<span>Paused</span>` : `${ICONS.pause}<span>Pause</span>`;
     pause.title = paused ? 'Resume automation' : 'Pause new work';
     pause.setAttribute('aria-label', pause.title);
-    pause.classList.toggle('paused', paused);
-    q('#jobs-filter').innerHTML = `<option value="">Every job</option>${data.jobs.map((j) => `<option value="${esc(j.id)}" ${filter === j.id ? 'selected' : ''}>${esc(j.title)}</option>`).join('')}`;
-    // A finished (delivered or cancelled) job only returns with Finished.
-    const jobs = sortJobs(data.jobs.filter((j) => (!filter || j.id === filter) && (!needsOnly || needs.has(j)) && (showDone || j.stage !== 'done')));
-    const empty = !data.jobs.length ? 'Start with an outcome.<br>Wrangler will shape the work.' : needsOnly ? 'Nothing needs you right now.' : 'No jobs match these filters.';
-    q('#jobs-boards').innerHTML = jobs.map(jobTileHtml).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
+    pause.setAttribute('aria-pressed', String(paused));
+    for (const [key, , test] of FILTERS) {
+      const b = q(`[data-filter="${key}"]`), n = data.jobs.filter((j) => test(j, needs)).length;
+      b.setAttribute('aria-pressed', String(key === filter));
+      b.querySelector('.jobs-rail-n').textContent = n || (key === 'needs' ? '' : '0');
+      b.querySelector('.jobs-rail-n').classList.toggle('ask', key === 'needs' && n > 0);
+    }
+    assignScenes(data.jobs, scenes);
+    const test = FILTERS.find(([key]) => key === filter)[2];
+    const jobs = sortJobs(data.jobs.filter((j) => test(j, needs)));
+    const empty = !data.jobs.length ? 'Start with an outcome.<br>Wrangler will shape the work.' : filter === 'needs' ? 'Nothing needs you right now.' : 'No jobs here.';
+    // Settings saved before `plateArt` existed lack it until the next save.
+    const art = PLATE_ART.includes(data.settings.plateArt) ? data.settings.plateArt : 'quiet';
+    root.dataset.plateArt = art;
+    q('#jobs-boards').innerHTML = jobs.map((j) => plateHtml(j, scenes.get(j.id), art)).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
     // Keep a human's plan edits and review snapshot intact across live graph ticks;
     // any open form (feedback, a move) is a human mid-edit and is left alone.
     // A run stopping or going idle bumps the job's revision without touching the
@@ -784,14 +811,6 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       ${text ? row(a.type === 'post' ? 'Post' : a.type === 'create' ? 'Body' : 'Comment', `<span class="job-write-quote">${esc(text)}</span>`) : ''}
       ${row('By', esc(dependencyLine(job, sub)))}${sub.why ? row('Why', esc(sub.why)) : ''}</dl>`;
   }
-  // What approving a write in review does, in the place's own words.
-  function writeVerb(sub) {
-    const a = sub.action || {};
-    const type = placeOf(sub);
-    if (type === 'jira') return a.type === 'create' ? 'Create in Jira' : a.to ? 'Move in Jira' : 'Comment in Jira';
-    if (type === 'other') return `Write to ${placeShort(sub)}`;
-    return ({ slack: 'Post to Slack', confluence: a.type === 'create' ? 'Create the page' : 'Comment on the page' })[type] || 'Write';
-  }
   // A write in review is approved from its own fields: the panel is the editor.
   // A form, so a live tick leaves what is being typed alone and the chord
   // approves; Skip finishes it without writing.
@@ -1123,17 +1142,60 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   q('#job-new').onclick = createJob;
   q('#jobs-concurrency').onchange = (e) => send({ type: 'job-settings', patch: { concurrency: Number(e.target.value) } });
   q('#jobs-pause').onclick = () => send({ type: 'job-settings', patch: { paused: !data.settings.paused } });
-  q('#jobs-filter').onchange = (e) => { filter = e.target.value; render(); };
-  q('#jobs-needs').onchange = (e) => { needsOnly = e.target.checked; render(); };
-  q('#jobs-done').onchange = (e) => { showDone = e.target.checked; render(); };
+  q('.jobs-rail').onclick = (e) => { const b = e.target.closest('[data-filter]'); if (b) { filter = b.dataset.filter; render(); } };
+  // A plate's stub does what it names (Merge, Answer, approve or skip a draft, a
+  // move) or opens what has to be read first; a node opens its sub-job, the title the job.
+  function runAsk(jobId, subId, act) {
+    const job = data.jobs.find((j) => j.id === jobId);
+    const sub = job?.subJobs.find((s) => s.id === subId);
+    if (!job) return;
+    if (act === 'merge' && sub) return send({ type: 'job-action', id: job.id, subJobId: sub.id, action: 'approve-merge', head: sub.pr?.head, ...(sub.ready ? { readyReceiptId: sub.ready.receiptId } : {}) });
+    if (act === 'session' && sub) return onSession(sub.sessions.at(-1));
+    if (['approve-write', 'skip-write'].includes(act) && sub) return send({ type: 'job-action', id: job.id, subJobId: sub.id, action: act });
+    openDetail(job.id, subId);
+    if (act.startsWith('move:') && sub) openMove(job, sub, act.slice(5));
+  }
+  // A plate's place chip opens its writes here, fixed over the board: the plate clips
+  // overflow. Outside #jobs-boards, so a tick's redraw leaves it be.
+  const placePop = document.createElement('div');
+  placePop.className = 'job-plate-pop'; placePop.hidden = true; placePop.setAttribute('role', 'menu');
+  root.append(placePop);
+  let popFor = null;
+  const closePlacePop = () => { placePop.hidden = true; popFor?.setAttribute('aria-expanded', 'false'); popFor = null; };
+  function openPlacePop(chip) {
+    const job = data.jobs.find((j) => j.id === chip.dataset.placeJob);
+    const same = popFor?.dataset.placeJob === chip.dataset.placeJob && popFor?.dataset.place === chip.dataset.place;
+    closePlacePop();
+    if (!job || same) return;
+    placePop.innerHTML = placePopHtml(job, Number(chip.dataset.place));
+    placePop.hidden = false; popFor = chip; chip.setAttribute('aria-expanded', 'true');
+    const r = chip.getBoundingClientRect(), w = placePop.offsetWidth, h = placePop.offsetHeight;
+    placePop.style.left = `${Math.max(12, Math.min(r.left, innerWidth - w - 12))}px`;
+    placePop.style.top = `${r.bottom + 6 + h > innerHeight - 12 ? Math.max(12, r.top - 6 - h) : r.bottom + 6}px`;
+  }
+  placePop.onclick = (e) => { const row = e.target.closest('[data-sub]'); if (row) { closePlacePop(); openDetail(row.dataset.job, row.dataset.sub); } };
+  // Capture phase: the board's own handlers stop some clicks and keys from bubbling.
+  document.addEventListener('click', (e) => { if (!placePop.hidden && !placePop.contains(e.target) && !e.target.closest?.('[data-place]')) closePlacePop(); }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !placePop.hidden) closePlacePop(); }, true);
   q('#jobs-boards').onclick = (e) => {
-    const card = e.target.closest('[data-job]'); if (card) openDetail(card.dataset.job, card.dataset.sub);
+    const chip = e.target.closest('[data-place]'); if (chip) return openPlacePop(chip);
+    const go = e.target.closest('[data-ask]');
+    // One click per decision: a sent one disables the stub until the next tick redraws it.
+    if (go) { if (['merge', 'approve-write', 'skip-write'].includes(go.dataset.ask)) go.parentElement.querySelectorAll('button').forEach((b) => { b.disabled = true; }); return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask); }
+    const el = e.target.closest('[data-job]'); if (el) return openDetail(el.getAttribute('data-job'), el.getAttribute('data-sub'));
+    // Anywhere else on a plate (the sky, the gaps between chips) opens the job, as the title does.
+    const plate = e.target.closest('.job-plate'); if (plate && !e.target.closest('a,button')) openDetail(plate.dataset.board, '');
+  };
+  q('#jobs-boards').onkeydown = (e) => {
+    const node = e.target.closest?.('g[data-job]');
+    if (!node || !['Enter', ' '].includes(e.key)) return;
+    e.preventDefault(); openDetail(node.getAttribute('data-job'), node.getAttribute('data-sub'));
   };
   q('#jobs-intro-open').onclick = () => onIntro();
   q('#jobs-settings').onclick = () => {
     selected = null; planDraft = null;
-    show(`<h2>Automation settings</h2><form id="job-settings-form"><label>Automatic CI repair attempts per sub-job<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label>Minutes a merged PR may wait for a post-merge run to start before it is flagged<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label><label>Application for “Review code in…” <small>A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…</small><input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label><div class="job-actions"><button class="primary" title="These limits apply across all automated jobs. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.">Save settings</button><button type="button" id="job-settings-intro">${ICONS.info}How Jobs works</button></div></form>${whatsNewHtml(updates?.list() || [])}`);
-    dialog.querySelector('form').onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); send({ type: 'job-settings', patch: { maxRepairs: +f.get('maxRepairs'), deploymentStaleMinutes: +f.get('deploymentStaleMinutes'), ideApp: String(f.get('ideApp')).trim() } }); dialog.close(); };
+    show(`<h2>Automation settings</h2><form id="job-settings-form"><label>Automatic CI repair attempts per sub-job<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label>Minutes a merged PR may wait for a post-merge run to start before it is flagged<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label><label>Application for “Review code in…” <small>A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…</small><input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label><label>Plate art <small>What each job’s plate on the board is drawn over</small><select name="plateArt">${[['quiet', 'Skylines'], ['full', 'Launch-page scenes']].map(([v, l]) => `<option value="${v}" ${v === (data.settings.plateArt === 'full' ? 'full' : 'quiet') ? 'selected' : ''}>${l}</option>`).join('')}</select></label><div class="job-actions"><button class="primary" title="These limits apply across all automated jobs. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.">Save settings</button><button type="button" id="job-settings-intro">${ICONS.info}How Jobs works</button></div></form>${whatsNewHtml(updates?.list() || [])}`);
+    dialog.querySelector('form').onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); send({ type: 'job-settings', patch: { maxRepairs: +f.get('maxRepairs'), deploymentStaleMinutes: +f.get('deploymentStaleMinutes'), ideApp: String(f.get('ideApp')).trim(), plateArt: String(f.get('plateArt')) } }); dialog.close(); };
     dialog.querySelector('#job-settings-intro').onclick = () => { dialog.close(); onIntro(); };
     dialog.querySelector('.update-section').onclick = (e) => { const b = e.target.closest('[data-update-id]'); if (b) { dialog.close(); updates.open(b.dataset.updateId); } };
   };
