@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { milestoneReached, triggerStatus, fillText, editWrite, advanceWrite, writeUrl, writeBrief, approveWrite, skipWrite, placeName, applyWrites, applyDrafts, draftsDecided, reopenWrite, openWrites, toDraft } from './job-writes.js';
+import { milestoneReached, triggerStatus, fillText, editWrite, advanceWrite, writeUrl, writeBrief, approveWrite, skipWrite, placeName, applyWrites, applyDrafts, draftsDecided, reopenWrite, openWrites, toDraft, awaitsKeys } from './job-writes.js';
 import { writeReviewed } from './jobs-schema.js';
 
 const pr = (over = {}) => ({ id: 't', kind: 'pr', title: 'Deliver t', repo: '/repo', stage: 'implementation', sessions: [], after: [], ...over });
@@ -202,4 +202,16 @@ test('drafts: exactly the reviewed writes, laid on as edits; the run parks until
   assert.deepEqual([post.state, post.error, n.stage], ['approved', null, 'session'], 'retrying it sends its session back to make it, still approved');
   n.stage = 'done'; post.state = 'failed'; post.error = 'again';
   assert.throws(() => reopenWrite(job, post), /has finished, so nothing will make it now/);
+});
+
+test('a session that creates a story does not wait for its key; one that only uses it does', () => {
+  const create = write({ id: 'mk', jiraKey: undefined, action: { type: 'create' } });
+  const link = write({ id: 'cm', jiraKey: undefined, action: { type: 'comment', comment: 'Preview attached' } });
+  const job = jobOf(session(), create, link);
+  job.plan.stories[0].key = undefined;
+  assert.equal(awaitsKeys(job, job.subJobs[0]), false, 'it makes the ticket first');
+  assert.equal(writeBrief(job, link).ticket, 'the ticket mk creates');
+  assert.equal(writeBrief(job, link).story, undefined, 'a comment is not a story to create');
+  job.subJobs[1].by = 'other';
+  assert.equal(awaitsKeys(job, job.subJobs[0]), true, 'another session owns the create');
 });

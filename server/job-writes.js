@@ -68,8 +68,10 @@ export const toDraft = (job, session) => openWrites(job, session).filter((w) => 
 // Drafted and still with the human: the session is not run again until each is decided.
 export const inReview = (job, session) => ownedWrites(job, session).filter((w) => !w.cancelledAt && !isMakeWrite(w) && w.stage === 'review');
 // A session writing to a story nobody has created yet waits for its key, as a
-// PR naming that story does.
-export const awaitsKeys = (job, session) => openWrites(job, session).some(awaitsTicket);
+// PR naming that story does — unless it owns that story's create itself, which
+// it makes first: waiting there would wait on its own receipt forever.
+const createOf = (job, storyId) => (job.subJobs || []).find((w) => isStoryCreate(w) && w.storyId === storyId && !w.cancelledAt);
+export const awaitsKeys = (job, session) => openWrites(job, session).some((w) => awaitsTicket(w) && createOf(job, w.storyId)?.by !== session.id);
 
 // A write lives and dies with its session: dropped with it, and failed (the
 // human's to mark done, or drop) if the session finished without reporting it —
@@ -123,7 +125,11 @@ export function writeBrief(job, sub) {
     return { id: sub.id, place: placeOf(sub), ...where, write: a.type, ...(a.title ? { title: a.title } : {}), ...(a.text ? { text: fill(a.text) } : {}), ...tail };
   }
   const story = storyOf(job, sub);
-  return { id: sub.id, place: 'jira', ticket: sub.jiraKey || null, ...(sub.jiraKey ? {} : { story: story?.title, project: storyProject(story), ...(story?.fields?.length ? { fields: story.fields } : {}) }),
+  // Only a create carries the story to make; a write to a ticket its own session
+  // creates first names that create, not a story it would read as one to make.
+  const create = !sub.jiraKey && !isStoryCreate(sub) ? createOf(job, sub.storyId) : null;
+  const ticket = sub.jiraKey || (create ? `the ticket ${create.id} creates` : null);
+  return { id: sub.id, place: 'jira', ticket, ...(sub.jiraKey || create ? {} : { story: story?.title, project: storyProject(story), ...(story?.fields?.length ? { fields: story.fields } : {}) }),
     write: a.type, ...(a.to ? { to: a.to } : {}), ...(a.comment ? { comment: fill(a.comment) } : {}), ...tail };
 }
 
