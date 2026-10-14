@@ -538,14 +538,13 @@ test('green and amber verdicts, a pending summary and no comments each read dist
   }
 });
 
-test('new-job form sends chosen model, repositories and the four review checkpoints', (t) => {
+test('new-job form sends chosen model and the four review checkpoints', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   assert.equal(form.elements.reviewCode.checked, true, 'the human reads each diff before it is committed, unless they opt out');
   assert.equal(form.elements.amendmentAuthority, undefined, 'agents never change the plan, so there is no authority to grant');
   form.elements.intent.value = 'Deliver something useful';
-  form.elements.repos.value = '/repo\n/repo\n/second';
   form.dispatchEvent(f.event('submit'));
-  const msg = f.sent[0]; assert.equal(msg.type, 'job-create'); assert.deepEqual(msg.job.repos, ['/repo', '/second']);
+  const msg = f.sent[0]; assert.equal(msg.type, 'job-create');
   assert.equal(msg.job.taskId, null, 'jobs stay Unassigned unless a task is chosen');
   assert.equal(msg.job.model, 'sonnet'); assert.equal(msg.job.reviewPlan, true); assert.equal(msg.job.reviewCode, true); assert.equal(msg.job.reviewMerge, true); assert.equal(msg.job.reviewSessions, true);
   assert.equal(msg.job.effort, '', 'Default leaves effort to the agent');
@@ -648,15 +647,14 @@ test('the new-job primary action starts planning and the plain button parks it i
   assert.equal(f.sent[2].start, false);
 });
 
-test('new job is a brief beside a property sidebar, with the planning extras folded under the brief', (t) => {
+test('new job is a brief beside a property sidebar, and the brief is only the description and images', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   const brief = form.querySelector('.job-create-brief'); const props = form.querySelector('.job-create-props');
   assert.equal(brief.querySelector('h2').textContent, 'New job');
   assert.ok(brief.contains(form.elements.intent));
-  const more = brief.querySelector('details');
-  assert.equal(more.open, false, 'repository hints and guidance start folded');
-  assert.equal(more.querySelector('summary').textContent, 'Planning guidance & repository hints');
-  assert.ok(more.contains(form.elements.repos) && more.contains(form.elements.planningPrompt));
+  assert.equal(brief.querySelector('details'), null, 'no folded planning guidance or repository hints');
+  assert.deepEqual([...brief.querySelectorAll('textarea')].map((e) => e.name), ['intent']);
+  assert.equal(form.elements.repos, undefined); assert.equal(form.elements.planningPrompt, undefined);
   assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Review checkpoints', 'Images', 'After delivery']);
   for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'shareImages', 'updateMain']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
   assert.ok(props.querySelector('#job-pick').querySelector('.pick-ticket') && props.querySelector('#job-pick .pick-meter'), 'the picker is a ticket with an effort meter in the sidebar');
@@ -667,17 +665,15 @@ test('new job is a brief beside a property sidebar, with the planning extras fol
   assert.match(form.querySelector('.job-create-foot').textContent, /nothing touches Jira until you approve/);
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent[0], { type: 'job-create', start: true, job: { intent: 'Deliver it', repos: [], agent: 'claude', model: 'sonnet', effort: '', planningPrompt: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, updateMain: false, images: [], shareImages: true, taskId: null } });
+  assert.deepEqual(f.sent[0], { type: 'job-create', start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, updateMain: false, images: [], shareImages: true, taskId: null } });
 });
 
-test('new jobs need only an outcome while repository hints stay optional', (t) => {
+test('new jobs need only an outcome and leave repositories to planning', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   form.elements.intent.value = 'Customers can access their accounts';
-  assert.equal(form.elements.repos.required, false);
-  assert.equal(form.elements.repos.closest('details').open, false);
   assert.equal(form.checkValidity(), true);
   form.dispatchEvent(f.event('submit'));
-  assert.equal(f.sent[0].type, 'job-create'); assert.deepEqual(f.sent[0].job.repos, []);
+  assert.equal(f.sent[0].type, 'job-create'); assert.equal('repos' in f.sent[0].job, false); assert.equal('planningPrompt' in f.sent[0].job, false);
   f.view.created();
   const job = f.data.jobs[0]; job.repos = []; job.plan = null; job.stage = 'backlog'; f.view.update(f.data);
   f.q('.job-card-open').click();
