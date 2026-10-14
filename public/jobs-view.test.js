@@ -552,19 +552,96 @@ test('new-job form sends chosen model and the four review checkpoints', (t) => {
   assert.equal(f.q('#job-dialog').open, true);
 });
 
+const reviewSent = (f) => { const m = f.sent.at(-1); return m && Object.fromEntries(Object.entries(m).filter(([k, v]) => v !== undefined && k !== 'plan')); };
+const footerButton = (f, field) => f.q(`.job-detail-footer [data-review="${field}"]`);
+const footerHint = (f) => f.q('.job-detail-footer .job-flags-hint').textContent;
+
+test('the footer checkpoints are buttons: a switch counts from the next gate, keeps the dialog, and offers Undo', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation' }];
+  f.view.update(f.data); f.view.openDetail('job1');
+  const code = () => footerButton(f, 'reviewCode');
+  assert.deepEqual([code().tagName, code().type, code().getAttribute('aria-pressed'), code().getAttribute('aria-label')], ['BUTTON', 'button', 'true', 'Code: You review. Switch to Auto']);
+  assert.equal(f.q('.job-detail-footer .job-flags').getAttribute('role'), 'group');
+  assert.equal(footerButton(f, 'reviewPlan').getAttribute('aria-disabled'), 'true');
+  assert.match(footerButton(f, 'reviewPlan').getAttribute('aria-label'), /^Plan: You review\. The plan is already approved/);
+  const before = f.sent.length;
+  footerButton(f, 'reviewPlan').click();
+  assert.equal(f.sent.length, before, 'a locked checkpoint sends nothing');
+  code().dispatchEvent(new f.window.Event('pointerenter'));
+  assert.match(footerHint(f), /Code: You review You read each PR’s diff before it’s committed\. Click for Auto\./);
+  code().click();
+  assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: false });
+  assert.deepEqual([code().className, code().getAttribute('aria-pressed'), code().getAttribute('aria-busy')], ['job-flag auto', 'false', 'true'], 'shown at once, busy until the job confirms it');
+  assert.match(footerHint(f), /Code: Auto From the next PR on\. Undo/);
+  f.view.created({ event: 'job-action-complete', jobId: 'job1', action: 'set-review' });
+  assert.equal(f.q('#job-dialog').open, true, 'the switch was made here, so the dialog stays');
+  job.reviewCode = false; f.view.update(f.data);
+  assert.equal(code().getAttribute('aria-busy'), null);
+  assert.equal(code().getAttribute('aria-label'), 'Code: Auto. Switch to You review');
+  f.q('[data-review-undo]').click();
+  assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: true });
+  assert.match(footerHint(f), /Code: You review Switched back\./);
+  assert.equal(f.q('[data-review-undo]'), null, 'Undo is for one step');
+  f.view.reviewFailed({ event: 'job-action-failed', jobId: 'job1', action: 'set-review', field: 'reviewCode', error: 'Job was cancelled' });
+  assert.equal(code().getAttribute('aria-pressed'), 'false', 'a refusal snaps back to what the job says');
+  assert.match(footerHint(f), /Code: Auto Job was cancelled/);
+});
+
+test('switching to Auto while work waits at the checkpoint asks first, and only then releases it', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'review', state: 'verified', ready: { checks: ['Tests pass'], receiptId: 'run_1' } }, { ...sub('web'), stage: 'review', state: 'verified', ready: { checks: ['Tests pass'], receiptId: 'run_2' } }];
+  f.view.update(f.data); f.view.openDetail('job1');
+  const before = f.sent.length;
+  footerButton(f, 'reviewCode').click();
+  assert.equal(f.sent.length, before, 'nothing is sent before the human confirms');
+  const confirm = () => f.q('#job-review-confirm');
+  assert.match(confirm().textContent, /Switch Code to Auto\?2 diffs are waiting for your review\. Auto lets them through now/);
+  assert.equal(confirm().querySelector('button.primary').textContent, 'Commit and open 2 PRs');
+  f.view.update(f.data);
+  assert.ok(confirm(), 'a graph tick leaves the question open');
+  confirm().querySelector('[data-review-keep]').click();
+  assert.equal(confirm(), null); assert.equal(f.sent.length, before, 'Keep You review leaves everything as it was');
+  assert.equal(footerButton(f, 'reviewCode').getAttribute('aria-pressed'), 'true');
+  footerButton(f, 'reviewCode').click();
+  confirm().dispatchEvent(f.event('submit'));
+  assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: false, release: true });
+  assert.match(footerHint(f), /Code: Auto 2 diffs are being committed and opened as PRs\. Released work can’t be pulled back\./);
+  assert.equal(f.q('[data-review-undo]'), null, 'released work has no Undo');
+});
+
+test('Plan switched to Auto on a drafted plan approves the draft on display; a finished job locks every checkpoint', (t) => {
+  const f = fixture(t);
+  f.data.jobs[0].plan = { ...plan, subJobs: [...plan.subJobs, { id: 'spike', kind: 'session', title: 'Run spike', storyId: 'story', after: [], brief: 'Do it here' }] };
+  f.view.update(f.data); f.view.openDetail('job1');
+  assert.ok(footerButton(f, 'reviewSessions'), 'a planned session sub-job is enough to switch Session results');
+  f.q('[data-title="0"]').value = 'Deliver the API'; f.q('[data-title="0"]').dispatchEvent(f.event('input'));
+  footerButton(f, 'reviewPlan').click();
+  assert.equal(f.q('#job-review-confirm button.primary').textContent, 'Approve the plan and start');
+  f.q('#job-review-confirm').dispatchEvent(f.event('submit'));
+  const msg = f.sent.at(-1);
+  assert.deepEqual([msg.action, msg.field, msg.you, msg.release, msg.revision, msg.plan.subJobs[0].title], ['set-review', 'reviewPlan', false, true, 2, 'Deliver the API']);
+  f.q('#job-dialog').close();
+  const job = f.data.jobs[0]; job.stage = 'done'; job.subJobs = [{ id: 'spike', kind: 'session', title: 'Run spike', after: [], brief: 'Do it here', sessions: [], repairs: [], stage: 'done' }]; f.view.update(f.data);
+  f.view.openDetail('job1');
+  assert.deepEqual([...document.querySelectorAll('.job-detail-footer [data-review]')].map((b) => [b.dataset.review, b.getAttribute('aria-disabled')]),
+    [['reviewPlan', 'true'], ['reviewCode', 'true'], ['reviewMerge', 'true'], ['reviewSessions', 'true']]);
+  assert.match(footerButton(f, 'reviewMerge').getAttribute('aria-label'), /The job is finished/);
+});
+
 test('the Plan checkpoint can be set to Auto in the new-job form, and is a flag on the job', (t) => {
   const f = fixture(t); const job = f.data.jobs[0];
   f.q('[data-job="job1"]').click();
   const plan = () => f.q('.job-detail-footer .job-flag');
-  assert.equal(plan().getAttribute('aria-label'), 'Plan: You review. You approve the plan before any ticket, PR or session starts', 'a job without the flag still reviews its plan');
-  assert.equal(plan().title, plan().getAttribute('aria-label'));
+  assert.equal(plan().getAttribute('aria-label'), 'Plan: You review. Switch to Auto', 'a job without the flag still reviews its plan');
+  assert.equal(plan().title, 'Plan: You review. You approve the plan before any ticket, PR or session starts');
   assert.ok(plan().classList.contains('you') && plan().querySelector('.job-flag-badge'), 'filled amber with the hand badge');
   assert.deepEqual([...document.querySelectorAll('.job-detail-footer .job-flag')].map((e) => [e.getAttribute('aria-label').split('.')[0], e.className]),
     [['Plan: You review', 'job-flag you'], ['Code: You review', 'job-flag you'], ['Merge: You review', 'job-flag you']], 'no session sub-jobs, so no Session results flag');
   f.q('#job-dialog').close();
   job.reviewPlan = false; job.reviewMerge = false; f.view.update(f.data);
   f.q('[data-job="job1"]').click();
-  assert.equal(plan().getAttribute('aria-label'), 'Plan: Auto. Work starts as soon as the plan is drafted');
+  assert.equal(plan().title, 'Plan: Auto. Work starts as soon as the plan is drafted');
   assert.ok(plan().classList.contains('auto'), 'a dashed outline with the fast-forward badge');
   assert.match(f.q('.job-flag.auto[aria-label^="Merge: Auto"]').title, /PRs merge once checks pass, unless a reviewer leaves blocking comments/);
   f.q('#job-dialog').close();

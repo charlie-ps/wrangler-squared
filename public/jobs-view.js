@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, youReview, checkpointHint, checkpointFlagHtml, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan } from './jobs.js';
+import { CHECKPOINTS, checkpoint, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, redComments, mergeHeldByComments, deploymentStalled, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml, jobTileHtml } from './job-graph.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 import { createJobImages, imagesPanelHtml, openZoom } from './job-images.js';
@@ -14,7 +14,6 @@ const chip = (icon, text, { cls = '', title = '' } = {}) => `<span class="job-ch
 // The state chip carries every explanatory sentence the step has, so they cost a
 // hover rather than a paragraph; the info glyph says there is something to read.
 const stateChip = (state, text, hints = []) => `<span class="job-chip job-chip-state tone-${STATES[state].tone}"${hints.length ? ` title="${esc(hints.join('\n\n'))}"` : ''}>${stateIconHtml(state)}<span>${esc(text)}</span>${hints.length ? ICONS.info : ''}</span>`;
-const flagsHtml = (job) => CHECKPOINTS.filter((cp) => cp.field !== 'reviewSessions' || hasSessionSubs(job)).map((cp) => checkpointFlagHtml(cp, youReview(job, cp.field))).join('');
 // Mirrors server/job-store.js approve-merge: nothing merges before its prerequisites deploy.
 const mergeApprovable = (job, sub) => sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && (job.reviewMerge || redComments(sub)) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 // Comment text is written by reviewers and bots: escaped, never trusted HTML.
@@ -102,12 +101,25 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   // dependency change redraws the whole stepper (the node moves wave), so the
   // open state has to outlive the markup or the editor snaps shut under the pointer.
   const openDeps = new Set();
+  // The detail footer's checkpoint buttons. Their hint, a pending switch, an Undo
+  // and an open confirm all outlive the markup, which every graph tick rebuilds.
+  let flags = null;
+  const resetFlags = (jobId = null) => { flags = { jobId, hover: null, note: null, pending: null, confirm: null, inside: false, painting: false }; };
+  resetFlags();
   root.innerHTML = `<header class="jobs-header"><h1>Jobs</h1>
     <div class="jobs-filters"><select id="jobs-filter" aria-label="Show one job"><option value="">Every job</option></select><label class="jobs-chip jobs-chip-needs" title="Only jobs waiting on you"><input id="jobs-needs" type="checkbox">${ICONS.eye}Needs me <span id="jobs-review-count">0</span></label><label class="jobs-chip" title="Include delivered and cancelled jobs"><input id="jobs-done" type="checkbox">${ICONS.check}Finished</label></div>
     <div class="jobs-toolbar"><span id="jobs-active-count" aria-live="polite"></span><label class="jobs-chip" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="8" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-icon"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="primary" id="job-new">${ICONS.plus}New job</button></div></header>
     <div id="jobs-boards" class="jobs-grid"></div>`;
   const q = (s) => root.querySelector(s);
-  function update(snapshot) { data = snapshot || data; render(); picker?.agentsChanged(getAgents()); }
+  function update(snapshot) {
+    data = snapshot || data;
+    const job = data.jobs.find((j) => j.id === flags.jobId);
+    if (flags.pending && job && youReview(job, flags.pending.field) === flags.pending.you) flags.pending = null;
+    // A plan approved from the footer (Plan switched to Auto) leaves review: the
+    // draft goes, so the detail follows the job instead of the frozen editor.
+    if (planDraft && job && job.id === selected?.jobId && !selected.subId && job.stage !== 'planning') planDraft = null;
+    render(); picker?.agentsChanged(getAgents());
+  }
   function render() {
     const cards = jobCards(data.jobs);
     const needs = new Set(cards.filter((c) => jobNeedsReview(c.job, c.sub)).map((c) => c.job));
@@ -157,7 +169,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     send({ type: 'job-action', id: selected.jobId, subJobId: subId || undefined, action: name, ...extra });
   }
   function openDetail(jobId, subId) {
-    selected = { jobId, subId }; planDraft = null; revision = null; commentsShown.clear(); openDeps.clear(); openMore.clear();
+    selected = { jobId, subId }; planDraft = null; revision = null; commentsShown.clear(); openDeps.clear(); openMore.clear(); resetFlags(jobId);
     const job = data.jobs.find((j) => j.id === jobId);
     if (!subId && job?.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
     const sub = job?.subJobs.find((s) => s.id === subId);
@@ -297,6 +309,100 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     const [icon, text] = state === 'failing' ? [ICONS.wrench, 'Resolve'] : codeAwaitingReview(lead) ? [ICONS.code, 'Review code'] : isSessionSub(lead) ? [ICONS.doc, 'Review result'] : isHumanSub(lead) ? [ICONS.person, 'Open task'] : [ICONS.eye, 'Open'];
     return `<button class="primary" data-open-sub="${esc(lead.id)}" title="${title}">${icon}${text}${n ? ` #${n}` : ''}</button>`;
   }
+  // A switch counts from the next gate the job reaches (server/job-store.js
+  // setReview). One that would release work already waiting asks first and has
+  // no Undo; any other applies at once, Undo in the hint until the pointer and
+  // focus leave the footer. The tile shows the new state, aria-busy, until the
+  // job's next broadcast confirms it or a refusal snaps it back.
+  const shownYou = (job, field) => flags.pending?.field === field ? flags.pending.you : youReview(job, field);
+  function flagsHintHtml(job) {
+    let head = 'Review checkpoints', body = 'Click one to change it from the next gate on.', undo = false;
+    if (flags.note) ({ head, body, undo } = flags.note);
+    else if (flags.hover) {
+      const cp = checkpoint(flags.hover), you = shownYou(job, cp.field), lock = checkpointLock(job, cp.field);
+      head = checkpointLabel(cp, you);
+      body = lock ? `${lock}.` : `${checkpointHint(cp, you)}. Click for ${you ? 'Auto' : 'You review'}.`;
+    }
+    return `<p class="job-flags-hint" aria-live="polite"><b>${esc(head)}</b> <span>${esc(body)}</span>${undo ? ' <button type="button" class="job-flags-undo" data-review-undo>Undo</button>' : ''}</p>`;
+  }
+  function footerHtml(job) {
+    // Before approval the sub-jobs exist only in the plan, and Session results is
+    // still switchable there.
+    const sessions = hasSessionSubs(job) || !!(planDraft || job.plan)?.subJobs.some(isSessionSub);
+    const cps = CHECKPOINTS.filter((cp) => cp.field !== 'reviewSessions' || sessions);
+    const buttons = cps.map((cp) => checkpointButtonHtml(cp, shownYou(job, cp.field), { lock: checkpointLock(job, cp.field), saving: flags.pending?.field === cp.field })).join('');
+    const c = flags.confirm && checkpoint(flags.confirm.field);
+    // A form, so a graph tick leaves the question where it is (render() skips a dialog holding one).
+    const confirm = c ? `<form class="job-flags-confirm" id="job-review-confirm"><b>Switch ${esc(c.name)} to Auto?</b><p>${esc(c.wait(flags.confirm.n))} Auto lets ${flags.confirm.n === 1 ? 'it' : 'them'} through now, and every later one goes straight on.</p><div class="job-actions"><button class="primary">${esc(c.yes(flags.confirm.n))}</button><button type="button" data-review-keep>Keep You review</button></div></form>` : '';
+    return `<footer class="job-detail-footer">${confirm}<div class="job-flags" role="group" aria-label="Review checkpoints">${buttons}</div>${flagsHintHtml(job)}</footer>`;
+  }
+  function setReview(field, you, release) {
+    const cp = checkpoint(field);
+    const n = release ? flags.confirm?.n || 1 : 0;
+    flags.confirm = null; flags.pending = { field, you };
+    flags.note = release ? { field, head: checkpointLabel(cp, false), body: `${cp.done(n)}. Released work can’t be pulled back.`, undo: false }
+      : { field, head: checkpointLabel(cp, you), body: `From the next ${cp.unit} on.${you ? ' Anything already past this checkpoint carries on.' : ''}`, undo: { field, you: !you } };
+    action('set-review', { field, you, ...(release ? { release: true } : {}), ...(release && field === 'reviewPlan' && planDraft ? { plan: planDraft, revision } : {}) }, '');
+    paintFooter(field);
+  }
+  // Handlers read the job when they fire: a plan under review is not redrawn on
+  // graph ticks, so a job captured at wiring time would go stale.
+  const shownJob = () => data.jobs.find((j) => j.id === selected?.jobId);
+  function wireFooter() {
+    const footer = dialog.querySelector('.job-detail-footer');
+    if (!footer) return;
+    footer.querySelectorAll('[data-review]').forEach((b) => {
+      const field = b.dataset.review;
+      const enter = () => { if (flags.hover === field) return; flags.hover = field; if (flags.note?.field !== field) flags.note = null; paintHint(); };
+      b.onpointerenter = enter; b.onfocus = enter;
+      b.onclick = () => {
+        const job = shownJob();
+        if (!job || checkpointLock(job, field) || flags.pending) return;
+        const you = shownYou(job, field);
+        const n = you ? checkpointWaiting(job, field) : 0;
+        if (!n) return setReview(field, !you, false);
+        flags.confirm = { field, n }; flags.note = null;
+        paintFooter();
+        dialog.querySelector('#job-review-confirm button.primary')?.focus();
+      };
+    });
+    // Leaving with neither pointer nor focus inside drops the hover hint and any Undo.
+    const left = () => { flags.hover = null; if (flags.note?.undo) flags.note = null; paintHint(); };
+    footer.onpointerenter = () => { flags.inside = true; };
+    footer.onpointerleave = () => { flags.inside = false; if (!footer.contains(document.activeElement)) left(); };
+    footer.onfocusout = (e) => { if (!flags.painting && !flags.inside && !footer.contains(e.relatedTarget)) left(); };
+    const undo = footer.querySelector('[data-review-undo]');
+    if (undo) undo.onclick = () => {
+      if (flags.pending) return;
+      const { field, you } = flags.note.undo;
+      setReview(field, you, false);
+      flags.note = { field, head: checkpointLabel(checkpoint(field), you), body: 'Switched back.', undo: false };
+      paintFooter(field);
+    };
+    const confirm = footer.querySelector('#job-review-confirm');
+    if (confirm) {
+      confirm.onsubmit = (e) => { e.preventDefault(); setReview(flags.confirm.field, false, true); };
+      confirm.querySelector('[data-review-keep]').onclick = () => { const { field } = flags.confirm; flags.confirm = null; paintFooter(field); };
+    }
+  }
+  function paintHint() {
+    const hint = dialog.querySelector('.job-detail-footer .job-flags-hint');
+    if (!hint) return;
+    hint.outerHTML = flagsHintHtml(shownJob());
+    wireFooter();
+  }
+  // The footer alone, so a click does not rebuild the dialog under the pointer;
+  // `focus` names the button that should hold focus afterwards.
+  function paintFooter(focus = null) {
+    const job = shownJob();
+    const footer = dialog.querySelector('.job-detail-footer');
+    if (!job || !footer) return;
+    flags.painting = true;
+    footer.outerHTML = footerHtml(job);
+    flags.painting = false;
+    wireFooter();
+    if (focus) dialog.querySelector(`.job-detail-footer [data-review="${focus}"]`)?.focus();
+  }
   function jobDetail(job) {
     const state = jobState(job);
     const live = job.stage === 'active' || job.stage === 'done';
@@ -330,7 +436,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       : `<button id="job-refine" title="Ask for a new plan from where the job stands. Nothing changes until you approve it.">${ICONS.edit}Change plan</button>`;
     const tail = job.cancelledAt || job.stage === 'done' ? '' : `<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel job</button>`;
     return `${appbar(job.title, chips)}${eventHtml(job, null)}${body}
-      <div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${tail}</div><footer class="job-detail-footer">${flagsHtml(job)}</footer>`;
+      <div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${tail}</div>${footerHtml(job)}`;
   }
   function subDetail(job, sub) {
     const state = subState(job, sub);
@@ -403,7 +509,12 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     if (!job) return;
     const sub = job.subJobs.find((s) => s.id === selected.subId);
     if (!sub && !planDraft && job.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
+    const focus = document.activeElement?.closest?.('.job-detail-footer [data-review]')?.dataset.review;
+    flags.painting = true;
     show(sub ? subDetail(job, sub) : jobDetail(job));
+    flags.painting = false;
+    wireFooter();
+    if (focus) dialog.querySelector(`.job-detail-footer [data-review="${focus}"]`)?.focus();
     dialog.querySelectorAll('[data-action]').forEach((b) => b.onclick = () => {
       const name = b.dataset.action;
       const target = b.dataset.sub ? job.subJobs.find((s) => s.id === b.dataset.sub) : sub;
@@ -610,12 +721,26 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     e.preventDefault();
     run();
   });
-  dialog.addEventListener('close', () => { selected = null; planDraft = null; commentsShown.clear(); openDeps.clear(); openMore.clear(); });
+  dialog.addEventListener('close', () => { selected = null; planDraft = null; commentsShown.clear(); openDeps.clear(); openMore.clear(); resetFlags(); });
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
   // the same dialog a board card's click does, from a job/sub id pair index.js kept.
   // newJob is the intro's last button.
-  return { update, newJob: createJob, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
+  // A refused switch snaps back and the hint says why.
+  function reviewFailed(msg) {
+    if (msg.jobId !== flags.jobId || !flags.pending) return;
+    const cp = checkpoint(msg.field || flags.pending.field);
+    const job = data.jobs.find((j) => j.id === flags.jobId);
+    flags.pending = null;
+    flags.note = { field: cp.field, head: job ? checkpointLabel(cp, youReview(job, cp.field)) : cp.name, body: msg.error, undo: false };
+    paintFooter();
+  }
+  return { update, newJob: createJob, reviewFailed, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
+    // A checkpoint switch keeps the dialog: the footer is where it was made.
+    if (msg?.action === 'set-review') {
+      if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }
+      return;
+    }
     if (dialog.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;
     dialog.close();
   }, openDetail };

@@ -342,6 +342,81 @@ test('a session sub-job is a hard prerequisite: nothing behind it starts until i
   assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'implementation']);
 });
 
+// --- Review checkpoints switched mid-job ---
+
+const setReview = (f, field, you, extra = {}) => f.store.action(f.job.id, 'set-review', { field, you, ...extra });
+
+test('a code review switch counts from the next gate: waiting diffs stay until released, and a ready receipt under Auto is approved as it lands', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api'));
+  setReview(f, 'reviewCode', false);
+  let job = f.store.get(f.job.id);
+  assert.equal(job.reviewCode, false);
+  assert.deepEqual([job.subJobs[0].stage, job.subJobs[0].state], ['review', 'verified'], 'a diff already waiting is not let through unasked');
+  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['set-review', null, 'Switched Code to Auto']]);
+  f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('web'));
+  assert.equal(f.sub(1).state, 'approved', 'the run kept its uncommitted prompt; its receipt is approved as it lands');
+  assert.ok(f.sub(1).ready.approvedAt);
+  await f.tick();
+  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['web', 'publish']);
+  setReview(f, 'reviewCode', false, { release: true });
+  assert.deepEqual([f.sub().state, !!f.sub().ready.approvedAt], ['approved', true]);
+  assert.deepEqual(f.store.get(f.job.id).moves.slice(-2).map((m) => [m.move, m.subJobId]), [['approve-code', 'api'], ['set-review', null]]);
+  const revision = f.store.get(f.job.id).revision;
+  setReview(f, 'reviewCode', false);
+  assert.equal(f.store.get(f.job.id).moves.length, 3, 'switching to what it already is records nothing');
+  assert.ok(f.store.get(f.job.id).revision > revision);
+  setReview(f, 'reviewCode', true);
+  assert.equal(f.store.get(f.job.id).reviewCode, true);
+});
+
+test('a set-review switch is validated: an unknown checkpoint, a non-boolean, an approved plan and a cancelled job are refused', async (t) => {
+  const f = fixture(t); await f.approve();
+  assert.throws(() => setReview(f, 'reviewNope', false), /Unknown review checkpoint/);
+  assert.throws(() => setReview(f, 'reviewCode', 'no'), /Unknown review checkpoint/);
+  assert.throws(() => setReview(f, 'reviewPlan', false), /plan is already approved/);
+  f.store.action(f.job.id, 'cancel-job');
+  assert.throws(() => setReview(f, 'reviewMerge', false), /Job was cancelled/);
+});
+
+test('Plan switched to Auto: while planning the receipt approves itself, and a drafted plan is approved only on release, pinned to its revision', async (t) => {
+  const f = fixture(t);
+  f.store.action(f.job.id, 'start'); await f.tick();
+  setReview(f, 'reviewPlan', false);
+  f.report({ kind: 'plan', plan: plan() });
+  assert.equal(f.store.get(f.job.id).stage, 'active', 'as a job created with Plan on Auto');
+
+  const g = fixture(t);
+  g.store.action(g.job.id, 'start'); await g.tick(); g.report({ kind: 'plan', plan: plan() }); await g.tick();
+  setReview(g, 'reviewPlan', false);
+  assert.equal(g.store.get(g.job.id).stage, 'planning', 'a drafted plan waits unless released');
+  setReview(g, 'reviewPlan', true);
+  const { revision } = g.store.get(g.job.id);
+  assert.throws(() => setReview(g, 'reviewPlan', false, { release: true, revision: revision - 1 }), /plan changed/);
+  const edited = plan([spec('api', [], { title: 'Deliver the API' })]);
+  setReview(g, 'reviewPlan', false, { release: true, revision, plan: edited });
+  const job = g.store.get(g.job.id);
+  assert.deepEqual([job.stage, job.reviewPlan, job.subJobs.map((s) => s.title)], ['active', false, ['Deliver the API']]);
+  assert.equal(job.moves.at(-1).detail, 'Switched Plan to Auto, releasing what was waiting');
+});
+
+test('Session results and Merge switched mid-job: a released receipt is accepted, and a green PR merges on the next poll once Merge is Auto', async (t) => {
+  const f = fixture(t); await f.approve(plan([sessionSpec('spike'), spec('api', ['spike'])]));
+  f.report({ kind: 'completed', checks: ['Schema documented'] });
+  setReview(f, 'reviewSessions', false, { release: true });
+  assert.deepEqual([f.sub().stage, !!f.sub().sessionApprovedAt], ['cleanup', true]);
+  await f.tick();
+  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'implementation']);
+
+  const g = fixture(t); await g.approve();
+  g.report({ kind: 'published', url: PR_URL }); g.setPr({ checkStatus: 'passing' });
+  await g.tick(); await g.tick();
+  assert.deepEqual(g.merged, [], 'Merge on You review waits for Approve merge');
+  setReview(g, 'reviewMerge', false);
+  await g.tick();
+  assert.deepEqual(g.merged, ['head1']);
+});
+
 // --- Human tasks ---
 
 test('a human sub-job has no repo and no check, and lands in its own stage no runner ever launches', async (t) => {
@@ -1276,6 +1351,17 @@ test('a move arrives as a job-action with its own fields and reaches the store w
     title: 'Sync the proto', brief: 'Regenerate the proto', position: 'after', note: 'small one' }, host);
   assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id, action: 'split-out', subJobId: 'api' }]);
   assert.deepEqual(f.store.get(f.job.id).subJobs.map((s) => s.id), ['api', 'api-2']);
+});
+
+test('a refused job-action is broadcast with its reason instead of thrown, so the footer can snap back', async (t) => {
+  const f = fixture(t); await f.approve();
+  const host = fakeHost(f); const ticks = stubRunner(t, host);
+  await jobActionHandler.handler({ id: f.job.id, action: 'set-review', field: 'reviewPlan', you: false }, host);
+  assert.deepEqual(host.broadcasts, [{ event: 'job-action-failed', jobId: f.job.id, action: 'set-review', field: 'reviewPlan', error: 'The plan is already approved. A replan always waits for you' }]);
+  assert.equal(host.rebuilds, 0); assert.equal(ticks(), 0);
+  await jobActionHandler.handler({ id: f.job.id, action: 'set-review', field: 'reviewMerge', you: false }, host);
+  assert.deepEqual(host.broadcasts.at(-1), { event: 'job-action-complete', jobId: f.job.id, action: 'set-review' });
+  assert.equal(f.store.get(f.job.id).reviewMerge, false);
 });
 
 test('starting a HUMAN task identifies its reply so the client can keep a draft open', async (t) => {

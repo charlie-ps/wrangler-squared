@@ -180,13 +180,32 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
 .job-actions button.danger { color:var(--red-fg); }
 .job-actions button.danger:hover { background:var(--danger-bg); }
 .job-actions button:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
-.job-detail-footer { display:flex; align-items:center; gap:8px; margin-top:18px; padding-top:12px; border-top:1px solid var(--border-muted); }
+.job-detail-footer { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:18px; padding-top:12px; border-top:1px solid var(--border-muted); }
+.job-flags { display:flex; gap:8px; }
+.job-flags-hint { flex:1; min-width:180px; margin:0; font-size:12px; color:var(--fg-muted); }
+.job-flags-hint b { color:var(--fg); font-weight:600; }
+.job-flags-undo { padding:0 2px; border:0; background:none; font:inherit; font-weight:600; color:var(--blue-fg); cursor:pointer; }
+.job-flags-undo:hover { text-decoration:underline; }
+.job-flags-undo:focus-visible { outline:2px solid var(--blue); outline-offset:2px; border-radius:3px; }
+.job-flags-confirm { flex-basis:100%; padding:10px 12px; border-radius:10px; background:color-mix(in srgb, var(--st-warn) 10%, var(--surface)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 45%, transparent); font-size:13px; }
+.job-flags-confirm p { margin:4px 0 10px; color:var(--fg-muted); }
+.job-flags-confirm .job-actions { margin:0; }
 .job-flag { position:relative; flex:none; display:inline-grid; place-items:center; width:26px; height:26px; border-radius:7px; font-size:14px; }
 .job-flag.you { background:color-mix(in srgb, var(--st-warn) 15%, var(--surface)); color:var(--st-warn-fg); }
 .job-flag.auto { color:var(--fg-subtle); border:1px dashed var(--border); }
 .job-flag-badge { position:absolute; right:-4px; bottom:-4px; display:grid; place-items:center; width:13px; height:13px; border-radius:50%; font-size:9px; background:var(--surface); }
 .job-flag.you .job-flag-badge { color:var(--st-warn-fg); box-shadow:0 0 0 1px var(--st-warn); }
 .job-flag.auto .job-flag-badge { color:var(--fg-subtle); box-shadow:0 0 0 1px var(--border); }
+/* The footer's flags are buttons: a bigger target, the same tile. */
+button.job-flag { width:30px; height:30px; padding:0; margin:0; border:0; border-radius:8px; font:inherit; font-size:15px; cursor:pointer; transition:background .12s, color .12s, border-color .12s; }
+button.job-flag.you { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 45%, transparent); }
+button.job-flag.you:hover { background:color-mix(in srgb, var(--st-warn) 28%, var(--surface)); }
+button.job-flag.auto { background:var(--surface); border:1px dashed var(--border); }
+button.job-flag.auto:hover { background:var(--surface-2); color:var(--fg); border-color:var(--fg-subtle); }
+button.job-flag:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+button.job-flag[aria-busy="true"] { cursor:progress; opacity:.6; }
+button.job-flag[aria-disabled="true"] { cursor:default; opacity:.45; }
+button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 /* A review checkpoint on one row: stage glyph, name over the hint for the current
    choice, then a single icon that flips between You review (hand) and Auto (ff). */
 .job-prop:has(>.job-review) { gap:10px; }

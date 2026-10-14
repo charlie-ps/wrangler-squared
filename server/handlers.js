@@ -36,9 +36,15 @@ export const jobCreateHandler = makeJobCreateHandler();
 export const jobActionHandler = {
   type: 'job-action',
   async handler(msg, host) {
-    host.stores.jobs.action(msg.id, msg.action, msg);
+    const ids = { jobId: msg.id, action: msg.action, ...(msg.subJobId ? { subJobId: msg.subJobId } : {}) };
+    // A refusal goes out as a frame rather than a throw, which never reaches the
+    // board: the footer's checkpoint buttons snap back and say why.
+    try { host.stores.jobs.action(msg.id, msg.action, msg); } catch (e) {
+      host.broadcast({ event: 'job-action-failed', ...ids, ...(msg.field ? { field: msg.field } : {}), error: e?.message || String(e) });
+      return;
+    }
     await host.rebuild();
-    host.broadcast({ event: 'job-action-complete', jobId: msg.id, action: msg.action, ...(msg.subJobId ? { subJobId: msg.subJobId } : {}) });
+    host.broadcast({ event: 'job-action-complete', ...ids });
     kick(host).catch((e) => host.log('job-action tick failed', e));
   },
 };

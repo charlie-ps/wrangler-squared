@@ -12,11 +12,19 @@ export const reviewCode = (job) => job.reviewCode ?? true;
 // The four review checkpoints, in the one set of words the New job form, the
 // job's flags, the plan dialog and the intro all use: each is named for what you
 // review, and each state for who acts. Merge alone defaults off on a stored job.
+// `wait`, `yes` and `done` are the footer's words for releasing work already
+// waiting at a checkpoint when it is switched to Auto; `unit` is what the next
+// gate is reached by.
+const several = (n, one, many) => n === 1 ? one : `${n} ${many}`;
 export const CHECKPOINTS = [
-  { field: 'reviewPlan', icon: 'doc', name: 'Plan', you: 'You approve the plan before any ticket, PR or session starts', auto: 'Work starts as soon as the plan is drafted' },
-  { field: 'reviewCode', icon: 'code', name: 'Code', you: 'You read each PR’s diff before it’s committed', auto: 'The agent commits and opens the PR without a diff review' },
-  { field: 'reviewMerge', icon: 'merge', name: 'Merge', you: 'You approve each PR once its checks pass', auto: 'PRs merge once checks pass, unless a reviewer leaves blocking comments' },
-  { field: 'reviewSessions', icon: 'robot', name: 'Session results', you: 'You approve each session’s receipt before it counts as done', auto: 'A session counts as done once it reports' },
+  { field: 'reviewPlan', icon: 'doc', name: 'Plan', unit: 'plan', you: 'You approve the plan before any ticket, PR or session starts', auto: 'Work starts as soon as the plan is drafted',
+    wait: () => 'The plan is waiting for your approval.', yes: () => 'Approve the plan and start', done: () => 'Plan approved, work starting' },
+  { field: 'reviewCode', icon: 'code', name: 'Code', unit: 'PR', you: 'You read each PR’s diff before it’s committed', auto: 'The agent commits and opens the PR without a diff review',
+    wait: (n) => `${several(n, 'A diff is', 'diffs are')} waiting for your review.`, yes: (n) => `Commit and open ${several(n, 'the PR', 'PRs')}`, done: (n) => `${several(n, 'The diff is', 'diffs are')} being committed and opened as PRs` },
+  { field: 'reviewMerge', icon: 'merge', name: 'Merge', unit: 'PR', you: 'You approve each PR once its checks pass', auto: 'PRs merge once checks pass, unless a reviewer leaves blocking comments',
+    wait: (n) => `${several(n, 'A PR has', 'PRs have')} passing checks and ${n === 1 ? 'is' : 'are'} waiting for Approve merge.`, yes: (n) => `Merge ${several(n, 'the PR', 'PRs')}`, done: (n) => `${several(n, 'The PR merges', 'PRs merge')} on the next poll, unless a reviewer leaves blocking comments` },
+  { field: 'reviewSessions', icon: 'robot', name: 'Session results', unit: 'session receipt', you: 'You approve each session’s receipt before it counts as done', auto: 'A session counts as done once it reports',
+    wait: (n) => `${several(n, 'A session receipt is', 'session receipts are')} waiting for your approval.`, yes: (n) => `Accept ${several(n, 'the receipt', 'receipts')}`, done: (n) => `${several(n, 'The receipt is', 'receipts are')} accepted` },
 ];
 export const checkpoint = (field) => CHECKPOINTS.find((c) => c.field === field);
 export const youReview = (job, field) => field === 'reviewMerge' ? !!job.reviewMerge : field === 'reviewCode' ? reviewCode(job) : job[field] ?? true;
@@ -29,6 +37,31 @@ export const checkpointFlagHtml = (cp, you) => {
   const text = esc(`${checkpointLabel(cp, you)}. ${checkpointHint(cp, you)}`);
   return `<span class="job-flag ${you ? 'you' : 'auto'}" role="img" aria-label="${text}" title="${text}">${ICONS[cp.icon]}<span class="job-flag-badge">${you ? ICONS.hand : ICONS.ff}</span></span>`;
 };
+// The detail footer's checkpoint is the same tile as a button (aria-pressed is
+// You review). A locked one stays focusable, aria-disabled, so its name can say why.
+export const checkpointButtonHtml = (cp, you, { lock = null, saving = false } = {}) => {
+  const label = checkpointLabel(cp, you);
+  const aria = esc(`${label}. ${lock || `Switch to ${you ? 'Auto' : 'You review'}`}`);
+  return `<button type="button" class="job-flag ${you ? 'you' : 'auto'}" data-review="${cp.field}" aria-pressed="${you}" aria-label="${aria}" title="${esc(`${label}. ${checkpointHint(cp, you)}`)}"${lock ? ' aria-disabled="true"' : ''}${saving ? ' aria-busy="true"' : ''}>${ICONS[cp.icon]}<span class="job-flag-badge">${you ? ICONS.hand : ICONS.ff}</span></button>`;
+};
+// Why a checkpoint can no longer change. Mirrors server/job-store.js setReview.
+export function checkpointLock(job, field) {
+  if (job.cancelledAt) return 'The job was cancelled: there is nothing left to review';
+  if (job.stage === 'done') return 'The job is finished: there is nothing left to review';
+  if (field === 'reviewPlan' && !['backlog', 'planning'].includes(job.stage)) return 'The plan is already approved. A replan always waits for you';
+  return null;
+}
+// What switching a You review checkpoint to Auto would let through right now,
+// which is what the footer asks about before it sends `release`. Mirrors
+// server/job-store.js releaseWaiting, plus Merge, which the runner's next poll
+// releases on its own once the flag is off.
+export function checkpointWaiting(job, field) {
+  if (!youReview(job, field)) return 0;
+  if (field === 'reviewPlan') return job.stage === 'planning' && job.plan && !job.runs.some((r) => !r.stopped) ? 1 : 0;
+  return job.subJobs.filter((s) => !s.error && (field === 'reviewCode' ? codeAwaitingReview(s) && !s.ready?.approvedAt
+    : field === 'reviewMerge' ? s.stage === 'pr' && s.pr?.checkStatus === 'passing' && s.mergeApprovedHead !== s.pr.head && !pendingDependencies(job, s).length
+      : isSessionSub(s) && s.stage === 'review' && !!s.result)).length;
+}
 // One native checkbox (checked is You review), so a click or Space flips it and
 // an unchecked box submits nothing, which reads as Auto. The words live in the
 // title and the accessible name, both rewritten by whoever handles the change;

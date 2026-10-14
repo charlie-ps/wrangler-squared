@@ -2,7 +2,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR } from './data-dir.js';
 import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
-import { jobInputSchema, settingsSchema, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, storiesKeyed } from './jobs-schema.js';
+import { jobInputSchema, settingsSchema, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, storiesKeyed, reviewCode } from './jobs-schema.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { applyMove, dropSub, MOVE_ACTIONS } from './job-moves.js';
@@ -66,6 +66,42 @@ function cancelJob(j, now) {
   if (j.cancelledAt) throw new Error('Job is already cancelled');
   j.cancelledAt = now; j.paused = false; j.error = null; j.blocked = null; j.replan = null;
   for (const s of j.subJobs) if (!['cleanup', 'done'].includes(s.stage)) dropSub(s, now);
+}
+// A running job's review checkpoints, switched from the detail footer. Every gate
+// reads its flag when the job reaches it (a receipt landing, a merge poll), so
+// writing the field is the whole of "from the next gate on". Work already WAITING
+// at a gate is released only when the human confirmed exactly that (`release`):
+// a board a tick behind must never let through something nobody saw waiting.
+// Merge has nothing to release here: the runner's next poll merges a green PR
+// once the flag is off. Plan locks once approved: a replan always waits anyway.
+export const REVIEW_POINTS = { reviewPlan: 'Plan', reviewCode: 'Code', reviewMerge: 'Merge', reviewSessions: 'Session results' };
+const flagOf = (j, field) => field === 'reviewCode' ? reviewCode(j) : field === 'reviewMerge' ? !!j.reviewMerge : j[field] ?? true;
+function releaseWaiting(j, field, { plan, revision }, now) {
+  if (field === 'reviewPlan') {
+    if (j.stage !== 'planning' || !j.plan || j.runs.some(runnable)) return 0;
+    if (revision != null && j.revision !== revision) throw new Error('The plan changed. Review the latest version before approving.');
+    approve(j, plan || j.plan);
+    return 1;
+  }
+  const waiting = j.subJobs.filter((s) => !s.error && s.stage === 'review' && (field === 'reviewCode'
+    ? isPrSub(s) && s.state === 'verified' && s.ready && !s.ready.approvedAt
+    : field === 'reviewSessions' && isSessionSub(s) && s.result));
+  if (waiting.length && j.replan) throw new Error('A plan change is pending. Approve or discard it first.');
+  for (const s of waiting) {
+    if (field === 'reviewCode') { s.ready = { ...s.ready, approvedAt: now }; s.state = 'approved'; record(j, s, 'approve-code', null, `Approved the working tree of ${quoted(s.title)}`); }
+    else { s.sessionApprovedAt = now; s.stage = 'cleanup'; s.state = 'queued'; record(j, s, 'approve-session', null, `Approved the result of ${quoted(s.title)}`); }
+  }
+  return waiting.length;
+}
+function setReview(j, { field, you, release, plan, revision }, now) {
+  const name = REVIEW_POINTS[field];
+  if (!name || typeof you !== 'boolean') throw new Error('Unknown review checkpoint');
+  if (j.stage === 'done') throw new Error('The job is finished: there is nothing left to review');
+  if (field === 'reviewPlan' && !['backlog', 'planning'].includes(j.stage)) throw new Error('The plan is already approved. A replan always waits for you');
+  const released = !you && release ? releaseWaiting(j, field, { plan, revision }, now) : 0;
+  if (flagOf(j, field) === you && !released) return;
+  j[field] = you;
+  record(j, null, 'set-review', null, `Switched ${name} to ${you ? 'You review' : 'Auto'}${released ? `, releasing ${released === 1 ? 'what was waiting' : `${released} waiting`}` : ''}`);
 }
 const HELD_BY_REPLAN = new Set(['approve-code', 'approve-merge', 'approve-session', 'revise-session', 'start-human', 'finish-human']);
 export const MERGE_IS_DELIVERY = 'Merged; nothing runs on push for these paths';
@@ -187,6 +223,7 @@ export class JobStore {
       // moves on under the planner (approved, merged, marked done, reshaped by a
       // move) is no longer the job the proposal was written against.
       if (j.replan && (MOVE_ACTIONS.has(move) || HELD_BY_REPLAN.has(action))) throw new Error('A plan change is pending. Approve or discard it first.');
+      if (action === 'set-review') { setReview(j, payload, Date.now()); return; }
       if (MOVE_ACTIONS.has(move)) {
         const { detail } = applyMove(j, s, move, payload, { now: Date.now(), buildSubJob });
         if (j.plan) j.repos = planRepos(j.plan);
@@ -391,7 +428,12 @@ export class JobStore {
     // The working tree is the deliverable and nothing is committed: the card
     // waits in Code review until the human approves it (approve-code), which
     // is what releases the publish session.
-    if (report.kind === 'ready') { s.ready = { checks: report.checks, receiptId: r.id, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified'; }
+    // Code review switched off while the session worked: its prompt still said
+    // leave it uncommitted, so the receipt is approved as it lands.
+    if (report.kind === 'ready') {
+      s.ready = { checks: report.checks, receiptId: r.id, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
+      if (!reviewCode(j)) { s.ready.approvedAt = s.ready.at; s.state = 'approved'; }
+    }
     if (report.kind === 'published') { s.pr = { url: report.url, checkStatus: 'pending' }; s.stage = 'pr'; s.state = 'watching'; s.mergeApprovedHead = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
     if (report.kind === 'repaired') { s.repairs.push({ ...report, at: Date.now() }); s.state = 'watching'; s.mergeApprovedHead = null; s.pr.checkStatus = 'pending'; s.fixRequested = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
     // A session's receipt is the whole deliverable; with review on it waits for a
