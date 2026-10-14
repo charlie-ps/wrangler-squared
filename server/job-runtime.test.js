@@ -162,6 +162,35 @@ test('planning grants no addDir and names no clone root when the checkouts folde
   });
 });
 
+test('a Codex job\'s writable folders join every step\'s addDirs, expanded, with missing ones skipped', async () => {
+  const checkouts = fs.mkdtempSync(path.join(os.tmpdir(), 'checkouts-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'home-'));
+  const extra = fs.mkdtempSync(path.join(os.tmpdir(), 'extra-'));
+  fs.mkdirSync(path.join(home, '.docker'));
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    await withCheckouts(checkouts, async () => {
+      const launch = async (job, phase = 'planning') => {
+        const { host, spawned } = fakeHost();
+        await runtimeWith(host, { run: async () => assert.fail('no repository to fetch') }).launch({ id: 'job_12345678', title: 'Sign-in', intent: 'Ship it', ...job },
+          phase === 'planning' ? null : { id: 'spike', kind: 'session', brief: 'Investigate' }, { id: 'run_1', phase }, () => {});
+        return spawned[0].addDirs;
+      };
+      const dirs = ['~/.docker', extra, missing(), `${extra}/`];
+      assert.deepEqual(await launch({ agent: 'codex', sandbox: 'auto', writableDirs: dirs }), [checkouts, path.join(home, '.docker'), extra], 'planning keeps its checkouts grant; a folder missing here is dropped');
+      assert.deepEqual(await launch({ agent: 'codex', sandbox: 'locked', writableDirs: dirs }, 'session'), [checkouts, path.join(home, '.docker'), extra]);
+      assert.deepEqual(await launch({ agent: 'codex', sandbox: 'full', writableDirs: dirs }), [checkouts], 'Full access has no sandbox to widen');
+      assert.deepEqual(await launch({ agent: 'claude', sandbox: 'auto', writableDirs: dirs }), [checkouts], 'Claude has no OS sandbox');
+    });
+    await withCheckouts(missing(), async () => {
+      const { host, spawned } = fakeHost();
+      await runtimeWith(host, { run: async () => assert.fail('no repository') }).launch({ id: 'job_12345678', title: 'Sign-in', intent: 'Ship it', agent: 'codex', writableDirs: [missing()] }, null, { id: 'run_1', phase: 'planning' }, () => {});
+      assert.equal(spawned[0].addDirs, undefined, 'nothing left to grant, no addDirs at all');
+    });
+  } finally { process.env.HOME = prevHome; }
+});
+
 test('cleanup deletes only the ref value it verified, and refuses extra commits', async () => {
   const { host } = fakeHost();
   const wt = { path: missing(), repoRoot: '/repo', branch: 'job-api' };

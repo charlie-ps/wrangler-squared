@@ -10,6 +10,10 @@ const repoPath = z.string().trim().min(1).max(1000).refine(
   (s) => !/[\r\n\0]/.test(s) && (path.isAbsolute(s) || s.startsWith('~/')),
   'Use an absolute local repository path or ~/path',
 );
+const folderPath = z.string().trim().min(1).max(1000).refine(
+  (s) => !/[\r\n\0]/.test(s) && (path.isAbsolute(s) || s.startsWith('~/')),
+  'Use an absolute folder path or ~/path',
+);
 export const checksSchema = z.array(line).min(1).max(8);
 export const briefSchema = z.string().trim().min(1).max(500);
 // A sub-job is one of four kinds. A PR changes a repository. An agent session
@@ -321,6 +325,7 @@ export const MAX_IMAGES = 8;
 const imageName = z.string().regex(/^paste-\d{1,20}-[a-f0-9]{4,32}\.(?:png|jpg|gif|webp)$/);
 // The checkpoints a new job starts with when nobody chose: New job's original form.
 export const REVIEW_DEFAULTS = { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false };
+export const SANDBOX_MODES = ['locked', 'auto', 'full'];
 export const jobInputSchema = z.object({
   title: line.optional(), intent: z.string().trim().min(1).max(16000),
   repos: z.array(repoPath).max(30).default([]),
@@ -338,6 +343,12 @@ export const jobInputSchema = z.object({
   // already staged by the client's `api.images.stage`. `shareImages` decides whether
   // sub-job sessions get them too; planning always does.
   images: z.array(imageName).max(MAX_IMAGES).default([]), shareImages: z.boolean().default(true),
+  // How a Codex step is sandboxed (manifest.js codexPolicy); Claude has no OS
+  // sandbox. A job stored before this has none and keeps core's lock.
+  sandbox: z.enum(SANDBOX_MODES).default('auto'),
+  // Folders a Codex step may also write, granted as addDirs on every step
+  // (job-runtime.js writableDirsFor); ignored under Full access.
+  writableDirs: z.array(folderPath).max(12).default([]),
 });
 export const settingsSchema = z.object({
   concurrency: z.number().int().min(1).max(16).default(8),

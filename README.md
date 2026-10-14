@@ -14,6 +14,19 @@ the post-merge runs and cleans up. Humans decide at the review points — plan,
 code, merge — and make the seven **moves** when something goes wrong; agents
 never change the plan.
 
+A Codex job also saves a **sandbox** mode, chosen in the New job form's Sandbox
+section and applied to every step through the manifest's `codexPolicy` hook
+(host API 1.12): **Locked to worktree** keeps core's
+`--sandbox workspace-write --ask-for-approval never`, **Auto-approve** (the
+default for new jobs) launches `codex --approve-for-me` so a reviewer model can
+let a step write outside its worktree, and **Full access** launches
+`--dangerously-bypass-approvals-and-sandbox`. Extra writable folders (such as
+`~/.docker`) are passed as `--add-dir` on every step unless the mode is Full
+access. A folder that does not exist on this machine is skipped, because a
+missing `--add-dir` would fail the launch. Only job sessions get the policy, and
+Claude jobs ignore it because Claude has no OS sandbox. A job saved before this
+existed stays locked.
+
 When a Job is created it can stay Unassigned, use an active Task, or create a
 new Task. Every agent session launched for that Job uses the same Task and its
 shared memory. Archiving that Task stops its active sessions; restore it before
@@ -21,7 +34,8 @@ retrying the Job so later sessions do not lose the Task context.
 
 Agents can create jobs too: any ordinary agent session gets a `create_job` tool
 taking what the New job form takes (the description as `intent`, `repos`,
-`agent`/`model`/`effort`, an optional `taskId` or `newTaskName`, and `start`).
+`agent`/`model`/`effort`, `sandbox`/`writableDirs`, an optional `taskId` or
+`newTaskName`, and `start`).
 It returns the `jobId`; without `start` the job waits in the backlog, and with it
 planning still stops for a human to approve the plan. Job-step sessions do not
 see the tool, so a job cannot start further jobs.
@@ -31,7 +45,7 @@ see the tool, so a job cannot start further jobs.
 Functionally complete against host API **1.31.0**: 1.4 added the worktree,
 `addDirs`, `taskId` and PR-automation spawn options this extension depends on,
 1.6 the `usage:read` and `sessions:bill` capabilities behind the per-job price,
-1.7 the `view` badge that puts the needs-you count on the rail button, 1.8 the client `api.openSession` the Jobs view opens a step's card with, 1.25 the client `api.agents()` the New job form reads its models and efforts from, 1.27 the client `api.openDiff` behind Review code in Wrangler, and 1.31 the `images:keep` capability and `images` spawn option behind a job's attached images. Every feature the in-core system had is either wired
+1.7 the `view` badge that puts the needs-you count on the rail button, 1.8 the client `api.openSession` the Jobs view opens a step's card with, 1.12 the `codexPolicy` hook behind a Codex job's sandbox mode, 1.25 the client `api.agents()` the New job form reads its models and efforts from, 1.27 the client `api.openDiff` behind Review code in Wrangler, and 1.31 the `images:keep` capability and `images` spawn option behind a job's attached images. Every feature the in-core system had is either wired
 through the extension `host` façade or is one of the open host-API gaps listed in
 **`docs/PORTING.md`**, which is the map: what came from where, what stands in
 for what, and which gap blocks which feature. `grep -rn 'TODO(host-api' server

@@ -205,7 +205,7 @@
 .job-dialog:has(.job-create) { width:min(880px,95vw); padding:0; }
 .job-create { display:grid; grid-template-columns:minmax(0,1fr) 280px; }
 .job-create-brief { padding:24px 28px 16px; min-width:0; }
-.job-create-brief label { display:flex; flex-direction:column; gap:7px; font-size:12px; margin:14px 0; }
+.job-create-brief label:not(.job-review-toggle) { display:flex; flex-direction:column; gap:7px; font-size:12px; margin:14px 0; }
 .job-create-props { padding:60px 18px 12px; background:color-mix(in srgb, var(--surface-2) 55%, var(--surface)); border-left:1px solid var(--border-muted); }
 .job-dialog .job-prop { display:grid; gap:4px; min-width:0; margin:0; padding:0 0 10px; border:0; border-bottom:1px solid var(--border-muted); border-radius:0; }
 .job-dialog .job-prop:last-child { border-bottom:0; }
@@ -226,6 +226,43 @@
 .job-create-foot .job-actions button:not(.primary):hover { background:var(--surface-2); color:var(--fg); }
 /* The primary stays first in the DOM so Enter in a field submits with it, not with Add to backlog. */
 .job-create-foot .job-actions button.primary { order:1; margin:0; }
+/* New job's checkpoints sit under the brief as a two-column tile grid. */
+.job-dialog .job-review-grid { margin-top:22px; padding:0; border-bottom:0; }
+.job-review-tiles { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.job-review-tiles .job-review { padding:10px 10px 10px 8px; border-radius:12px; background:color-mix(in srgb, var(--surface-2) 45%, transparent); box-shadow:inset 0 0 0 1px var(--border-muted); }
+.job-review-tiles .job-review-row { align-items:start; }
+.job-review-tiles .job-review-stage { padding-top:1px; }
+@media(max-width:520px) { .job-review-tiles { grid-template-columns:1fr; } }
+/* Sandbox: a Codex step's reach outside its worktree (public/job-sandbox.js). */
+.job-dialog .job-sandbox { gap:2px; }
+.job-sbx { appearance:none; display:block; width:100%; margin:0; padding:6px 6px 6px 0; border:0; border-radius:10px; background:transparent; color:var(--fg-muted); font:inherit; text-align:left; cursor:pointer; transition:background .12s; }
+.job-sbx:hover { background:var(--surface-2); }
+.job-sbx:focus-visible,.job-sbx-add:focus-visible,.job-sbx-chip button:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.job-sbx[aria-pressed=true] .job-review-name { color:var(--fg); }
+.job-sbx .job-review-name { color:inherit; }
+.job-sbx { --sbx:var(--fg); }
+.job-sbx.tone-auto,.job-sbx-launch.tone-auto { --sbx:var(--blue-fg); }
+.job-sbx.tone-full,.job-sbx-launch.tone-full { --sbx:var(--red-fg); }
+.job-sbx-launch.tone-locked { --sbx:var(--fg); }
+.job-sbx[aria-pressed=true] .job-review-stage { color:var(--sbx); }
+.job-sbx-on { display:grid; place-items:center; width:30px; height:30px; border-radius:8px; font-size:15px; color:var(--sbx); background:var(--surface-2); box-shadow:inset 0 0 0 1px var(--border); }
+.job-sbx[aria-pressed=true] .job-sbx-on { background:color-mix(in srgb, var(--sbx) 15%, var(--surface)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--sbx) 50%, transparent); }
+.job-sbx-dirs { display:grid; gap:6px; margin-top:8px; }
+.job-sbx-dirs[hidden] { display:none; }
+.job-sbx-label { font-size:11.5px; color:var(--fg-subtle); }
+.job-sbx-chips { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.job-sbx-chip { display:inline-flex; align-items:center; gap:2px; max-width:100%; padding:3px 3px 3px 10px; border:1px solid var(--border); border-radius:99px; background:var(--surface); font:11px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg); overflow-wrap:anywhere; }
+.job-sbx-chip button { appearance:none; display:grid; place-items:center; flex:none; width:18px; height:18px; padding:0; border:0; border-radius:99px; background:transparent; color:var(--fg-subtle); font-size:10px; cursor:pointer; }
+.job-sbx-chip button:hover { color:var(--fg); background:var(--surface-2); }
+.job-sbx-add { appearance:none; display:inline-flex; align-items:center; gap:5px; margin:0; padding:4px 10px 4px 8px; border:1px dashed var(--border); border-radius:99px; background:transparent; color:var(--fg-muted); font-size:11px; cursor:pointer; }
+.job-sbx-add:hover { color:var(--fg); }
+.job-dialog input.job-sbx-input { width:100%; padding:4px 10px; border-radius:99px; font:11px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.job-sbx-input[aria-invalid=true] { border-color:var(--red-fg); }
+.job-sbx-launch { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 8px; margin-top:10px; padding-top:8px; border-top:1px dashed var(--border-muted); font:11px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.job-sbx-launch span { text-transform:uppercase; letter-spacing:.1em; color:var(--fg-subtle); }
+.job-sbx-launch code { font:inherit; color:var(--sbx); overflow-wrap:anywhere; text-align:right; background:none; padding:0; }
+.job-sbx-claude { padding:6px 0; }
+.job-sbx-claude .job-review-name { color:var(--fg-muted); }
 @media(max-width:760px) { .job-create { grid-template-columns:1fr; } .job-create-props { padding:8px 28px 12px; border-left:0; border-top:1px solid var(--border-muted); } }
 .job-appbar { margin-bottom:20px; }
 .job-back { all:unset; display:inline-flex; align-items:center; gap:6px; max-width:calc(100% - 50px); font-size:12px; color:var(--fg-muted); cursor:pointer; }

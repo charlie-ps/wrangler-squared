@@ -220,6 +220,37 @@ test('a launch binds its run to the card id via onBeforeDispatch, and job_report
   assert.equal(host.stores.jobs.get(job.id).error, 'Repo hint does not exist');
 });
 
+test('codexPolicy answers only for a job step, from its job\'s saved sandbox', async () => {
+  _resetForTests();
+  const { host } = fakeHost();
+  const job = host.stores.jobs.create({ ...newJob, agent: 'codex' });
+  assert.equal(job.sandbox, 'auto', 'a new job auto-approves');
+  host.stores.jobs.action(job.id, 'start', {});
+  await runnerFor(host).tick();
+  const { sessionId } = host.stores.jobs.get(job.id).runs[0];
+  const ask = (id, phase = 'dispatch') => manifest.codexPolicy({ phase, sessionId: id, entry: null, ext: host });
+  const withMode = (sandbox) => { const stored = host.stores.jobs.data.jobs[0]; if (sandbox === undefined) delete stored.sandbox; else stored.sandbox = sandbox; return ask(sessionId); };
+  assert.deepEqual(withMode('auto'), { approveForMe: true });
+  assert.deepEqual(withMode('full'), { bypass: true });
+  assert.equal(withMode('locked'), undefined, 'locked is core\'s own default');
+  assert.equal(withMode(undefined), undefined, 'a job stored before the field keeps the lock');
+  withMode('full');
+  assert.deepEqual(ask(sessionId, 'resume'), { bypass: true }, 'a resumed step keeps its job\'s mode');
+  assert.equal(ask('someone-else'), undefined, 'an ordinary session keeps core\'s defaults');
+  assert.equal(ask(undefined), undefined);
+});
+
+test('job-create and create_job carry the sandbox and writable folders', async () => {
+  _resetForTests();
+  const { host } = fakeHost();
+  runnerFor(host).tick = async () => {};
+  await handler('job-create').handler({ job: { ...newJob, agent: 'codex', sandbox: 'locked', writableDirs: ['~/.docker', '/opt/cache'] }, start: false }, host);
+  assert.ok('sandbox' in tool('create_job').inputSchema && 'writableDirs' in tool('create_job').inputSchema);
+  await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, sandbox: 'full', start: false });
+  await handler('job-create').handler({ job: { ...newJob, writableDirs: ['relative/dir'] }, start: false }, host);
+  assert.deepEqual(host.stores.jobs.snapshot().jobs.map((j) => [j.sandbox, j.writableDirs]), [['locked', ['~/.docker', '/opt/cache']], ['full', []]], 'a relative folder is refused');
+});
+
 test('the graph contributor carries jobs under its own key and stamps live runs with card status', async () => {
   _resetForTests();
   const { host, spawned } = fakeHost();

@@ -104,6 +104,15 @@ feature).
   idle rule reach a parked run. A stored write with no `by` predates this and is
   failed on load (`job-store.js migrateSessionWrites`), never run;
   `validatePlan` looks past it so moves still work on that job.
+- **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
+  next to `skillsFor` and gated the same way (`runForSession`). Its context
+  carries the façade as `ext`, not `host`. A job with no `sandbox` field (one
+  saved before it) answers `undefined`, which is core's lock. `writableDirs`
+  reach spawn as `addDirs` (`job-runtime.js writableDirsFor`), Codex only and
+  never under Full access, and a folder missing on this machine is dropped,
+  because core refuses a missing one and fails the launch. The form's
+  "Launches" line (`public/job-sandbox.js`) mirrors `CODEX_POLICY`, so change
+  them together.
 - **New job's model picker is `public/model-picker.js` over `public/model-plates.js`.** It owns no form state: it reports `{ agent, model, effort }` through `onChange` into hidden inputs, so `form.onsubmit` and the `job-create` payload are untouched, and creating a job saves `settings.usualPick`. `describe()` must never invent a version from an alias (gap 18 in `docs/PORTING.md`). A galaxy plate is exactly one rAF loop, stopped by `dispose()`/re-render; art colours are fixed, chrome is board variables, except Claude's cabinet and ticket, whose launch-page near-black/ivory follows core's `body.light`. Each Claude plate declares its own noise filters (`fx()`), so plates never share an SVG id.
 - **What's new is `public/updates.js`'s `UPDATES`, oldest first.** A bigger release appends `{ id, date, title, body }` (our own copy; optional `icon`, `tone`, `figure`, `anim`); every unseen one opens in one run, oldest first, and closing it records them all under `updatesSeen`. A first-run reader gets the intro instead, and closing that counts every current update seen, so an id must never be reused.
 - **Client modules import their leaves RELATIVELY** (`./util.js`, `./icons.js`,

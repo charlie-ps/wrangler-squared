@@ -3,7 +3,7 @@ import { JobStore } from './job-store.js';
 import { withJobSpend, withRunStatus } from './job-spend.js';
 import { TOOLS, hideTool } from './tools.js';
 import { HANDLERS } from './handlers.js';
-import { runnerFor, spendFor, noteGraph, isAutomated } from './jobs.js';
+import { runnerFor, spendFor, noteGraph, isAutomated, runForSession } from './jobs.js';
 
 // The extension manifest (agent-wrangler docs/superpowers/specs/
 // 2026-09-11-extensions-api-design.md, "Manifest"). The repo root's index.js
@@ -25,6 +25,18 @@ export const dir = fileURLToPath(new URL('..', import.meta.url));
 // and `sessionId` answers. Returning the full list keeps; `[]` suppresses.
 function skillsFor({ sessionId, skills, host }) {
   return isAutomated(host.stores.jobs, sessionId) ? skills : [];
+}
+
+// Per-launch Codex autonomy (host API 1.12, loader createCodexPolicyResolver),
+// asked at dispatch (after onBeforeDispatch, so the run is bound), resume and
+// fork. Only a job step answers, from its job's saved `sandbox`; a job stored
+// before the field keeps core's default lock. `undefined` is core's
+// `--sandbox workspace-write --ask-for-approval never`. The answering
+// extension's façade arrives as `ext`, not `host`.
+export const CODEX_POLICY = { locked: undefined, auto: { approveForMe: true }, full: { bypass: true } };
+function codexPolicy({ sessionId, ext }) {
+  const owner = runForSession(ext.stores.jobs, sessionId);
+  return owner ? CODEX_POLICY[owner.job.sandbox ?? 'locked'] : undefined;
 }
 
 export default {
@@ -53,6 +65,7 @@ export default {
   handlers: HANDLERS,
   skills: ['job-worker'],
   skillsFor,
+  codexPolicy,
   hideTool,
 
   // Every ~4s graph tick. `graph.sessions` is what carries each live run's card

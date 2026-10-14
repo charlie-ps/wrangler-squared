@@ -15,6 +15,7 @@ const FILTERS = [
 ];
 import { createJobImages, imagesPanelHtml, openZoom } from './job-images.js';
 import { mountModelPicker } from './model-picker.js';
+import { mountSandbox } from './job-sandbox.js';
 import { whatsNewHtml } from './updates.js';
 import { createIdeaCorner } from './idea-corner.js';
 const checkTone = (state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED', 'passing'].includes(state) ? 'passed' : ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'failing'].includes(state) ? 'failed' : '';
@@ -1112,8 +1113,8 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     const tasks = getTasks().filter((t) => !t.archived && !t.archivedAt);
     const toggle = (name, label, consequence, checked) => `<label class="job-toggle"><span>${label}${consequence ? `<small>${consequence}</small>` : ''}</span><input type="checkbox" class="job-switch" name="${name}" ${checked ? 'checked' : ''}></label>`;
     show(`<form id="job-create-form" class="job-create">
-      <div class="job-create-brief"><h2>New job</h2><div class="job-outcome"><label>Describe job<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should we deliver, and how will we know it works?"></textarea></label>${imagesPanelHtml()}</div></div>
-      <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop job-pick" id="job-pick"><legend>Agent</legend></fieldset><input type="hidden" name="agent"><input type="hidden" name="model"><input type="hidden" name="effort"><fieldset class="job-prop"><legend>Review checkpoints</legend>${reviewPointsHtml(reviewDefaultsOf(data.settings))}</fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset><fieldset class="job-prop"><legend>After delivery</legend>${toggle('updateMain', 'Fast-forward main', '', false)}</fieldset></aside>
+      <div class="job-create-brief"><h2>New job</h2><div class="job-outcome"><label>Describe job<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should we deliver, and how will we know it works?"></textarea></label>${imagesPanelHtml()}</div><fieldset class="job-prop job-review-grid"><legend>Review checkpoints</legend><div class="job-review-tiles">${reviewPointsHtml(reviewDefaultsOf(data.settings))}</div></fieldset></div>
+      <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop job-pick" id="job-pick"><legend>Agent</legend></fieldset><input type="hidden" name="agent"><input type="hidden" name="model"><input type="hidden" name="effort"><fieldset class="job-prop job-sandbox" id="job-sandbox"></fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset><fieldset class="job-prop"><legend>After delivery</legend>${toggle('updateMain', 'Fast-forward main', '', false)}</fieldset></aside>
       <footer class="job-create-foot"><span>Planning proposes stories and repos. With Plan on You review, nothing touches Jira until you approve.</span><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
     const form = dialog.querySelector('form');
     let images;
@@ -1129,10 +1130,12 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       },
     });
     dialog.addEventListener('close', () => images.dispose(), { once: true });
+    // Before the picker: its first onChange, at mount, tells the sandbox which agent it is for.
+    const sandbox = mountSandbox(form.querySelector('#job-sandbox'));
     // Hidden agent/model/effort keep form.onsubmit and the job-create payload as they were.
     picker = mountModelPicker(form.querySelector('#job-pick'), {
       agents, usual: data.settings.usualPick, cover: form,
-      onChange: (pick) => { for (const k of ['agent', 'model', 'effort']) form.elements[k].value = pick[k]; },
+      onChange: (pick) => { for (const k of ['agent', 'model', 'effort']) form.elements[k].value = pick[k]; sandbox.setAgent(pick.agent); },
     });
     dialog.addEventListener('close', () => { picker?.dispose(); picker = null; }, { once: true });
     form.elements.taskId.onchange = () => {
@@ -1145,7 +1148,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       e.preventDefault(); if (images.busy()) return; const values = new FormData(form);
       const taskId = values.get('taskId');
       // Enter and the primary button both start planning; only the grey button parks it.
-      send({ type: 'job-create', start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', ...reviewFlagsOf(values), updateMain: values.has('updateMain'), images: images.names(), shareImages: values.has('shareImages'), taskId: taskId && taskId !== '__new__' ? taskId : null } });
+      send({ type: 'job-create', start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', ...reviewFlagsOf(values), ...sandbox.value(), updateMain: values.has('updateMain'), images: images.names(), shareImages: values.has('shareImages'), taskId: taskId && taskId !== '__new__' ? taskId : null } });
       const usualPick = { agent: String(values.get('agent')), model: String(values.get('model')), effort: String(values.get('effort')) };
       if (usualPick.agent && usualPick.model) send({ type: 'job-settings', patch: { usualPick } });
     };

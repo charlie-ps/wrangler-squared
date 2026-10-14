@@ -725,7 +725,7 @@ test('the new-job primary action starts planning and the plain button parks it i
   assert.equal(f.sent[2].start, false);
 });
 
-test('new job is a brief beside a property sidebar, and the brief is only the description and images', (t) => {
+test('new job is a brief beside a property sidebar, and the brief is the description, images and checkpoint tiles', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   const brief = form.querySelector('.job-create-brief'); const props = form.querySelector('.job-create-props');
   assert.equal(brief.querySelector('h2').textContent, 'New job');
@@ -733,17 +733,19 @@ test('new job is a brief beside a property sidebar, and the brief is only the de
   assert.equal(brief.querySelector('details'), null, 'no folded planning guidance or repository hints');
   assert.deepEqual([...brief.querySelectorAll('textarea')].map((e) => e.name), ['intent']);
   assert.equal(form.elements.repos, undefined); assert.equal(form.elements.planningPrompt, undefined);
-  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Review checkpoints', 'Images', 'After delivery']);
-  for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites', 'shareImages', 'updateMain']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
+  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Sandbox', 'Images', 'After delivery']);
+  assert.deepEqual([...brief.querySelectorAll('legend')].map((l) => l.textContent), ['Review checkpoints']);
+  for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'shareImages', 'updateMain']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
+  for (const name of ['reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites']) assert.ok(brief.contains(form.querySelector(`[name="${name}"]`)), `${name} is a tile under the brief`);
   assert.ok(props.querySelector('#job-pick').querySelector('.pick-ticket') && props.querySelector('#job-pick .pick-meter'), 'the picker is a ticket with an effort meter in the sidebar');
-  assert.deepEqual([...props.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].checked, r.querySelector('small').textContent]),
+  assert.deepEqual([...brief.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].checked, r.querySelector('small').textContent]),
     [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts'], ['reviewCode', 'Code', true, 'You read each PR’s diff before it’s committed'], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass'], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done'], ['reviewWrites', 'Writes', false, 'Each write is made by its session, with a receipt']]);
   assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('small')?.textContent]),
     [['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, undefined]]);
   assert.match(form.querySelector('.job-create-foot').textContent, /nothing touches Jira until you approve/);
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent[0], { type: 'job-create', start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, updateMain: false, images: [], shareImages: true, taskId: null } });
+  assert.deepEqual(f.sent[0], { type: 'job-create', start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, sandbox: 'auto', writableDirs: [], updateMain: false, images: [], shareImages: true, taskId: null } });
 });
 
 test('new jobs need only an outcome and leave repositories to planning', (t) => {
@@ -2012,4 +2014,37 @@ test('the masthead counts agents in bays and says when automation is paused', (t
   assert.ok(f.q('#jobs').classList.contains('jobs-paused'));
   assert.equal(f.q('#jobs-pause').getAttribute('aria-pressed'), 'true');
   assert.equal(f.q('#jobs-active-count').textContent, '1 of 2 agents paused');
+});
+
+test('New job\'s Sandbox section follows the agent and round-trips its mode and folders into job-create', (t) => {
+  const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
+  const sbx = () => f.q('#job-sandbox');
+  assert.ok(f.q('.job-create-brief .job-review-grid .job-review-tiles .job-review[data-checkpoint="reviewWrites"]'), 'the checkpoints are tiles under the brief');
+  assert.equal(f.q('.job-create-props .job-review'), null, 'and no longer in the side panel');
+  assert.match(sbx().textContent, /Not used by Claude/, 'Claude collapses the section to one row');
+  assert.equal(sbx().querySelector('.job-sbx'), null);
+  click(f, '.pick-ticket'); click(f, '.pick-tab[data-agent=codex]'); click(f, '.pick-cell[data-value="gpt-5.6-sol"]');
+  const pressed = () => sbx().querySelector('.job-sbx[aria-pressed=true]').dataset.mode;
+  const launches = () => sbx().querySelector('.job-sbx-launch code').textContent;
+  assert.equal(pressed(), 'auto', 'a new job auto-approves');
+  assert.equal(launches(), 'codex --approve-for-me');
+  click(f, '.job-sbx-add');
+  const input = sbx().querySelector('.job-sbx-input');
+  const enter = (value) => { const el = sbx().querySelector('.job-sbx-input'); el.value = value; el.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); };
+  assert.ok(input, 'the add button opens a path field');
+  enter('relative/dir');
+  assert.equal(sbx().querySelector('.job-sbx-input').getAttribute('aria-invalid'), 'true', 'a relative path is refused');
+  enter('~/.docker/'); enter('/opt/cache'); enter('~/.docker');
+  assert.equal(f.sent.length, 0, 'Enter in the folder field never submits New job');
+  assert.deepEqual([...sbx().querySelectorAll('.job-sbx-chip')].map((c) => c.textContent), ['~/.docker', '/opt/cache'], 'trailing slash trimmed, duplicates dropped');
+  assert.equal(launches(), 'codex --approve-for-me --add-dir ~/.docker --add-dir /opt/cache');
+  click(f, '.job-sbx-chip button[aria-label="Remove /opt/cache"]');
+  click(f, '.job-sbx[data-mode=full]');
+  assert.equal(sbx().querySelector('.job-sbx-dirs').hidden, true, 'Full access hides the folders');
+  assert.equal(launches(), 'codex --dangerously-bypass-approvals-and-sandbox');
+  click(f, '.job-sbx[data-mode=locked]');
+  assert.equal(launches(), 'codex --sandbox workspace-write --ask-for-approval never --add-dir ~/.docker');
+  form.elements.intent.value = 'Build the dev container';
+  form.dispatchEvent(f.event('submit'));
+  assert.deepEqual([f.sent[0].type, f.sent[0].job.agent, f.sent[0].job.sandbox, f.sent[0].job.writableDirs], ['job-create', 'codex', 'locked', ['~/.docker']]);
 });

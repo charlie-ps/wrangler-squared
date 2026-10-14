@@ -24,6 +24,16 @@ import { checkoutsDir } from './data-dir.js';
 // `noteDispatch` (new — see launch()) and `exists` / `resumeWithMail`, which a
 // session parked on its drafts needs (job-writes.js).
 export const LAUNCH_GRACE_MS = 2 * 60 * 1000;
+// The job's extra writable folders for a Codex step, expanded and deduped.
+// Claude has no OS sandbox to widen and Full access has none left, so neither
+// gets them; a folder missing on this machine is skipped, since a missing
+// --add-dir fails the whole launch.
+export function writableDirsFor(job) {
+  if (job.agent !== 'codex' || job.sandbox === 'full') return [];
+  const dirs = (job.writableDirs || []).map(expandRepo).filter((d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } });
+  return [...new Set(dirs)];
+}
+
 export const expandRepo = (repo) => path.resolve(repo.startsWith('~/') ? path.join(os.homedir(), repo.slice(2)) : repo);
 
 export class JobRuntime {
@@ -99,6 +109,7 @@ export class JobRuntime {
     // would make this explicit rather than positional.
     this.pendingLaunch = { prepared, cleanupHead, adopt: Boolean(existing) };
     const checkouts = planning && checkoutsDir();
+    const addDirs = [...new Set([...(checkouts ? [checkouts] : []), ...writableDirsFor(job)])];
     const images = this.imagesFor(job, run.phase);
     try {
       const result = await this.host.sessions.spawn({
@@ -113,7 +124,8 @@ export class JobRuntime {
         // repos it will find; a Codex worker's own worktree git dir is granted by
         // the wrangler (session-manager.js withCodexWorktreeAddDir). No such
         // folder on this machine, no grant: a missing --add-dir fails the launch.
-        ...(checkouts ? { addDirs: [checkouts] } : {}),
+        // The job's own extra folders ride along on every phase.
+        ...(addDirs.length ? { addDirs } : {}),
         // Binds task memory before the pane starts, which is the only ordering a
         // Codex session honours (it resolves its writable root once, at launch).
         taskId: job.taskId || undefined,
