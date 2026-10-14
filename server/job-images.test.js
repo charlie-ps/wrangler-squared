@@ -55,12 +55,12 @@ test('sub-job spawns get the images while sharing is on and not when it is off',
   assert.equal('images' in spawned[3], false);
 });
 
-test('a job without images spawns without the option, and the jira step never gets them', async () => {
+test('a job without images spawns without the option, and a write step never gets them', async () => {
   const { host, spawned, kept } = fakeHost();
   kept.set(A, Buffer.from('x'));
   const runtime = runtimeWith(host);
   await runtime.launch(jobWith([]), null, { id: 'r', phase: 'planning' }, () => {});
-  await runtime.launch(jobWith([A]), null, { id: 'r', phase: 'jira' }, () => {});
+  await runtime.launch(jobWith([A]), null, { id: 'r', phase: 'write' }, () => {});
   assert.deepEqual(spawned.map((s) => 'images' in s), [false, false]);
 });
 

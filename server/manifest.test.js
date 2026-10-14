@@ -40,6 +40,17 @@ test('job-create through the extension handler signature creates, starts and bro
   assert.deepEqual(broadcasts, [{ event: 'job-created', jobId: job.id, started: true }]);
 });
 
+test('job-create and create_job carry reviewWrites, which is off unless asked for', async () => {
+  _resetForTests();
+  const { host } = fakeHost();
+  runnerFor(host).tick = async () => {};
+  await handler('job-create').handler({ job: newJob, start: false }, host);
+  await handler('job-create').handler({ job: { ...newJob, reviewWrites: true }, start: false }, host);
+  assert.ok('reviewWrites' in tool('create_job').inputSchema);
+  await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, reviewWrites: true, start: false });
+  assert.deepEqual(host.stores.jobs.snapshot().jobs.map((j) => j.reviewWrites), [false, true, true]);
+});
+
 test('job-create creates a named task and stores it on the job', async () => {
   _resetForTests();
   const { host, tasks } = fakeHost();

@@ -28,14 +28,14 @@ export function prSummary(pr) {
   if (failed || pr.reviewDecision === 'CHANGES_REQUESTED' || pr.mergeStateStatus === 'DIRTY') checkStatus = 'failing';
   else if (mergeWithAdmin || (pr.mergeStateStatus === 'CLEAN' && !pr.isDraft && (allGreen || !checks.length))) checkStatus = 'passing';
   else if (allGreen && pr.reviewDecision === 'REVIEW_REQUIRED') checkStatus = 'awaiting-review';
-  return { url: pr.url, state: pr.state, head: pr.headRefOid, branch: pr.headRefName,
+  return { url: pr.url, title: pr.title || null, state: pr.state, head: pr.headRefOid, branch: pr.headRefName,
     base: pr.baseRefName, mergeCommit: pr.mergeCommit?.oid || null,
     checkStatus, checks, mergeWithAdmin, behind, dirty: pr.mergeStateStatus === 'DIRTY', mergeState: pr.mergeStateStatus || null, reviewDecision: pr.reviewDecision };
 }
 export class JobGithub {
   constructor(run = runFile) { this.run = run; }
   async pr(sub) {
-    const fields = 'url,state,isDraft,headRefOid,headRefName,baseRefName,mergeCommit,mergeStateStatus,mergeable,reviewDecision,statusCheckRollup';
+    const fields = 'url,title,state,isDraft,headRefOid,headRefName,baseRefName,mergeCommit,mergeStateStatus,mergeable,reviewDecision,statusCheckRollup';
     const raw = JSON.parse(await this.run('gh', ['pr', 'view', sub.pr.url, '--json', fields], sub.repo));
     const repo = JSON.parse(await this.run('gh', ['repo', 'view', '--json', 'nameWithOwner'], sub.repo));
     const slug = new URL(raw.url).pathname.split('/').slice(1, 3).join('/');

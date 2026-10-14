@@ -65,3 +65,42 @@ the `runId` from your prompt and the receipt kind it names.
   upstream.
 - **Look for an existing PR for the branch before creating one**, so a retried
   step doesn't open a duplicate.
+
+## Planning writes
+
+- Use a preset place (jira, slack, confluence, artifact, file, url) whenever
+  one fits. Anything else is `place:{type:"other", name, ref?}`: a `write` is
+  one free-text instruction (`text`), or a session `make`s something there.
+- Writes are off review by default (the job's `reviewWrites`). Set
+  `review:true` only on a write you judge risky — something public, or hard to
+  undo; your `true` holds even when the job's default is off. Story fields are
+  reviewed with the write that creates the story, not with the plan.
+
+## Write steps (Jira, Slack, Confluence, other places)
+
+- Make exactly the writes your prompt lists, reading each place first: the
+  ticket's status and comments, the channel's recent messages, the page or the
+  space it goes in. Answer every one in the receipt: `written`, `already` (it
+  was at or past the target, or the same post or page is already there — never
+  post twice), or `failed` with the place's own error message. Give `url`, the
+  permalink, for whatever you posted or created.
+- A write the place refuses is a `failed` result, not a blocked receipt, and
+  never something to work around; blocked is for when you cannot reach Jira,
+  Slack or Confluence at all.
+- A Jira create sets every field it lists, exactly as given; dropping one Jira
+  will not take is a workaround, so that create is `failed`.
+- An `other` place (`name`, and `where` if given): do exactly its one
+  instruction there with whatever MCP tool or CLI reaches it, and report
+  `written` with a `url` if the result has one. If nothing you have reaches
+  that place, report `failed` with the tool's own error verbatim — never
+  substitute another place.
+
+## Session steps with outputs
+
+- If your prompt lists outputs, make each one where it says and report every
+  one in `completed`: `{id, url, title?}` with its link (a file's absolute
+  path), or `{id, missing:"one line why"}` if you could not. A receipt that
+  leaves one out is refused. An output in an `other` place may be a URL or an
+  absolute path.
+- Publish every output normally even if it is reviewed: the human reviews it
+  after it exists, and there is no draft step.

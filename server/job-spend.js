@@ -67,7 +67,7 @@ export function withJobSpend(snapshot, byCard = new Map()) {
     ...snapshot,
     jobs: (snapshot?.jobs || []).map((job) => {
       const subJobs = (job.subJobs || []).map((sub) => ({ ...sub, ...sumCards(byCard, sub.sessions || []) }));
-      // Planning and ticketing runs carry a null subJobId, so no sub-job holds
+      // Planning and write runs carry a null subJobId, so no sub-job holds
       // their cards: a job's total is every card ANY of its runs bound, unioned
       // with whatever its sub-jobs list (identical today — sub.sessions is filled
       // from bindRun — but the union can never under-report if that changes).

@@ -1,5 +1,6 @@
-import { isPrSub } from './jobs-schema.js';
+import { isPrSub, isWriteSub, isStoryCreate, isMakeWrite, withStoryCreates } from './jobs-schema.js';
 import { dropSub, reworkSub, validatePlan } from './job-moves.js';
+import { milestoneReached } from './job-writes.js';
 
 // Changing the plan of a job that is already running. The human asks with
 // feedback, a planning session proposes a whole plan, and nothing changes until
@@ -12,10 +13,15 @@ import { dropSub, reworkSub, validatePlan } from './job-moves.js';
 // touch one, and one it leaves out is carried over as it stands — the plan is the
 // record of what this job did, not only of what it still will.
 export const isFrozen = (sub) => !!sub.cancelledAt || ['deployment', 'cleanup', 'done'].includes(sub.stage) || !!sub.mergedAt || !!sub.deployed;
-const EDITABLE = ['title', 'brief', 'check', 'after'];
-// Kind, repository and story decide where a sub-job's work lives (its worktree,
-// its PR, its ticket), so changing one is new work under a new id, not an edit.
-const FIXED = ['kind', 'repo', 'storyId'];
+// A write's action, trigger (or making session), review flag, reason and the
+// channel or page it names are what it IS, so they edit like a brief: same
+// place, different write.
+const EDITABLE = ['title', 'brief', 'check', 'after', 'action', 'on', 'by', 'review', 'why', 'place'];
+// Kind, repository, story and place type decide where a sub-job's work lives
+// (its worktree, its PR, its ticket, its channel), so changing one is new work
+// under a new id, not an edit.
+const FIXED = ['kind', 'repo', 'storyId', 'place.type'];
+const fixedOf = (s, k) => (k === 'place.type' ? s.place?.type : s[k]);
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const norm = (s) => ({ ...s, kind: s.kind || 'pr', after: s.after || [], check: s.check || undefined });
 const quoted = (title) => `“${title}”`;
@@ -40,20 +46,23 @@ export function mergeReplan(job, proposal) {
     const next = proposed.get(p.id);
     const sub = live.get(p.id);
     if (!sub || frozen.includes(p.id)) {
-      if (next && EDITABLE.concat(FIXED).some((k) => !same(norm(p)[k], next[k]))) throw new Error(`${p.id} has already ${sub?.cancelledAt ? 'been dropped' : 'landed'}; keep it exactly as it is`);
+      if (next && (EDITABLE.some((k) => !same(norm(p)[k], next[k])) || FIXED.some((k) => !same(fixedOf(norm(p), k), fixedOf(next, k))))) throw new Error(`${p.id} has already ${sub?.cancelledAt ? 'been dropped' : 'landed'}; keep it exactly as it is`);
       subJobs.push(p); continue;
     }
+    // Stories outlive every proposal, so the write that creates one does too: a
+    // planner that leaves it out has only stopped repeating it.
+    if (!next && isStoryCreate(p)) { changes.kept.push(p.id); subJobs.push(p); continue; }
     if (!next) { changes.removed.push(p.id); subJobs.push(p); continue; }
-    const fixed = FIXED.filter((k) => !same(norm(p)[k], next[k]));
+    const fixed = FIXED.filter((k) => !same(fixedOf(norm(p), k), fixedOf(next, k)));
     if (fixed.length) throw new Error(`${p.id}: ${fixed.join(', ')} cannot change; remove it and add the new work under a new id`);
     const fields = EDITABLE.filter((k) => !same(norm(p)[k], next[k]));
     if (fields.length) changes.edited.push({ id: p.id, fields });
     else changes.kept.push(p.id);
-    subJobs.push({ ...p, title: next.title, brief: next.brief, after: next.after, ...(next.check ? { check: next.check } : { check: undefined }) });
+    subJobs.push({ ...p, ...Object.fromEntries(EDITABLE.map((k) => [k, next[k]])) });
   }
   for (const s of proposal.subJobs) if (!current.has(s.id)) { changes.added.push(s.id); subJobs.push(norm(s)); }
   // An existing story keeps its key: it is part of what the human already agreed
-  // to. A new keyless one is ticketed by the ordinary Jira step once approved.
+  // to. A new keyless one gets its own create write (below).
   const stories = [...job.plan.stories];
   for (const t of proposal.stories || []) {
     const had = stories.find((x) => x.id === t.id);
@@ -61,12 +70,30 @@ export function mergeReplan(job, proposal) {
     else if (t.key && had.key && t.key !== had.key) throw new Error(`${t.id} was approved as ${had.key}; keep that key`);
   }
   const gone = new Set([...changes.removed, ...job.subJobs.filter((s) => s.cancelledAt).map((s) => s.id)]);
+  // A made output goes with the session that would have made it.
+  for (const s of subJobs) {
+    if (!isMakeWrite(s) || !gone.has(s.by) || gone.has(s.id) || frozen.includes(s.id)) continue;
+    if (!current.has(s.id)) throw new Error(`${s.id} would never be made: ${s.by} is being cancelled`);
+    changes.kept = changes.kept.filter((x) => x !== s.id); changes.edited = changes.edited.filter((e) => e.id !== s.id);
+    changes.removed.push(s.id); gone.add(s.id);
+  }
   for (const s of subJobs) {
     if (gone.has(s.id) || frozen.includes(s.id)) continue;
     const dead = s.after.filter((id) => gone.has(id));
     if (dead.length) throw new Error(`${s.id} would wait forever on ${dead.join(', ')}, which ${dead.length === 1 ? 'is' : 'are'} being cancelled`);
+    // An if-dropped write is exactly what a cancelled trigger fires; any other
+    // milestone it has not reached by now it never will.
+    if (isWriteSub(s) && s.on && gone.has(s.on.sub) && s.on.at !== 'dropped' && !milestoneReached(live.get(s.on.sub), s.on.at)) {
+      throw new Error(`${s.id} would wait forever on ${s.on.sub}, which is being cancelled`);
+    }
   }
-  const plan = { context: proposal.context || job.plan.context, stories, subJobs: subJobs.map((s) => Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined))) };
+  const workflows = { ...(job.plan.workflows || {}), ...(proposal.workflows || {}) };
+  const jiraSite = proposal.jiraSite || job.plan.jiraSite;
+  let plan = { context: proposal.context || job.plan.context, stories, workflows, ...(jiraSite ? { jiraSite } : {}), subJobs: subJobs.map((s) => Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined))) };
+  // A new keyless story is created by its own write, exactly as on first approval.
+  const before = new Set(plan.subJobs.map((s) => s.id));
+  plan = withStoryCreates(plan);
+  for (const s of plan.subJobs) if (!before.has(s.id)) changes.added.push(s.id);
   validatePlan(plan);
   return { plan, changes };
 }
@@ -75,7 +102,7 @@ export function mergeReplan(job, proposal) {
 // what the human just asked it to change.
 export function requestReplan(job, feedback, now) {
   if (job.stage !== 'active') throw new Error('Only a running job has a plan to change');
-  if (job.runs.some((r) => !r.stopped && !r.subJobId)) throw new Error('Wait for the planning or ticketing step to finish');
+  if (job.runs.some((r) => !r.stopped && !r.subJobId)) throw new Error('Wait for the planning step or the writes to finish');
   const text = String(feedback || '').trim().slice(0, 8000);
   if (!text) throw new Error('Explain the change you want');
   clearPlanningError(job);
@@ -118,6 +145,9 @@ export function approveReplan(job, proposalId, { now, buildSubJob }) {
     const sub = job.subJobs.find((s) => s.id === id);
     const spec = plan.subJobs.find((s) => s.id === id);
     for (const k of EDITABLE) { if (spec[k] === undefined) delete sub[k]; else sub[k] = spec[k]; }
+    // A changed write is judged afresh against its (possibly new) trigger.
+    // A made output in review already exists: it stays there for Accept.
+    if (isWriteSub(sub) && ['write', 'review'].includes(sub.stage) && !(isMakeWrite(sub) && sub.result)) { sub.stage = 'write'; sub.state = 'queued'; sub.error = null; sub.blocked = null; }
     lines.push({ sub, detail: `Plan change edited ${quoted(spec.title)} (${fields.join(', ')})` });
     // The rework launches once the new prerequisites have landed (job-runner.js).
     if (hasCode(sub) && fields.some((k) => REWORKS.includes(k))) {
@@ -147,7 +177,8 @@ export function approveReplan(job, proposalId, { now, buildSubJob }) {
 // frozen, and the plan they came from.
 export function replanStatus(job, sub) {
   const pr = isPrSub(sub) && sub.pr?.url ? ` · PR ${sub.pr.url}` : '';
+  const write = isWriteSub(sub) ? ` · ${JSON.stringify(sub.place || { type: 'jira' })} ${JSON.stringify(sub.action)}${sub.on ? ` on ${sub.on.sub}/${sub.on.at}` : ''}${sub.by ? ` by ${sub.by}` : ''}${sub.result?.url ? ` · at ${sub.result.url}` : ''}` : '';
   const run = liveRun(job, sub.id) ? ' · a step is running' : '';
   const state = sub.cancelledAt ? 'cancelled' : `${sub.stage}${sub.state ? `/${sub.state}` : ''}`;
-  return `- ${sub.id} (${sub.kind || 'pr'}) ${JSON.stringify(sub.title)}: ${state}${pr}${run}${isFrozen(sub) ? ' · FROZEN' : ''}`;
+  return `- ${sub.id} (${sub.kind || 'pr'}) ${JSON.stringify(sub.title)}: ${state}${pr}${write}${run}${isFrozen(sub) ? ' · FROZEN' : ''}`;
 }

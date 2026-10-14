@@ -38,7 +38,7 @@ export class JobRuntime {
   // longer has is dropped here rather than handed to spawn, which refuses an
   // unknown image before launching anything and would wedge the step forever.
   imagesFor(job, phase) {
-    const wanted = phase === 'planning' || (phase !== 'jira' && job.shareImages !== false);
+    const wanted = phase === 'planning' || (phase !== 'write' && job.shareImages !== false);
     return wanted ? (job.images || []).filter((n) => this.host.images.read(n)) : [];
   }
 
@@ -51,10 +51,11 @@ export class JobRuntime {
       const task = this.host.tasks.get(job.taskId);
       if (!task || task.archived) throw new Error('The Job task is no longer active. Restore it before retrying.');
     }
-    // Planning discovers its repositories, ticketing only talks to Jira and a
-    // session sub-job has none: blank cwd asks the wrangler for a fresh scratch
-    // workspace (dispatch's own rule), without fetching or branching a repo.
-    const planning = ['planning', 'jira', 'session'].includes(run.phase);
+    // Planning discovers its repositories, a write run only talks to Jira, Slack
+    // or Confluence, and a session sub-job has none: blank cwd asks the wrangler
+    // for a fresh scratch workspace (dispatch's own rule), without fetching or
+    // branching a repo.
+    const planning = ['planning', 'write', 'session'].includes(run.phase);
     const repo = planning ? '' : expandRepo(sub.repo);
     const existing = sub?.worktree;
     if (existing && !fs.existsSync(existing.path)) throw new Error('Worktree is missing; restore it before retrying');
@@ -167,7 +168,7 @@ export class JobRuntime {
   //
   // A starting Claude has no status file yet, so its card reads 'unknown' (core's
   // "visible, never idle") or is not in the cached graph at all; reading either as
-  // dead reaped Jira steps seconds after launch. No status counts only for
+  // dead reaped write steps seconds after launch. No status counts only for
   // LAUNCH_GRACE_MS, so a card that never reaches the graph still errors.
   async isAlive(run) {
     const s = run.sessionId && this.host.sessions.get(run.sessionId);
@@ -271,7 +272,7 @@ export class JobRuntime {
   }
 
   async cleanupPlanning(job) {
-    for (const run of job.runs.filter((r) => (r.phase === 'planning' || r.phase === 'jira') && r.sessionId)) {
+    for (const run of job.runs.filter((r) => (r.phase === 'planning' || r.phase === 'write') && r.sessionId)) {
       await this.stop(run);
     }
     for (const wt of job.planningWorktrees || []) {

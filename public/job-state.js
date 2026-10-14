@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { isPrSub, isSessionSub, isHumanSub, replanPending, replanProposed, heldByReplan, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, replanPending, replanProposed, heldByReplan, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber } from './jobs.js';
 
 // The one state vocabulary every surface draws: a tone (the colour, see the
 // .tone-* rules in jobs.css), a glyph and a short name. Every stage, run status,
@@ -31,6 +31,7 @@ export function subState(job, sub) {
   if (jobNeedsReview(job, sub)) return 'needs';
   if (jobStatus(job, sub).tone === 'working') return 'running';
   if (redPipeline(sub)) return 'failing';
+  if (isWriteSub(sub)) return writeWaiting(job, sub) ? 'waiting' : 'queued';
   return pendingDependencies(job, sub).length ? 'waiting' : 'queued';
 }
 
@@ -62,7 +63,7 @@ export function subLabel(job, sub) {
   const state = subState(job, sub);
   const n = prNumber(sub);
   if (state === 'failing') {
-    if (cancelledDependencies(job, sub).length) return 'Prerequisite dropped';
+    if (cancelledDependencies(job, sub).length) return isWriteSub(sub) ? 'Trigger dropped' : 'Prerequisite dropped';
     if (sub.error || eventFor(job, sub)) return eventFor(job, sub).title;
     if (job.error) return 'Needs attention';
     return redPipeline(sub) === 'checks' ? 'Checks failing' : 'Deploy failing';
@@ -73,6 +74,7 @@ export function subLabel(job, sub) {
     if (codeAwaitingReview(sub)) return 'Review code';
     if (isSessionSub(sub)) return 'Review result';
     if (isHumanSub(sub)) return 'Your turn';
+    if (isWriteSub(sub)) return 'Review write';
     if (sub.stage === 'pr') return n ? `Merge #${n}` : 'Merge';
   }
   return jobStatus(job, sub).text;

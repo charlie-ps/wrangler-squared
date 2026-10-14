@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { line, id, jira, jiraProject, briefSchema, prUrlSchema, planSchema, isHumanSub, isPrSub, reviewCode } from './jobs-schema.js';
+import { line, id, jira, jiraProject, briefSchema, prUrlSchema, planSchema, placeLinkSchema, isHumanSub, isPrSub, isWriteSub, reviewCode, withStoryCreates } from './jobs-schema.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 
 // The seven moves a human would make by hand when a job goes wrong. Agents never
@@ -15,7 +15,8 @@ export const moveSchemas = {
     title: line, brief: briefSchema, check: line.optional(), position: position.optional(), note }),
   reorder: z.object({ after: z.array(id).max(30) }),
   drop: z.object({}),
-  mark: z.object({ position: z.enum(['pr', 'merged', 'done']), url: prUrlSchema.optional(), note }),
+  // `link` is where a write's place is, when the human made it by hand.
+  mark: z.object({ position: z.enum(['pr', 'merged', 'done']), url: prUrlSchema.optional(), link: placeLinkSchema.optional(), note }),
   'accept-red': z.object({ note }),
 };
 export const MOVE_ACTIONS = new Set(Object.keys(moveSchemas));
@@ -108,6 +109,11 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
   if (sub.stage === 'done' || sub.cancelledAt) throw new Error('Sub-job has already finished');
   const data = schema.parse(payload);
   if (liveRun(job, sub.id) && REFUSED_WHILE_LIVE.has(move)) throw new Error('Wait for the session to stop');
+  // A write has no session, PR or order of its own: it is edited (job-writes.js),
+  // dropped, or marked done because someone already made it by hand.
+  if (isWriteSub(sub) && !['drop', 'mark'].includes(move)) throw new Error('A write can only be edited, dropped or marked done');
+  if (isWriteSub(sub) && sub.state === 'writing') throw new Error('Wait for the write to finish');
+  if (data.link && !isWriteSub(sub)) throw new Error('Only a write is marked done with where it is');
 
   if (move === 'fix-here') {
     if (sub.stage === 'pr') {
@@ -150,12 +156,17 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
 
   if (move === 'new-ticket') {
     const taken = new Set(job.plan.stories.map((s) => s.id));
-    // Keyless unless the human already made the ticket: the runner then runs the
-    // ordinary Jira step for it, and the new sub-job waits for that key.
+    // Keyless unless the human already made the ticket: its create write (below)
+    // makes it, and the new sub-job waits for that key.
     const story = { id: freeId(taken, (n) => `s-${n}`), ...(data.key ? { key: data.key } : {}),
       ...(data.project ? { project: data.project } : {}), title: data.storyTitle };
     const spec = addPrSubJob(job, sub, data, { storyId: story.id, jiraKey: data.key || null, story, buildSubJob,
       position: UNMERGED.includes(sub.stage) ? data.position : null });
+    // The ticket is created the way every keyless story is: by its own write,
+    // due at once, which the new PR waits on for its key.
+    const known = new Set(job.plan.subJobs.map((s) => s.id));
+    job.plan = withStoryCreates(job.plan);
+    for (const s of job.plan.subJobs) if (!known.has(s.id)) job.subJobs.push(buildSubJob(job.plan, s));
     sub.error = null; sub.blocked = null;
     if (data.note) sub.note = data.note;
     return { detail: `New ticket ${quoted(story.title)} with PR ${quoted(spec.title)}${data.position ? ` to land ${data.position} this` : ''}` };
@@ -194,7 +205,7 @@ export function applyMove(job, sub, move, payload, { now = Date.now(), buildSubJ
     }
     if (sub.stage === 'cleanup') throw new Error('Sub-job has already finished');
     const checks = [data.note || 'Marked done by hand'];
-    if (!isPrSub(sub)) sub.result = { checks, at: now, receiptId: null };
+    if (!isPrSub(sub)) sub.result = { checks, at: now, receiptId: null, ...(data.link ? { url: data.link } : {}) };
     else sub.deployed = { at: now, checks, commit: sub.pr?.mergeCommit || null };
     sub.error = null; sub.blocked = null; sub.stage = 'cleanup'; sub.state = 'queued';
     return { detail: `Marked done: ${checks[0]}` };

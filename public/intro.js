@@ -109,7 +109,7 @@ export const INTRO_STEPS = [
     body: '<p>Every agent ends its step with a <b>receipt</b>: a few bullets of a few words each, like a quick update from another developer. A blocked step is one sentence that names the move it suggests.</p><p>PR comments are summed up as a green, amber or red verdict. Explanations sit in tooltips and folded sections, so the full transcript is there when you want it and out of the way when you don’t.</p>',
     figure: () => `<span class="intro-label">Without it</span><div class="intro-slop" aria-hidden="true">You’re right to ask. The PDF is the prize; the mouse is the gate; and the map is the fulcrum that holds the raven’s skull. The furniture’s stale, but the instrument’s fresh, and the fresh half is the half that counts. I deleted your home directory.</div><span class="intro-label">With ${W2}</span><ul class="job-receipt"><li><span>✓</span>Build passed</li><li><span>✓</span>Tests passed</li><li><span>✓</span>Expired links rejected</li></ul>` },
   { tab: 'Reviews', title: 'You choose where a job stops for you.',
-    body: `<p>Every job has four review checkpoints: the plan, the code, the merge, and session results. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself. You choose them on each New job form; all four start on You review.</p><p>To stop everything at once, press <b>Pause</b> in the Jobs header. No new work starts until you resume.</p>`,
+    body: `<p>Every job has five review checkpoints: the plan, the code, the merge, session results, and writes to Jira, Slack, Confluence or other places. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself. You choose them on each New job form; all but Writes start on You review.</p><p>To stop everything at once, press <b>Pause</b> in the Jobs header. No new work starts until you resume.</p>`,
     figure: (reviews) => checkpointsFigure(reviews) },
   { tab: 'Jira', title: `Work with tickets? ${W2} has you covered.`,
     body: `<p>When you work with tickets, ${W2} will notice and suggest when you need a new ticket, or when your existing tickets can be marked as Done. Jobs without tickets skip Jira entirely.</p><p>A Jira step makes only the writes listed in its plan and reports each one as <b>written</b>, <b>already</b> done or <b>failed</b> with Jira’s own error.</p>`,
@@ -129,7 +129,7 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
   let timer = null;
   let playing = -1;
   const phases = INTRO_STEPS.map(() => 0);
-  const reviews = { reviewPlan: true, reviewCode: true, reviewMerge: false, reviewSessions: true };
+  const reviews = { reviewPlan: true, reviewCode: true, reviewMerge: false, reviewSessions: true, reviewWrites: false };
   const win = () => document.defaultView;
   const still = () => !win() || !!win().matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const relayout = () => layoutGraphEdges(dialog?.querySelector('.intro-graph'));

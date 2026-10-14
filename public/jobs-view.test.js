@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isPrimaryActionKey, primaryAction } from './jobs-view.js';
-import { jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, movesFor, eventFor } from './jobs.js';
+import { jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, movesFor, eventFor, writeReviewed } from './jobs.js';
 import { jobTileHtml, planGraphHtml } from './job-graph.js';
 
 const sub = (id, after = []) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Implement it and open the PR', sessions: [], repairs: [] });
@@ -733,16 +733,16 @@ test('new job is a brief beside a property sidebar, and the brief is only the de
   assert.deepEqual([...brief.querySelectorAll('textarea')].map((e) => e.name), ['intent']);
   assert.equal(form.elements.repos, undefined); assert.equal(form.elements.planningPrompt, undefined);
   assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Review checkpoints', 'Images', 'After delivery']);
-  for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'shareImages', 'updateMain']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
+  for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites', 'shareImages', 'updateMain']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
   assert.ok(props.querySelector('#job-pick').querySelector('.pick-ticket') && props.querySelector('#job-pick .pick-meter'), 'the picker is a ticket with an effort meter in the sidebar');
   assert.deepEqual([...props.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].checked, r.querySelector('small').textContent]),
-    [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts'], ['reviewCode', 'Code', true, 'You read each PR’s diff before it’s committed'], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass'], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done']]);
+    [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts'], ['reviewCode', 'Code', true, 'You read each PR’s diff before it’s committed'], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass'], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done'], ['reviewWrites', 'Writes', false, 'Writes are made when due, each with a receipt']]);
   assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('small')?.textContent]),
     [['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, undefined]]);
   assert.match(form.querySelector('.job-create-foot').textContent, /nothing touches Jira until you approve/);
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent[0], { type: 'job-create', start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, updateMain: false, images: [], shareImages: true, taskId: null } });
+  assert.deepEqual(f.sent[0], { type: 'job-create', start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, updateMain: false, images: [], shareImages: true, taskId: null } });
 });
 
 test('new jobs need only an outcome and leave repositories to planning', (t) => {
@@ -934,30 +934,86 @@ test('plans show session rows without a repository and new jobs default to revie
   assert.equal(f.sent.at(-1).job.reviewSessions, true);
 });
 
-test('a plan proposes story titles the human can edit, and approval of keyless stories says tickets follow', (t) => {
+test('a plan lists its story titles, and approval of keyless stories says whether each is created at once or held for review', (t) => {
   const f = fixture(t); const [job] = f.data.jobs;
   job.plan = structuredClone(plan); job.plan.stories = [{ id: 'story', title: 'Customers can sign in' }, { id: 'audit', project: 'SEC', key: undefined, title: 'Sign-ins are audited' }, { id: 'old', key: 'AUTH-9', title: 'Existing work' }, { id: 'events', project: 'SEC', title: 'Sign-in events are emitted' }];
   job.plan.subJobs[1].storyId = 'audit'; job.plan.subJobs.forEach((s) => delete s.jiraKey); f.view.update(f.data);
   f.q('[data-job="job1"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-story-key')].map((e) => e.textContent), ['NEW-1', 'SEC-NEW-1', 'AUTH-9', 'SEC-NEW-2'], 'proposals are numbered per project');
   assert.equal(document.querySelectorAll('.job-story-key.job-story-new').length, 3);
+  assert.equal(document.querySelectorAll('.job-stories input, .job-stories textarea, .job-new-stories').length, 0, 'plan review shows titles only: a story is edited on its create, in review');
   assert.deepEqual([...document.querySelectorAll('.job-node')].map((e) => e.title.split('\n')[1]), ['NEW-1', 'SEC-NEW-1']);
   assert.deepEqual([...document.querySelectorAll('.job-appbar .job-chip')].slice(1).map((c) => c.textContent), ['NEW-1', 'SEC-NEW-1', '+2'], 'the app bar names the first stories; the rest are one chip');
   assert.match(f.q('.job-appbar .job-chip[title^="Customers can sign in"]').title, /created only after you approve/);
-  assert.match(f.q('[data-action="approve-plan"]').title, /creates the 3 new Jira stories with these titles, then starts work/);
-  const title = f.q('[data-story="0"]'); title.value = 'Customers sign in without lockouts'; title.dispatchEvent(f.event('input'));
+  assert.match(f.q('[data-action="approve-plan"]').title, /^Approve starts work in dedicated worktrees\. The 3 new Jira stories are created in Jira straight away\./);
+  job.reviewWrites = true; f.view.update(f.data); f.q('#job-dialog').close(); f.q('[data-job="job1"]').click();
+  assert.match(f.q('[data-action="approve-plan"]').title, /The 3 new Jira stories are held for your review before they are created\./, 'a job reviewing its writes holds every create');
+  job.reviewWrites = false; job.plan.subJobs.unshift({ id: 'create-story', kind: 'write', place: { type: 'jira' }, title: 'Create story: Customers can sign in', storyId: 'story', after: [], action: { type: 'create' }, review: true });
+  f.view.update(f.data); f.q('#job-dialog').close(); f.q('[data-job="job1"]').click();
+  assert.match(f.q('[data-action="approve-plan"]').title, /Of the 3 new Jira stories, 2 are created in Jira straight away and 1 is held for your review first\./, 'a create\'s own review wins over the job\'s');
+  job.plan.subJobs.shift(); job.plan.stories[0].title = 'Customers sign in without lockouts'; f.view.update(f.data); f.q('#job-dialog').close(); f.q('[data-job="job1"]').click();
   f.q('[data-action="approve-plan"]').click();
   assert.equal(f.sent[0].plan.stories[0].title, 'Customers sign in without lockouts');
   assert.equal(f.sent[0].plan.stories[0].key, undefined, 'the browser never mints a key');
   f.q('#job-dialog').close();
-  // Approved: the job card waits in the Jira column while a ticketing session runs, and never asks for review.
-  job.stage = 'jira'; job.plan = f.sent[0].plan; job.runs = [{ id: 'r2', subJobId: null, phase: 'jira', stopped: false }]; f.view.update(f.data);
-  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Creating Jira tickets');
+  // Approved: the job runs at once, and creating each keyless story is its own write, never asking for review.
+  job.stage = 'active'; job.plan = f.sent[0].plan;
+  job.subJobs = [{ id: 'create-story', kind: 'write', place: { type: 'jira' }, title: 'Create story: Customers sign in without lockouts', storyId: 'story', after: [], action: { type: 'create' }, stage: 'write', state: 'writing', sessions: [], repairs: [] },
+    ...job.plan.subJobs.map((s) => ({ ...s, stage: 'implementation', state: 'queued', jiraKey: null }))];
+  job.runs = [{ id: 'r2', subJobId: null, phase: 'write', stopped: false, writes: ['create-story'] }]; f.view.update(f.data);
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Writing to Jira');
   assert.ok(f.q('[data-board="job1"]').classList.contains('tone-run'));
   assert.equal(jobNeedsReview(job, null), false);
+  assert.equal(jobStatus(job, job.subJobs[1]).text, 'Waiting for a Jira ticket');
   f.q('[data-job="job1"]').click();
-  assert.match(hint(f), /Creating the approved Jira stories/);
   assert.equal(f.q('[data-action="approve-plan"]'), null);
+  const create = f.q('.job-write[data-open-sub="create-story"]');
+  assert.match(create.textContent, /^Create.*Writing to Jira$/);
+  assert.match(create.closest('.job-place').querySelector('summary').textContent, /NEW-1/, 'a create joins the pill of the node its story belongs to');
+});
+
+test('a story create in review is its own editor: summary and fields as planned, and approving creates it with exactly what is left', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs;
+  job.plan = structuredClone(plan);
+  job.plan.stories = [{ id: 'story', key: 'AUTH-1', title: 'Customers can sign in' }, { id: 'audit', project: 'SEC', title: 'Sign-ins are audited',
+    fields: [{ name: 'Issue Type', value: 'Story' }, { name: 'Components', value: 'Auth <b>core</b>' }, { name: 'Description', value: 'Every sign-in writes one audit row.' }] }];
+  job.plan.subJobs[1].storyId = 'audit'; delete job.plan.subJobs[1].jiraKey; f.view.update(f.data);
+  f.q('[data-job="job1"]').click();
+  assert.equal(f.q('.job-new-stories'), null, 'plan review no longer edits a story\'s fields');
+  assert.equal(f.q('[data-story-field]'), null);
+  f.q('#job-dialog').close();
+  job.stage = 'active';
+  job.subJobs = [{ id: 'create-audit', kind: 'write', place: { type: 'jira' }, title: 'Create story: Sign-ins are audited', storyId: 'audit', after: [], action: { type: 'create' }, review: true, stage: 'review', state: 'verified', sessions: [], repairs: [] },
+    ...job.plan.subJobs.map((s) => ({ ...s, stage: 'implementation', state: 'queued', sessions: [], repairs: [] }))];
+  f.view.update(f.data); f.q('[data-job="job1"]').click(); f.q('.job-write[data-open-sub="create-audit"]').click();
+  const panel = () => f.q('#job-write-review');
+  assert.match(f.q('.job-write-hint').textContent, /Review is on for this write, so nothing has been written to Jira yet/);
+  assert.equal(panel().querySelector('[name="storyTitle"]').value, 'Sign-ins are audited');
+  assert.deepEqual([...panel().querySelectorAll('dt')].map((e) => e.textContent), ['Project', 'Issue Type', 'Components', 'Description']);
+  assert.ok(!panel().innerHTML.includes('<b>core'), 'a planner-written value is escaped');
+  assert.deepEqual([...panel().querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Create in Jira', 'Skip']);
+  assert.equal(f.q('#job-write-edit'), null, 'the panel is the editor');
+  const title = panel().querySelector('[name="storyTitle"]'); title.value = 'Every sign-in is audited'; title.dispatchEvent(f.event('input'));
+  const desc = f.q('[data-story-field="2"]'); desc.value = 'One audit row per sign-in.  '; desc.dispatchEvent(f.event('input'));
+  f.q('[data-story-field-remove="1"]').click();
+  f.q('[data-story-new-name]').value = 'Labels'; f.q('[data-story-new-value]').value = 'audit';
+  f.q('[data-story-field-add]').click();
+  assert.deepEqual([...panel().querySelectorAll('dt')].map((e) => e.textContent), ['Project', 'Issue Type', 'Description', 'Labels']);
+  assert.equal(panel().querySelector('[name="storyTitle"]').value, 'Every sign-in is audited', 'a redraw keeps what was typed');
+  f.q('[data-story-new-name]').value = 'labels'; f.q('[data-story-new-value]').value = 'audit, sso';
+  f.q('[data-story-field-add]').click();
+  const blank = f.q('[data-story-field="0"]'); blank.value = ' '; blank.dispatchEvent(f.event('input'));
+  f.data.jobs[0].revision++; f.view.update(f.data);
+  assert.equal(panel().querySelector('[name="storyTitle"]').value, 'Every sign-in is audited', 'a live tick leaves the panel alone');
+  panel().requestSubmit();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'create-audit', action: 'approve-write',
+    write: { story: { title: 'Every sign-in is audited', fields: [{ name: 'Description', value: 'One audit row per sign-in.' }, { name: 'Labels', value: 'audit, sso' }] } } },
+    'an emptied field is left unset; a field added twice is one field');
+  f.q('[data-open-job]').click(); f.q('.job-write[data-open-sub="create-audit"]').click();
+  f.q('#job-write-review').requestSubmit();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'create-audit', action: 'approve-write' }, 'nothing changed sends no write');
+  f.q('[data-action="skip-write"]').click();
+  assert.equal(f.sent.at(-1).action, 'skip-write');
 });
 
 test('a ticketless plan reviews with no stories, its sub-jobs carry No ticket and never wait for Jira', (t) => {
@@ -1367,4 +1423,360 @@ test('a job’s Outcome shows its pictures as a numbered strip, asks for the byt
   const thumbs = [...f.q('#job-dialog').querySelectorAll('.job-image-strip .job-image-thumb')];
   assert.equal(thumbs[0].querySelector('img').getAttribute('src'), 'data:image/png;base64,eA==');
   assert.equal(thumbs[1].querySelector('img'), null, 'a picture the store lost stays a numbered blank');
+});
+
+// --- Writes and places ---
+
+const jiraWrite = (id, on, action, extra = {}) => ({ id, kind: 'write', place: { type: 'jira' }, title: `Write ${id}`, storyId: 'story', jiraKey: 'AUTH-1', after: [], ...(on ? { on } : {}), action, sessions: [], repairs: [], ...extra });
+const withWrites = (f, writes, extra = {}) => {
+  const [job] = f.data.jobs;
+  job.plan = { ...structuredClone(plan), workflows: { AUTH: ['To Do', 'In Progress', 'In Review', 'Done'] }, subJobs: [...structuredClone(plan.subJobs), ...writes] };
+  Object.assign(job, extra); f.view.update(f.data);
+  return job;
+};
+
+test('plan review hangs each proposed write under its trigger, and the editor changes it in the draft that approval sends', (t) => {
+  const f = fixture(t);
+  withWrites(f, [jiraWrite('w-pr', { sub: 'api', at: 'pr' }, { type: 'transition', to: 'In Review', comment: 'PR {pr.url}' }, { why: 'AUTH moves <b>open</b> PRs to In Review' }),
+    jiraWrite('w-wont', { sub: 'web', at: 'dropped' }, { type: 'transition', to: 'Done' }, { review: true })]);
+  f.q('[data-job="job1"]').click();
+  const stack = (id) => f.q(`[data-node="${id}"]`).closest('.job-stack');
+  assert.equal(stack('w-pr'), stack('api'), 'a write hangs under the node whose milestone fires it');
+  assert.equal(stack('w-wont'), stack('web'));
+  assert.match(f.q('[data-node="w-pr"]').textContent, /^→ In Review \+ comment\s*when PR opened$/, 'the trigger is the node above, so only its milestone is named');
+  assert.ok(f.q('[data-node="w-pr"] .job-proposed'));
+  const pill = f.q('[data-node="w-pr"]').closest('details.job-place');
+  assert.equal(pill.open, false, 'a place starts folded');
+  assert.equal(pill.querySelector('summary').textContent, 'AUTH-1↗', 'an existing ticket is a place that exists');
+  assert.equal(pill.querySelectorAll('.job-place-dot').length, 1);
+  assert.match(f.q('[data-node="w-wont"]').textContent, /only if dropped/);
+  assert.ok(f.q('[data-node="w-wont"]').classList.contains('dormant'));
+  const eye = (id) => f.q(`[data-node="${id}"]`).parentElement.querySelector('[data-review-write]');
+  assert.deepEqual([eye('w-wont').getAttribute('aria-pressed'), eye('w-wont').classList.contains('on'), eye('w-wont').title], ['true', true, 'Review before writing']);
+  assert.equal(eye('w-pr').getAttribute('aria-pressed'), 'false');
+  assert.equal(f.q('[data-node="w-wont"]').contains(eye('w-wont')), false, 'the eye is beside the row, not inside its button');
+  assert.equal(f.q('.job-write-count').textContent, '2 writes · 1 reviewed');
+  eye('w-wont').click();
+  assert.equal(f.q('[data-write-editor]'), null, 'flipping review does not open the editor');
+  assert.equal(eye('w-wont').getAttribute('aria-pressed'), 'false'); assert.equal(f.q('.job-write-count').textContent, '2 writes');
+  assert.match(f.q('[data-action="approve-plan"]').title, /The 2 writes run as their milestones arrive\. /);
+  eye('w-wont').click();
+  assert.equal(f.q('.job-write-count').textContent, '2 writes · 1 reviewed');
+  assert.equal(f.q('[data-action="approve-plan"]').textContent, 'Approve 2', 'writes are not counted as work');
+  assert.match(f.q('[data-action="approve-plan"]').title, /The 2 writes run as their milestones arrive; 1 waits for your review first/);
+  assert.ok(![...document.querySelectorAll('[data-dep]')].some((c) => c.value.startsWith('w-')), 'nothing can wait on a write');
+  f.q('[data-node="w-pr"]').click();
+  const editor = f.q('[data-write-editor]');
+  assert.match(editor.querySelector('.job-write-why').innerHTML, /&lt;b&gt;open&lt;\/b&gt;/, 'the planner\'s reason is text, never markup');
+  assert.deepEqual([...editor.querySelectorAll('[name="to"] option')].map((o) => o.value), ['', 'To Do', 'In Progress', 'In Review', 'Done']);
+  assert.ok([...editor.querySelectorAll('[name="on"] option')].some((o) => o.textContent === 'Deliver web · only if dropped'));
+  editor.querySelector('[name="to"]').value = 'Done'; editor.querySelector('[name="to"]').dispatchEvent(f.event('change'));
+  f.q('[data-write-editor] [name="review"]').checked = true; f.q('[data-write-editor] [name="review"]').dispatchEvent(f.event('change'));
+  assert.match(f.q('[data-node="w-pr"]').textContent, /^→ Done/);
+  assert.ok(f.q('[data-node="w-pr"]').closest('details.job-place').open, 'the place holding the open editor stays open');
+  f.q('[data-write-editor] [name="to"]').value = ''; f.q('[data-write-editor] [name="to"]').dispatchEvent(f.event('change'));
+  f.q('[data-write-editor] [name="comment"]').value = ''; f.q('[data-write-editor] [name="comment"]').dispatchEvent(f.event('change'));
+  assert.ok(f.q('[data-action="approve-plan"]').disabled, 'a write that neither moves nor comments cannot be approved');
+  f.q('[data-write-editor] [name="comment"]').value = 'Merged: {pr.url}'; f.q('[data-write-editor] [name="comment"]').dispatchEvent(f.event('change'));
+  f.q('[data-write-editor] [name="on"]').value = 'api|merged'; f.q('[data-write-editor] [name="on"]').dispatchEvent(f.event('change'));
+  f.q('[data-add-write="web"]').click();
+  assert.match(f.q('[data-write-editor] h4').textContent, /AUTH-1 → In Review/); assert.doesNotMatch(f.q('[data-write-editor] h4').textContent, /Proposed/, 'the human\'s own write is not proposed');
+  f.q('[data-write-remove]').click();
+  f.q('[data-node="w-wont"]').click(); f.q('[data-write-done]').click();
+  assert.equal(f.q('[data-write-editor]'), null);
+  f.q('[data-action="approve-plan"]').click();
+  assert.equal(f.sent.at(-1).plan.subJobs.find((s) => s.id === 'w-wont').review, true, 'a flipped eye is sent as an explicit boolean');
+  const sent = f.sent.at(-1).plan.subJobs.find((s) => s.id === 'w-pr');
+  assert.deepEqual([sent.action, sent.on, sent.review, sent.title], [{ type: 'comment', comment: 'Merged: {pr.url}' }, { sub: 'api', at: 'merged' }, true, 'Comment on AUTH-1']);
+  assert.equal(f.sent.at(-1).plan.subJobs.length, 4, 'the removed write is gone');
+});
+
+test('a running write names what it waits for, needs you only in review, where its panel is the editor that Move in Jira approves; Edit and Skip send their actions', (t) => {
+  const f = fixture(t);
+  const job = withWrites(f, [], { stage: 'active', subJobs: [{ ...sub('api'), stage: 'implementation', state: 'queued' }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' },
+    jiraWrite('w-pr', { sub: 'api', at: 'pr' }, { type: 'transition', to: 'In Review' }, { stage: 'write', state: 'queued' }),
+    jiraWrite('w-wont', { sub: 'web', at: 'dropped' }, { type: 'transition', to: 'Done' }, { stage: 'write', state: 'queued' }),
+    jiraWrite('w-rev', { sub: 'api', at: 'started' }, { type: 'transition', to: 'In Progress', comment: 'Started <script>' }, { stage: 'review', state: 'verified', review: true, why: 'Team <i>rule</i>' })] });
+  const [, , wait, dormant, rev] = job.subJobs;
+  assert.deepEqual([jobStatus(job, wait).text, jobStatus(job, dormant).text, jobStatus(job, rev).text], ['Waits for Deliver api · PR opened', 'Only if Deliver web is dropped', 'Review the write']);
+  assert.deepEqual([wait, dormant, rev].map((s) => jobNeedsReview(job, s)), [false, false, true]);
+  assert.equal(f.q('#jobs-review-count').textContent, '1', 'a write in review counts toward needs-you');
+  assert.match(f.q('[data-board="job1"]').textContent, /Review write/);
+  f.q('[data-board="job1"] .job-card-open').click();
+  const pill = f.q('[data-node="w-rev"]').closest('details.job-place');
+  assert.equal(pill, f.q('[data-node="w-pr"]').closest('details.job-place'), 'one pill per ticket under its trigger');
+  assert.ok(pill.classList.contains('urgent') && pill.classList.contains('tone-warn'), 'a write in review rings its folded pill');
+  assert.match(f.q('[data-node="w-pr"]').textContent, /when PR opened$/, 'a write waiting for its milestone names only the milestone');
+  assert.match(f.q('[data-node="w-rev"]').textContent, /Review write$/);
+  assert.equal(f.q('.job-seg[data-sub="w-rev"]'), null, 'a write is no step of the progress bar');
+  f.q('[data-open-sub="w-rev"]').click();
+  assert.match(f.q('.job-write-hint').textContent, /Review is on for this write, so nothing has been written to Jira yet/);
+  const panel = f.q('#job-write-review');
+  assert.match(panel.innerHTML, /Started &lt;script&gt;/); assert.match(panel.innerHTML, /Team &lt;i&gt;rule&lt;\/i&gt;/);
+  assert.equal(panel.querySelector('[name="to"]').value, 'In Progress');
+  assert.deepEqual([panel.querySelector('[name="on"]'), panel.querySelector('[name="review"]')], [null, null], 'in review only what it writes can change');
+  assert.match(f.q('.job-write-spec').textContent, /When Deliver api reaches started/);
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Move in Jira', 'Skip']);
+  assert.deepEqual(movesFor(job, rev).map((m) => m.id), ['drop', 'mark']);
+  panel.requestSubmit();
+  assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).subJobId, f.sent.at(-1).write], ['approve-write', 'w-rev', undefined], 'nothing changed: a plain approval');
+  panel.querySelector('[name="to"]').value = ''; panel.querySelector('[name="comment"]').value = '';
+  panel.requestSubmit();
+  assert.match(f.q('#job-move-error').textContent, /moves the ticket, comments on it, or both/); assert.equal(f.sent.at(-1).write, undefined);
+  panel.querySelector('[name="comment"]').value = 'Picked up: {pr.url}';
+  panel.requestSubmit();
+  assert.deepEqual(f.sent.at(-1).write, { action: { to: null, comment: 'Picked up: {pr.url}' } }, 'only what changed, null where emptied');
+  f.q('[data-action="skip-write"]').click();
+  assert.equal(f.sent.at(-1).action, 'skip-write');
+  f.q('[data-open-job]').click(); f.q('[data-open-sub="w-pr"]').click();
+  f.q('#job-write-edit').click();
+  const form = f.q('#job-write-form');
+  assert.equal(form.querySelector('[name="review"]').checked, false);
+  form.querySelector('[name="to"]').value = 'Done'; form.querySelector('[name="review"]').checked = true;
+  form.requestSubmit();
+  assert.deepEqual(f.sent.at(-1).write, { action: { to: 'Done', comment: null }, on: { sub: 'api', at: 'pr' }, review: true });
+});
+
+test('a refused write shows Jira\'s own error with Retry and Pick another status; a dropped trigger strands the rest; already-there explains itself', (t) => {
+  const f = fixture(t);
+  const job = withWrites(f, [], { stage: 'active', subJobs: [{ ...sub('api'), stage: 'cleanup', cancelledAt: 1, state: 'cancelled' }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' },
+    jiraWrite('w-fail', { sub: 'web', at: 'started' }, { type: 'transition', to: 'In Review' }, { stage: 'write', state: 'failed', error: 'Field Reviewer is required for this transition.' }),
+    jiraWrite('w-dead', { sub: 'api', at: 'pr' }, { type: 'comment', comment: 'x' }, { stage: 'write', state: 'queued' }),
+    jiraWrite('w-there', { sub: 'web', at: 'started' }, { type: 'transition', to: 'In Progress', comment: 'Picked up' }, { stage: 'done', state: 'done', result: { outcome: 'already', from: 'In Review', checks: ['AUTH-1 was already at or past In Progress; comment posted'], text: 'Picked up', receiptId: 'r1' } })] });
+  const [, , failed, dead, there] = job.subJobs;
+  assert.equal(jobStatus(job, dead).text, 'Trigger dropped'); assert.equal(jobNeedsReview(job, dead), true);
+  assert.equal(jobStatus(job, there).text, 'Already there');
+  assert.deepEqual(eventFor(job, failed), { title: 'Jira refused the write', detail: 'Field Reviewer is required for this transition.', suggested: null });
+  f.q('[data-board="job1"] .job-card-open').click(); f.q('[data-open-sub="w-fail"]').click();
+  assert.match(f.q('.job-event').textContent, /Jira refused the write.*Field Reviewer is required/);
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Pick another status']);
+  assert.deepEqual([...document.querySelectorAll('.job-move')].map((b) => b.textContent), ['Drop', 'Mark done']);
+  f.q('#job-write-edit').click();
+  assert.equal(f.q('#job-dialog h2').textContent, 'Pick another status');
+  f.q('#job-move-back').click();
+  f.q('[data-open-job]').click(); f.q('[data-open-sub="w-dead"]').click();
+  assert.match(f.q('.job-write-hint').textContent, /Deliver api was dropped, so it will never reach PR opened/);
+  assert.match(f.q('#job-write-edit').textContent, /Move trigger/);
+  f.q('[data-open-job]').click(); f.q('[data-open-sub="w-there"]').click();
+  assert.match(f.q('.job-write-hint').textContent, /AUTH-1 was already at or past In Progress \(In Review\), so nothing moved; the comment was still posted/);
+  assert.match(f.q('.job-write-spec').textContent, /In Review → In Progress/);
+});
+
+const sessionNode = (id, extra = {}) => ({ id, kind: 'session', title: `Run ${id}`, after: [], brief: 'Measure it', sessions: [], repairs: [], ...extra });
+const made = (id, type, by, what, extra = {}) => ({ id, kind: 'write', place: { type }, title: `Make ${what}`, by, after: [], action: { type: 'make', what }, sessions: [], repairs: [], ...extra });
+const placesJob = (f, result = {}) => withWrites(f, [], { stage: 'active', plan: { ...structuredClone(plan), jiraSite: 'https://x.atlassian.net', subJobs: [] }, subJobs: [
+  { ...sub('api'), stage: 'pr', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', checkStatus: 'pending' } },
+  sessionNode('report', { stage: 'session', state: 'queued' }),
+  jiraWrite('w-pr', { sub: 'api', at: 'pr' }, { type: 'transition', to: 'In Review' }, { stage: 'done', state: 'done', result: { outcome: 'written', receiptId: 'r1', checks: ['Moved'] } }),
+  jiraWrite('w-done', { sub: 'api', at: 'deployed' }, { type: 'transition', to: 'Done' }, { stage: 'write', state: 'queued' }),
+  made('chart', 'artifact', 'report', 'p95 <i>chart</i>', { stage: 'write', state: 'queued', ...result.chart }),
+  made('k6', 'file', 'report', 'k6 report', { stage: 'write', state: 'queued', ...result.k6 }),
+  { id: 'post', kind: 'write', place: { type: 'slack', ref: '#web-platform' }, title: 'Post in #web-platform', after: [], on: { sub: 'report', at: 'deployed' }, review: true, action: { type: 'post', text: 'Chart: {chart.url}' }, stage: 'write', state: 'queued', sessions: [], repairs: [] },
+] });
+
+test('the stepper folds a node\'s writes into one pill per place: dots per write, dashed until the place exists, ringed when one needs you', (t) => {
+  const f = fixture(t);
+  placesJob(f, { k6: { state: 'failed', error: 'k6 was not installed' } });
+  f.q('[data-board="job1"] .job-card-open').click();
+  const pill = (id) => f.q(`[data-node="${id}"]`).closest('details.job-place');
+  assert.equal(pill('w-pr'), pill('w-done'), 'two writes to one ticket under one node are one pill');
+  assert.equal(pill('w-pr').querySelectorAll('.job-place-dot').length, 2);
+  assert.deepEqual([...pill('w-pr').querySelectorAll('.job-place-dot')].map((d) => d.className.includes('tone-ok')), [true, false]);
+  assert.equal(pill('w-pr').querySelector('summary b').textContent, 'AUTH-1');
+  assert.ok(!pill('w-pr').classList.contains('ghost'), 'a ticket with a key exists');
+  const open = pill('w-pr').querySelector('.job-place-head a');
+  assert.deepEqual([open.getAttribute('href'), open.target, open.rel], ['https://x.atlassian.net/browse/AUTH-1', '_blank', 'noopener'], 'a ticket opens on the site the planner read');
+  assert.notEqual(pill('chart'), pill('k6'), 'each made output is its own place');
+  assert.equal(f.q('[data-node="chart"]').closest('.job-stack'), f.q('[data-node="report"]').closest('.job-stack'), 'a made output hangs under its session');
+  assert.ok(pill('chart').classList.contains('ghost')); assert.match(pill('chart').querySelector('.job-place-head em').textContent, /not made yet/);
+  assert.equal(pill('chart').querySelector('summary b').textContent, 'p95 <i>chart</i>', 'what the planner wrote is text');
+  assert.match(f.q('[data-node="chart"]').textContent, /^Make\s*by the session$/);
+  assert.ok(pill('k6').classList.contains('urgent') && pill('k6').classList.contains('tone-bad'), 'a failed output rings its pill');
+  assert.match(pill('post').querySelector('summary').textContent, /^#web-platform$/); assert.ok(pill('post').querySelector('.job-write-review'), 'the eye says it is reviewed first');
+  f.q('[data-open-sub="k6"]').click();
+  assert.equal(f.q('.job-event b').textContent, 'Not made');
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Edit'], 'a made output is not retried on its own');
+});
+
+test('a place that exists opens from its pill; a local file shows its path to copy', async (t) => {
+  const f = fixture(t);
+  placesJob(f, { chart: { stage: 'done', state: 'done', result: { outcome: 'written', url: 'https://claude.ai/artifact/7f3c', title: 'Checkout p95', receiptId: 'r2', at: 2 } },
+    k6: { stage: 'done', state: 'done', result: { outcome: 'written', url: '/Users/me/k6 report.html', receiptId: 'r2', at: 2 } } });
+  f.q('[data-board="job1"] .job-card-open').click();
+  const pill = (id) => f.q(`[data-node="${id}"]`).closest('details.job-place');
+  assert.equal(pill('chart').querySelector('summary b').textContent, 'Checkout p95', 'a made place takes the title it was made with');
+  assert.equal(pill('chart').querySelector('.job-place-head a').getAttribute('href'), 'https://claude.ai/artifact/7f3c');
+  assert.equal(pill('k6').querySelector('.job-place-head a'), null, 'the board cannot follow file://');
+  assert.equal(pill('k6').querySelector('.job-place-path code').textContent, '/Users/me/k6 report.html');
+  const copied = [];
+  const prev = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async (s) => { copied.push(s); } } }, configurable: true });
+  t.after(() => Object.defineProperty(globalThis, 'navigator', prev));
+  pill('k6').querySelector('[data-copy-path]').click(); await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(copied, ['/Users/me/k6 report.html']);
+  assert.equal(pill('k6').querySelector('[data-copy-path]').textContent, 'Copied');
+});
+
+test('the board card carries one pill per place across the job, dots merged, an existing place a link above the card, and no progress segment for a write', (t) => {
+  const f = fixture(t);
+  const job = placesJob(f, { chart: { stage: 'done', state: 'done', result: { outcome: 'written', url: 'https://claude.ai/artifact/7f3c', receiptId: 'r2', at: 2 } } });
+  const card = f.q('[data-board="job1"]');
+  assert.deepEqual([...card.querySelectorAll('.job-seg')].map((e) => e.dataset.sub), ['api', 'report'], 'writes add no segment');
+  const chips = [...card.querySelectorAll('.job-card-places .job-place-chip')];
+  assert.deepEqual(chips.map((c) => c.querySelector('b').textContent), ['AUTH-1', 'p95 <i>chart</i>', 'k6 report', '#web-platform']);
+  assert.equal(chips[0].querySelectorAll('.job-place-dot').length, 2, 'every write to the ticket, merged');
+  assert.deepEqual([chips[0].tagName, chips[0].getAttribute('href'), chips[0].target, chips[0].rel], ['A', 'https://x.atlassian.net/browse/AUTH-1', '_blank', 'noopener']);
+  assert.equal(chips[1].tagName, 'A'); assert.equal(chips[1].getAttribute('href'), 'https://claude.ai/artifact/7f3c');
+  assert.deepEqual([chips[2].tagName, chips[2].classList.contains('ghost')], ['SPAN', true], 'a place not made yet is a dashed span');
+  assert.match(chips[3].title, /Slack channel · #web-platform\nWaiting: Post \(when done\)/);
+  assert.match(jobTileHtml({ ...job, stage: 'planning', plan: job.plan }), /^(?![\s\S]*job-card-places)/, 'a plan with no writes draws no strip');
+  chips[1].click();
+  assert.equal(f.q('#job-dialog').open, false, 'opening the place is not opening the job');
+});
+
+test('plan review adds a place under a step and picks its type: a Slack post needs its channel and text, a session can make an output instead', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs;
+  job.plan = { ...structuredClone(plan), stories: [], subJobs: [{ ...sub('api'), storyId: undefined, jiraKey: undefined }, sessionNode('report')] };
+  f.view.update(f.data); f.q('[data-job="job1"]').click();
+  f.q('[data-add-write="api"]').click();
+  let editor = f.q('[data-write-editor]');
+  assert.equal(editor.querySelector('[name="placeType"]:checked').value, 'slack', 'a plan with no stories offers a post first');
+  assert.deepEqual([...editor.querySelectorAll('[name="placeType"]')].map((o) => o.value), ['slack', 'confluence', 'other'], 'no Jira without a story, and only a session makes an artifact, file or page');
+  assert.ok(editor.querySelector('[name="placeType"][value="other"]').closest('.job-place-opt').classList.contains('other'), 'Something else is the dashed, open-ended one');
+  assert.match(editor.querySelector('.job-error').textContent, /Name the channel/);
+  assert.ok(f.q('[data-action="approve-plan"]').disabled);
+  editor.querySelector('[name="ref"]').value = '#web-platform'; editor.querySelector('[name="ref"]').dispatchEvent(f.event('change'));
+  editor = f.q('[data-write-editor]');
+  editor.querySelector('[name="text"]').value = 'Shipped {pr.url}'; editor.querySelector('[name="text"]').dispatchEvent(f.event('change'));
+  assert.equal(f.q('[data-write-editor] .job-error'), null);
+  assert.match(f.q('[data-write-editor] h4').textContent, /Post in #web-platform/);
+  f.q('[data-write-done]').click();
+  f.q('[data-add-write="report"]').click();
+  editor = f.q('[data-write-editor]');
+  assert.ok(editor.querySelector('[name="placeType"][value="artifact"]'));
+  editor.querySelector('[name="placeType"][value="artifact"]').checked = true; editor.querySelector('[name="placeType"][value="artifact"]').dispatchEvent(f.event('change'));
+  editor = f.q('[data-write-editor]');
+  assert.equal(editor.querySelector('[name="on"]'), null, 'a made output has no when: its session makes it');
+  editor.querySelector('[name="what"]').value = 'p95 chart'; editor.querySelector('[name="what"]').dispatchEvent(f.event('change'));
+  f.q('[data-action="approve-plan"]').click();
+  const sent = f.sent.at(-1).plan.subJobs.filter((s) => s.kind === 'write');
+  assert.deepEqual(sent.map((s) => [s.place, s.action, s.on, s.by, s.title]), [
+    [{ type: 'slack', ref: '#web-platform' }, { type: 'post', text: 'Shipped {pr.url}' }, { sub: 'api', at: 'deployed' }, undefined, 'Post in #web-platform'],
+    [{ type: 'artifact' }, { type: 'make', what: 'p95 chart' }, undefined, 'report', 'Make p95 chart']]);
+});
+
+test('a made output is marked done with where it is; a Slack post in review asks to Post to Slack', (t) => {
+  const f = fixture(t);
+  placesJob(f, { k6: { state: 'failed', error: 'k6 was not installed' } });
+  f.q('[data-board="job1"] .job-card-open').click(); f.q('[data-open-sub="k6"]').click();
+  f.q('.job-move[data-move="mark"]').click();
+  const form = f.q('#job-move-form');
+  assert.equal(form.querySelector('[name="link"]').required, true);
+  form.querySelector('[name="link"]').value = 'k6.html'; form.requestSubmit();
+  assert.match(f.q('#job-move-error').textContent, /https:\/\/ or an absolute path/);
+  form.querySelector('[name="link"]').value = '/Users/me/k6.html'; form.requestSubmit();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'k6', action: 'mark', position: 'done', link: '/Users/me/k6.html' });
+  const [job] = f.data.jobs;
+  Object.assign(job.subJobs.find((s) => s.id === 'post'), { stage: 'review', state: 'verified' }); f.view.update(f.data);
+  f.q('#job-move-back').click(); f.q('[data-open-job]').click(); f.q('[data-open-sub="post"]').click();
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Post to Slack', 'Skip']);
+  assert.match(f.q('.job-write-hint').textContent, /nothing has been written to Slack yet/);
+  const panel = f.q('#job-write-review');
+  assert.deepEqual([panel.querySelector('[name="ref"]').value, panel.querySelector('[name="text"]').value], ['#web-platform', 'Chart: {chart.url}']);
+  panel.querySelector('[name="ref"]').value = '#web'; panel.querySelector('[name="text"]').value = 'Chart is up: {chart.url}';
+  panel.requestSubmit();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'post', action: 'approve-write', write: { action: { text: 'Chart is up: {chart.url}' }, ref: '#web' } });
+  panel.querySelector('[name="ref"]').value = ''; panel.requestSubmit();
+  assert.match(f.q('#job-move-error').textContent, /Name the channel/);
+});
+
+test('a made output in review is already published: it says where, and Accept finishes it with no Skip and no Edit', (t) => {
+  const f = fixture(t);
+  const job = placesJob(f, { chart: { stage: 'review', state: 'verified', review: true, result: { outcome: 'written', url: 'https://claude.ai/artifact/7f3c', title: 'Checkout <b>p95</b>', receiptId: 'r2', checks: ['Published'], at: 2 } },
+    k6: { stage: 'review', state: 'verified', review: true, result: { outcome: 'written', url: '/Users/me/k6.html', receiptId: 'r3', checks: ['Written'], at: 2 } } });
+  const chart = job.subJobs.find((s) => s.id === 'chart');
+  assert.deepEqual([jobStatus(job, chart).text, jobNeedsReview(job, chart)], ['Review the output', true]);
+  f.q('[data-board="job1"] .job-card-open').click(); f.q('[data-open-sub="chart"]').click();
+  assert.equal(f.q('.job-write-hint').textContent, 'Review is on for this output: Run report published it. Accept it to finish, or drop it.');
+  const where = f.q('.job-write-where a');
+  assert.deepEqual([where.getAttribute('href'), where.textContent, where.target], ['https://claude.ai/artifact/7f3c', 'Checkout <b>p95</b> ↗', '_blank']);
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Accept']);
+  assert.equal(f.q('#job-write-review'), null, 'nothing is left to edit');
+  f.q('[data-action="approve-write"]').click();
+  assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).subJobId, f.sent.at(-1).write], ['approve-write', 'chart', undefined]);
+  f.q('[data-open-job]').click(); f.q('[data-open-sub="k6"]').click();
+  assert.equal(f.q('.job-write-where code').textContent, '/Users/me/k6.html', 'a path is text, never a link');
+  assert.equal(f.q('.job-write-where a'), null);
+});
+
+test('write review is tri-state: a write\'s own boolean wins, else the job\'s reviewWrites, else off', () => {
+  const w = { kind: 'write', place: { type: 'slack' } };
+  assert.deepEqual([writeReviewed({}, w), writeReviewed({ reviewWrites: true }, w), writeReviewed({ reviewWrites: true }, { ...w, review: false }), writeReviewed({}, { ...w, review: true })], [false, true, false, true]);
+});
+
+test('a job that reviews its writes says so: New job sends the switch, the header flags it, and every write without its own say shows the eye', (t) => {
+  const f = fixture(t);
+  f.q('#job-new').click(); const form = f.q('#job-create-form');
+  assert.equal(form.elements.reviewWrites.checked, false, 'writes run unreviewed unless asked');
+  form.elements.reviewWrites.checked = true; form.elements.intent.value = 'Deliver it'; form.dispatchEvent(f.event('submit'));
+  assert.equal(f.sent.at(-1).job.reviewWrites, true);
+  f.q('#job-dialog').close();
+  const job = placesJob(f);
+  f.q('[data-board="job1"] .job-card-open').click();
+  assert.equal(f.q('.job-flag.auto[aria-label^="Writes:"]').title, 'Writes: Auto. Writes are made when due, each with a receipt');
+  assert.equal(document.querySelectorAll('.job-write-review').length, 1, 'only the post asks for review itself');
+  f.q('#job-dialog').close();
+  job.reviewWrites = true; f.view.update(f.data); f.q('[data-board="job1"] .job-card-open').click();
+  assert.equal(f.q('.job-flag.you[aria-label^="Writes:"]').title, 'Writes: You review. Each write to Jira, Slack, Confluence or another place stops for you before it’s made');
+  assert.equal(document.querySelectorAll('.job-write-review').length, 5, 'every write now waits for review');
+  assert.match(f.q('[data-board="job1"] .job-card-open').title, /Writes: You review/);
+});
+
+test('plan review adds a write to somewhere else: named, optionally located, with the one instruction, and reviewed if asked', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs;
+  job.plan = { ...structuredClone(plan), stories: [], subJobs: [{ ...sub('api'), storyId: undefined, jiraKey: undefined }, sessionNode('report')] };
+  f.view.update(f.data); f.q('[data-job="job1"]').click();
+  f.q('[data-add-write="api"]').click();
+  let editor = f.q('[data-write-editor]');
+  editor.querySelector('[name="placeType"][value="other"]').checked = true; editor.querySelector('[name="placeType"][value="other"]').dispatchEvent(f.event('change'));
+  editor = f.q('[data-write-editor]');
+  assert.equal(editor.querySelector('.job-error').textContent, 'Name the place.');
+  assert.ok(editor.querySelector('[name="on"]'), 'a write elsewhere fires on a milestone like any other');
+  const set = (name, value) => { const e = f.q(`[data-write-editor] [name="${name}"]`); e.value = value; e.dispatchEvent(f.event('change')); };
+  set('name', 'Status page'); set('ref', 'https://status.example.com');
+  assert.equal(f.q('[data-write-editor] .job-error').textContent, 'Say what to do there.');
+  set('text', 'Post a resolved notice linking {pr.url}');
+  assert.equal(f.q('[data-write-editor] .job-error'), null);
+  assert.match(f.q('[data-write-editor] h4').textContent, /Write to Status page/);
+  assert.equal(f.q('[data-node="api-write"]').closest('details.job-place').querySelector('summary b').textContent, 'Status page');
+  assert.ok(f.q('[data-node="api-write"]').closest('details.job-place').classList.contains('other'), 'a place elsewhere is drawn dashed');
+  const review = f.q('[data-write-editor] [name="review"]'); review.checked = true; review.dispatchEvent(f.event('change'));
+  f.q('[data-write-done]').click();
+  f.q('[data-add-write="report"]').click();
+  editor = f.q('[data-write-editor]');
+  editor.querySelector('[name="placeType"][value="other"]').checked = true; editor.querySelector('[name="placeType"][value="other"]').dispatchEvent(f.event('change'));
+  assert.deepEqual([...f.q('[data-write-editor] [name="actionType"]').options].map((o) => o.textContent), ['Do something there', 'Made by Run report']);
+  set('name', 'Grafana'); set('actionType', 'make');
+  assert.match(f.q('[data-write-editor] .job-write-toggle').textContent, /once its session publishes it, it waits for you to accept it/);
+  set('what', 'p95 dashboard');
+  f.q('[data-action="approve-plan"]').click();
+  const sent = f.sent.at(-1).plan.subJobs.filter((s) => s.kind === 'write');
+  assert.deepEqual(sent.map((s) => [s.place, s.action, s.on, s.by, s.review]), [
+    [{ type: 'other', name: 'Status page', ref: 'https://status.example.com' }, { type: 'write', text: 'Post a resolved notice linking {pr.url}' }, { sub: 'api', at: 'deployed' }, undefined, true],
+    [{ type: 'other', name: 'Grafana' }, { type: 'make', what: 'p95 dashboard' }, undefined, 'report', false]]);
+});
+
+test('a write elsewhere in review is approved as Write to its name, sending only the edited instruction', (t) => {
+  const f = fixture(t);
+  withWrites(f, [], { stage: 'active', subJobs: [{ ...sub('api'), stage: 'pr', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', checkStatus: 'pending' } },
+    { id: 'status', kind: 'write', place: { type: 'other', name: 'Status page', ref: 'https://status.example.com' }, title: 'Write to Status page', after: [], on: { sub: 'api', at: 'pr' }, review: true, action: { type: 'write', text: 'Post a notice' }, stage: 'review', state: 'verified', sessions: [], repairs: [] }] });
+  f.q('[data-board="job1"] .job-card-open').click(); f.q('[data-open-sub="status"]').click();
+  assert.match(f.q('.job-write-hint').textContent, /nothing has been written to Status page yet/);
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Write to Status page', 'Skip']);
+  const panel = f.q('#job-write-review');
+  panel.querySelector('[name="text"]').value = 'Post a resolved notice';
+  panel.requestSubmit();
+  assert.deepEqual(f.sent.at(-1).write, { action: { text: 'Post a resolved notice' } });
+  panel.querySelector('[name="name"]').value = 'Statuspage'; panel.requestSubmit();
+  assert.deepEqual(f.sent.at(-1).write, { action: { text: 'Post a resolved notice' }, name: 'Statuspage' });
 });

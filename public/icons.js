@@ -5,6 +5,15 @@ const svg = (body, cls = '') => `<svg class="icon${cls ? ` ${cls}` : ''}" viewBo
 export const ROBOT_ICON = svg('<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>');
 export const PULL_REQUEST_ICON = svg('<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/>');
 export const PERSON_ICON = svg('<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>');
+export const TICKET_ICON = svg('<path d="M3 8a2 2 0 0 0 2-2h14a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2H5a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 7v2M14 11v2M14 15v2"/>');
+// The places a job writes to (public/jobs.js PLACES): generic strokes, never a
+// brand's logo. An artifact is ICONS.sparkle.
+export const SLACK_ICON = svg('<path d="M9 4L7 20M17 4l-2 16M4 9h16M3.5 15h16"/>');
+export const CONFLUENCE_ICON = svg('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 11h6M9 14.5h6M9 18h4"/>');
+export const FILE_ICON = svg('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M10.5 12l-2 2.5 2 2.5M13.5 12l2 2.5-2 2.5"/>');
+// Somewhere the presets do not name: a pin, since the human names the place.
+export const PIN_ICON = svg('<path d="M19 10c0 5.5-7 11-7 11s-7-5.5-7-11a7 7 0 0 1 14 0z"/><circle cx="12" cy="10" r="2.5"/>');
+export const GLOBE_ICON = svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>');
 export const ROCKET_PATH = '<path d="M12 2.5c3 2 5 5.5 5 9.5l-1.8 4H8.8L7 12c0-4 2-7.5 5-9.5z"/><circle cx="12" cy="9.5" r="1.6"/><path d="M9.5 19.5h5"/>';
 export const ICONS = {
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
@@ -40,5 +49,9 @@ export const ICONS = {
   grid: svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>'),
   // The rail button's glyph (index.js ICON), for the intro's picture of the rail.
   jobs: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16M5 8h2M11 11h2M17 8h2"/>'),
-  robot: ROBOT_ICON, pr: PULL_REQUEST_ICON, person: PERSON_ICON,
+  arrow: svg('<path d="M5 12h14M13 6l6 6-6 6"/>'),
+  sparkle: svg('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>'),
+  copy: svg('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
+  robot: ROBOT_ICON, pr: PULL_REQUEST_ICON, person: PERSON_ICON, ticket: TICKET_ICON,
+  slack: SLACK_ICON, confluence: CONFLUENCE_ICON, file: FILE_ICON, globe: GLOBE_ICON, pin: PIN_ICON,
 };

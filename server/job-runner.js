@@ -3,6 +3,7 @@ import { summariseComments, commentsBlockMerge } from './job-comments.js';
 import { awaitsTicket } from './jobs-schema.js';
 import { logWarn } from './log.js';
 import { isFrozen } from './job-replan.js';
+import { advanceWrite, dueWrites, failWrites } from './job-writes.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
@@ -46,7 +47,7 @@ export class JobRunner {
     for (const run of this.store.get(id).runs.filter(runnable)) {
       let error;
       const job = this.store.get(id);
-      // A cancelled job stops its planning/ticketing run the way a dropped
+      // A cancelled job stops its planning or write run the way a dropped
       // sub-job stops its step: quietly, no missing-receipt error.
       // So does a re-planning run whose plan change the human discarded.
       const cancelled = job.cancelledAt || (run.subJobId && job.subJobs.find((s) => s.id === run.subJobId)?.cancelledAt)
@@ -75,7 +76,7 @@ export class JobRunner {
           const s = j.subJobs.find((s) => s.id === r.subJobId);
           // On the run as well as the card: retry clears the card's, and the
           // history a later session reads (job-prompts.js) needs the run's.
-          if (error) { r.error = error; (s || j).error = error; }
+          if (error) { r.error = error; if (r.writes?.length) failWrites(j, r, error); else (s || j).error = error; }
         });
       } catch (e) {
         this.store.update(id, (j) => { j.error = shortError(e); });
@@ -143,13 +144,13 @@ export class JobRunner {
       }).catch((e) => console.error('[jobs] comment triage', e)).finally(() => this.pending.delete(done));
     this.triaging.set(key, { fingerprint: comments.fingerprint }); this.pending.add(done);
   }
-  async launch(job, sub, phase) {
+  async launch(job, sub, phase, extra) {
     // A plan change waiting on the human freezes every sub-job it may still
     // edit or cancel: no new step, no merge, no human approval (job-store.js).
     // Steps already running carry on, PRs keep being watched, and work past the
     // point of no return (a verify after deploy) lands as it would have.
     if (sub && this.store.get(job.id).replan && !isFrozen(sub)) return;
-    const run = this.store.claim(job.id, sub?.id || null, phase);
+    const run = this.store.claim(job.id, sub?.id || null, phase, extra);
     if (!run) return;
     try {
       await this.runtime.launch(job, sub, run, (sessionId, wt) => this.store.bindRun(job.id, run.id, sessionId, wt));
@@ -158,8 +159,10 @@ export class JobRunner {
       // Even a launch error may have created a process. Stop before releasing.
       await this.runtime.stop(latest);
       this.store.update(job.id, (j) => {
-        j.runs.find((r) => r.id === run.id).stopped = true;
-        (j.subJobs.find((s) => s.id === sub?.id) || j).error = shortError(e);
+        const r = j.runs.find((r) => r.id === run.id);
+        r.stopped = true;
+        if (r.writes?.length) failWrites(j, r, shortError(e));
+        else (j.subJobs.find((s) => s.id === sub?.id) || j).error = shortError(e);
       });
     }
   }
@@ -171,17 +174,9 @@ export class JobRunner {
     // one takes the ordinary road below — every sub-job is already in cleanup.
     if (job.cancelledAt && job.stage !== 'active') { if (!job.runs.some(runnable)) await this.finish(id); return; }
     if (job.stage === 'planning' && !job.plan && !activeFor(job)) { await this.launch(job, null, 'planning'); return; }
-    if (job.stage === 'jira' && !activeFor(job)) { await this.launch(job, null, 'jira'); return; }
     if (job.stage !== 'active') return;
     if (job.replan && !job.replan.proposal && !activeFor(job)) {
       await this.launch(job, null, 'planning');
-      job = this.store.get(id);
-    }
-    // A New ticket move can add a keyless story to a running job: ticketing is
-    // the same step, run again, and the sub-job waiting on that key starts once
-    // its receipt lands (job-store.js).
-    if (!job.replan && job.plan?.stories.some((s) => !s.key) && !activeFor(job)) {
-      await this.launch(job, null, 'jira');
       job = this.store.get(id);
     }
     for (const initial of job.subJobs) {
@@ -198,6 +193,13 @@ export class JobRunner {
           // moves only when the human marks it (job-store.js start-human /
           // finish-human), which is also why no clock or dependency gate applies:
           // the board shows it, and passing it by is the whole behaviour.
+        } else if (sub.stage === 'write') {
+          // A write never launches on its own: it falls due here (or stops for
+          // review), and every write due on this tick shares one session below;
+          // a made output waits on its session's receipt. A pending plan change
+          // may still edit or drop it, so it waits.
+          // Tried on this tick's copy first: an idle tick must not rewrite the file.
+          if (!job.replan && advanceWrite(job, sub, this.now())) this.store.update(id, (j) => advanceWrite(j, j.subJobs.find((s) => s.id === sub.id), this.now()));
         } else if (sub.stage === 'implementation') {
           // One session per PR: work, commit, push, open the PR. Every
           // prerequisite gates the start: the worktree is cut from the default
@@ -308,6 +310,17 @@ export class JobRunner {
       }
     }
     job = this.store.get(id);
+    // Batched: one short session for every write due now, so a story created on
+    // approval and three transitions on one merge cost one launch, not four.
+    // TODO(host-api jira:write, slack:write): a whole agent session for a
+    // one-line transition or post is the price of having no Jira or Slack
+    // client; a host-side one would make each write a call and its read-first
+    // rule a status compare.
+    const due = dueWrites(job);
+    if (due.length && !job.replan && !job.error && !activeFor(job) && this.allowed(id)) {
+      await this.launch(job, null, 'write', { writes: due.map((s) => s.id) });
+      job = this.store.get(id);
+    }
     if (job.subJobs.length && job.subJobs.every((s) => s.stage === 'done')) await this.finish(id);
   }
   // Delivered or cancelled, the job ends the same way: planning sessions and

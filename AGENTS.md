@@ -4,7 +4,7 @@ Developer notes for Wrangler² — the Agent Wrangler automated-jobs system as a
 installable extension. Only the non-obvious, durable things; point at code rather
 than re-deriving it. **Read `docs/PORTING.md` first**: the port is functionally
 complete on host API 1.31.0, and that file is the map (what came from where, what
-stands in for what, and which of the five open host-API gaps block which
+stands in for what, and which of the eight open host-API gaps block which
 feature).
 
 ## What this is
