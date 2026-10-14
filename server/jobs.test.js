@@ -633,6 +633,9 @@ test('a merged sub-job with nothing deployed past the stale window is flagged; a
   await f.tick(); assert.ok(f.sub().deploymentStale, 'an all-skipped merge deployed nothing');
   f.setDeployment({ status: 'pending', runs: [{ workflow: 'Deploy', runId: 7, status: 'pending' }], commit: 'merge1' });
   await f.tick(); assert.equal(f.sub().deploymentStale, null, 'a run in progress is a slow deploy, never stale');
+  f.setDeployment({ status: 'pending', runs: [{ workflow: 'Deploy', runId: 7, status: 'passing' }, { workflow: 'Build', runId: 8, status: 'cancelled' }], commit: 'merge1' });
+  await f.tick(); assert.deepEqual(f.sub().deploymentStale, { since: f.sub().mergedAt, cancelled: ['Build'] }, 'a cancellation nothing replaced goes to the human');
+  assert.ok(!f.sub().error, 'and is never a failed deploy');
 });
 
 // --- Moves ---
@@ -2163,6 +2166,45 @@ test('deployment observer discovers the runs GitHub started for the exact merge 
   gh.run = async () => JSON.stringify([{ ...good, databaseId: 9, conclusion: 'failure' }, { ...good, databaseId: 9, attempt: 2 }]);
   const rerun = await gh.deployment(sub);
   assert.equal(rerun.status, 'passing'); assert.equal(rerun.runs.length, 1);
+});
+
+test('a cancelled post-merge run is judged by the later run on the same branch that contains the merge', async () => {
+  const sub = { repo: '/repo', pr: { mergeCommit: 'merged', base: 'main' } };
+  const base = { headBranch: 'main', event: 'push', status: 'completed', attempt: 1, workflowName: 'Build' };
+  const cancelled = { ...base, databaseId: 10, headSha: 'merged', conclusion: 'cancelled' };
+  const sibling = { ...base, databaseId: 11, headSha: 'sibling', conclusion: 'success' };
+  const next = { ...base, databaseId: 12, headSha: 'next', status: 'in_progress', conclusion: '' };
+  let later = [next, sibling]; const calls = [];
+  const gh = new JobGithub(async (_bin, args) => {
+    calls.push(args);
+    if (args.includes('--commit')) return JSON.stringify([cancelled]);
+    if (args[0] === 'run') return JSON.stringify(later);
+    return args[1].endsWith('merged...next') ? 'ahead' : 'behind';
+  });
+  let result = await gh.deployment(sub);
+  assert.equal(result.status, 'pending', 'the replacement is still running');
+  assert.deepEqual(result.runs[0], { workflow: 'Build', runId: 12, url: undefined, status: 'pending', conclusion: null, supersedes: 10, commit: 'next' });
+  const list = calls.find((a) => a[0] === 'run' && a.includes('--workflow'));
+  assert.deepEqual(list.slice(0, 8), ['run', 'list', '--workflow', 'Build', '--branch', 'main', '--event', 'push']);
+
+  later = [sibling, { ...next, status: 'completed', conclusion: 'success' }];
+  assert.equal((await gh.deployment(sub)).status, 'passing');
+  assert.equal(calls.filter((a) => a[0] === 'api' && a[1].endsWith('merged...next')).length, 1, 'containment is asked once per pair');
+  later = [{ ...next, status: 'completed', conclusion: 'failure' }];
+  assert.equal((await gh.deployment(sub)).status, 'failing', 'a red build containing the merge is a red merge');
+
+  later = [sibling];
+  result = await gh.deployment(sub);
+  assert.equal(result.status, 'pending', 'a run on a commit without the merge is not evidence');
+  assert.equal(result.runs[0].status, 'cancelled'); assert.equal(result.runs[0].runId, 10);
+  later = [{ ...next, status: 'completed', conclusion: 'cancelled' }, { ...next, databaseId: 13, headSha: 'after', status: 'completed', conclusion: 'success' }];
+  gh.run = async (_bin, args) => args.includes('--commit') ? JSON.stringify([cancelled]) : args[0] === 'run' ? JSON.stringify(later) : 'ahead';
+  result = await gh.deployment(sub);
+  assert.equal(result.status, 'passing', 'a replacement cancelled in turn hands on to the next');
+  assert.equal(result.runs[0].runId, 13);
+  gh.run = async (_bin, args) => args.includes('--commit') ? JSON.stringify([cancelled, { ...cancelled, databaseId: 20, workflowName: 'Deploy', conclusion: 'success' }])
+    : args[0] === 'run' ? '[]' : 'ahead';
+  assert.equal((await gh.deployment(sub)).status, 'pending', 'an unreplaced cancellation holds back a green sibling');
 });
 
 // --- Changing the plan of a running job ---

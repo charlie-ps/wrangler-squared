@@ -32,8 +32,12 @@ export function prSummary(pr) {
     base: pr.baseRefName, mergeCommit: pr.mergeCommit?.oid || null,
     checkStatus, checks, mergeWithAdmin, behind, dirty: pr.mergeStateStatus === 'DIRTY', mergeState: pr.mergeStateStatus || null, reviewDecision: pr.reviewDecision };
 }
+const verdict = (run) => ({ workflow: run.workflowName, runId: run.databaseId, url: run.url,
+  status: run.status !== 'completed' ? 'pending' : run.conclusion === 'success' ? 'passing'
+    : run.conclusion === 'skipped' ? 'skipped' : 'failing',
+  conclusion: run.conclusion || null });
 export class JobGithub {
-  constructor(run = runFile) { this.run = run; }
+  constructor(run = runFile) { this.run = run; this.contains = new Map(); }
   async pr(sub) {
     const fields = 'url,title,state,isDraft,headRefOid,headRefName,baseRefName,mergeCommit,mergeStateStatus,mergeable,reviewDecision,statusCheckRollup';
     const raw = JSON.parse(await this.run('gh', ['pr', 'view', sub.pr.url, '--json', fields], sub.repo));
@@ -162,12 +166,45 @@ export class JobGithub {
     // A skipped run is GitHub saying the workflow did not apply to this commit —
     // not a failure worth a recovery job, but not deployment evidence either, so
     // it neither blocks nor satisfies. All-skipped therefore reads as silence.
-    const results = [...latest.values()].map((run) => ({ workflow: run.workflowName, runId: run.databaseId, url: run.url,
-      status: run.status !== 'completed' ? 'pending' : run.conclusion === 'success' ? 'passing'
-        : run.conclusion === 'skipped' ? 'skipped' : 'failing',
-      conclusion: run.conclusion || null }));
+    const results = await Promise.all([...latest.values()].map(async (run) => run.conclusion === 'cancelled'
+      ? this.successor(sub, run) : verdict(run)));
+    // A cancelled run nothing has replaced yet holds the verdict like a pending
+    // one, but is not one: the runner flags it stale rather than waiting forever.
     return { status: results.some((r) => r.status === 'failing') ? 'failing'
-      : results.some((r) => r.status === 'passing') && !results.some((r) => r.status === 'pending') ? 'passing' : 'pending',
+      : results.some((r) => r.status === 'passing') && !results.some((r) => ['pending', 'cancelled'].includes(r.status)) ? 'passing' : 'pending',
       runs: results, commit: sub.pr.mergeCommit };
+  }
+  // A cancelled push run is almost always a concurrency group replacing a queued
+  // run with a newer push, so the merge is judged by the first later run of the
+  // same workflow on the same branch whose commit contains it. Later runs are
+  // walked oldest first: on a linear branch the first that contains the merge is
+  // the one that built it soonest, and one cancelled in turn is skipped for the
+  // next. A run on a commit that does not contain the merge (a sibling that
+  // landed first) is never evidence. Nothing yet is `cancelled`, not failing —
+  // GitHub may still queue the successor, and a hand-cancelled run is the
+  // human's call, not a recovery job's.
+  async successor(sub, run) {
+    const cancelled = { ...verdict(run), status: 'cancelled' };
+    if (!run.headBranch) return cancelled;
+    const later = JSON.parse(await this.run('gh', ['run', 'list', '--workflow', run.workflowName, '--branch', run.headBranch,
+      '--event', run.event, '--limit', '50', '--json', 'databaseId,headSha,status,conclusion,url,workflowName,attempt'], sub.repo))
+      .filter((r) => r.databaseId > run.databaseId && r.headSha !== run.headSha)
+      .sort((a, b) => a.databaseId - b.databaseId || a.attempt - b.attempt);
+    const runs = new Map();
+    for (const r of later) runs.set(r.databaseId, r);
+    let covered = false;
+    for (const r of runs.values()) {
+      covered ||= await this.includes(sub, run.headSha, r.headSha);
+      if (covered && r.conclusion !== 'cancelled') return { ...verdict(r), supersedes: run.databaseId, commit: r.headSha };
+    }
+    return cancelled;
+  }
+  async includes(sub, commit, head) {
+    const key = `${sub.repo}\0${commit}\0${head}`;
+    if (!this.contains.has(key)) {
+      const status = await this.run('gh', ['api', `repos/{owner}/{repo}/compare/${commit}...${head}`, '--jq', '.status'], sub.repo);
+      this.contains.set(key, ['ahead', 'identical'].includes(status));
+    }
+    return this.contains.get(key);
   }
 }

@@ -1151,6 +1151,8 @@ test('a merged sub-job with no post-merge run turns amber, joins Needs me and sa
   f.q('[data-sub="api"]').click();
   assert.match(hint(f), /No GitHub Actions run has started for merge commit abcdef12 in 40 min/);
   assert.match(hint(f), /Mark position: done/, 'it says what the human can do about it');
+  watching.deploymentStale = { since: watching.mergedAt, cancelled: ['Build'] }; f.view.update(f.data);
+  assert.match(hint(f), /Build was cancelled on merge commit abcdef12 and no later run that includes it has started in 40 min/);
   assert.equal(f.q('.job-event b').textContent, 'Nothing deployed');
   assert.equal(jobStatus(job, { ...watching, stage: 'cleanup', deploymentStale: watching.deploymentStale }).text, 'Queued', 'stale is only meaningful while watching');
 });

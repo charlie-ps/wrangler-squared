@@ -289,14 +289,17 @@ export class JobRunner {
             s.deploymentResult = result; s.observationError = null; s.nextPollAt = this.now() + 30000;
             // NOTHING running this long after the merge means the workflows said
             // this push deploys and GitHub disagrees — nothing triggered, or
-            // everything that did was skipped. Silence can never be read as
+            // everything that did was skipped, or a cancelled run that no later
+            // run containing the merge has replaced. Silence can never be read as
             // success (it is indistinguishable from a run not yet queued), so it
             // goes to the human rather than completing the sub-job. A run in
             // progress is just a slow deploy and is never stale. Pre-existing
             // sub-jobs have no mergedAt; count from their first observation.
             s.mergedAt ??= this.now();
-            const silent = result.status === 'pending' && !result.runs.some((r) => r.status !== 'skipped');
-            s.deploymentStale = silent && this.now() - s.mergedAt > staleMs ? { since: s.mergedAt } : null;
+            const silent = result.status === 'pending' && !result.runs.some((r) => r.status === 'pending');
+            const cancelled = result.runs.filter((r) => r.status === 'cancelled').map((r) => r.workflow);
+            s.deploymentStale = silent && this.now() - s.mergedAt > staleMs
+              ? { since: s.mergedAt, ...(cancelled.length ? { cancelled } : {}) } : null;
           });
           if (!this.allowed(id)) continue;
           job = this.store.get(id); sub = job.subJobs.find((s) => s.id === sub.id);

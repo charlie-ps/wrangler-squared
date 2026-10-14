@@ -40,7 +40,14 @@ function commentsHtml(sub, shown) {
 
 const minutesSince = (at) => Math.max(1, Math.round((Date.now() - at) / 60000));
 const when = (at) => at ? new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
-const staleHint = (sub) => deploymentStalled(sub) ? `No GitHub Actions run has started for merge commit ${(sub.pr?.mergeCommit || '').slice(0, 8)} in ${minutesSince(sub.deploymentStale.since)} min. If this repository does not deploy for these paths, Mark position: done. Wrangler keeps polling in case a run appears.` : '';
+const staleHint = (sub) => {
+  if (!deploymentStalled(sub)) return '';
+  const commit = (sub.pr?.mergeCommit || '').slice(0, 8), minutes = minutesSince(sub.deploymentStale.since);
+  const cancelled = sub.deploymentStale.cancelled || [];
+  return cancelled.length
+    ? `${cancelled.join(', ')} was cancelled on merge commit ${commit} and no later run that includes it has started in ${minutes} min. If it was cancelled on purpose, Mark position: done. Wrangler keeps polling in case a run appears.`
+    : `No GitHub Actions run has started for merge commit ${commit} in ${minutes} min. If this repository does not deploy for these paths, Mark position: done. Wrangler keeps polling in case a run appears.`;
+};
 // What happened and what the agent suggested, in the danger register: the one box
 // a human reads before choosing a move. Title, detail and the suggestion are all
 // agent- or observation-written, so every one of them is escaped.
@@ -887,7 +894,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       body = `${sub.stage === 'review' && sub.ready ? `<h3>Ready for review</h3>${receiptHtml(sub.ready.checks)}` : ''}
         ${sub.pr?.checks?.length ? `<h3>Checks</h3><ul class="job-checks">${sub.pr.checks.map((c) => `<li class="${checkTone(c.state)}">${checkMark(c.state)} ${esc(c.name)} <small>${esc(c.state.toLowerCase())}</small></li>`).join('')}</ul>` : ''}
         ${sub.pr ? commentsHtml(sub, commentsShown) : ''}
-        ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}</small></li>`).join('')}</ul>` : ''}
+        ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
         ${sub.deployed ? `<h3>Landed</h3>${receiptHtml(sub.deployed.checks)}` : ''}${noteFor(sub)}`;
       actions = `${codeAwaitingReview(sub) && !sub.error && !held ? `<button class="primary" data-action="approve-code" title="${esc(hints.find((h) => h.startsWith('Nothing is committed')) || '')}">${ICONS.check}Approve &amp; ${sub.pr ? 'push' : 'open PR'}</button>` : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="Merge head ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}${fabMove}
         ${sub.worktree && sub.stage !== 'done' ? `<button id="job-diff">${ICONS.code}Review code in Wrangler</button>` : ''}${sub.worktree?.path && sub.stage !== 'done' ? `<button id="job-ide">Review code in ${esc(ideApp())}</button>` : ''}${session}${retry}
