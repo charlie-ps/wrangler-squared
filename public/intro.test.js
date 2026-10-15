@@ -50,7 +50,7 @@ test('Next, Back and the stepper walk the steps; only the current one is readabl
   let started = 0;
   const storage = memoryStorage();
   createIntro({ storage, onNewJob: () => { started += 1; } }).open();
-  assert.deepEqual(INTRO_STEPS.map((s) => s.tab), ['Welcome', 'Jobs', 'New job', 'Sub-jobs', 'Needs you', 'Receipts', 'Reviews', 'Jira', 'Start']);
+  assert.deepEqual(INTRO_STEPS.map((s) => s.tab), ['Welcome', 'Jobs', 'New job', 'Sub-jobs', 'Needs you', 'Receipts', 'See it working', 'Reviews', 'Writes', 'Start']);
   assert.equal(p.q('.intro-count').textContent, `1 of ${INTRO_STEPS.length}`);
   assert.ok(p.q('[data-intro="back"]').hidden, 'no Back on the first step');
   assert.equal(document.querySelectorAll('.intro-panel:not([inert])').length, 1, 'every step is laid out, one is live');
@@ -129,7 +129,7 @@ test('with reduced motion each live figure holds a finished frame and nothing ti
 
 test('the arrow keys step through, and the review checkpoints are a picture that switches in place', (t) => {
   const p = page(t);
-  createIntro({ storage: memoryStorage() }).open(6);
+  createIntro({ storage: memoryStorage() }).open(7);
   assert.match(p.title(), /stops for you\./);
   const row = () => p.q('.intro-checkpoint[data-checkpoint="reviewMerge"]');
   assert.deepEqual([...p.window.document.querySelectorAll('.intro-checkpoint .job-review-name')].map((n) => n.firstChild.textContent), ['Plan', 'Code', 'Merge', 'Session results', 'Writes', 'Red steps'], 'all six checkpoints, in the form’s words');
@@ -149,9 +149,50 @@ test('the arrow keys step through, and the review checkpoints are a picture that
   assert.equal(p.window.document.activeElement, toggle(), 'focus stays on the toggle');
   assert.equal(p.window.document.activeElement.form, null, 'the picture is no form’s field');
   p.q('#jobs-intro').dispatchEvent(new p.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-  assert.match(p.title(), /Work with tickets/);
+  assert.match(p.title(), /kept up to date/);
   p.q('#jobs-intro').dispatchEvent(new p.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
   assert.match(p.title(), /stops for you\./);
+});
+
+const step = (tab) => INTRO_STEPS.findIndex((s) => s.tab === tab);
+const still = (tab) => { const s = INTRO_STEPS[step(tab)]; const el = document.createElement('div'); el.innerHTML = s.figure({}, s.anim?.still ?? 0); return el; };
+
+test('New job shows the planner’s branch and an Add idea example drawn in full, never in a scrolling field', (t) => {
+  page(t);
+  const el = still('New job');
+  assert.equal(el.querySelector('.job-plan-branch').textContent, 'next');
+  assert.equal(el.querySelector('.job-change textarea'), null, 'a one-row textarea would scroll the example');
+  assert.equal(el.querySelector('.job-change-text').textContent, 'Design the export button first, and land it on next');
+  assert.equal(el.querySelectorAll('button, input, textarea, [tabindex]').length, 0, 'nothing in the picture takes focus');
+});
+
+test('Sub-jobs draws three kinds and the places a session writes to; Jira is a place, not a kind', (t) => {
+  page(t);
+  const el = still('Sub-jobs');
+  assert.deepEqual([...el.querySelectorAll('.intro-kind')].map((k) => k.textContent), ['PR', 'Session', 'Human']);
+  assert.deepEqual([...el.querySelectorAll('.job-place-chip b')].map((b) => b.textContent), ['Jira', 'Slack', 'Confluence', 'Artifact', 'File', 'Web page']);
+});
+
+test('Needs you plays a red step that Wrangler fixes uncounted, then a fix that waits on you', (t) => {
+  page(t);
+  const seen = frames(step('Needs you')).map((el) => [el.querySelector('.job-status').textContent, el.querySelector('.intro-count-pill').textContent]);
+  assert.deepEqual(seen.slice(0, 3), [['Ready for your review', '2'], ['Checks failing', '2'], ['Fixing · try 1 of 2', '1']], 'fixing is not counted');
+  assert.deepEqual(seen.at(-1), ['Fix ready · Review fix', '2']);
+});
+
+test('See it working fills the Show me grid from the board’s own markup, then leaves the preview running, all inert', (t) => {
+  page(t);
+  const els = frames(step('See it working'));
+  assert.deepEqual(els.map((el) => el.querySelectorAll('.job-proof-card:not(.wn-pending)').length), [0, 1, 2, 3, 3, 3]);
+  assert.equal(els[2].querySelector('.job-running'), null, 'nothing is running until the proof is in');
+  assert.match(els.at(-1).querySelector('.job-running').textContent, /Running for you/);
+  assert.ok(els.at(-1).querySelector('.intro-inert').hasAttribute('inert'), 'its buttons and link do nothing here, so nobody can reach them');
+});
+
+test('Writes ends with a receipt for every write, one of them already done', (t) => {
+  page(t);
+  const lines = [...still('Writes').querySelectorAll('.intro-jira-row small')].map((n) => n.textContent);
+  assert.deepEqual(lines, ['Written Claude artifact ↗', 'Written WEB-214 ↗', 'Already done', 'Written #team-web ↗']);
 });
 
 test('reopens from the Jobs header and from Automation settings', (t) => {

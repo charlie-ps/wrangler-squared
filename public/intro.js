@@ -1,6 +1,7 @@
 import { ICONS } from './icons.js';
 import { layoutGraphEdges, rocketHtml } from './job-graph.js';
 import { CHECKPOINTS, checkpointFlagHtml, checkpointHint, checkpointToggleHtml } from './jobs.js';
+import { composer, proofFigure, runningBar } from './figs.js';
 
 // The "How Jobs works" walkthrough: shown once to every browser that has not
 // dismissed it (installed today or long ago), then only on request from the Jobs
@@ -11,7 +12,7 @@ export const SEEN_KEY = 'introSeen';
 
 const W2 = 'Wrangler<sup>2</sup>';
 const node = (tone, icon, title, status, state, on = false) => `<div class="job-node tone-${tone}"><span class="job-node-tile${on ? ' on' : ''}">${ICONS[icon]}${state ? `<span class="job-node-state">${ICONS[state]}</span>` : ''}</span><span class="job-node-title">${title}</span>${status ? `<span class="job-status">${status}</span>` : ''}</div>`;
-const jiraRow = (tone, icon, title, status, state, on = false) => `<div class="intro-jira-row tone-${tone}"><span class="job-node-tile${on ? ' on' : ''}">${ICONS[icon]}<span class="job-node-state">${ICONS[state]}</span></span><span><b>${title}</b><small>${status}</small></span></div>`;
+const writeRow = (tone, icon, title, status, state, on = false) => `<div class="intro-jira-row tone-${tone}"><span class="job-node-tile${on ? ' on' : ''}">${ICONS[icon]}<span class="job-node-state">${ICONS[state]}</span></span><span><b>${title}</b><small>${status}</small></span></div>`;
 const kind = (tone, icon, label) => `<div class="intro-kind tone-${tone}"><span class="job-node-tile">${ICONS[icon]}</span>${label}</div>`;
 
 // The two live figures share the job-state.js vocabulary: [tone, state glyph, solid tile].
@@ -86,6 +87,52 @@ const YOU = `<b class="intro-cp you">${ICONS.hand}You review</b>`;
 const AUTO = `<b class="intro-cp">${ICONS.ff}Auto</b>`;
 const checkpointsFigure = (reviews) => `<div class="intro-checkpoints">${CHECKPOINTS.map((cp) => `<div class="job-review intro-checkpoint" data-checkpoint="${cp.field}"><div class="job-review-row">${checkpointFlagHtml(cp, reviews[cp.field])}<span class="job-review-name">${cp.name}<small>${checkpointHint(cp, reviews[cp.field])}</small></span>${checkpointToggleHtml(cp, reviews[cp.field], `intro-${cp.field}`)}</div></div>`).join('')}</div>`;
 
+// New job: the flow, the branch the planner chose, and Add idea under the plan.
+const newJobFigure = () => `<div class="intro-flow">${node('ok', 'edit', 'Describe', 'Done', 'check')}<span class="intro-flow-line"></span>${node('run', 'robot', 'Plan', 'Planning', 'spin', true)}<span class="intro-flow-line"></span>${node('warn', 'eye', 'Approve', 'Needs you', 'eye')}</div>
+  <div class="job-chips"><span class="job-chip job-plan-branch">${ICONS.branch}<span>next</span></span><span class="job-chip">${ICONS.pr}<span>2 PRs · 1 session</span></span></div>
+  ${composer('Planner', 'Add an idea for the planner…', 'Redraws the plan for you to review.', 'Design the export button first, and land it on next')}`;
+
+// Sub-jobs: three kinds of tile, and the places a session writes to as pills.
+const placePill = (icon, label, tone = 'idle', on = false) => `<span class="job-place-chip">${ICONS[icon]}<b>${label}</b><span class="job-place-dots"><span class="job-place-dot tone-${tone}${on ? ' on' : ''}"></span></span></span>`;
+const kindsFigure = () => `<div class="intro-kinds">${kind('run', 'pr', 'PR')}${kind('run', 'robot', 'Session')}${kind('warn', 'person', 'Human')}</div>
+  <span class="intro-label">Places a session writes to</span>
+  <div class="job-places intro-places">${placePill('ticket', 'Jira')}${placePill('slack', 'Slack')}${placePill('confluence', 'Confluence')}${placePill('sparkle', 'Artifact')}${placePill('file', 'File')}${placePill('globe', 'Web page')}</div>`;
+
+// Needs you: one card going red, Wrangler fixing it while it is not counted, then the fix waiting on you.
+const RED = [
+  { tone: 'warn', glyph: 'eye', seg: ['warn', 'eye'], line: 'Ready for your review', need: 1, chip: null },
+  { tone: 'bad', glyph: 'x', seg: ['bad', 'x'], line: 'Checks failing', need: 1, chip: ['bad', 'x', 'Checks failing'] },
+  { tone: 'run', glyph: 'spin', seg: ['run', 'spin'], line: 'Fixing · try 1 of 2', need: 0, chip: ['run', 'wrench', 'Wrangler is fixing it'] },
+  { tone: 'run', glyph: 'spin', seg: ['run', 'spin'], line: 'Fixing · try 1 of 2', need: 0, chip: ['run', 'wrench', 'Only this step and the next wait'] },
+  { tone: 'warn', glyph: 'eye', seg: ['warn', 'eye'], line: 'Fix ready · Review fix', need: 1, chip: ['warn', 'eye', 'Fix ready'] },
+  { tone: 'warn', glyph: 'eye', seg: ['warn', 'eye'], line: 'Fix ready · Review fix', need: 1, chip: ['warn', 'eye', 'Fix ready'] },
+];
+const needsFigure = (phase) => {
+  const f = RED[phase];
+  return `<article class="job-card tone-${f.tone}"><div class="job-card-open"><span class="job-avatar">${ICONS[f.glyph]}</span><strong>Rotate the staging client secret</strong></div><div class="job-progress"><span class="job-seg tone-ok">${ICONS.check}</span><span class="job-seg tone-${f.seg[0]}">${ICONS[f.seg[1]]}</span><span class="job-seg tone-idle planned">${ICONS.planned}</span></div><footer><span class="job-status">${f.line}</span><span class="job-card-cost">$1.84</span></footer></article><div class="job-chips"><span class="intro-chip-on">${ICONS.eye}Needs me <span class="intro-count-pill">${f.need + 1}</span></span>${f.chip ? `<span class="job-chip job-chip-state tone-${f.chip[0]}">${ICONS[f.chip[1]]}<span>${f.chip[2]}</span></span>` : ''}</div>`;
+};
+
+// See it working: the proof grid filling in, then the preview left running.
+const SEE = [[0, 'none'], [1, 'none'], [2, 'none'], [3, 'on'], [3, 'on'], [3, 'on']];
+// Inert: the board's own cards and bar carry buttons and a link that do nothing here.
+const seeFigure = (phase) => `<div class="intro-inert" inert>${proofFigure(SEE[phase][0])}${runningBar(SEE[phase][1])}</div>`;
+
+// Writes: a design to approve, then a ticket moved and the team told, each with its receipt.
+const WRITES = scenes([
+  { a: ['run', 'spin', 'Publishing', true], t: ['idle', 'planned', 'Queued'], d: ['idle', 'planned', 'After it merges'], s: ['idle', 'planned', 'After the ticket'] },
+  { a: ['ok', 'check', 'Written <u>Claude artifact ↗</u>', true], t: ['run', 'spin', 'Writing', true] },
+  { t: ['ok', 'check', 'Written <u>WEB-214 ↗</u>', true] },
+  { d: ['run', 'spin', 'Writing', true] },
+  { d: ['ok', 'check', 'Already done', true], s: ['run', 'spin', 'Writing', true] },
+  { s: ['ok', 'check', 'Written <u>#team-web ↗</u>', true] },
+  {},
+]);
+const writesFigure = (phase) => {
+  const row = ([tone, state, line, on], icon, title) => writeRow(tone, icon, title, line, state, on);
+  const f = WRITES[phase];
+  return `<div class="intro-jira">${row(f.a, 'sparkle', 'Publish the design for you to approve')}${row(f.t, 'ticket', 'Create WEB-214 with the design linked')}${row(f.d, 'ticket', 'Move WEB-214 to Done')}${row(f.s, 'slack', 'Post in #team-web: what changed')}</div>`;
+};
+
 // `anim` steps redraw their figure every `ms`; `still` is the frame shown with
 // reduced motion. `stack` puts the figure under the heading at full width.
 export const INTRO_STEPS = [
@@ -96,26 +143,40 @@ export const INTRO_STEPS = [
     body: `<p>${W2} adds <b>automated jobs</b> to Agent Wrangler. You describe a goal; it splits the goal into sub-jobs, starts agent sessions for them, and stops for you wherever you’ve asked to review.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board.</p>`,
     cls: 'intro-board', anim: { frames: BOARD_FRAMES.length, ms: 1600, still: 2 },
     figure: (reviews, phase) => board(phase) },
-  { tab: 'New job', title: 'New job, then a plan you approve before anything runs.',
-    body: `<p>Press <b>New job</b> and write the outcome you want. ${W2} drafts a <b>plan</b>, splitting work into ordered tasks.</p><p>Iterate on the plan until you’re happy, then <b>Approve</b>. By default nothing runs before you approve: no session, ticket or PR. If you trust a job, set its Plan checkpoint to Auto and it starts as soon as the plan is drafted. You can also save a job to the backlog and start it later.</p>`,
-    figure: () => `<div class="intro-flow">${node('ok', 'edit', 'Describe', 'Done', 'check')}<span class="intro-flow-line"></span>${node('run', 'robot', 'Plan', 'Planning', 'spin', true)}<span class="intro-flow-line"></span>${node('warn', 'eye', 'Approve', 'Needs you', 'eye')}</div>` },
-  { tab: 'Sub-jobs', title: 'Four kinds of sub-job for every kind of task.',
-    body: '<p>The kind sits on the corner of every tile in the stepper. Hover a tile to see what it is.</p><p>A <b>PR</b> works in a worktree, opens a pull request, waits for checks, merges and confirms the deploy. A <b>session</b> runs on this machine with no pull request. A <b>human</b> step is yours alone, and the job waits for it. A <b>Jira</b> step creates or updates tickets.</p>',
-    figure: () => `<div class="intro-kinds">${kind('run', 'pr', 'PR')}${kind('run', 'robot', 'Session')}${kind('warn', 'person', 'Human')}${kind('idle', 'story', 'Jira')}</div>` },
-  { tab: 'Needs you', title: 'Amber means it is waiting on you.',
-    body: `<p>Each job is a card coloured by its state: blue while agents work, <b>amber when it needs you</b>, red when something failed, green when delivered. A job turns amber at each checkpoint you marked ${YOU}, and whenever an agent is stuck and needs your decision.</p><p>The <b>Needs me</b> chip filters the board down to those cards, and the rail badge counts them from any view. Open a card to see the plan, the agent’s receipt and the moves you can make.</p>`,
-    figure: () => `<article class="job-card tone-warn"><div class="job-card-open"><span class="job-avatar">${ICONS.eye}</span><strong>Rotate the staging client secret</strong></div><div class="job-progress"><span class="job-seg tone-ok">${ICONS.check}</span><span class="job-seg tone-warn">${ICONS.eye}</span><span class="job-seg tone-idle planned">${ICONS.planned}</span></div><footer><span class="job-status">Ready for your review</span><span class="job-card-cost">$1.84</span></footer></article><div class="job-chips"><span class="intro-chip-on">${ICONS.eye}Needs me <span class="intro-count-pill">2</span></span><span class="job-chip job-chip-state tone-bad">${ICONS.x}<span>Checks failing</span></span></div>` },
-  { tab: 'Receipts', title: 'Sloptimized: don’t read another line of slop.',
-    body: '<p>Every agent ends its step with a <b>receipt</b>: a few bullets of a few words each, like a quick update from another developer. A blocked step is one sentence that names the move it suggests.</p><p>PR comments are summed up as a green, amber or red verdict. Explanations sit in tooltips and folded sections, so the full transcript is there when you want it and out of the way when you don’t.</p>',
+  { tab: 'New job',
+    title: 'New job, then a plan you approve before anything runs.',
+    body: `<p>Press <b>New job</b> and describe the outcome, in words or with screenshots. ${W2} drafts a <b>plan</b> of ordered sub-jobs and picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>To change the plan, write in <b>Add idea</b> under it. Nothing runs until you <b>Approve</b>: no session, ticket or PR. Ask it to “design it first” and the plan starts with a design for you to sign off. You can also save a job to the backlog and start it later.</p>`,
+    figure: () => newJobFigure() },
+  { tab: 'Sub-jobs',
+    title: 'Three kinds of sub-job, and the places they write to.',
+    body: '<p>The kind sits on the corner of every tile in the stepper. Hover a tile to see what it is.</p><p>A <b>PR</b> works in a worktree, shows you it working, opens a pull request, waits for checks, merges and confirms the deploy. A <b>session</b> runs on this machine with no pull request. A <b>human</b> step is yours alone, and the job waits for it.</p><p>A session can also write to places outside the board: a Jira ticket, a Slack channel, a Confluence page, or a Claude artifact it publishes. Each place is a pill under the session that writes to it.</p>',
+    figure: () => kindsFigure() },
+  { tab: 'Needs you',
+    title: 'Amber means it is waiting on you.',
+    body: `<p>Each job is a card coloured by its state: blue while agents work, <b>amber when it needs you</b>, red when something failed, green when delivered. A job turns amber at each checkpoint you marked ${YOU}, and whenever an agent needs your decision. The <b>Needs me</b> chip filters the board down to those cards.</p><p>Red goes to ${W2}’s planner first. It fixes the step or changes the plan while the rest of the job carries on, and only that step and the ones after it wait. If it can’t, the step is <b>declared red</b> and waits for you to decide.</p>`,
+    anim: { frames: RED.length, ms: 1500, still: 4 },
+    figure: (reviews, phase) => needsFigure(phase) },
+  { tab: 'Receipts',
+    title: 'Sloptimized: don’t read another line of slop.',
+    body: '<p>Every agent ends its step with a <b>receipt</b>: a few bullets of a few words each, like a quick update from another developer. A blocked step is one sentence saying what stopped it.</p><p>PR comments are summed up as a green, amber or red verdict. Explanations sit in tooltips and folded sections, so the full transcript is there when you want it and out of the way when you don’t.</p>',
     figure: () => `<span class="intro-label">Without it</span><div class="intro-slop" aria-hidden="true">You’re right to ask. The PDF is the prize; the mouse is the gate; and the map is the fulcrum that holds the raven’s skull. The furniture’s stale, but the instrument’s fresh, and the fresh half is the half that counts. I deleted your home directory.</div><span class="intro-label">With ${W2}</span><ul class="job-receipt"><li><span>✓</span>Build passed</li><li><span>✓</span>Tests passed</li><li><span>✓</span>Expired links rejected</li></ul>` },
-  { tab: 'Reviews', title: 'You choose where a job stops for you.',
-    body: `<p>Every job has five review checkpoints: the plan, the code, the merge, session results, and writes to Jira, Slack, Confluence or other places. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself. You choose them on each New job form. It starts from the defaults in <b>Automation settings</b>, where all but Writes start on You review.</p><p>To stop everything at once, press <b>Pause</b> in the Jobs header. No new work starts until you resume.</p>`,
+  { tab: 'See it working',
+    title: 'See each PR working before you read its diff.',
+    body: `<p>The plan lists what each PR must <b>show you</b>, and you can edit the list. The agent captures each item from the running build, as a screenshot, a recording or a command’s output, before anything is committed.</p><p>What it started stays <b>running for you</b> to try. Ask its session about it, or for a change, in <b>Add idea</b>: it stays open while you review and answers from what it built. Approve, and ${W2} stops everything it started.</p>`,
+    cls: 'intro-see', anim: { frames: SEE.length, ms: 1300, still: 3 },
+    figure: (reviews, phase) => seeFigure(phase) },
+  { tab: 'Reviews',
+    title: 'You choose where a job stops for you.',
+    body: `<p>Every job has six checkpoints: the plan, the code, the merge, session results, writes to other places, and red steps. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself, so a Plan on Auto starts as soon as it is drafted. For red steps you choose <b>You decide</b> or <b>Wrangler replans</b>.</p><p>New job starts from the defaults in <b>Automation settings</b>, where all but Writes start on You review. To stop everything at once, press <b>Pause</b> in the Jobs header.</p>`,
     figure: (reviews) => checkpointsFigure(reviews) },
-  { tab: 'Jira', title: `Work with tickets? ${W2} has you covered.`,
-    body: `<p>When you work with tickets, ${W2} will notice and suggest when you need a new ticket, or when your existing tickets can be marked as Done. Jobs without tickets skip Jira entirely.</p><p>Every write is made by a session in the plan, which reports each one as <b>written</b>, <b>already</b> done or <b>failed</b> with Jira’s own error; a write you review is drafted first and waits for you.</p>`,
-    figure: () => `<div class="intro-jira">${jiraRow('ok', 'story', 'Create ZCT-7', 'Written', 'check', true)}${jiraRow('run', 'pr', 'Fix it in a PR', 'Working', 'spin', true)}${jiraRow('idle', 'story', 'Comment the PR link', 'After the PR', 'planned')}${jiraRow('idle', 'story', 'Move ZCT-7 to Done', 'After it merges', 'planned')}</div><span class="job-chip job-chip-state tone-warn intro-start">${ICONS.eye}<span>Suggests: new ticket for the follow-up</span></span>` },
-  { tab: 'Start', title: 'You’re ready to start a job.',
-    body: `<p>Start with something small you would normally hand to one agent, so you can watch each step once.</p><ul class="intro-done">${['Jobs in the rail, with the needs-you count', 'New job, then approve the plan', 'PR, session, human and Jira sub-jobs', 'Short receipts instead of walls of text', `Review checkpoints you set per job: ${YOU} or ${AUTO}`].map((t) => `<li>${ICONS.check}${t}</li>`).join('')}</ul><p>Open this again from the ${ICONS.info} button in the Jobs header, or from <b>Automation settings</b>.</p>`,
+  { tab: 'Writes',
+    title: 'Tickets, designs and posts, kept up to date as the job runs.',
+    body: `<p>Sessions in the plan publish a design for you to approve, open the ticket, move it to Done when the PR merges, and tell the team. Nothing is written that the plan doesn’t list, and jobs without tickets skip Jira entirely.</p><p>Every write gets a receipt: <b>written</b>, <b>already</b> done, or <b>failed</b> with the place’s own error. With Writes on ${YOU}, you get a draft to edit, write or skip first.</p>`,
+    anim: { frames: WRITES.length, ms: 1400, still: 5 },
+    figure: (reviews, phase) => writesFigure(phase) },
+  { tab: 'Start',
+    title: 'You’re ready to start a job.',
+    body: `<p>Start with something small you would normally hand to one agent, so you can watch each step once.</p><ul class="intro-done">${['Jobs in the rail, with the needs-you count', 'New job, then approve the plan', 'PR, session and human sub-jobs, and the places they write to', 'Short receipts, and each PR shown working', 'Red steps go to the planner before you', `Six checkpoints you set per job: ${YOU} or ${AUTO}`].map((t) => `<li>${ICONS.check}${t}</li>`).join('')}</ul><p>Open this again from the ${ICONS.info} button in the Jobs header, or from <b>Automation settings</b>.</p>`,
     figure: () => `<div class="intro-flow">${node('ok', 'pr', 'Add CSV export', 'Delivered', 'check', true)}<span class="intro-flow-line"></span>${node('ok', 'robot', 'Backfill data', 'Delivered', 'check', true)}</div>` },
 ];
 

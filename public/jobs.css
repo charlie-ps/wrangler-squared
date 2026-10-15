@@ -642,7 +642,7 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 /* The intro (intro.js): the job dialog's surface, app bar, stepper and FAB, with
    a figure per step drawn from the same tiles, cards and chips as the board.
    Sized up from the other dialogs so it reads like a page, not a form. */
-.jobs-intro { width:min(1060px,calc(100vw - 32px)); padding:32px 40px; }
+.jobs-intro { width:min(1060px,calc(100vw - 32px)); max-height:calc(100vh - 32px); padding:32px 40px; }
 .jobs-intro sup { font-size:.7em; line-height:0; vertical-align:super; }
 .jobs-intro .intro-appbar { display:flex; align-items:center; gap:12px; margin-bottom:18px; padding-right:44px; }
 .jobs-intro .jobs-kicker { font-size:11px; }
@@ -720,7 +720,7 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .intro-flow { display:flex; align-items:flex-start; justify-content:center; gap:4px; }
 .intro-flow .job-node { flex:1 1 0; min-width:0; padding:4px 0; }
 .intro-flow-line { flex:none; width:28px; height:2px; margin-top:35px; background:var(--border); }
-.intro-kinds { display:grid; grid-template-columns:repeat(2,1fr); gap:26px 14px; justify-items:center; padding-block:8px; }
+.intro-kinds { display:grid; grid-template-columns:repeat(3,1fr); gap:26px 14px; justify-items:center; padding-block:8px; }
 .intro-kind { display:flex; flex-direction:column; align-items:center; gap:10px; }
 .intro-label { font-size:13px; font-weight:600; color:var(--fg); }
 .intro-slop { margin-bottom:-4px; font-size:13px; line-height:1.5; color:var(--fg-muted); }
@@ -753,6 +753,26 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .intro-done { list-style:none; display:grid; gap:8px; margin:16px 0 0; padding:0; font-size:15px; color:var(--fg); }
 .intro-done li { display:flex; align-items:center; gap:10px; }
 .intro-done .icon { color:var(--green-fg); }
+.intro-places { justify-content:flex-start; }
+.intro-places .job-place-chip { cursor:default; }
+.intro-places .job-place-chip b { font-size:12px; }
+.intro-jira-row small u { text-decoration:none; color:var(--blue-fg); font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; }
+/* figs.js: the board's composer, proof grid and Running bar, drawn small and inert. */
+.intro-figure .job-change { margin:0; }
+.intro-figure .job-change-text { flex:1; min-width:0; align-self:center; padding:6px 2px; color:var(--fg); font:13.5px/1.5 var(--font); overflow-wrap:anywhere; }
+.intro-figure .job-change-text.ph { color:var(--fg-subtle); }
+.intro-figure .job-change-attach, .intro-figure .job-change-go { cursor:default; }
+.intro-figure .job-change-go:not(.on) { background:var(--border); color:var(--surface); }
+.intro-figure .job-proof { margin:0; }
+.intro-figure .job-proof-grid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.intro-figure .job-proof-card { grid-template-columns:minmax(0,1fr); padding:6px; gap:4px; cursor:default; }
+.intro-figure .job-proof-card small { -webkit-line-clamp:2; font-size:11px; }
+.intro-figure .job-proof-ck { font-size:12px; }
+.intro-figure .job-proof-head { font-size:13px; }
+.intro-inert { display:contents; }
+.intro-see .job-running ul { display:none; }
+.wn-pending { opacity:.55; }
+.wn-pending .job-proof-thumb { border-style:dashed; }
 @media(max-width:700px) {
   .jobs-intro { padding:22px 20px; border-radius:20px; }
   .jobs-intro h2 { font-size:24px; }
@@ -761,6 +781,23 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
   .intro-steps .job-seg span { display:none; }
   .intro-graph .job-graph-columns { gap:28px; }
   .job-node-repo, .job-node-landing { display:none; }
+}
+/* A laptop screen (1280x720): every step still fits the dialog with no inner scroll,
+   so the chrome, figure padding and the six checkpoint rows tighten. */
+@media(max-height:820px) and (min-width:701px) {
+  .jobs-intro { padding:24px 40px; }
+  .jobs-intro .intro-appbar { margin-bottom:12px; }
+  .intro-steps { margin-bottom:18px; }
+  .jobs-intro h2 { font-size:28px; }
+  .jobs-intro p { font-size:15px; line-height:1.55; margin-top:12px; }
+  .jobs-intro .job-actions { margin-top:20px; }
+  .jobs-intro .job-actions button.primary { padding:12px 22px; }
+  .intro-figure { padding:16px 18px; gap:12px; }
+  .intro-panel.intro-stack { gap:14px; }
+  .intro-value { padding:14px 20px 12px; }
+  .intro-graph .job-graph-col { gap:10px; }
+  .intro-checkpoints { gap:6px; }
+  .intro-checkpoint { padding:6px 10px; line-height:1.3; }
 }
 @media(prefers-reduced-motion:reduce) { .job-review-toggle,.job-switch,.job-switch::after,.intro-figure .job-node-tile,.intro-graph path,.intro-goal,.intro-goal .job-avatar,.intro-mini-job,.intro-mini-job .job-avatar,.intro-rail-badge { transition:none; } .intro-rail-badge.bump { animation:none; } }
 
