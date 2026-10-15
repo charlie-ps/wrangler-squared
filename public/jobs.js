@@ -352,7 +352,7 @@ export function actionLine(a, plan) {
 // Who an idea at each view goes to (server/job-change.js routes it): the agent
 // that holds the work when there is one, else the planner. `to` names it on the
 // box, `hint` says what it does with the idea.
-const PLANNER = { to: 'Planner', placeholder: 'Add an idea for the planner…', hint: 'Proposes a plan change. Nothing changes until you approve.' };
+const PLANNER = { to: 'Planner', placeholder: 'Add an idea for the planner…', hint: 'Sends feedback back to a step or changes the plan. Nothing changes until you approve.' };
 const CHANGE_ROUTE = {
   plan: { ...PLANNER, hint: 'Redraws the plan for you to review.' },
   proposal: { to: 'Planner', placeholder: 'Add to this proposal…', hint: 'Redraws the proposal.' },

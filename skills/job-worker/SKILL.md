@@ -56,6 +56,27 @@ When your prompt is a plan change, your `plan` receipt is a **proposal**: nothin
 applies until the human approves it, and each action is refused at approval if
 the PR head, merge commit or stage it was written against has moved.
 
+### An idea from the human: feedback or a plan edit
+
+One idea often mixes both, so read it sentence by sentence and sort each one:
+
+- **Feedback on what a live step already produced** (a design session's mock-up,
+  a PR's code or result, "not enough spacing before this line", "it's a bit tall")
+  goes back to THAT step as a `rework {note}` action, in the human's own terms.
+  Never copy it into a downstream brief: the step that made the thing is the
+  only one that can fix it, and left unchanged it ships the same flaw.
+- **New work, reordering, dropping or re-briefing a step that has not run** is a
+  plan edit.
+- Both can share one proposal. One action per sub-job, so fold all of a step's
+  feedback into one note.
+
+Example: "Not enough spacing before this line, and it's a bit tall, make sure
+that works in the UI. Also design the export button first, and land it on next."
+becomes `actions:[{type:"rework", sub:"design", note:"Not enough spacing before
+this line, and it's a bit tall: make sure that works in the UI."}]` plus new
+steps for the export button designed first, landing on `next`. The brief of
+every PR after `design` stays as it was.
+
 ### A red step Wrangler sent you after
 
 Your prompt says `RED STEP` when a step went red and Wrangler (not the human)
@@ -83,7 +104,7 @@ after it are held while you work.
 - `actions:[{type, sub, …}]` act on live sub-jobs, one per sub-job:
   `accept-red {note?}` (unrelated failing checks, or a failing post-merge run),
   `mark {position:"merged"|"done", evidence}` (**`evidence` is required**: the PR
-  or ticket that shows it), `rework {note}` (back to its own agent), and
+  or ticket that shows it), `rework {note}` (back to its own agent: use it for the human's feedback on what the step produced, not only for a red step), and
   `recover {fix}` for a merged sub-job whose post-merge run failed: add a PR
   sub-job that fixes it and name its id as `fix`. Never use accept-red or mark
   to hide a real failure.

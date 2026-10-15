@@ -1339,7 +1339,7 @@ test('Add idea on a running job asks the planner for a proposal; the sent idea s
   f.q('[data-board="job1"] .job-plate-open').click();
   assert.equal(f.q('#job-refine'), null, 'there is no separate Change plan dialog: the box is on the job');
   assert.equal(f.q('.job-change textarea').placeholder, 'Add an idea for the planner…');
-  assert.match(f.q('.job-change').textContent, /Proposes a plan change\. Nothing changes until you approve\./);
+  assert.match(f.q('.job-change').textContent, /Sends feedback back to a step or changes the plan\. Nothing changes until you approve\./);
   const text = f.q('.job-change textarea'); text.value = 'Split web in two'; text.dispatchEvent(f.event('input')); f.q('[data-change-send]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', at: 'job', ref: 'job', text: 'Split web in two' });
 

@@ -2217,6 +2217,7 @@ test('a running job takes a plan change as a proposal: frozen work is locked, re
   const prompt = jobPrompt(f.store.get(f.job.id), null, planner.run);
   assert.match(prompt, /ALREADY RUNNING/); assert.match(prompt, /- api \(pr\) "Deliver api": done\/done · FROZEN/);
   assert.match(prompt, /Frozen \(.*\): api\./); assert.match(prompt, /- web .*a step is running/); assert.match(prompt, /Requested change: Drop docs/);
+  assert.match(prompt, /Feedback on what a live sub-job already produced.*`rework` action on THAT sub-job.*never write it into a later sub-job/);
   assert.throws(() => change(f, null, 'again'), /Wait for the planning/);
 
   const proposal = (subs) => plan(subs);
