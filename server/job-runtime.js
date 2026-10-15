@@ -327,6 +327,8 @@ export class JobRuntime {
   async isMergedAncestor(local, mergedHead, repoRoot) {
     if (local === mergedHead) return true;
     await this.run('git', ['fetch', 'origin'], repoRoot).catch(() => {});
+    // GitHub's Update branch makes a merge commit that no surviving branch carries once the PR branch is auto-deleted.
+    await this.run('git', ['fetch', 'origin', mergedHead], repoRoot).catch(() => {});
     await this.run('git', ['cat-file', '-e', `${mergedHead}^{commit}`], repoRoot).catch(() => {
       throw new Error(`Cannot resolve merged PR head ${mergedHead}; nothing was deleted, preserve it for review`);
     });

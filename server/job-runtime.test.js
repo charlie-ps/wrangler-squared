@@ -252,6 +252,7 @@ test('cleanup of a PR sub-job accepts a local head behind the GitHub-updated PR 
   const f = fakeRun({ head: 'pushed', remote: 'head1\trefs/heads/job-api' });
   await runtimeWith(host, { run: f.run }).cleanup({}, sub);
   assert.ok(f.calls.some((c) => c[0] === 'fetch'), 'the merge commit was made on GitHub');
+  assert.ok(f.calls.some((c) => c[0] === 'fetch' && c.join(' ') === 'fetch origin head1'), 'the merged head is fetched by sha, as its branch may be auto-deleted');
   assert.deepEqual(f.calls.find((c) => c[0] === 'merge-base'), ['merge-base', '--is-ancestor', 'pushed', 'head1']);
   assert.deepEqual(f.calls.find((c) => c[0] === 'update-ref'), ['update-ref', '-d', 'refs/heads/job-api', 'pushed']);
 });
