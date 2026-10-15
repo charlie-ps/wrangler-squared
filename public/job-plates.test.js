@@ -53,13 +53,24 @@ test('a plate draws its plan as kind shapes in the sky, dashed where work waits 
   assert.match(html, /1 of 4 landed/);
 });
 
-test('plate art: the skyline alone, the scene behind it on hover, or the scene alone with ink that follows it', () => {
+test('plate art: the sky alone, or the scene alone with ink that follows it', () => {
   const j = job({ subJobs: [sub('api', { stage: 'implementation' })] });
   const quiet = plateHtml(j, 'haiku', 'quiet'), full = plateHtml(j, 'haiku', 'full');
-  assert.ok(quiet.includes('class="skyline"') && !quiet.includes('class="scene"'));
-  assert.ok(!full.includes('class="skyline"') && full.includes('class="scene"') && full.includes('class="scrim"'));
+  assert.ok(quiet.includes('class="gx"') && !quiet.includes('class="scene"'));
+  assert.ok(!full.includes('class="gx"') && full.includes('class="scene"') && full.includes('class="scrim"'));
   assert.match(quiet, /job-plate-tag lt/, 'light ink on the night sky whatever the scene');
   assert.match(full, /job-plate-tag dk/, 'dark ink on the ivory page');
+});
+
+test('the quiet sky is a placeholder with the graph\u2019s floor, tone and level, drawn with no DOM', () => {
+  assert.equal(typeof document, 'undefined');
+  const tall = job({ subJobs: [sub('a', { stage: 'done' }), sub('b', { after: ['a'], stage: 'implementation' }), sub('c', { after: ['a'], stage: 'implementation' }), sub('d', { after: ['a'], stage: 'implementation' }), sub('e', { after: ['b', 'c', 'd'] })] });
+  const lone = job({ subJobs: [sub('a', { stage: 'implementation' })] });
+  const attr = (html, k) => html.match(new RegExp(`class="gx"[^>]*data-${k}="([^"]*)"`))[1];
+  assert.ok(+attr(plateHtml(tall, 'opus'), 'floor') > +attr(plateHtml(lone, 'opus'), 'floor'), 'a taller plan reports a lower floor');
+  assert.match(plateHtml(lone, 'opus'), /class="gx"[^>]*data-tone="idle"|class="gx"[^>]*data-tone="(run|warn|bad|ok|pause)"/);
+  assert.match(plateHtml(job({ stage: 'backlog', subJobs: [] }), 'opus'), /class="gx"[^>]*data-floor="82"/);
+  assert.equal(plateHtml(lone, 'opus', 'full').includes('class="gx"'), false);
 });
 
 test('a write is a moon off the session that makes it, its place a chip under the title, and a draft in review the stub', () => {

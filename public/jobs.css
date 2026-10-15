@@ -56,11 +56,39 @@
 .jobs-rail-sort { margin-left:auto; font:500 10px var(--jobs-mono); letter-spacing:.18em; text-transform:uppercase; color:var(--fg-subtle); }
 
 .jobs-plates { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr)); gap:22px; }
-.job-plate { --t:var(--c-fg); position:relative; cursor:pointer; display:flex; flex-direction:column; min-width:0; border-radius:18px; overflow:hidden; background:var(--card-bg); border:1px solid var(--border-muted); backdrop-filter:blur(14px) saturate(1.2); -webkit-backdrop-filter:blur(14px) saturate(1.2); transition:transform .25s cubic-bezier(.2,.8,.2,1), border-color .25s; }
-.job-plate:hover { transform:translateY(-3px); border-color:color-mix(in srgb, var(--c) 45%, var(--border-muted)); }
+.job-plate { --t:var(--c-fg); position:relative; cursor:pointer; display:flex; flex-direction:column; min-width:0; border-radius:18px; overflow:hidden; background:var(--card-bg); border:1px solid var(--border-muted); backdrop-filter:blur(14px) saturate(1.2); -webkit-backdrop-filter:blur(14px) saturate(1.2); transition:border-color .25s; }
+.job-plate:hover { border-color:color-mix(in srgb, var(--c) 45%, var(--border-muted)); }
 .job-plate:is(.tone-warn,.tone-bad) { border-color:color-mix(in srgb, var(--c) 50%, var(--border-muted)); }
-/* The stub's notches: two half-circles bitten out where the ticket tears off. */
-.job-plate.stubbed { -webkit-mask:radial-gradient(circle 8px at 0 calc(100% - 53px), #0000 96%, #000), radial-gradient(circle 8px at 100% calc(100% - 53px), #0000 96%, #000); -webkit-mask-composite:source-in; mask:radial-gradient(circle 8px at 0 calc(100% - 53px), #0000 96%, #000), radial-gradient(circle 8px at 100% calc(100% - 53px), #0000 96%, #000); mask-composite:intersect; }
+/* The quiet sky (job-skylines.js): canvases painted once, only transforms and opacity animate. */
+.gx { --k:1; position:absolute; inset:0; overflow:hidden; background:#020306; isolation:isolate; }
+.gx canvas { position:absolute; display:block; }
+.gx .l { position:absolute; inset:0; overflow:hidden; }
+.gx canvas.l { left:0; top:0; }
+.gx :is(.fx,.bh) { position:absolute; inset:0; }
+.gx :is(.ring,.band,.glare) { mix-blend-mode:screen; }
+.gx .spin { animation:gx-spin calc(var(--dur) * var(--k)) linear infinite; will-change:transform; }
+.gx .spin.rev { animation-direction:reverse; }
+@keyframes gx-spin { to { transform:rotate(360deg); } }
+.gx .band { position:absolute; overflow:hidden; }
+.gx .band canvas { left:0; top:0; }
+.gx .flow { animation:gx-flow calc(var(--dur) * var(--k)) linear infinite; will-change:transform; }
+@keyframes gx-flow { from { transform:translateX(calc(var(--tw) * -1)); } to { transform:none; } }
+.gx .glare { animation:gx-glare calc(28s * var(--k)) ease-in-out infinite alternate; }
+@keyframes gx-glare { from { opacity:.55; } to { opacity:1; } }
+.gx .fx { transition:filter .5s; }
+.job-plate:hover .gx .fx { filter:brightness(1.18) saturate(1.15); }
+.gx.off *,.jobs-paused .gx *,.job-plate.paused .gx * { animation-play-state:paused !important; }
+/* Hover: no lift. The border lights with a sweep in the state colour while the hole spins up (job-skylines.js). */
+@property --sweep { syntax:'<angle>'; inherits:false; initial-value:0deg; }
+.job-plate::before { content:""; position:absolute; inset:0; z-index:3; pointer-events:none; border-radius:inherit; padding:1.5px; opacity:0; transition:opacity .35s;
+  background:conic-gradient(from var(--sweep), transparent 0 62%, color-mix(in srgb, var(--c) 70%, transparent) 80%, #fff 84%, transparent 86%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask:linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.job-plate:hover::before { opacity:1; animation:gx-sweep 2.4s linear infinite; }
+@keyframes gx-sweep { to { --sweep:360deg; } }
+/* Legibility over the glow: a dark halo under each label, no filter (the halos animate). */
+#jobs:not([data-plate-art="full"]) .job-plate-graph .lbl { paint-order:stroke; stroke:rgba(2,3,6,.85); stroke-width:2.4px; stroke-linejoin:round; }
+#jobs:not([data-plate-art="full"]) .job-plate-graph .edge { stroke-opacity:.55; }
+@media(prefers-reduced-motion:reduce) { .gx * { animation:none !important; } .job-plate:hover::before { animation:none; } }
 .job-plate-art { position:relative; aspect-ratio:320 / 150; overflow:hidden; background:#05070c; }
 .job-plate-art>svg { position:absolute; inset:0; width:100%; height:100%; display:block; }
 .job-plate-art .scrim { position:absolute; inset:0; pointer-events:none; background:linear-gradient(180deg, rgba(5,6,10,.42) 0%, rgba(5,6,10,0) 26%, rgba(5,6,10,0) 78%, rgba(5,6,10,.3) 100%); }
@@ -68,7 +96,7 @@
 .job-plate-art::after { content:""; position:absolute; inset:0; pointer-events:none; opacity:0; background:radial-gradient(120% 70% at 50% 100%, rgba(255,170,110,.34), transparent 62%); }
 #jobs[data-plate-art="full"] .job-plate.running .job-plate-art::after { animation:jobs-breathe 4.6s ease-in-out infinite; }
 @keyframes jobs-breathe { 50% { opacity:1; } }
-.job-plate:is(.paused) :is(.scene,.skyline) { filter:grayscale(.85) brightness(.82); }
+.job-plate:is(.paused) :is(.scene,.gx) { filter:grayscale(.85) brightness(.82); }
 .job-plate:is(.planned,.queued) .scene { filter:saturate(.7) brightness(.8); }
 .job-plate:is(.done,.dropped) .job-plate-art { opacity:.9; }
 .job-plate-tag { position:absolute; top:11px; left:12px; right:12px; text-align:center; font:500 8.5px/1 var(--jobs-mono); letter-spacing:.26em; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; }
@@ -155,7 +183,7 @@
 .job-plate-place i { width:6px; height:6px; flex:none; border-radius:50%; background:var(--c); }
 .job-plate-place-out { font-size:11px; opacity:.65; }
 @media(max-width:560px) { #jobs { padding:16px 16px 84px; } .jobs-mast h1 { font-size:34px; } .jobs-tools { margin-left:0; } .jobs-rail-sort { display:none; } }
-@media(prefers-reduced-motion:reduce) { .jobs-beacon::before,.job-plate-graph .halo,.job-plate-graph .failing,.job-plate-art::after { animation:none !important; } .job-plate,.job-plate-go { transition:none; } .job-plate:hover { transform:none; } }
+@media(prefers-reduced-motion:reduce) { .jobs-beacon::before,.job-plate-graph .halo,.job-plate-graph .failing,.job-plate-art::after { animation:none !important; } .job-plate,.job-plate-go { transition:none; } }
 
 /* The intro's figures still draw the earlier tonal card and its progress segments. */
 .job-card { position:relative; display:flex; flex-direction:column; gap:16px; padding:18px; border-radius:21px; background:var(--cb); color:var(--fg); transition:transform .15s, box-shadow .15s; }

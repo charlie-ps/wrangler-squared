@@ -1,26 +1,29 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { skylineSvg, landOf, GLOW } from './job-skylines.js';
+import { PAL, paletteOf, capFor, skyHtml } from './job-skylines.js';
 
-const strip = (svg) => svg.replace(/id="p\d+/g, 'id="p').replace(/#p\d+/g, '#p');
-
-test('a job keeps its skyline, and the wall varies between jobs', () => {
-  assert.equal(strip(skylineSvg('job1', 'run', 3)), strip(skylineSvg('job1', 'run', 3)));
-  assert.ok(new Set(Array.from({ length: 20 }, (_, i) => landOf(`j${i}`))).size >= 3, 'ridges, lakes and dunes all turn up');
-});
-
-test('the light is the state, and the sun climbs as the job lands', () => {
-  assert.ok(skylineSvg('job1', 'warn', 3).includes(GLOW.warn));
-  assert.ok(skylineSvg('job1', 'nope', 3).includes(GLOW.idle), 'an unknown tone reads as idle');
-  const sunY = (lvl) => Number(skylineSvg('job1', 'run', lvl).match(/<circle cx="[\d.]+" cy="([\d.]+)" r="[\d.]+" fill="#fff4e2"/)[1]);
-  assert.ok(sunY(5) < sunY(1));
-});
-
-test('ridges are smooth: no step between neighbouring points jumps like a spike', () => {
-  for (const seed of ['a', 'b', 'c', 'd', 'e']) {
-    for (const [, d] of skylineSvg(seed, 'ok', 3).matchAll(/<path d="(M0,[^"]+?)(?: L320,150 L0,150 Z)?"/g)) {
-      const ys = [...d.matchAll(/[ML](\d+),([\d.]+)/g)].map((m) => Number(m[2]));
-      ys.slice(1).forEach((y, i) => assert.ok(Math.abs(y - ys[i]) < 3, `${seed}: ${ys[i]} → ${y}`));
-    }
+test('the cap stays 14 units under the plan at every level, and grows as the job lands', () => {
+  for (let floor = 20; floor <= 140; floor += 5) for (let lvl = 1; lvl <= 5; lvl++) {
+    const cap = capFor(lvl, floor);
+    assert.ok(cap <= Math.max(13, 150 - floor - 14), `floor ${floor} lvl ${lvl}: ${cap}`);
+    assert.ok(cap >= 13);
   }
+  assert.ok(capFor(5, 40) > capFor(1, 40));
+  assert.equal(capFor(5, 140), 13, 'a plan reaching the foot leaves only the minimum');
+});
+
+test('a tone picks its palette, and an unknown one reads as idle', () => {
+  for (const tone of Object.keys(PAL)) assert.equal(paletteOf(tone), PAL[tone]);
+  assert.equal(paletteOf('nope'), PAL.idle);
+  assert.ok(Object.values(PAL).every((p) => p.length === 7 && p.at(-1) === '#ffffff'));
+  assert.match(skyHtml('job1', 'warn', 3, 90), /data-tone="warn"/);
+  assert.match(skyHtml('job1', 'nope', 3, 90), /data-tone="idle"/);
+});
+
+test('the placeholder carries what the painter needs, and the same job paints the same sky', () => {
+  const a = skyHtml('job1', 'run', 3, 88.4, true);
+  assert.equal(a, skyHtml('job1', 'run', 3, 88.4, true));
+  assert.match(a, /^<div class="gx" data-seed="\w+" data-tone="run" data-lvl="3" data-floor="88" data-dim><\/div>$/);
+  assert.doesNotMatch(skyHtml('job1', 'run', 3, 88), /data-dim/);
+  assert.notEqual(skyHtml('job1', 'run', 3, 88).match(/data-seed="(\w+)"/)[1], skyHtml('job2', 'run', 3, 88).match(/data-seed="(\w+)"/)[1]);
 });
