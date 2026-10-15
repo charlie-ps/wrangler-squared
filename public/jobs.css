@@ -557,19 +557,11 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-comment-toggle:hover { background:var(--border-muted); color:var(--fg); }
 .job-comments p { margin:8px 0 0; white-space:pre-wrap; color:var(--fg); }
 /* What went wrong, in the failing tone: the glyph, the short title, the agent's
-   own sentence, and the move it named. */
+   own sentence. */
 .job-event { display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; margin:0 0 16px; padding:12px 14px; border-radius:12px; background:color-mix(in srgb, var(--st-bad) 12%, var(--surface)); font-size:12px; }
 .job-event>.icon { font-size:16px; color:var(--st-bad-fg); }
 .job-event b { color:var(--st-bad-fg); }
 .job-event p { margin:4px 0 0; color:var(--fg); }
-.job-event-move { display:inline-block; margin-top:6px; font-size:11px; color:var(--fg-muted); }
-.job-moves { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0; }
-.job-move { padding:6px 12px; border:1px solid var(--border-muted); border-radius:8px; background:transparent; color:var(--fg); font:inherit; font-size:12px; cursor:pointer; }
-.job-move:hover { background:var(--surface-2); }
-.job-move:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
-.job-move b { font-weight:500; }
-.job-move.hot { border-color:var(--st-warn); background:color-mix(in srgb, var(--st-warn) 14%, transparent); }
-.job-move-deps label>span:last-child { color:var(--fg); }
 .job-move-log { list-style:none; padding:0; margin:8px 0 0; font-size:12px; }
 .job-move-log li { display:flex; justify-content:space-between; align-items:baseline; gap:14px; padding:6px 0; border-top:1px solid var(--border-muted); line-height:1.5; overflow-wrap:anywhere; }
 .job-move-log li:first-child { border-top:0; }
@@ -999,3 +991,8 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .jobs-idea-kept { font-size:11.5px; color:var(--fg-subtle); }
 @media(max-width:640px) { .jobs-idea { right:12px; left:12px; bottom:12px; } .jobs-idea-panel { width:100%; max-width:none; } }
 @media(prefers-reduced-motion:reduce) { .jobs-idea-teaser { transition:none; } .jobs-idea-teaser:hover { transform:none; } }
+.job-change { display:grid; gap:8px; margin:4px 0; }
+.job-change label { display:grid; gap:4px; font-size:13px; color:var(--fg); }
+.job-change label small { color:var(--fg-muted); font-size:12px; }
+.job-change textarea { width:100%; resize:vertical; }
+.job-change-send { display:flex; gap:8px; }

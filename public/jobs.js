@@ -297,50 +297,9 @@ export const codeAwaitingReview = (sub) => isPrSub(sub) && sub?.stage === 'revie
 // or "Merge completes it · …". Absent until the PR exists.
 export const deploysLine = (sub) => sub?.deploys?.summary || '';
 
-// The seven moves a human makes by hand when something goes wrong. Agents never
-// apply plan changes: a blocked receipt may only NAME one of these.
-export const MOVES = [
-  { id: 'fix-here', label: 'Fix here', blurb: 'New commit on this PR, with your note.' },
-  { id: 'split-out', label: 'Split out', blurb: 'New PR, same ticket. Lands before or after this one.' },
-  { id: 'new-ticket', label: 'New ticket', blurb: 'New story and PR for scope you didn’t know about.' },
-  { id: 'reorder', label: 'Reorder', blurb: 'Change what this lands after.' },
-  { id: 'drop', label: 'Drop', blurb: 'Cancel this sub-job.' },
-  { id: 'mark', label: 'Mark position', blurb: 'Merged by hand. Deploy confirmed. Already covered elsewhere.' },
-  { id: 'accept-red', label: 'Accept red', blurb: 'The failing pipeline is noise. Carry on as if it were green.' },
-];
-export const moveById = (id) => MOVES.find((m) => m.id === id) || null;
-// Fix here on a sub-job with no PR yet is the same server move (note, then run it
-// again) but promising "a new commit on this PR" would name something that does
-// not exist, so the copy follows the sub-job's stage.
-export function moveCopy(job, sub, move) {
-  // Accept red does a different thing on each side of the merge, and the button
-  // must say which one it is about to do.
-  if (move.id === 'accept-red') {
-    if (sub?.stage === 'pr') return { ...move, blurb: 'Merge this PR as it stands, red checks and all.' };
-    if (sub?.stage === 'deployment') return { ...move, blurb: 'Count the merge as landed despite the failing post-merge run.' };
-    return move;
-  }
-  if (move.id !== 'fix-here') return move;
-  // An open PR under code review: the fix takes the same road as the first cut,
-  // so the copy must not promise a commit the human has not yet reviewed.
-  if (isPrSub(sub) && sub?.stage === 'pr') return reviewCode(job) ? { ...move, blurb: 'Back to work on this PR. You review the diff before it is pushed.' } : move;
-  if (sub?.stage === 'review') return { ...move, label: 'Request changes', blurb: 'Back to work in the same worktree, with your note.' };
-  return { ...move, label: 'Retry with a note', blurb: isSessionSub(sub) ? 'Run this session again, with your note.' : 'Start the work again, with your note.' };
-}
-// Which "Mark position" claims this sub-job's stage can still accept — mirrors the
-// server's gates so the form never offers a position the move would refuse.
-export function markOptions(sub) {
-  if (!sub || sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage)) return [];
-  const pr = isPrSub(sub);
-  return [
-    ...(pr && ['implementation', 'review'].includes(sub.stage) && !sub.pr ? [{ value: 'pr', label: 'A PR is already open for this work' }] : []),
-    ...(pr && sub.stage === 'pr' ? [{ value: 'merged', label: 'Merged by hand' }] : []),
-    { value: 'done', label: isMakeWrite(sub) ? 'Made by hand' : isWriteSub(sub) ? 'Already written by hand' : 'Done: deployed, or already covered elsewhere' },
-  ];
-}
 // Which red pipeline Accept red would wave through, if any — the failing checks on
 // an open PR, or the failing post-merge run of a merged one — mirroring the
-// server's gates (job-moves.js). Already accepted at this exact head or merge
+// server's gates. Already accepted at this exact head or merge
 // commit means there is nothing left to accept.
 export function redPipeline(sub) {
   if (!sub || !isPrSub(sub)) return null;
@@ -349,26 +308,33 @@ export function redPipeline(sub) {
   return null;
 }
 export const redAccepted = (sub) => !!sub?.acceptedRed && sub.acceptedRed.ref === (sub.stage === 'pr' ? sub.pr?.head : sub.stage === 'deployment' ? sub.pr?.mergeCommit : undefined);
-// Mirrors server/job-moves.js: a move the server would refuse is never drawn.
-// Nothing at all once the sub-job is finished, dropped, or already cleaning up.
-export function movesFor(job, sub) {
-  // Every move reshapes the plan a pending change was written against, so the
-  // server refuses them all until it is approved or discarded.
-  if (!sub || sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage) || replanPending(job)) return [];
-  // A write is edited from its own dialog; the only moves are the two that end it.
-  if (isWriteSub(sub)) return MOVES.filter((m) => ['drop', 'mark'].includes(m.id))
-    .map((m) => (m.id === 'mark' ? { ...m, label: 'Mark done', blurb: isMakeWrite(sub) ? 'You made it yourself. Paste where it is.' : isStoryCreate(sub) ? 'You created the ticket yourself. Give its key.' : 'Someone already made this write by hand.' } : m));
-  const pr = isPrSub(sub);
-  const allowed = {
-    'fix-here': ['pr', 'implementation', 'review', 'session'].includes(sub.stage),
-    'split-out': pr && ['implementation', 'review', 'pr', 'deployment'].includes(sub.stage),
-    'new-ticket': pr,
-    reorder: ['implementation', 'review', 'pr', 'session', 'human'].includes(sub.stage),
-    drop: true,
-    mark: !isHumanSub(sub) && markOptions(sub).length > 0,
-    'accept-red': pr && redPipeline(sub),
-  };
-  return MOVES.filter((m) => allowed[m.id]).map((m) => moveCopy(job, sub, m));
+// Who an idea at each view goes to (server/job-change.js routes it): the agent
+// that holds the work when there is one, else the planner.
+const CHANGE_HINT = {
+  plan: 'Goes to the planner, which redraws the plan for you to review.',
+  code: 'Goes back to the session that wrote this working tree. You review the new diff.',
+  session: 'Goes back to the session that made this result, which reports again.',
+  pr: 'Goes to a repair session on this PR.',
+};
+export const changeHint = (at) => CHANGE_HINT[at] || 'Goes to the planner, which proposes a plan change for you to approve.';
+// What the human is looking at, and the exact thing in it, which Request changes
+// pins its idea to. Mirrors server/job-change.js changeView: the server refuses a
+// request whose pin no longer matches. Null means nothing is left to change.
+export function changeView(job, sub) {
+  if (job.cancelledAt) return null;
+  if (!sub) {
+    if (job.stage === 'planning' && job.plan) return { at: 'plan', ref: String(job.revision) };
+    if (job.stage !== 'active') return null;
+    return job.replan?.proposal ? { at: 'proposal', ref: job.replan.proposal.id } : { at: 'job', ref: 'job' };
+  }
+  if (sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage)) return null;
+  const step = { at: 'step', ref: `${sub.stage}/${sub.state}` };
+  if (isWriteSub(sub)) return { at: 'write', ref: step.ref };
+  if (isSessionSub(sub)) return sub.stage === 'review' && sub.result ? { at: 'session', ref: String(sub.result.receiptId) } : step;
+  if (!isPrSub(sub)) return step;
+  if (sub.stage === 'review' && ['verified', 'approved'].includes(sub.state) && sub.ready) return { at: 'code', ref: String(sub.ready.receiptId) };
+  if (sub.stage === 'pr' && sub.pr?.head) return { at: 'pr', ref: sub.pr.head };
+  return step;
 }
 // The runner writes these error strings itself, so the short title is derived
 // from them; anything it does not recognise keeps the neutral heading and lets
@@ -385,16 +351,13 @@ function eventTitle(sub) {
   if (isWriteSub(sub) && sub.state === 'failed') return `${placeShort(sub)} refused the write`;
   return 'Needs attention';
 }
-// What happened, in one line, plus the move the agent suggested if it named one.
-// `suggested` is only ever the agent's own `blocked.move` — the board never
-// guesses a move on the human's behalf.
+// What happened, in one line.
 export function eventFor(job, sub) {
-  if (!sub) return job.error ? { title: 'Job needs attention', detail: job.error, suggested: null } : null;
+  if (!sub) return job.error ? { title: 'Job needs attention', detail: job.error } : null;
   if (sub.cancelledAt) return null;
-  const suggested = sub.blocked?.move || null;
-  if (sub.error) return { title: eventTitle(sub), detail: sub.error, suggested };
-  if (deploymentStalled(sub)) return { title: 'Nothing deployed', detail: `No post-merge run has started for merge commit ${(sub.pr?.mergeCommit || '').slice(0, 8)}.`, suggested };
-  if (sub.stage === 'pr' && redComments(sub)) return { title: 'Comments block merging', detail: commentVerdict(sub).text, suggested };
+  if (sub.error) return { title: eventTitle(sub), detail: sub.error };
+  if (deploymentStalled(sub)) return { title: 'Nothing deployed', detail: `No post-merge run has started for merge commit ${(sub.pr?.mergeCommit || '').slice(0, 8)}.` };
+  if (sub.stage === 'pr' && redComments(sub)) return { title: 'Comments block merging', detail: commentVerdict(sub).text };
   return null;
 }
 // A plan change on a running job (server/job-replan.js): asked for, then a

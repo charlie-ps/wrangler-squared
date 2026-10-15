@@ -12,6 +12,8 @@ import { normaliseComments, commentsBlockMerge } from './job-comments.js';
 import { jobCreateHandler, makeJobCreateHandler, jobActionHandler, jobSettingsHandler } from './handlers.js';
 import { _resetForTests, runnerFor } from './jobs.js';
 import { jobReportTool, getJobContextTool } from './tools.js';
+import { changeView } from './job-change.js';
+import { dropSub, validatePlan } from './job-sub-ops.js';
 
 const input = { title: 'Reliable sign-in', intent: 'Customers can sign in reliably', repos: ['/repo'], reviewMerge: true };
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', after, brief: `Implement ${id}`, ...extra });
@@ -20,6 +22,29 @@ const humanSpec = (id, after = []) => ({ id, kind: 'human', title: `Do ${id} you
 const plan = (subs = [spec('api')], stories = [{ id: 'story', key: 'AUTH-123', title: 'Reliable sign-in' }]) =>
   ({ context: 'The sign-in service is Java; deploys are Helm.', stories, subJobs: subs });
 const PR_URL = 'https://github.com/org/repo/pull/1';
+// The one way an idea comes in, pinned to what is on screen right now (job-change.js
+// changeView), as the board sends it.
+const change = (f, subId, text = 'Take another pass') => {
+  const job = f.store.get(f.job.id);
+  const view = changeView(job, subId ? job.subJobs.find((s) => s.id === subId) : null);
+  return f.store.action(f.job.id, 'request-change', { subJobId: subId, at: view?.at, ref: view?.ref, text });
+};
+const dropIt = (f, subId) => f.store.update(f.job.id, (j) => dropSub(j.subJobs.find((s) => s.id === subId), Date.now(), j));
+// Stand-ins for what a human did by hand, until proposals carry actions (design A2):
+// the runner still honours these states, so its tests set them directly.
+const markDone = (f, subId, note = 'Done by hand', extra = {}) => f.store.update(f.job.id, (j) => {
+  const s = j.subJobs.find((x) => x.id === subId);
+  const checks = [note];
+  if (s.kind && s.kind !== 'pr') s.result = { checks, at: Date.now(), receiptId: null, ...extra };
+  else s.deployed = { at: Date.now(), checks, commit: s.pr?.mergeCommit || null };
+  s.error = null; s.blocked = null; s.stage = 'cleanup'; s.state = 'queued';
+});
+const acceptRed = (f, subId, note = null) => f.store.update(f.job.id, (j) => {
+  const s = j.subJobs.find((x) => x.id === subId);
+  if (s.stage === 'pr') { s.acceptedRed = { ref: s.pr.head, note, at: Date.now() }; s.mergeApprovedHead = s.pr.head; }
+  else s.acceptedRed = { ref: s.pr?.mergeCommit || null, note, at: Date.now() };
+  s.error = null; s.blocked = null; s.state = 'watching'; s.nextPollAt = 0;
+});
 function fixture(t, jobInput = input) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-jobs-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -215,7 +240,7 @@ test('a replan keeps the previous plan and an edited plan replaces the proposed 
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
   f.report({ kind: 'plan', plan: plan([{ ...spec('api'), repo: '/discovered' }]) }); await f.tick();
   const first = f.store.get(f.job.id);
-  f.store.action(f.job.id, 'replan', { feedback: 'Move this change to the shared service' }); await f.tick();
+  change(f, null, 'Move this change to the shared service'); await f.tick();
   assert.deepEqual(f.last().job.previousPlan, first.plan);
   f.report({ kind: 'plan', plan: plan([{ ...spec('api'), repo: '/shared' }]) }); await f.tick();
   assert.throws(() => f.store.approvePlan(f.job.id, first.revision), /changed/);
@@ -232,7 +257,7 @@ test('reports require the assigned caller and the phase they were launched for',
   assert.throws(() => f.report({ kind: 'deployed', checks: ['Works'] }), /must submit ready or published/);
   assert.throws(() => f.report({ kind: 'published', url: 'https://example.com/pull/1' }));
   assert.throws(() => f.report({ kind: 'blocked', summary: 'x', amendment: { reason: 'r', ops: [] } }), /amendment/, 'the plan is the human\'s: no receipt may carry a change to it');
-  assert.throws(() => f.report({ kind: 'blocked', summary: 'x', move: 'invent-a-move' }));
+  assert.throws(() => f.report({ kind: 'blocked', summary: 'x', move: 'fix-here' }), /move/, 'a blocked receipt no longer names a move');
   f.report({ kind: 'published', url: PR_URL });
   f.report({ kind: 'published', url: PR_URL }, w);
   assert.throws(() => f.report({ kind: 'published', url: 'https://github.com/org/repo/pull/2' }, w), /different report/);
@@ -269,7 +294,7 @@ test('Retry after a blocked publish keeps the approval: the tree the human appro
   f.report({ kind: 'ready', checks: ['Tests pass'] }); await f.tick(); await later();
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await later(); await f.tick();
   assert.equal(f.last().run.phase, 'publish');
-  f.report({ kind: 'blocked', summary: 'git add of config/example.env was denied', move: 'fix-here' }); await f.tick(); await later();
+  f.report({ kind: 'blocked', summary: 'git add of config/example.env was denied' }); await f.tick(); await later();
   assert.deepEqual([f.sub().stage, f.sub().error, f.sub().blocked.phase], ['review', 'git add of config/example.env was denied', 'publish']);
   f.store.action(f.job.id, 'retry', { subJobId: 'api', note: 'example.env is a template, stage it' });
   assert.deepEqual([f.sub().stage, f.sub().state, f.sub().error, f.sub().note], ['review', 'approved', null, 'example.env is a template, stage it']);
@@ -284,10 +309,10 @@ test('Retry after a blocked publish keeps the approval: the tree the human appro
   assert.equal(f.sub().stage, 'pr');
 });
 
-test('Request changes under code review is Fix here: back to work in the same worktree with the note, receipt withdrawn', async (t) => {
+test('Request changes on code under review: back to work in the same worktree with the note, receipt withdrawn', async (t) => {
   const f = fixture(t); await f.approve();
   f.report({ kind: 'ready', checks: ['Tests pass'] }); await f.tick();
-  f.store.action(f.job.id, 'fix-here', { subJobId: 'api', note: 'Use the existing retry helper' });
+  change(f, 'api', 'Use the existing retry helper');
   const sub = f.sub();
   assert.deepEqual([sub.stage, sub.state, sub.ready, sub.note], ['implementation', 'queued', null, 'Use the existing retry helper']);
   assert.match(f.store.get(f.job.id).moves.at(-1).detail, /back to work/);
@@ -297,12 +322,12 @@ test('Request changes under code review is Fix here: back to work in the same wo
   assert.equal(f.sub().stage, 'review'); assert.equal(f.sub().note, null);
   // Approved but not yet launched: Request changes still withdraws it.
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId });
-  f.store.action(f.job.id, 'fix-here', { subJobId: 'api' });
+  change(f, 'api');
   assert.equal(f.sub().stage, 'implementation');
   await f.tick(); f.report({ kind: 'ready', checks: ['Again'] }); await f.tick();
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await f.tick();
   assert.equal(f.last().run.phase, 'publish');
-  assert.throws(() => f.store.action(f.job.id, 'fix-here', { subJobId: 'api' }), /Wait for the session to stop/, 'not under the live publish session');
+  assert.throws(() => change(f, 'api'), /Wait for the session to stop/, 'not under the live publish session');
 });
 
 test('an implementation session that published anyway lands its PR whatever the review flag says, and with review off one session does it all', async (t) => {
@@ -472,14 +497,11 @@ test('human output is optional but rejected above its dedicated limit', async (t
   assert.equal(f.sub().result.output, undefined);
 });
 
-test('the marks belong to human tasks alone, and Mark done still finishes one by hand', async (t) => {
+test('start and finish are for human tasks alone', async (t) => {
   const f = fixture(t); await f.approve(plan([humanSpec('sign'), sessionSpec('spike')]));
   assert.throws(() => f.store.action(f.job.id, 'start-human', { subJobId: 'spike' }), /not a human task/);
   assert.throws(() => f.store.action(f.job.id, 'finish-human', { subJobId: 'spike' }), /no longer yours to mark/);
-  assert.throws(() => f.store.action(f.job.id, 'fix-here', { subJobId: 'sign', note: 'again' }), /nothing to run again/);
-  assert.throws(() => f.store.action(f.job.id, 'accept-red', { subJobId: 'sign' }), /no pipeline to accept/);
-  assert.throws(() => f.store.action(f.job.id, 'split-out', { subJobId: 'sign', title: 'Follow-up', brief: 'Do the rest' }), /no repository to open a PR in/);
-  f.store.action(f.job.id, 'mark', { subJobId: 'sign', position: 'done', note: 'The vendor had already done it' });
+  f.store.action(f.job.id, 'finish-human', { subJobId: 'sign', note: 'The vendor had already done it' });
   const sign = f.sub();
   assert.equal(sign.stage, 'cleanup');
   assert.deepEqual(sign.result, { checks: ['The vendor had already done it'], at: sign.result.at, receiptId: null });
@@ -488,7 +510,7 @@ test('the marks belong to human tasks alone, and Mark done still finishes one by
 
 test('a dropped or cancelled human task never satisfies what waits on it', async (t) => {
   const f = fixture(t); await f.approve(plan([humanSpec('sign'), spec('api', ['sign'])]));
-  f.store.action(f.job.id, 'drop', { subJobId: 'sign' });
+  dropIt(f, 'sign');
   await f.tick(); await f.tick();
   assert.deepEqual([f.sub().stage, f.sub().state], ['done', 'cancelled']);
   assert.deepEqual(f.launched.map((w) => w.run.phase), ['planning'], 'api can never start behind a dropped prerequisite');
@@ -558,16 +580,15 @@ test('Accept red on an open PR merges the pinned head instead of repairing it; a
   const f = fixture(t); f.store.settings({ maxRepairs: 0 }); await atPr(f);
   f.setPr({ checkStatus: 'failing', checks: [{ name: 'e2e', state: 'FAILURE' }] }); await f.tick();
   assert.match(f.sub().error, /repair limit/);
-  f.store.action(f.job.id, 'accept-red', { subJobId: 'api', note: 'e2e is flaky this week' });
+  acceptRed(f, 'api', 'e2e is flaky this week');
   assert.equal(f.sub().error, null); assert.deepEqual(f.sub().acceptedRed, { ref: 'head1', note: 'e2e is flaky this week', at: f.sub().acceptedRed.at });
   await f.tick();
   assert.deepEqual(f.merged, ['head1']); assert.equal(f.sub().mergeRequestedHead, 'head1');
   assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 0, 'an accepted head is never repaired');
-  assert.deepEqual(f.store.get(f.job.id).moves.map((m) => [m.move, m.note]), [['accept-red', 'e2e is flaky this week']]);
   // The acceptance was for head1: a push that lands red is back on the repair road.
   const g = fixture(t); g.store.settings({ maxRepairs: 0 }); await atPr(g);
   g.setPr({ checkStatus: 'failing' }); await g.tick();
-  g.store.action(g.job.id, 'accept-red', { subJobId: 'api' });
+  acceptRed(g, 'api');
   g.setPr({ head: 'head2' }); await g.tick();
   assert.deepEqual(g.merged, []); assert.match(g.sub().error, /repair limit/);
   assert.equal(g.sub().mergeApprovedHead, 'head1', 'the approval it carried stays pinned to the head that was accepted');
@@ -577,7 +598,7 @@ test('with manual merge on, Accept red needs no second Approve merge click: the 
   const f = fixture(t); f.store.settings({ maxRepairs: 0 }); await f.approve(); f.report({ kind: 'published', url: PR_URL });
   f.setPr({ checkStatus: 'failing' }); await f.tick();
   assert.match(f.sub().error, /repair limit/);
-  f.store.action(f.job.id, 'accept-red', { subJobId: 'api' }); await f.tick();
+  acceptRed(f, 'api'); await f.tick();
   assert.deepEqual(f.merged, ['head1'], 'reviewMerge on, yet no second Approve merge click is asked for');
 });
 
@@ -586,7 +607,7 @@ test('Accept red on a failing post-merge run climbs the rest of the ladder, rece
   f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick();
   f.setDeployment({ status: 'failing', runs: [{ workflow: 'Deploy to prod', status: 'failing' }], commit: 'merge1' }); await f.tick();
   assert.match(f.sub().error, /Post-merge run failed/);
-  f.store.action(f.job.id, 'accept-red', { subJobId: 'api', note: 'Prod deploy is red for the unrelated smoke test' });
+  acceptRed(f, 'api', 'Prod deploy is red for the unrelated smoke test');
   assert.equal(f.sub().error, null);
   await f.tick();
   assert.deepEqual(f.sub().deployed.checks, ['Post-merge run accepted red: Prod deploy is red for the unrelated smoke test']);
@@ -596,7 +617,7 @@ test('Accept red on a failing post-merge run climbs the rest of the ladder, rece
   const g = fixture(t); await atPr(g, plan([spec('api', [], { check: 'helm list shows auth in prod' })]));
   g.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await g.tick();
   g.setDeployment({ status: 'failing', runs: [{ workflow: 'Deploy to prod', status: 'failing' }], commit: 'merge1' }); await g.tick();
-  g.store.action(g.job.id, 'accept-red', { subJobId: 'api', note: 'smoke test is unrelated' }); await g.tick();
+  acceptRed(g, 'api', 'smoke test is unrelated'); await g.tick();
   assert.equal(g.last().run.phase, 'verify');
   const prompt = jobPrompt(g.store.get(g.job.id), g.sub(), g.last().run);
   assert.match(prompt, /post-merge runs FAILED \(Deploy to prod\) and the human accepted that — "smoke test is unrelated"/);
@@ -638,17 +659,17 @@ test('a merged sub-job with nothing deployed past the stale window is flagged; a
   assert.ok(!f.sub().error, 'and is never a failed deploy');
 });
 
-// --- Moves ---
+// --- Request changes ---
 
 const movesOf = (f) => f.store.get(f.job.id).moves;
 
-test('Fix here on an open PR under code review goes back to work in the PR worktree, through review, and the approved tree is pushed to the same PR', async (t) => {
+test('Request changes on an open PR under code review goes back to work in the PR worktree, through review, and the approved tree is pushed to the same PR', async (t) => {
   const f = fixture(t); await f.approve();
   f.report({ kind: 'published', url: PR_URL }); await f.tick();
   f.setPr({ checkStatus: 'passing' }); await f.tick();
   f.store.action(f.job.id, 'approve-merge', { subJobId: 'api', head: 'head1' });
   assert.equal(f.sub().mergeApprovedHead, 'head1');
-  f.store.action(f.job.id, 'fix-here', { subJobId: 'api', note: 'Rename the flag to sign_in_v2' });
+  change(f, 'api', 'Rename the flag to sign_in_v2');
   const sent = f.sub();
   assert.deepEqual([sent.stage, sent.state, sent.fixRequested, sent.note, sent.pr.url], ['implementation', 'queued', null, 'Rename the flag to sign_in_v2', PR_URL], 'the PR stays on the card; nothing is committed to it yet');
   assert.match(movesOf(f).at(-1).detail, /back to work on its PR/);
@@ -670,12 +691,12 @@ test('Fix here on an open PR under code review goes back to work in the PR workt
   assert.deepEqual([f.sub().stage, f.sub().state, f.sub().mergeApprovedHead], ['pr', 'watching', null], 'a new head: the old merge approval is spent');
 });
 
-test('Fix here on an open PR with code review off launches a repair whatever colour the checks are, and the repaired receipt clears it', async (t) => {
+test('Request changes on an open PR with code review off launches a repair whatever colour the checks are, and the repaired receipt clears it', async (t) => {
   const f = fixture(t, { ...input, reviewCode: false }); await f.approve();
   f.report({ kind: 'published', url: PR_URL }); await f.tick();
   f.setPr({ checkStatus: 'passing' }); await f.tick();
   assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 0, 'green checks start nothing on their own');
-  f.store.action(f.job.id, 'fix-here', { subJobId: 'api', note: 'Rename the flag to sign_in_v2' });
+  change(f, 'api', 'Rename the flag to sign_in_v2');
   const requested = f.sub();
   assert.equal(requested.fixRequested.note, 'Rename the flag to sign_in_v2');
   assert.equal(requested.state, 'watching'); assert.equal(requested.nextPollAt, 0);
@@ -684,17 +705,17 @@ test('Fix here on an open PR with code review off launches a repair whatever col
   assert.equal(f.last().sub.fixRequested.note, 'Rename the flag to sign_in_v2', 'the prompt carries the note');
   f.report({ kind: 'repaired', changes: ['Renamed the flag'], checks: ['Tests pass'] });
   assert.equal(f.sub().fixRequested, null); assert.equal(f.sub().note, null);
-  assert.deepEqual(movesOf(f).map((m) => [m.subJobId, m.move, m.note]), [['api', 'fix-here', 'Rename the flag to sign_in_v2']]);
+  assert.deepEqual(movesOf(f).map((m) => [m.subJobId, m.move, m.note]), [['api', 'request-change', 'Rename the flag to sign_in_v2']]);
   assert.match(movesOf(f)[0].detail, /new commit on “Deliver api”/);
   assert.match(movesOf(f)[0].id, /^mv_/);
 });
 
-test('Fix here before a PR exists is a retry with a steer, and is refused once the PR has merged', async (t) => {
+test('a blocked step is retried with a note; a request on a step with no agent of its own goes to the planner', async (t) => {
   const f = fixture(t); await f.approve();
-  f.report({ kind: 'blocked', summary: 'The feature flag name is ambiguous', move: 'fix-here' }); await f.tick();
-  assert.deepEqual(f.sub().blocked, { summary: 'The feature flag name is ambiguous', move: 'fix-here', phase: 'implementation', at: f.sub().blocked.at });
+  f.report({ kind: 'blocked', summary: 'The feature flag name is ambiguous' }); await f.tick();
+  assert.deepEqual(f.sub().blocked, { summary: 'The feature flag name is ambiguous', phase: 'implementation', at: f.sub().blocked.at });
   assert.equal(f.sub().error, 'The feature flag name is ambiguous');
-  f.store.action(f.job.id, 'fix-here', { subJobId: 'api', note: 'Call it sign_in_v2' });
+  f.store.action(f.job.id, 'retry', { subJobId: 'api', note: 'Call it sign_in_v2' });
   assert.equal(f.sub().error, null); assert.equal(f.sub().blocked, null);
   assert.equal(f.sub().state, 'queued'); assert.equal(f.sub().note, 'Call it sign_in_v2');
   await f.tick();
@@ -702,117 +723,60 @@ test('Fix here before a PR exists is a retry with a steer, and is refused once t
   f.report({ kind: 'published', url: PR_URL });
   assert.equal(f.sub().note, null, 'the note is spent once that session reports');
   f.store.update(f.job.id, (j) => { j.subJobs[0].stage = 'deployment'; });
-  assert.throws(() => f.store.action(f.job.id, 'fix-here', { subJobId: 'api' }), /Split out/);
+  change(f, 'api', 'Also guard empty payloads');
+  const asked = f.store.get(f.job.id);
+  assert.match(asked.replan.feedback, /^About “Deliver api” \(api, deployment\/\w+\): Also guard empty payloads$/, 'merged work has no resumable agent: the planner takes it, told where it came from');
+  assert.equal(f.sub().stage, 'deployment', 'nothing moves until the proposal is approved');
+  assert.deepEqual(movesOf(f).at(-1) && [movesOf(f).at(-1).subJobId, movesOf(f).at(-1).move, movesOf(f).at(-1).note], ['api', 'request-change', 'Also guard empty payloads']);
 });
 
-test('Split out adds a PR on the same ticket, before or after this one', async (t) => {
-  for (const position of ['before', 'after']) {
-    const f = fixture(t); await f.approve(); f.alive.clear(); await f.tick();
-    f.store.action(f.job.id, 'split-out', { subJobId: 'api', title: 'Sync the proto', brief: 'Regenerate the proto', position, check: 'Proto matches', note: 'Do this one first' });
-    const job = f.store.get(f.job.id);
-    const [api, extra] = job.subJobs;
-    assert.equal(extra.id, 'api-2'); assert.equal(extra.repo, '/repo'); assert.equal(extra.storyId, 'story');
-    assert.equal(extra.jiraKey, 'AUTH-123'); assert.equal(extra.check, 'Proto matches'); assert.equal(extra.stage, 'implementation');
-    assert.deepEqual(job.plan.subJobs.map((s) => s.id), ['api', 'api-2'], 'the approved plan carries it too');
-    if (position === 'before') { assert.deepEqual(api.after, ['api-2']); assert.deepEqual(extra.after, []); }
-    else { assert.deepEqual(api.after, []); assert.deepEqual(extra.after, ['api']); }
-    assert.deepEqual(job.plan.subJobs[0].after, api.after);
-    assert.equal(api.note, 'Do this one first'); assert.equal(api.repairAllowance, 1);
-    assert.match(movesOf(f)[0].detail, new RegExp(`Split out “Sync the proto” to land ${position} this`));
-  }
+test('a request is pinned to what was viewed: a moved head, receipt, revision or proposal refuses it, and so does an idea with no words', async (t) => {
+  const f = fixture(t); await f.approve(); f.report({ kind: 'published', url: PR_URL }); await f.tick();
+  const view = changeView(f.store.get(f.job.id), f.sub());
+  assert.deepEqual(view, { at: 'pr', ref: 'head1' });
+  const send = (extra) => f.store.action(f.job.id, 'request-change', { subJobId: 'api', ...view, text: 'Rename the flag', ...extra });
+  assert.throws(() => send({ ref: 'head0' }), /changed since you looked/);
+  assert.throws(() => send({ at: 'code' }), /changed since you looked/);
+  assert.throws(() => send({ text: '  ' }), /Explain the change/);
+  assert.throws(() => f.store.action(f.job.id, 'request-change', { subJobId: 'ghost', ...view, text: 'x' }), /Sub-job not found/);
+  assert.deepEqual(movesOf(f), [], 'a refused request leaves no trace');
+  send();
+  assert.equal(movesOf(f).length, 1);
 });
 
-test('Split out from a merged sub-job is its fix: it counts as deployed when the fix does', async (t) => {
-  const f = fixture(t); await atPr(f); f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick();
-  f.setDeployment({ status: 'failing', runs: [{ workflow: 'Deploy', status: 'failing' }], commit: 'merge1' }); await f.tick();
-  assert.match(f.sub().error, /Post-merge run failed/);
-  f.store.action(f.job.id, 'split-out', { subJobId: 'api', title: 'Guard empty payloads', brief: 'Add the null guard', position: 'before' });
-  const api = f.sub();
-  assert.equal(api.recoveredBy, 'api-2'); assert.equal(api.state, 'awaiting-fix'); assert.equal(api.error, null);
-  assert.deepEqual(api.after, [], 'a merged sub-job cannot wait for anything: position is ignored');
-  assert.match(movesOf(f)[0].detail, /as the fix for this merged PR/);
-  await f.tick();
-  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api-2', 'implementation']);
-  f.store.update(f.job.id, (j) => { j.subJobs[1].deployed = { checks: ['Live'] }; j.subJobs[1].stage = 'done'; });
-  await f.tick();
-  assert.equal(f.sub().stage, 'cleanup'); assert.match(f.sub().deployed.checks[0], /Fixed by Guard empty payloads/);
-  assert.equal(f.sub().deployed.commit, 'merge1');
+test('a session result goes back to its own session; the first plan and a running job go to the planner, and a pending change refuses a step\'s own agent', async (t) => {
+  const g = fixture(t); await g.approve(plan([sessionSpec('spike')]));
+  g.report({ kind: 'completed', checks: ['Answered'] }); await g.tick();
+  assert.deepEqual(changeView(g.store.get(g.job.id), g.sub()), { at: 'session', ref: g.sub().result.receiptId });
+  assert.throws(() => g.store.action(g.job.id, 'request-change', { subJobId: 'spike', at: 'session', ref: 'run_stale', text: 'Also check staging' }), /changed since you looked/);
+  change(g, 'spike', 'Also check staging');
+  assert.deepEqual([g.sub().stage, g.sub().state, g.sub().result, g.sub().feedback], ['session', 'queued', null, 'Also check staging']);
+  const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web')]) }); await f.tick();
+  assert.deepEqual(changeView(f.store.get(f.job.id), null), { at: 'plan', ref: String(f.store.get(f.job.id).revision) });
+  assert.throws(() => f.store.action(f.job.id, 'request-change', { at: 'plan', ref: '0', text: 'x' }), /changed since you looked/);
+  change(f, null, 'Just the API');
+  assert.equal(f.store.get(f.job.id).feedback, 'Just the API'); assert.equal(f.store.get(f.job.id).plan, null);
 });
 
-test('New ticket adds a keyless story and the write that creates it, under a stories session; its key releases the new PR', async (t) => {
-  const f = fixture(t); await f.approve(); f.alive.clear(); await f.tick();
-  f.store.action(f.job.id, 'new-ticket', { subJobId: 'api', storyTitle: 'Sign-ins are audited', project: 'SEC',
-    title: 'Emit audit events', brief: 'Emit an event per sign-in', position: 'after' });
-  let job = f.store.get(f.job.id);
-  assert.deepEqual(job.plan.stories.map((s) => [s.id, s.key ?? null, s.project ?? null]), [['story', 'AUTH-123', null], ['s-2', null, 'SEC']]);
-  const extra = job.subJobs.find((s) => s.id === 'api-2');
-  assert.equal(extra.storyId, 's-2'); assert.equal(extra.jiraKey, null); assert.deepEqual(extra.after, ['api']);
-  assert.deepEqual(job.subJobs.filter((s) => s.kind === 'write').map((s) => [s.id, s.storyId, s.action.type, s.by]), [['create-s-2', 's-2', 'create', 'stories']]);
-  assert.deepEqual(job.subJobs.find((s) => s.id === 'stories').title, 'Create Jira stories');
-  await f.tick();
-  const ticketing = f.workerFor('stories', 'session');
-  assert.match(jobPrompt(f.store.get(f.job.id), ticketing.sub, ticketing.run), /"id":"create-s-2","place":"jira","ticket":null,"story":"Sign-ins are audited","project":"SEC"/);
-  assert.equal(f.launched.filter((w) => w.sub?.id === 'api-2').length, 0, 'nothing starts without a key');
-  f.report({ kind: 'completed', checks: ['Created SEC-42'], writes: [{ id: 'create-s-2', outcome: 'written', key: 'SEC-42' }] }, ticketing);
-  job = f.store.get(f.job.id);
-  assert.equal(job.stage, 'active');
-  assert.equal(job.subJobs.find((s) => s.id === 'api-2').jiraKey, 'SEC-42'); assert.equal(job.plan.subJobs.find((s) => s.id === 'api-2').jiraKey, 'SEC-42');
-  f.store.update(f.job.id, (j) => { j.subJobs[0].deployed = { checks: ['Live'] }; j.subJobs[0].stage = 'done'; });
-  await f.tick();
-  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api-2', 'implementation']);
-  assert.match(movesOf(f)[0].detail, /New ticket “Sign-ins are audited” with PR “Emit audit events” to land after this/);
+test('every step\'s idea has one way in: a pending plan change holds the step agents but a proposal takes more ideas', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api')); await f.tick();
+  change(f, null, 'Also cover SSO'); await f.tick();
+  assert.equal(f.store.get(f.job.id).replan.feedback, 'Also cover SSO');
+  assert.throws(() => change(f, 'api', 'Rename it'), /plan change is pending/, 'the planner holds the job still');
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub)); await f.tick();
+  const proposal = f.store.get(f.job.id).replan.proposal;
+  assert.deepEqual(changeView(f.store.get(f.job.id), null), { at: 'proposal', ref: proposal.id });
+  assert.throws(() => f.store.action(f.job.id, 'request-change', { at: 'proposal', ref: 'run_other', text: 'x' }), /changed since you looked/);
+  change(f, null, 'SSO goes first');
+  assert.equal(f.store.get(f.job.id).replan.previous.subJobs.length, 3, 'the planner reads the proposal it is asked to change');
 });
 
-test('Reorder rewrites what a sub-job lands after, refusing itself, a stranger and a cycle', async (t) => {
-  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')])); f.alive.clear(); await f.tick();
-  assert.throws(() => f.store.action(f.job.id, 'reorder', { subJobId: 'web', after: ['web'] }), /cannot depend on itself/);
-  assert.throws(() => f.store.action(f.job.id, 'reorder', { subJobId: 'web', after: ['ghost'] }), /Unknown dependency/);
-  f.store.action(f.job.id, 'reorder', { subJobId: 'web', after: ['api'] });
-  assert.deepEqual(f.sub(1).after, ['api']); assert.deepEqual(f.store.get(f.job.id).plan.subJobs[1].after, ['api']);
-  assert.throws(() => f.store.action(f.job.id, 'reorder', { subJobId: 'api', after: ['web'] }), /cycles/);
-  assert.deepEqual(f.sub().after, [], 'a refused reorder changes nothing');
-  f.store.action(f.job.id, 'reorder', { subJobId: 'web', after: [] });
-  assert.equal(movesOf(f).at(-1).detail, 'No longer waits for anything');
-  f.store.update(f.job.id, (j) => { j.subJobs[1].stage = 'deployment'; });
-  assert.throws(() => f.store.action(f.job.id, 'reorder', { subJobId: 'web', after: ['api'] }), /has merged/);
-});
-
-test('Mark position: a PR opened by hand, a merge done by hand, and work already covered elsewhere', async (t) => {
-  const f = fixture(t); await f.approve(); f.alive.clear(); await f.tick();
-  assert.throws(() => f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'merged' }), /Only an open PR/);
-  assert.throws(() => f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'pr' }), /Give the PR url/);
-  f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'pr', url: PR_URL });
-  let api = f.sub();
-  assert.equal(api.stage, 'pr'); assert.equal(api.state, 'watching'); assert.equal(api.pr.url, PR_URL);
-  assert.ok(api.nextPollAt > Date.now() + 9000, 'a PR named by hand settles like a reported one');
-  assert.throws(() => f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'pr', url: PR_URL }), /already has a PR/);
-  f.store.update(f.job.id, (j) => { j.subJobs[0].error = 'stuck'; });
-  f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'merged' });
-  api = f.sub();
-  assert.equal(api.error, null); assert.equal(api.nextPollAt, 0); assert.equal(api.stage, 'pr', 'the next poll reads the merge itself');
-  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick();
-  assert.equal(f.sub().stage, 'deployment');
-  f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'done', note: 'Deployed by hand, /health is green' });
-  api = f.sub();
-  assert.equal(api.stage, 'cleanup'); assert.deepEqual(api.deployed.checks, ['Deployed by hand, /health is green']);
-  assert.equal(api.deployed.commit, 'merge1'); assert.equal(api.note, null, 'a mark note is history, not a steer for a next session');
-  await f.tick(); assert.equal(f.store.get(f.job.id).stage, 'done');
-  assert.deepEqual(movesOf(f).map((m) => m.move), ['mark', 'mark', 'mark']);
-});
-
-test('Mark done finishes a session sub-job with its own receipt', async (t) => {
-  const f = fixture(t); await f.approve(plan([sessionSpec('spike')])); f.alive.clear(); await f.tick();
-  f.store.action(f.job.id, 'mark', { subJobId: 'spike', position: 'done', note: 'Already answered in the incident review' });
-  const spike = f.sub();
-  assert.equal(spike.stage, 'cleanup');
-  assert.deepEqual(spike.result, { checks: ['Already answered in the incident review'], at: spike.result.at, receiptId: null });
-  assert.equal(spike.deployed, undefined);
-});
-
-test('Mark done on a PR sub-job that never opened a PR still completes cleanup', async (t) => {
+test('a PR sub-job that never opened a PR and was finished by hand still completes cleanup', async (t) => {
   const f = fixture(t); await f.approve(); f.alive.clear(); await f.tick();
   f.store.update(f.job.id, (j) => { j.subJobs[0].worktree.cleanupHead = 'base'; });
-  f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'done', note: 'Finished outside the job' });
+  markDone(f, 'api', 'Finished outside the job');
   let api = f.sub();
   assert.equal(api.stage, 'cleanup'); assert.equal(api.pr, null);
   // The fixture's own runtime stub never exercises cleanupWorktree's git rules;
@@ -826,42 +790,24 @@ test('Mark done on a PR sub-job that never opened a PR still completes cleanup',
   assert.deepEqual([api.stage, api.state, api.error], ['done', 'done', null]);
 });
 
-test('Drop is the old cancel under a new name: it stops the live step and ignores its late receipt', async (t) => {
+test('dropping a sub-job stops the live step and ignores its late receipt', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web', ['api'])]));
   const worker = f.workerFor('api');
-  f.store.action(f.job.id, 'drop', { subJobId: 'api' });
-  let api = f.sub();
+  dropIt(f, 'api');
+  const api = f.sub();
   assert.equal(api.stage, 'cleanup'); assert.ok(api.cancelledAt); assert.equal(api.state, 'cancelled');
   f.report({ kind: 'published', url: PR_URL }, worker);
   assert.equal(f.sub().pr, null, 'a racing receipt must not move a dropped sub-job');
   await f.tick();
   assert.ok(f.stopped.includes(worker.run.id)); assert.deepEqual(f.cleaned, ['api']);
   assert.equal(f.sub().stage, 'done');
-  assert.throws(() => f.store.action(f.job.id, 'drop', { subJobId: 'api' }), /already finished/);
-  assert.throws(() => f.store.action(f.job.id, 'cancel', { subJobId: 'api' }), /already finished/, 'the old name still routes here');
-  assert.throws(() => f.store.action(f.job.id, 'drop'), /Choose a sub-job/);
-  assert.deepEqual(movesOf(f).map((m) => m.move), ['drop']);
 });
 
-test('a move that rewrites the plan waits for the session working to it; Drop never does', async (t) => {
-  const f = fixture(t); await f.approve();
-  for (const [action, payload] of [
-    ['split-out', { title: 'Second PR', brief: 'Split it' }],
-    ['new-ticket', { storyTitle: 'Another story', title: 'Second PR', brief: 'Split it' }],
-    ['reorder', { after: [] }],
-    ['mark', { position: 'done' }],
-  ]) assert.throws(() => f.store.action(f.job.id, action, { subJobId: 'api', ...payload }), /Wait for the session to stop/, action);
-  assert.deepEqual(movesOf(f), []);
-  f.store.action(f.job.id, 'drop', { subJobId: 'api' });
-  assert.equal(f.sub().state, 'cancelled');
-});
-
-test('every move is refused on a finished or dropped sub-job', async (t) => {
+test('a finished or dropped sub-job has nothing left to change', async (t) => {
   const f = fixture(t); await f.approve(); f.alive.clear(); await f.tick();
-  f.store.action(f.job.id, 'drop', { subJobId: 'api' });
-  for (const action of ['fix-here', 'split-out', 'new-ticket', 'reorder', 'drop', 'mark', 'accept-red']) {
-    assert.throws(() => f.store.action(f.job.id, action, { subJobId: 'api', title: 't', brief: 'b', storyTitle: 's', after: [], position: 'done' }), /already finished/, action);
-  }
+  dropIt(f, 'api');
+  assert.equal(changeView(f.store.get(f.job.id), f.sub()), null);
+  assert.throws(() => change(f, 'api'), /Nothing is left to change/);
 });
 
 test('cancelling a job drops every unfinished sub-job, stops its steps, cleans up and finishes as cancelled', async (t) => {
@@ -883,17 +829,17 @@ test('cancelling a job drops every unfinished sub-job, stops its steps, cleans u
   assert.deepEqual(job.subJobs.map((s) => [s.stage, s.state, s.error ?? null]), [['done', 'cancelled', null], ['done', 'cancelled', null], ['done', 'cancelled', null]]);
   assert.equal(job.stage, 'done'); assert.ok(job.completedAt); assert.equal(job.error ?? null, null);
   assert.equal(f.launched.length, before, 'the freed slots launch nothing');
-  for (const action of ['pause', 'resume', 'start', 'replan', 'approve-session', 'approve-merge', 'drop', 'fix-here']) {
-    assert.throws(() => f.store.action(f.job.id, action, { subJobId: action === 'drop' || action === 'fix-here' ? 'docs' : undefined, feedback: 'x' }), /Job was cancelled/, action);
+  for (const action of ['pause', 'resume', 'start', 'request-change', 'approve-session', 'approve-merge']) {
+    assert.throws(() => f.store.action(f.job.id, action, { subJobId: action === 'request-change' ? 'docs' : undefined, text: 'x' }), /Job was cancelled/, action);
   }
   assert.throws(() => f.store.action(f.job.id, 'cancel-job'), /already finished/);
-  assert.deepEqual(movesOf(f), [], 'a cancel is job state, not one of the six moves');
+  assert.deepEqual(movesOf(f), [], 'a cancel is job state, not a recorded intervention');
 });
 
 test('a sub-job already delivered or refused cleanup is left alone by a cancel, and Retry still clears a refused cleanup', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   f.alive.delete(f.workerFor('api').sid); await f.tick();
-  f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'done', note: 'Landed by hand' });
+  markDone(f, 'api', 'Landed by hand');
   const cleanupError = new Error('Branch has additional commits; preserve it for review');
   f.runtime.cleanup = async (j, s) => { if (s.id === 'web' && s.cancelledAt) throw cleanupError; f.cleaned.push(s.id); };
   f.store.action(f.job.id, 'cancel-job');
@@ -1308,7 +1254,7 @@ test('a refused write shows its place\'s error; Retry and Pick another status ru
   f.store.action(f.job.id, 'edit-write', { subJobId: 'w', write: { action: { to: 'QA' } } }); await f.tick();
   assert.match(jobPrompt(f.store.get(f.job.id), f.workerFor('n').sub, f.workerFor('n').run), /"to":"QA"/);
   f.report(completed([{ id: 'w', outcome: 'failed', error: 'No' }]), f.workerFor('n')); await f.tick();
-  f.store.action(f.job.id, 'mark', { subJobId: 'w', position: 'done', note: 'Moved it by hand' }); await f.tick();
+  markDone(f, 'w', 'Moved it by hand'); await f.tick();
   job = f.store.get(f.job.id);
   assert.equal(job.subJobs[1].stage, 'done'); assert.deepEqual(job.subJobs[1].result.checks, ['Moved it by hand']);
   assert.equal(f.launched.filter((l) => l.sub?.id === 'n').length, 3);
@@ -1341,7 +1287,7 @@ test('an if-dropped session is dormant: it starts when its trigger is dropped an
     notifier('web-wont', { sub: 'web', at: 'dropped' }), write('web-wont-w', 'web-wont', moveTo("Won't Do"))]));
   const sessions = () => f.launched.filter((l) => l.run.phase === 'session').map((l) => l.sub.id);
   assert.deepEqual(sessions(), [], 'nothing has come yet');
-  f.store.action(f.job.id, 'drop', { subJobId: 'web' }); await f.tick();
+  dropIt(f, 'web'); await f.tick();
   let job = f.store.get(f.job.id);
   assert.deepEqual(sessions(), ['web-wont']);
   assert.deepEqual([job.subJobs.find((s) => s.id === 'web-pr').stage, job.subJobs.find((s) => s.id === 'web-pr-w').state], ['session', 'queued'], 'its milestone will never come: the human drops it');
@@ -1362,7 +1308,7 @@ test('a session that ends without a receipt holds its writes; a pending plan cha
   let job = f.store.get(f.job.id);
   assert.match(job.subJobs[1].error, /without a receipt/); assert.equal(job.error ?? null, null);
   assert.equal(job.subJobs[2].state, 'queued');
-  f.store.action(f.job.id, 'replan', { feedback: 'Also cover SSO' });
+  change(f, null, 'Also cover SSO');
   f.report({ kind: 'published', url: PR_URL }, f.workerFor('api', 'implementation')); await f.tick();
   job = f.store.get(f.job.id);
   assert.equal(f.launched.filter((l) => l.sub?.id === 'later').length, 0, 'held: the change may still edit or drop it');
@@ -1455,11 +1401,9 @@ test('a session accounts for every output it makes: a link completes one, failed
   assert.deepEqual([k6.stage, k6.state, k6.error], ['write', 'failed', 'k6 was not installed on this machine'], 'the receipt shape of a session launched before every write lived on one still lands');
   assert.equal(page.result.url, 'https://x.atlassian.net/wiki/pages/42');
   assert.equal(job.subJobs.find((s) => s.id === 'report').stage, 'review', 'the session itself completes as usual');
-  assert.throws(() => f.store.action(f.job.id, 'mark', { subJobId: 'k6', position: 'done', link: 'not a link' }), /http\(s\) URL or an absolute path/);
-  f.store.action(f.job.id, 'mark', { subJobId: 'k6', position: 'done', link: '/Users/me/reports/k6.html', note: 'Ran k6 myself' }); await f.tick();
+  markDone(f, 'k6', 'Ran k6 myself', { url: '/Users/me/reports/k6.html' }); await f.tick();
   const marked = f.store.get(f.job.id).subJobs.find((s) => s.id === 'k6');
   assert.deepEqual([marked.stage, marked.result.url, marked.result.checks], ['done', '/Users/me/reports/k6.html', ['Ran k6 myself']]);
-  assert.throws(() => f.store.action(f.job.id, 'mark', { subJobId: 'report', position: 'done', link: 'https://x' }), /Only a write is marked done with where it is/);
 });
 
 test('a reviewed Slack post links the page another session made, is drafted for review, and keeps the permalink it was posted at', async (t) => {
@@ -1584,7 +1528,7 @@ test('a reviewed story create is drafted by its session, where its story is edit
 test('dropping a session drops the writes it would have made', async (t) => {
   const f = fixture(t);
   await f.approve(plan([sessionSpec('report'), make('chart', 'artifact', 'report', 'p95 chart'), write('w', 'report', moveTo('Done'))]));
-  f.store.action(f.job.id, 'drop', { subJobId: 'report' }); await f.tick(); await f.tick();
+  dropIt(f, 'report'); await f.tick(); await f.tick();
   const [chart, w] = f.store.get(f.job.id).subJobs.slice(1);
   assert.ok(chart.cancelledAt); assert.equal(chart.stage, 'done');
   assert.ok(w.cancelledAt);
@@ -1638,9 +1582,8 @@ test('a version-4 file: an in-flight milestone write is failed, never run; its w
   assert.deepEqual(stopped, ['run_w']); assert.equal(job.runs[0].stopped, true);
   assert.equal(job.error ?? null, null, 'the writer run stopped quietly');
   assert.ok(!job.runs.some((r) => r.phase === 'write' && !r.stopped), 'and nothing launches a writer again');
-  store.action('job_live', 'reorder', { subJobId: 'api', after: ['web'] });
-  assert.deepEqual(store.get('job_live').subJobs[0].after, ['web'], 'a move still validates the plan around the legacy write');
-  store.action('job_live', 'drop', { subJobId: 'w' });
+  validatePlan(store.get('job_live').plan);
+  store.update('job_live', (j) => dropSub(j.subJobs.find((s) => s.id === 'w'), Date.now(), j));
   assert.ok(store.get('job_live').subJobs.find((s) => s.id === 'w').cancelledAt);
   assert.throws(() => store.approvePlan('job_planning', 3), /names the session sub-job that makes it/, 'an unapproved plan is judged afresh on approval');
 });
@@ -1750,8 +1693,8 @@ test('with session review off a completed session goes straight to done; request
   const g = fixture(t);
   await g.approve(plan([sessionSpec('spike')]));
   g.report({ kind: 'completed', checks: ['Done'] }); await g.tick();
-  assert.throws(() => g.store.action(g.job.id, 'revise-session', { subJobId: 'spike' }), /Explain/);
-  g.store.action(g.job.id, 'revise-session', { subJobId: 'spike', feedback: 'Also check staging' });
+  assert.throws(() => change(g, 'spike', ' '), /Explain/);
+  change(g, 'spike', 'Also check staging');
   assert.equal(g.sub().stage, 'session'); assert.equal(g.sub().result, null);
   await g.tick();
   assert.equal(g.last().run.phase, 'session'); assert.equal(g.last().sub.feedback, 'Also check staging');
@@ -1759,7 +1702,7 @@ test('with session review off a completed session goes straight to done; request
   assert.equal(g.sub().stage, 'review'); assert.equal(g.sub().feedback, null);
   g.store.action(g.job.id, 'approve-session', { subJobId: 'spike', sessionReceiptId: g.sub().result.receiptId });
   assert.deepEqual(g.store.get(g.job.id).moves.map((m) => [m.subJobId, m.move, m.note]),
-    [['spike', 'revise-session', 'Also check staging'], ['spike', 'approve-session', null]], 'approvals and requests are on the same timeline as the plan moves');
+    [['spike', 'request-change', 'Also check staging'], ['spike', 'approve-session', null]], 'approvals and requests are on the same timeline');
 });
 
 test('with plan review off the plan receipt approves itself; a keyless story is still created by its own session first and a replan still waits', async (t) => {
@@ -1771,7 +1714,7 @@ test('with plan review off the plan receipt approves itself; a keyless story is 
   assert.equal(job.stage, 'active'); assert.ok(job.approvedAt); assert.equal(job.subJobs[0].id, 'api');
   await f.tick();
   assert.equal(f.last().run.phase, 'implementation');
-  f.store.action(f.job.id, 'replan', { feedback: 'Split the API change' }); await f.tick();
+  change(f, null, 'Split the API change'); await f.tick();
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('more')]) }); await f.tick();
   job = f.store.get(f.job.id);
   assert.ok(job.replan.proposal, 'a replan is a proposal the human approves'); assert.deepEqual(job.subJobs.map((s) => s.id), ['api']);
@@ -1840,8 +1783,8 @@ test('MCP receipts and context are caller-bound and carry the job and run only',
   await suggested.approve();
   const s = suggested.last();
   await jobReportTool.handler({ host: fakeHost(suggested), caller: s.sid },
-    { runId: s.run.id, report: { kind: 'blocked', summary: 'The proto is out of date', move: 'split-out' } });
-  assert.equal(suggested.sub().blocked.move, 'split-out');
+    { runId: s.run.id, report: { kind: 'blocked', summary: 'The proto is out of date' } });
+  assert.deepEqual(Object.keys(suggested.sub().blocked).sort(), ['at', 'phase', 'summary']);
   const drafting = fixture(t, { ...input, reviewWrites: true });
   await drafting.approve(plan([notifier('n'), write('w', 'n', moveTo('In Review'))]));
   const d = drafting.workerFor('n');
@@ -1917,14 +1860,13 @@ test('an invalid job-settings patch is refused and leaves the settings alone', a
   assert.equal(f.store.snapshot().settings.concurrency, 4);
 });
 
-test('a move arrives as a job-action with its own fields and reaches the store whole', async (t) => {
-  const f = fixture(t); await f.approve(); f.alive.clear(); await f.tick();
+test('a request-change arrives as a job-action with its own fields and reaches the store whole', async (t) => {
+  const f = fixture(t); await f.approve(); f.report({ kind: 'ready', checks: ['Tests pass'] }); await f.tick();
   const host = fakeHost(f);
   stubRunner(t, host);
-  await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'split-out',
-    title: 'Sync the proto', brief: 'Regenerate the proto', position: 'after', note: 'small one' }, host);
-  assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id, action: 'split-out', subJobId: 'api' }]);
-  assert.deepEqual(f.store.get(f.job.id).subJobs.map((s) => s.id), ['api', 'api-2']);
+  await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: 'code', ref: f.sub().ready.receiptId, text: 'Use the retry helper' }, host);
+  assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id, action: 'request-change', subJobId: 'api' }]);
+  assert.deepEqual([f.sub().stage, f.sub().note], ['implementation', 'Use the retry helper']);
 });
 
 test('a refused job-action is broadcast with its reason instead of thrown, so the footer can snap back', async (t) => {
@@ -2212,20 +2154,20 @@ test('a cancelled post-merge run is judged by the later run on the same branch t
 test('a running job takes a plan change as a proposal: frozen work is locked, removed work is cancelled, new work held until approval', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web'), spec('docs', ['api'])]));
   const web = f.workerFor('web');
-  assert.throws(() => f.store.action(f.job.id, 'replan', { feedback: ' ' }), /Explain the change/);
+  assert.throws(() => change(f, null, ' '), /Explain the change/);
   f.alive.delete(f.workerFor('api').sid); await f.tick();
-  f.store.action(f.job.id, 'mark', { subJobId: 'api', position: 'done' });
-  f.store.action(f.job.id, 'replan', { feedback: 'Drop docs; ship a CLI after web' }); await f.tick();
+  markDone(f, 'api');
+  change(f, null, 'Drop docs; ship a CLI after web'); await f.tick();
   const planner = f.last();
   await f.tick();
-  assert.throws(() => f.store.action(f.job.id, 'drop', { subJobId: 'docs' }), /plan change is pending/, 'a move would reshape the plan under the planner');
+  assert.throws(() => f.store.action(f.job.id, 'approve-merge', { subJobId: 'web', head: 'h' }), /plan change is pending/, 'an approval would move a sub-job under the planner');
   assert.equal(planner.run.phase, 'planning'); assert.equal(planner.sub, null);
   assert.equal(f.launched.filter((w) => w.sub?.id === 'docs').length, 0, 'new sub-job work is held while the change is pending');
   assert.equal(f.sub(0).stage, 'done');
   const prompt = jobPrompt(f.store.get(f.job.id), null, planner.run);
   assert.match(prompt, /ALREADY RUNNING/); assert.match(prompt, /- api \(pr\) "Deliver api": done\/done · FROZEN/);
   assert.match(prompt, /Frozen \(.*\): api\./); assert.match(prompt, /- web .*a step is running/); assert.match(prompt, /Requested change: Drop docs/);
-  assert.throws(() => f.store.action(f.job.id, 'replan', { feedback: 'again' }), /Wait for the planning/);
+  assert.throws(() => change(f, null, 'again'), /Wait for the planning/);
 
   const proposal = (subs) => plan(subs);
   assert.throws(() => f.report({ kind: 'plan', plan: proposal([{ ...spec('api'), brief: 'Redo api' }, spec('web')]) }, planner), /api has already landed/);
@@ -2265,7 +2207,7 @@ test('a plan change that moves a green PR behind new work reworks it, and neithe
   const f = fixture(t, { ...input, reviewCode: false }); await f.approve(plan([spec('api'), spec('web')]));
   f.report({ kind: 'published', url: PR_URL }, f.workerFor('web')); f.setPr({ checkStatus: 'passing' }); await f.tick();
   f.store.action(f.job.id, 'approve-merge', { subJobId: 'web', head: 'head1' });
-  f.store.action(f.job.id, 'replan', { feedback: 'Web needs the new api' }); await f.tick();
+  change(f, null, 'Web needs the new api'); await f.tick();
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web', ['api'], { brief: 'Implement web on the new api' })]) }, f.last());
   f.store.action(f.job.id, 'approve-replan', { proposalId: f.last().run.id });
   const web = () => f.store.get(f.job.id).subJobs.find((s) => s.id === 'web');
@@ -2284,7 +2226,7 @@ test('a plan change that moves a green PR behind new work reworks it, and neithe
 
 test('a pending plan change holds a green PR from merging until it is discarded', async (t) => {
   const f = fixture(t); await atPr(f);
-  f.store.action(f.job.id, 'replan', { feedback: 'Rethink it' }); await f.tick();
+  change(f, null, 'Rethink it'); await f.tick();
   f.setPr({ checkStatus: 'passing' }); await f.tick(); await f.tick();
   assert.equal(f.merged.length, 0, 'merging would land work the proposal may cancel');
   assert.equal(f.sub().pr.checkStatus, 'passing', 'the PR is still watched');
@@ -2295,7 +2237,7 @@ test('a pending plan change holds a green PR from merging until it is discarded'
 test('a discarded plan change stops its planner quietly and ignores a late proposal', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api')]));
   assert.throws(() => f.store.action(f.job.id, 'discard-replan'), /No plan change/);
-  f.store.action(f.job.id, 'replan', { feedback: 'Smaller' }); await f.tick();
+  change(f, null, 'Smaller'); await f.tick();
   const planner = f.last();
   f.store.action(f.job.id, 'discard-replan');
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web')]) }, planner);
@@ -2309,9 +2251,9 @@ test('a discarded plan change stops its planner quietly and ignores a late propo
 
 test('asking again replaces a waiting proposal and shows it to the next planner; a blocked planner is cleared by discarding', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api')]));
-  f.store.action(f.job.id, 'replan', { feedback: 'Add web' }); await f.tick();
+  change(f, null, 'Add web'); await f.tick();
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web')]) }); await f.tick();
-  f.store.action(f.job.id, 'replan', { feedback: 'Web first' }); await f.tick();
+  change(f, null, 'Web first'); await f.tick();
   const second = f.last();
   assert.match(jobPrompt(f.store.get(f.job.id), null, second.run), /Your previous proposal, which the human asked to change: .*"web"/);
   f.report({ kind: 'blocked', summary: 'Cannot tell which repo' }, second); await f.tick();

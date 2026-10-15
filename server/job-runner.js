@@ -4,7 +4,7 @@ import { awaitsTicket } from './jobs-schema.js';
 import { logWarn } from './log.js';
 import { isFrozen } from './job-replan.js';
 import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from './job-writes.js';
-import { dropSub } from './job-moves.js';
+import { dropSub } from './job-sub-ops.js';
 import { draftsDecidedMail } from './job-prompts.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
@@ -305,7 +305,7 @@ export class JobRunner {
           job = this.store.get(id); sub = job.subJobs.find((s) => s.id === sub.id);
           // The ladder ends here unless the plan named a check no pipeline can
           // perform; that one line is the only thing a verify session exists for.
-          // A red run the human accepted (job-moves.js) climbs the same rungs as
+          // A red run the human accepted (job-sub-ops.js) climbs the same rungs as
           // a green one, the plan's own check included; only the receipt line
           // says which colour it was.
           const accepted = result.status === 'failing' && !!sub.acceptedRed && sub.acceptedRed.ref === sub.pr?.mergeCommit;

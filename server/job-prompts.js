@@ -19,9 +19,8 @@ const branchNaming = (job, sub) => (!sub?.worktree?.branch || sub.worktree.branc
   : `Your worktree branch is ${sub.worktree.branch}; keep it.`;
 
 // The receipt is the only thing that advances a job, so every prompt ends with
-// the exact call. `move` is a suggestion the human sees as a pre-selected
-// button on the card; nothing an agent reports ever changes the plan itself.
-const blockedLine = 'Blocked: {kind:"blocked", summary:"one sentence", move?:"fix-here"|"split-out"|"new-ticket"|"reorder"|"drop"|"mark"|"accept-red"}.';
+// the exact call. Nothing an agent reports ever changes the plan itself.
+const blockedLine = 'Blocked: {kind:"blocked", summary:"one sentence"}.';
 const lines = (...parts) => parts.filter(Boolean).join('\n');
 const afterLine = (job, sub) => `After: ${(sub?.after || []).map((id) => (job.subJobs || []).find((s) => s.id === id)?.title || id).join(' · ') || 'none'}.`;
 const HUMAN_OUTPUT_PROMPT_MAX = 24000;
@@ -121,7 +120,7 @@ const heading = (job, sub) => `${sub?.jiraKey ? `${sub.jiraKey} · ` : ''}${job.
 // for. The block is the whole memory a fresh session gets; it stays sub-job
 // scoped (a sibling PR's history is noise here) and capped, oldest dropped.
 export const HISTORY_MAX_LINES = 10;
-const HUMAN_VERBS = { 'fix-here': 'requested changes', retry: 'retried', 'approve-code': 'approved the working tree', 'approve-session': 'approved the result', 'revise-session': 'requested changes' };
+const HUMAN_VERBS = { 'request-change': 'requested changes', 'fix-here': 'requested changes', retry: 'retried', 'approve-code': 'approved the working tree', 'approve-session': 'approved the result', 'revise-session': 'requested changes' };
 // TODO(host-api agents:read): the core version pretty-printed this through the
 // agent adapter's `models` table; the browser half reads that list (api.agents,
 // 1.25) but the server half still cannot, so the raw values stand in.

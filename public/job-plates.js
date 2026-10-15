@@ -2,7 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, runStatus, codeAwaitingReview, deploymentStalled, mergeApprovable, eventFor, movesFor, replanProposed } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, runStatus, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub } from './job-state.js';
 
 // The board as a wall of night skies: each job's plan is drawn into a quiet sky
@@ -186,9 +186,7 @@ export function plateAsk(job) {
   const detail = `${n ? `#${n} · ` : ''}${lead.title}${peers > 0 ? ` +${peers}` : ''}`;
   const ask = (label, button, icon, act = 'open') => ({ tone, label, detail, button, icon, act, sub: lead.id });
   if (state === 'failing') {
-    const id = eventFor(job, lead)?.suggested, move = id && movesFor(job, lead).find((m) => m.id === id);
-    const label = subLine(job, lead).replace(/^#\d+ · /, '');
-    return move ? ask(label, move.label, ICONS.x, `move:${move.id}`) : ask(label, 'Resolve', ICONS.x);
+    return ask(subLine(job, lead).replace(/^#\d+ · /, ''), 'Resolve', ICONS.x);
   }
   // A draft (or a published output) waiting on you is decided from the plate
   // as it stands; the dialog is where it is edited first.

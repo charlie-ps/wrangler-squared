@@ -1,12 +1,12 @@
 import { isPrSub, isWriteSub, isStoryCreate, isMakeWrite, withStoryCreates } from './jobs-schema.js';
-import { dropSub, reworkSub, validatePlan, notStarted } from './job-moves.js';
+import { dropSub, reworkSub, validatePlan, notStarted } from './job-sub-ops.js';
 import { milestoneReached } from './job-writes.js';
 
 // Changing the plan of a job that is already running. The human asks with
 // feedback, a planning session proposes a whole plan, and nothing changes until
 // the human approves that proposal — the same contract as the first plan, with
 // one difference: some of the plan has already happened. Pure over the job draft
-// job-store.js is about to persist, like job-moves.js.
+// job-store.js is about to persist, like job-sub-ops.js.
 //
 // Frozen is delivered or past the point of no return: merged (deployment onward),
 // a session or human task that finished (a session rerun only for its writes

@@ -1,0 +1,106 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { dropSub, keyStory, reworkSub, validatePlan } from './job-sub-ops.js';
+import { requestChange, changeView } from './job-change.js';
+import { awaitsTicket, withStoryCreates } from './jobs-schema.js';
+import { buildSubJob } from './job-store.js';
+
+// The pure surface: job-store.js hands these the draft it is about to persist, so
+// everything here is a plain object with no disk behind it.
+const planSub = (id, extra = {}) => ({ id, title: `Deliver ${id}`, kind: 'pr', repo: '/repo', storyId: 'story', after: [], brief: `Implement ${id}`, ...extra });
+function job({ subs = [planSub('api')], stories = [{ id: 'story', key: 'AUTH-1', title: 'Sign-in' }], runs = [], live } = {}) {
+  const plan = { context: 'Shared context', stories, subJobs: structuredClone(subs) };
+  return { id: 'job_1', stage: 'active', revision: 1, plan, runs, subJobs: live || plan.subJobs.map((s) => buildSubJob(plan, s)) };
+}
+const PR = 'https://github.com/org/repo/pull/1';
+const ask = (j, subId, text = 'Rename it') => {
+  const sub = subId ? j.subJobs.find((s) => s.id === subId) : null;
+  return requestChange(j, sub, { ...changeView(j, sub), text }, { now: 1000 });
+};
+
+test('a plan edit is judged by the plan schema it was approved under, without punishing a migrated brief', () => {
+  const j = job({ subs: [planSub('api'), planSub('web', { brief: 'x'.repeat(900) })] });
+  assert.doesNotThrow(() => validatePlan(j.plan));
+  const edit = (...changes) => ({ ...j.plan, subJobs: j.plan.subJobs.map((s) => ({ ...s, ...(changes.find(([id]) => id === s.id)?.[1] || {}) })) });
+  assert.throws(() => validatePlan(edit(['web', { after: ['ghost'] }])), /Unknown dependency/);
+  assert.doesNotThrow(() => validatePlan(edit(['web', { after: ['api'] }])));
+  assert.throws(() => validatePlan(edit(['web', { after: ['api'] }], ['api', { after: ['web'] }])), /cycles/);
+});
+
+test('reworkSub follows the code-review flag: back to work under review, a repair commit without it', () => {
+  const open = (extra = {}) => { const j = job(); Object.assign(j, extra); Object.assign(j.subJobs[0], { stage: 'pr', state: 'watching', pr: { url: PR, head: 'h1' }, ready: { checks: ['x'], receiptId: 'run_1' } }); return j; };
+  const reviewed = open();
+  assert.match(reworkSub(reviewed, reviewed.subJobs[0], 'Rename it', 1000), /back to work on its PR/);
+  assert.deepEqual([reviewed.subJobs[0].stage, reviewed.subJobs[0].state, reviewed.subJobs[0].note, reviewed.subJobs[0].fixRequested, reviewed.subJobs[0].ready],
+    ['implementation', 'queued', 'Rename it', null, null]);
+  assert.equal(reviewed.subJobs[0].pr.url, PR, 'the PR is kept: the approved tree is pushed to it');
+  const direct = open({ reviewCode: false });
+  assert.match(reworkSub(direct, direct.subJobs[0], 'Rename it', 1000), /new commit on/);
+  assert.deepEqual([direct.subJobs[0].stage, direct.subJobs[0].fixRequested.note, direct.subJobs[0].repairAllowance], ['pr', 'Rename it', 1]);
+});
+
+test('an idea routes to the agent that holds the work, else the planner, and clears the event it answers', () => {
+  const at = (stage, extra = {}) => { const j = job(); Object.assign(j.subJobs[0], { stage, ...extra }); return j; };
+  const code = at('review', { state: 'verified', ready: { checks: ['x'], receiptId: 'run_1' }, error: 'Worker blocked', blocked: { summary: 'Worker blocked' } });
+  assert.equal(ask(code, 'api').route, 'step');
+  assert.deepEqual([code.subJobs[0].stage, code.subJobs[0].error, code.subJobs[0].blocked], ['implementation', null, null]);
+  const open = at('pr', { state: 'watching', pr: { url: PR, head: 'h1' } });
+  assert.equal(changeView(open, open.subJobs[0]).ref, 'h1');
+  assert.equal(ask(open, 'api').route, 'step');
+  const merged = at('deployment', { state: 'watching' });
+  assert.equal(ask(merged, 'api').route, 'planner');
+  assert.match(merged.replan.feedback, /^About “Deliver api” \(api, deployment\/watching\): Rename it$/);
+  for (const stage of ['cleanup', 'done']) assert.throws(() => ask(at(stage), 'api'), /Nothing is left to change/, stage);
+  assert.throws(() => ask(at('pr', { cancelledAt: 5 }), 'api'), /Nothing is left to change/);
+  assert.throws(() => requestChange(open, open.subJobs[0], { at: 'pr', ref: 'h0', text: 'x' }, { now: 1 }), /changed since you looked/);
+  assert.throws(() => requestChange(open, open.subJobs[0], { at: 'pr', ref: 'h1', text: '  ' }, { now: 1 }), /Explain/);
+  const live = at('review', { state: 'verified', ready: { checks: ['x'], receiptId: 'run_1' } });
+  live.runs.push({ id: 'run_9', subJobId: 'api', stopped: false });
+  assert.throws(() => ask(live, 'api'), /Wait for the session to stop/);
+});
+
+const session = (id, extra = {}) => ({ id, title: `Run ${id}`, kind: 'session', after: [], brief: `Do ${id}`, ...extra });
+const jiraW = (id, by, action, extra = {}) => ({ id, kind: 'write', title: `Write ${id}`, place: { type: 'jira' }, storyId: 'new', after: [], by, action, ...extra });
+const keyless = () => job({ stories: [{ id: 'new', project: 'SEC', title: 'Audit' }],
+  subs: [session('stories', { stories: true }), jiraW('create-new', 'stories', { type: 'create' }), jiraW('move', 'ship', { type: 'transition', to: 'Done' }),
+    planSub('api', { storyId: 'new' }), session('ship')] });
+
+test('a created story\'s key is on the plan and on every sub-job naming it, and never swaps once approved', () => {
+  const j = keyless();
+  const at = (id) => j.subJobs.find((s) => s.id === id);
+  keyStory(j, 'new', 'SEC-4');
+  assert.equal(j.plan.stories[0].key, 'SEC-4');
+  assert.deepEqual([at('api').jiraKey, at('move').jiraKey, j.plan.subJobs.find((s) => s.id === 'api').jiraKey], ['SEC-4', 'SEC-4', 'SEC-4']);
+  assert.throws(() => keyStory(j, 'new', 'SEC-5'), /approved as SEC-4/);
+  assert.throws(() => keyStory(j, 'ghost', 'SEC-5'), /Unknown story/);
+});
+
+test('dropping a story\'s create before it has a key unlinks the story: its work goes ahead ticketless, its Jira writes are dropped, and nothing creates it again', () => {
+  const j = keyless();
+  const at = (id) => j.subJobs.find((s) => s.id === id);
+  assert.equal(awaitsTicket(at('api')), true);
+  dropSub(at('create-new'), 1000, j);
+  assert.equal(j.plan.stories[0].dropped, true);
+  assert.equal(at('api').storyId, undefined); assert.equal(awaitsTicket(at('api')), false);
+  assert.equal(j.plan.subJobs.find((s) => s.id === 'api').storyId, undefined);
+  assert.equal(at('move').cancelledAt, 1000, 'a write to the ticket has nothing to write to');
+  assert.equal(j.plan.subJobs.find((s) => s.id === 'move').storyId, 'new', 'its plan entry stays the record');
+  assert.doesNotThrow(() => validatePlan(j.plan));
+  assert.equal(withStoryCreates({ ...j.plan, subJobs: j.plan.subJobs.filter((s) => s.id !== 'create-new') }).subJobs.length, j.plan.subJobs.length - 1, 'a dropped story is never created again');
+  const keyed = job({ stories: [{ id: 'new', key: 'SEC-1', title: 'Audit' }], subs: [session('stories'), jiraW('create-new', 'stories', { type: 'create' }), planSub('api', { storyId: 'new' })] });
+  dropSub(keyed.subJobs[1], 1000, keyed);
+  assert.deepEqual([keyed.plan.stories[0].dropped, keyed.subJobs[2].storyId], [undefined, 'new'], 'a story with its key is unaffected');
+});
+
+
+test('the sub-job cap counts the story creates approval would add, once', () => {
+  const plan = (n, stories) => ({ context: '', stories, subJobs: Array.from({ length: n }, (_, i) => planSub(`p${i}`, { storyId: stories[i % stories.length].id })) });
+  const keyless = [{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }];
+  assert.doesNotThrow(() => validatePlan(plan(77, keyless)), '77 + a stories session + 2 creates is 80');
+  assert.throws(() => validatePlan(plan(78, keyless)), /Too many sub-jobs: 78 planned plus 3 to create stories exceeds 80/);
+  assert.doesNotThrow(() => validatePlan(withStoryCreates(plan(77, keyless))), 'creates already in the plan are not counted again');
+  assert.doesNotThrow(() => validatePlan(plan(80, [{ id: 'a', key: 'A-1', title: 'A' }])));
+  const stories = withStoryCreates(plan(1, keyless));
+  assert.throws(() => validatePlan({ ...stories, subJobs: [...stories.subJobs, { id: 'post', kind: 'write', title: 'Post', place: { type: 'slack', ref: '#x' }, after: [], by: 'stories', action: { type: 'post', text: 'Hi' } }] }),
+    /post: stories only creates the job's stories/, 'the session that skips result review does nothing else');
+});

@@ -11,8 +11,8 @@ that has no ticket gets no story and never waits for one. Each step runs as its 
 a dedicated worktree, submits a `job_report` receipt and stops; the wrangler
 watches the PR, drives CI repairs, merges when the gates are satisfied, watches
 the post-merge runs and cleans up. Humans decide at the review points — plan,
-code, merge — and make the seven **moves** when something goes wrong; agents
-never change the plan.
+code, merge — and send an idea in through **Request changes** on any step
+when something goes wrong; agents never change the plan.
 
 A Codex job also saves a **sandbox** mode, chosen in the New job form's Sandbox
 section and applied to every step through the manifest's `codexPolicy` hook

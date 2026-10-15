@@ -5,11 +5,11 @@ import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
 import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode } from './jobs-schema.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
-import { applyMove, dropSub, MOVE_ACTIONS } from './job-moves.js';
-import { requestReplan, discardReplan, proposeReplan, approveReplan } from './job-replan.js';
+import { dropSub } from './job-sub-ops.js';
+import { requestChange } from './job-change.js';
+import { discardReplan, proposeReplan, approveReplan } from './job-replan.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
 
-const activeForSub = (job, sub) => job.runs.some((r) => !r.stopped && r.subJobId === sub.id);
 const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 // Stamped on the run at claim so the history a later session reads (job-prompts.js)
 // names what ran. Null is "the agent's own default", which for Claude is whatever
@@ -17,9 +17,9 @@ const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 const launchModel = (job) => job.model || null;
 const launchEffort = (job) => job.effort || null;
 const quoted = (title) => `“${title}”`;
-// Every human intervention lands in `moves`, plan moves and approvals alike: it
-// is the one timeline the next session's prompt (job-prompts.js history) and
-// the detail view's Moves panel both read, so an approve or retry recorded
+// Every human intervention lands in `moves`, requested changes and approvals
+// alike: it is the one timeline the next session's prompt (job-prompts.js
+// history) and the detail view's History panel both read, so an approve or retry recorded
 // anywhere else would be invisible to the agent it most concerns.
 const record = (j, s, move, note, detail) => (j.moves ||= []).push({ id: uid('mv'), at: Date.now(), subJobId: s?.id || null, move, note: note || null, detail });
 export const runnable = (run) => run && !run.stopped;
@@ -37,7 +37,7 @@ const reviewSessions = (job) => job.reviewSessions ?? true;
 const reviewPlan = (job) => job.reviewPlan ?? true;
 const planRepos = (plan) => [...new Set(plan.subJobs.filter(isPrSub).map((s) => s.repo))];
 // The one place a plan entry becomes a live sub-job, so one approved with the
-// plan and one added later by a move are indistinguishable to the runner. A
+// plan and one added later by a plan change are indistinguishable to the runner. A
 // keyless story leaves `jiraKey` null: the write that creates the story fills
 // it in, and the sub-job cannot start until it has one. A sub-job with no story
 // is ticketless by design and starts as soon as its dependencies allow.
@@ -114,7 +114,7 @@ function setReview(j, { field, you, release, plan, revision }, now) {
   j[field] = you;
   record(j, null, 'set-review', null, `Switched ${name} to ${you ? 'You review' : 'Auto'}${released ? `, releasing ${released === 1 ? 'what was waiting' : `${released} waiting`}` : ''}`);
 }
-const HELD_BY_REPLAN = new Set(['approve-code', 'approve-merge', 'approve-session', 'revise-session', 'start-human', 'finish-human', 'approve-write', 'skip-write', 'edit-write']);
+const HELD_BY_REPLAN = new Set(['approve-code', 'approve-merge', 'approve-session', 'start-human', 'finish-human', 'approve-write', 'skip-write', 'edit-write']);
 export const MERGE_IS_DELIVERY = 'Merged; nothing runs on push for these paths';
 export const CURRENT_VERSION = 5;
 
@@ -169,7 +169,7 @@ function migratePlaces(job) {
 // session (a `write`-phase run); every write is now its session's (`by`). A
 // running job's milestone write is failed in place, never guessed onto a
 // session or rewritten: the human drops it or makes it by hand. Its plan entry
-// is left as it was (job-moves.js validatePlan looks past it), and a plan still
+// is left as it was (job-sub-ops.js validatePlan looks past it), and a plan still
 // awaiting approval is re-judged on approval. A live writer run is stopped
 // quietly by the runner (job-runner.js settle).
 function migrateSessionWrites(job) {
@@ -258,10 +258,9 @@ export class JobStore {
     });
   }
   // Every action carries its own fields on the control message, so the payload
-  // rides through whole: a move's shape is job-moves.js's business, not a fixed
-  // parameter list here.
+  // rides through whole rather than as a fixed parameter list.
   action(id, action, payload = {}) {
-    const { subJobId, revision, feedback, plan, head, sessionReceiptId, readyReceiptId } = payload;
+    const { subJobId, revision, plan, head, sessionReceiptId, readyReceiptId } = payload;
     const note = String(payload.note || '').trim().slice(0, 180) || null;
     if (action === 'approve-plan') return this.approvePlan(id, revision, plan);
     return this.update(id, (j) => {
@@ -271,17 +270,16 @@ export class JobStore {
       // Retry is the one thing left to do on a cancelled job: a refused cleanup
       // (a worktree with unpushed commits) is still the human's to clear.
       if (j.cancelledAt && action !== 'retry') throw new Error('Job was cancelled');
-      // `cancel` is Drop's old name and still arrives from an older board.
-      const move = action === 'cancel' ? 'drop' : action;
       // A pending plan change freezes the job where it stands: a sub-job that
-      // moves on under the planner (approved, merged, marked done, reshaped by a
-      // move) is no longer the job the proposal was written against.
-      if (j.replan && (MOVE_ACTIONS.has(move) || HELD_BY_REPLAN.has(action))) throw new Error('A plan change is pending. Approve or discard it first.');
+      // moves on under the planner (approved, merged, marked done) is no longer
+      // the job the proposal was written against.
+      if (j.replan && HELD_BY_REPLAN.has(action)) throw new Error('A plan change is pending. Approve or discard it first.');
       if (action === 'set-review') { setReview(j, payload, Date.now()); return; }
-      if (MOVE_ACTIONS.has(move)) {
-        const { detail } = applyMove(j, s, move, payload, { now: Date.now(), buildSubJob });
-        if (j.plan) j.repos = planRepos(j.plan);
-        record(j, s, move, payload.note, detail);
+      // The one way an idea comes in (job-change.js): to the step's own agent
+      // when it has one, else the planner.
+      if (action === 'request-change') {
+        const { detail } = requestChange(j, s, payload, { now: Date.now() });
+        record(j, s, 'request-change', payload.text, detail);
         return;
       }
       if (action === 'pause') { j.paused = true; return; }
@@ -290,9 +288,6 @@ export class JobStore {
         if (j.stage !== 'backlog') throw new Error('Job has already started');
         j.stage = 'planning'; return;
       }
-      // On a running job the change is a proposal the human approves (job-replan.js);
-      // until then the plan stands and no new step launches.
-      if (action === 'replan' && j.stage === 'active') { requestReplan(j, feedback, Date.now()); return; }
       if (action === 'discard-replan') { discardReplan(j); record(j, null, 'discard-replan', null, 'Discarded the proposed plan change'); return; }
       if (action === 'approve-replan') {
         const { lines, detail, feedback: asked } = approveReplan(j, payload.proposalId, { now: Date.now(), buildSubJob });
@@ -300,12 +295,6 @@ export class JobStore {
         record(j, null, 'approve-replan', asked.slice(0, 180), detail);
         for (const l of lines) record(j, l.sub, 'replan', null, l.detail);
         return;
-      }
-      if (action === 'replan') {
-        if (j.stage !== 'planning' || j.runs.some(runnable)) throw new Error('Wait for planning to finish');
-        j.feedback = String(feedback || '').trim().slice(0, 8000);
-        if (!j.feedback) throw new Error('Explain the change you want');
-        j.previousPlan = j.plan || j.previousPlan; j.plan = null; j.error = null; return;
       }
       if (action === 'retry') {
         const target = s || j;
@@ -325,14 +314,6 @@ export class JobStore {
           if (note) s.note = note;
         }
         record(j, s, 'retry', note, s ? `Retried ${quoted(s.title)}` : 'Retried the job');
-        return;
-      }
-      if (action === 'revise-session') {
-        if (!isSessionSub(s) || s.stage !== 'review' || activeForSub(j, s)) throw new Error('The session result is not ready for review');
-        s.feedback = String(feedback || '').trim().slice(0, 8000);
-        if (!s.feedback) throw new Error('Explain the requested change');
-        s.result = null; s.error = null; s.blocked = null; s.stage = 'session'; s.state = 'queued';
-        record(j, s, 'revise-session', s.feedback, `Requested changes on ${quoted(s.title)}`);
         return;
       }
       if (action === 'approve-session') {
@@ -511,12 +492,11 @@ export class JobStore {
       s.result = { ...report, receiptId: r.id, at: Date.now() }; s.feedback = null; s.note = null; s.stage = review ? 'review' : 'cleanup'; s.state = review ? 'verified' : 'queued';
     }
     if (report.kind === 'deployed') { s.deployed = { checks: report.checks, at: Date.now(), commit: s.pr?.mergeCommit || null }; s.stage = 'cleanup'; s.state = 'queued'; }
-    // The event box on the card: the agent's own sentence, plus the move it
-    // suggests (never applied — a human decides).
+    // The event box on the card: the agent's own sentence.
     if (report.kind === 'blocked') {
       const target = s || j;
       target.error = report.summary;
-      target.blocked = { summary: report.summary, move: report.move || null, phase: r.phase, at: Date.now() };
+      target.blocked = { summary: report.summary, phase: r.phase, at: Date.now() };
     }
   }
 }

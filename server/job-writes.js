@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import { line, commentSchema, storyFieldSchema, isWriteSub, isPrSub, isHumanSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, awaitsTicket, storyProject, writeReviewed, WRITE_REF, placeNameSchema, storyCreateTitle } from './jobs-schema.js';
-import { dropSub, keyStory, validatePlan } from './job-moves.js';
+import { dropSub, keyStory, validatePlan } from './job-sub-ops.js';
 
 // Writes (a `write` sub-job, jobs-schema.js): one write to one place outside the
 // board, made by the session sub-job it names (`by`). Pure over the job draft
-// the store is about to persist, like job-moves.js. The session's prompt lists
+// the store is about to persist, like job-sub-ops.js. The session's prompt lists
 // every open write it owns (job-prompts.js) and its `completed` receipt must
 // answer for each one (`applyWrites`), or it is refused whole and the session
 // fixes it. A milestone is the session's (`on`, `triggerStatus`), so the

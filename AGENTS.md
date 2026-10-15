@@ -103,7 +103,16 @@ feature).
   decided and the runner mails it (`run.mailedAt`). Don't let a new liveness or
   idle rule reach a parked run. A stored write with no `by` predates this and is
   failed on load (`job-store.js migrateSessionWrites`), never run;
-  `validatePlan` looks past it so moves still work on that job.
+  `validatePlan` looks past it so a plan edit still works on that job.
+- **One action brings an idea in: `request-change {subJobId?, at, ref, text}`**
+  (`server/job-change.js`), from the Request changes box on every step, review
+  and proposal; it replaced `revise-session`, both `replan` forms, `fix-here`
+  and the seven moves (Retry stays a button). `at`/`ref` pin it to what the
+  human read (`changeView`, mirrored client-side in `public/jobs.js`): a moved
+  head, receipt, revision or proposal refuses it. It routes to the step's
+  resumable agent (the tree's or result's session, an open PR's repair session)
+  else the planner, which proposes a plan change. The box is not a `<form>`, so
+  a tick's redraw is held back only while text is typed in it.
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one

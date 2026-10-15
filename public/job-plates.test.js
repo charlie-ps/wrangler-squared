@@ -30,9 +30,9 @@ test('the stub names the one thing a job needs from you, and nothing when it nee
   assert.deepEqual(['label', 'button', 'act', 'sub', 'tone'].map((k) => plateAsk(job({ subJobs: [green] }))[k]), ['Merge #7', 'Merge', 'merge', 'api', 'warn']);
   const review = sub('api', { stage: 'review', state: 'verified' });
   assert.deepEqual(['label', 'button', 'act'].map((k) => plateAsk(job({ subJobs: [review] }))[k]), ['Review code', 'Review', 'open']);
-  const blocked = sub('api', { stage: 'pr', error: 'Automatic repair limit reached', blocked: { move: 'split-out' }, pr: { url: 'https://github.com/o/r/pull/9', head: 'h9', checkStatus: 'failing', checks: [] } });
+  const blocked = sub('api', { stage: 'pr', error: 'Automatic repair limit reached', pr: { url: 'https://github.com/o/r/pull/9', head: 'h9', checkStatus: 'failing', checks: [] } });
   const failing = plateAsk(job({ subJobs: [blocked] }));
-  assert.deepEqual([failing.tone, failing.act, failing.detail], ['bad', 'move:split-out', '#9 · Deliver api'], 'the agent’s suggested move is the button');
+  assert.deepEqual([failing.tone, failing.button, failing.act, failing.detail], ['bad', 'Resolve', 'open', '#9 · Deliver api'], 'a red step opens to be resolved: the box is there');
   const prompt = sub('s', { kind: 'session', stage: 'session', sessions: ['card-1'] });
   assert.deepEqual(['button', 'act'].map((k) => plateAsk(job({ subJobs: [prompt], runs: [{ id: 'r', subJobId: 's', stopped: false, status: 'needs-you' }] }))[k]), ['Answer', 'session']);
   assert.equal(plateAsk(job({ subJobs: [sub('api', { stage: 'implementation' })], runs: [{ id: 'r', subJobId: 'api', stopped: false, status: 'working' }] })), null);

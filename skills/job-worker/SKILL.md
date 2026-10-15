@@ -32,10 +32,9 @@ the `runId` from your prompt and the receipt kind it names.
   real limitation or acceptance criterion.
 - **Never claim a check you did not perform.** A check you couldn't run is a
   blocked receipt, not an optimistic bullet.
-- **Blocked is one sentence**: `{kind:"blocked", summary:"…"}`. If you can see
-  which move the human should make, name it —
-  `move:"fix-here"|"split-out"|"new-ticket"|"reorder"|"drop"|"mark"|"accept-red"`. It is a
-  suggestion; the human decides.
+- **Blocked is one sentence**: `{kind:"blocked", summary:"…"}`. It goes to the
+  human, who answers with Retry or by sending a change in through Request
+  changes; you never name a move or change the plan.
 - Save your files before reporting: a successful report ends the run (all but
   `drafts`, which waits for mail; see below).
 - A report that failed on a connection error is **safe to retry identically**.

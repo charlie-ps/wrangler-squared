@@ -116,7 +116,7 @@ export class JobGithub {
     // retain match-head so a push cannot silently replace the approved change.
     let admin = false;
     if (sub.acceptedRed?.ref === sub.pr.head) {
-      // The human accepted this head red (job-moves.js), so green is not the
+      // The human accepted this head red (job-sub-ops.js), so green is not the
       // test — only that GitHub can still merge it. Admin is what gets a
       // BLOCKED merge past the check enforcement the red checks trip; an
       // UNSTABLE one (red but optional checks) needs no override, and a merge

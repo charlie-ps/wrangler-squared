@@ -132,7 +132,7 @@ export const ATTRIBUTION = 'Made with Agent Wrangler and the charlie-ps/wrangler
 // like any other (edit-write `story`), not with the plan.
 export const storyFieldSchema = z.object({ name: line, value: z.string().trim().min(1).max(2000) });
 // `dropped`: its create write was dropped before it had a key, so whatever named
-// it went ahead ticketless (job-moves.js `unlinkStory`); it stays as the record,
+// it went ahead ticketless (job-sub-ops.js `unlinkStory`); it stays as the record,
 // and nothing creates it again.
 export const storySchema = z.object({ id, key: jira.optional(), project: jiraProject.optional(), title: line,
   fields: z.array(storyFieldSchema).max(25).optional(), dropped: z.boolean().optional() });
@@ -383,9 +383,6 @@ export const settingsSchema = z.object({
   // gets. The board always sends all five: `settings(patch)` merges shallowly.
   reviewDefaults: z.object(Object.fromEntries(Object.entries(REVIEW_DEFAULTS).map(([f, v]) => [f, z.boolean().default(v)]))).default({}),
 });
-// A worker never changes the plan: `move` is a SUGGESTION on a blocked receipt,
-// which the board offers the human as the pre-selected button (job-moves.js).
-export const MOVE_NAMES = ['fix-here', 'split-out', 'new-ticket', 'reorder', 'drop', 'mark', 'accept-red'];
 // Strict, so a receipt carrying a field this system no longer has (an
 // `amendment`, a `commitMessage`) fails loudly with the offending key rather
 // than being silently stripped — the agent can then correct and retry, exactly
@@ -417,5 +414,5 @@ export const reportSchema = z.discriminatedUnion('kind', [
   receipt({ kind: z.literal('completed'), checks: checksSchema, writes: z.array(writeResultSchema).max(50).optional(), outputs: z.array(outputSchema).max(30).optional() }),
   // Mid-run, not the end of it: the session waits for mail with the human's decisions.
   receipt({ kind: z.literal('drafts'), drafts: z.array(draftSchema).min(1).max(50) }),
-  receipt({ kind: z.literal('blocked'), summary: line, move: z.enum(MOVE_NAMES).optional() }),
+  receipt({ kind: z.literal('blocked'), summary: line }),
 ]);

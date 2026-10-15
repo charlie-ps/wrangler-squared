@@ -39,12 +39,12 @@ test('every phase ends with its own receipt call, naming this run and the blocke
   for (const phase of ['planning', 'write', 'implementation', 'publish', 'repair', 'verify', 'session']) {
     const text = jobPrompt(planned, { ...briefed, pr: { url: 'https://github.com/org/repo/pull/1', mergeCommit: 'abc123' }, check: 'Sign-in works in dev' }, { ...run, phase });
     assert.match(text, /job_report \{runId:"run1"/, phase);
-    assert.match(text, /Blocked: \{kind:"blocked", summary:"one sentence", move\?:"fix-here"/, phase);
+    assert.match(text, /Blocked: \{kind:"blocked", summary:"one sentence"\}/, phase);
   }
 });
 
 test('the implementation prompt is one bounded step: context once, the brief, what it lands after, and the sub-job\'s history', () => {
-  const withNote = { ...planned, moves: [{ id: 'mv1', at: Date.now(), subJobId: 'api', move: 'fix-here', note: 'Call the flag sign_in_v2', detail: 'Sent “Deliver api” back to work' }] };
+  const withNote = { ...planned, moves: [{ id: 'mv1', at: Date.now(), subJobId: 'api', move: 'request-change', note: 'Call the flag sign_in_v2', detail: 'Sent “Deliver api” back to work' }] };
   const text = jobPrompt(withNote, { ...briefed, check: 'Sign-in works in dev', note: 'Call the flag sign_in_v2' }, run);
   assert.match(text, /^AUTH-1 · Sign-in$/m);
   assert.match(text, /Context: The sign-in service is Java/);
@@ -80,14 +80,14 @@ test('a relaunched step reads what already happened: every earlier run with its 
   const at = (min) => t0 + min * 60000;
   const job = { ...planned, agent: 'claude', runs: [
     { id: 'r1', subJobId: 'api', phase: 'implementation', model: 'opus', startedAt: at(0), stopped: true, report: { kind: 'ready', checks: ['Tests pass', 'Lint clean'] } },
-    { id: 'r2', subJobId: 'api', phase: 'publish', model: 'opus', startedAt: at(19), stopped: true, report: { kind: 'blocked', summary: 'git add of config/example.env was denied', move: 'fix-here' } },
+    { id: 'r2', subJobId: 'api', phase: 'publish', model: 'opus', startedAt: at(19), stopped: true, report: { kind: 'blocked', summary: 'git add of config/example.env was denied' } },
     { id: 'r3', subJobId: 'api', phase: 'publish', model: 'sonnet', startedAt: at(30), stopped: true, error: 'Session stopped without a receipt. Open it to see why, then retry.' },
     { id: 'r4', subJobId: 'api', phase: 'publish', startedAt: at(40), stopped: false, report: null },
     { id: 'other', subJobId: 'web', phase: 'implementation', model: 'opus', startedAt: at(1), stopped: true, report: { kind: 'ready', checks: ['Built'] } },
   ], moves: [
     { id: 'm1', at: at(18), subJobId: 'api', move: 'approve-code', note: null, detail: 'Approved the working tree of “Deliver api”' },
     { id: 'm2', at: at(23), subJobId: 'api', move: 'retry', note: 'example.env is a template, stage it', detail: 'Retried “Deliver api”' },
-    { id: 'm3', at: at(35), subJobId: 'api', move: 'reorder', note: null, detail: 'Now lands after “Sync the proto”' },
+    { id: 'm3', at: at(35), subJobId: 'api', move: 'approve-replan', note: null, detail: 'Changed the plan: 1 edited' },
     { id: 'm4', at: at(2), subJobId: 'web', move: 'retry', note: 'not mine', detail: 'Retried “Deliver web”' },
   ] };
   const body = historyLines(job, briefed, { id: 'r4', phase: 'publish' }, at(41));
@@ -97,7 +97,7 @@ test('a relaunched step reads what already happened: every earlier run with its 
     '- 17:21 publish · opus → blocked: git add of config/example.env was denied',
     '- 17:25 human retried: "example.env is a template, stage it"',
     '- 17:32 publish · sonnet → Session stopped without a receipt. Open it to see why, then retry.',
-    '- 17:37 human now lands after “Sync the proto”',
+    '- 17:37 human changed the plan: 1 edited',
   ]);
   const text = jobPrompt(job, briefed, { ...run, id: 'r4', phase: 'publish' });
   assert.match(text, /History of this sub-job, oldest first:\n- (?:\d{1,2} \w+ )?\d\d:\d\d implementation · opus → ready: Tests pass · Lint clean\n/);
