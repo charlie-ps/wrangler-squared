@@ -633,3 +633,12 @@ test('a worktree holding a dirty submodule cannot be pinned, so it offers no Dis
   await refusalOf(r, { discard: shown });
   assert.ok(fs.existsSync(path.join(r.wt.path, 'lib', 'file')));
 });
+
+test('a dropped sub-job of a job that lands on another branch is compared against that branch, not the default', async () => {
+  const { host } = fakeHost();
+  const sub = { ...merged, cancelledAt: 1, pr: null, worktree: { ...merged.worktree, path: missing() } };
+  const f = fakeRun({ head: 'rebased', log: 'rebased\tOnly on this machine' });
+  await assert.rejects(runtimeWith(host, { run: f.run }).cleanup({ base: 'next' }, sub), /1 commit not on origin\/next/);
+  assert.ok(f.calls.some((c) => c[0] === 'log' && c.includes('refs/remotes/origin/next')));
+  assert.ok(!f.calls.some((c) => c[0] === 'ls-remote'), 'the job\'s base is known, so origin\'s default is not asked for');
+});

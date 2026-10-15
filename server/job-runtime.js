@@ -300,7 +300,7 @@ export class JobRuntime {
     // A sub-job with no PR — cancelled, or marked done by hand before it ever
     // opened one — merged nothing. Its bytes are retained only if the branch
     // was pushed (the PR head) or never left the base it was cut from.
-    if (sub.worktree) await this.cleanupWorktree(sub.worktree, sub.pr?.head || sub.worktree.cleanupHead, { mergedHead: sub.pr?.head, base: sub.pr?.base, discard: sub.discard });
+    if (sub.worktree) await this.cleanupWorktree(sub.worktree, sub.pr?.head || sub.worktree.cleanupHead, { mergedHead: sub.pr?.head, base: sub.pr?.base || job.base, discard: sub.discard });
     if (sub.worktree && sub.pr && !sub.cancelledAt) await this.deleteRemoteBranch(sub.worktree, sub.pr.head);
     if (job.updateMain && !sub.cancelledAt && sub.pr && await this.landedOnDefault(job, sub)) {
       const root = await gitRepoRoot(expandRepo(sub.repo));
