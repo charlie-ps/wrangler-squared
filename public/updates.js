@@ -1,6 +1,5 @@
 import { ICONS } from './icons.js';
-import { proofGridHtml } from './job-proof.js';
-import { runningBarHtml } from './job-running.js';
+import { SHOTS, proofFigure, runningBar } from './figs.js';
 
 // What's new: a splash for each bigger release, shown once per browser, and the
 // list Automation settings reads to show any of them again. Seen ids live in the
@@ -76,36 +75,8 @@ function tellFigure(phase) {
     </div>`;
 }
 
-// See it working, in the board's own markup (job-proof.js grid, job-running.js
-// bar, job-thread.js thread, jobs-view.js Add idea box) fed with example data.
-// The two thumbnails are drawn screenshots standing in for real proof.
-const svgUrl = (s) => `data:image/svg+xml;utf8,${encodeURIComponent(s)}`;
-const shotRows = (y0, n, cols) => Array.from({ length: n }, (_, i) => `<rect x="10" y="${y0 + i * 13}" width="300" height="12" fill="${i % 2 ? '#1c2128' : '#151b23'}"/>${cols.map((x, j) => `<rect x="${x}" y="${y0 + 4 + i * 13}" width="${[46, 60, 30, 38][j % 4]}" height="4" rx="2" fill="#9198a1" opacity="${j ? .55 : .85}"/>`).join('')}`).join('');
-const SHOTS = {
-  'filtered.png': svgUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200"><rect width="320" height="200" fill="#0d1117"/><rect x="10" y="10" width="90" height="8" rx="4" fill="#f0f6fc"/><rect x="10" y="28" width="70" height="14" rx="7" fill="#4493f8" opacity=".3"/><rect x="18" y="33" width="50" height="4" rx="2" fill="#79c0ff"/><rect x="236" y="26" width="74" height="18" rx="6" fill="#1f6feb"/><rect x="248" y="33" width="50" height="4" rx="2" fill="#fff"/>${shotRows(54, 10, [18, 80, 170, 230])}</svg>`),
-  'excel.png': svgUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200"><rect width="320" height="200" fill="#f6f8fa"/><rect width="320" height="22" fill="#1a7f37"/><rect x="10" y="8" width="80" height="6" rx="3" fill="#fff"/>${Array.from({ length: 12 }, (_, i) => `<line x1="0" x2="320" y1="${34 + i * 14}" y2="${34 + i * 14}" stroke="#d1d9e0"/>`).join('')}${[40, 110, 190, 250].map((x) => `<line x1="${x}" x2="${x}" y1="22" y2="200" stroke="#d1d9e0"/>`).join('')}${Array.from({ length: 11 }, (_, i) => [46, 116, 196, 256].map((x, j) => `<rect x="${x}" y="${39 + i * 14}" width="${[50, 60, 40, 44][j]}" height="4" rx="2" fill="#59636e" opacity="${i ? .55 : .95}"/>`).join('')).join('')}</svg>`),
-};
-// Each evidence slot's placeholder glyph swapped for its drawn screenshot.
-const withShots = (html) => html.replace(/(data-ev-file="([^"]+)"[^>]*>)<svg[\s\S]*?<\/svg>/g, (m, open, file) => SHOTS[file] ? `${open}<img alt="" src="${SHOTS[file]}">` : m);
-const SEE_JOB = { id: 'csv', runs: [{ subJobId: 'csv-pr', parkedFor: 'ready', sessionId: 's1' }] };
-const SEE_ITEMS = [
-  { text: 'Exports only the filtered rows', shots: [{ file: 'filtered.png', url: 'http://localhost:5173/customers?plan=pro' }] },
-  { text: 'Opens in Excel with the same columns', shots: [{ file: 'excel.png' }] },
-  { text: 'Unit tests pass', run: { cmd: 'npm test', out: '✓ csv export (14)\n✓ filters (9)\n23 passing', exit: 0 } },
-];
-// `shown` is how many items have their proof so far; the rest are still to come.
-function proofFigure(shown) {
-  const pending = SEE_ITEMS.slice(shown).map((i) => `<span class="job-proof-card wn-pending"><span class="job-proof-media"><span class="job-proof-thumb">${ICONS.planned}</span></span><span class="job-proof-ck"><span aria-hidden="true">·</span><span>${i.text}</span></span><small>Not shown yet</small></span>`).join('');
-  if (!shown) return `<section class="job-proof"><div class="job-proof-head">${ICONS.eye}<span>Show me</span><small>0 of ${SEE_ITEMS.length} shown</small></div><div class="job-proof-grid">${pending}</div></section>`;
-  const sub = { id: 'csv-pr', title: 'Add CSV export', show: SEE_ITEMS.map((i) => i.text), ready: { round: 1, proof: SEE_ITEMS.slice(0, shown) } };
-  return withShots(proofGridHtml(SEE_JOB, sub)).replace('</div></section>', `${pending}</div></section>`);
-}
-function runningBar(state) {
-  const running = state === 'stopped'
-    ? { items: [], stopped: { reason: 'you approved round 1', results: [{ name: 'web', ok: true, detail: 'process group 48121 stopped' }, { name: 'api', ok: true, detail: 'docker compose down' }] } }
-    : { items: [{ name: 'web', url: 'http://localhost:5173', pid: 48121, log: 'web.log' }, { name: 'api', url: 'http://localhost:8787', stop: 'docker compose down' }] };
-  return runningBarHtml(SEE_JOB, { id: 'csv-pr', ready: { round: 1 }, running });
-}
+// See it working, in the board's own markup (figs.js checklist and running chip,
+// job-thread.js thread, jobs-view.js Add idea box) fed with example data.
 // The Add idea box with words in it. A <div> where the board has a <textarea>,
 // so the words wrap and show in full rather than scrolling in one row.
 const composer = (text) => `<div class="job-change has-text is-open">

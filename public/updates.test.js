@@ -48,7 +48,7 @@ test('the shipped registry is the two Writes pages, review defaults and See it w
   assert.equal(p.title(), 'Choose where every new job’s checkpoints start');
   p.click('[data-update="next"]');
   assert.equal(p.title(), 'See each PR working before you read its diff');
-  assert.ok(p.q('.update-panel .job-proof-grid'));
+  assert.ok(p.q('.update-panel .job-proof-list'));
   assert.equal(p.q('[data-update="next"]').textContent, 'Got it');
   p.click('[data-update="next"]');
   assert.deepEqual(seenIds(storage), ['review-defaults', 'see-it-working', 'writes-designs', 'writes-places']);

@@ -112,7 +112,7 @@ const needsFigure = (phase) => {
   return `<article class="job-card tone-${f.tone}"><div class="job-card-open"><span class="job-avatar">${ICONS[f.glyph]}</span><strong>Rotate the staging client secret</strong></div><div class="job-progress"><span class="job-seg tone-ok">${ICONS.check}</span><span class="job-seg tone-${f.seg[0]}">${ICONS[f.seg[1]]}</span><span class="job-seg tone-idle planned">${ICONS.planned}</span></div><footer><span class="job-status">${f.line}</span><span class="job-card-cost">$1.84</span></footer></article><div class="job-chips"><span class="intro-chip-on">${ICONS.eye}Needs me <span class="intro-count-pill">${f.need + 1}</span></span>${f.chip ? `<span class="job-chip job-chip-state tone-${f.chip[0]}">${ICONS[f.chip[1]]}<span>${f.chip[2]}</span></span>` : ''}</div>`;
 };
 
-// See it working: the proof grid filling in, then the preview left running.
+// See it working: the proof checklist filling in, then the preview left running.
 const SEE = [[0, 'none'], [1, 'none'], [2, 'none'], [3, 'on'], [3, 'on'], [3, 'on']];
 // Inert: the board's own cards and bar carry buttons and a link that do nothing here.
 const seeFigure = (phase) => `<div class="intro-inert" inert>${proofFigure(SEE[phase][0])}${runningBar(SEE[phase][1])}</div>`;

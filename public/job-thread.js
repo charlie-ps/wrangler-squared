@@ -37,8 +37,21 @@ export function threadHtml(job, sub) {
 }
 
 // Earlier rounds' proof, kept in case the human wants to see what changed.
+const earlierBody = (job, sub, rounds) => rounds.map((r) => `<div class="job-earlier-round"><h4>Round ${esc(r.round)}</h4><div class="job-msg-att">${(r.proof || []).flatMap((p) => (p.shots || []).map((s) => roundThumbHtml(job, sub, r.round, s.file))).join('')}</div><ul class="job-receipt">${(r.checks || []).map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul></div>`).join('');
 export function earlierRoundsHtml(job, sub) {
   const rounds = Array.isArray(sub?.earlier) ? sub.earlier : [];
   if (!rounds.length) return '';
-  return `<details class="job-more job-earlier"><summary>Earlier rounds <small>${rounds.map((r) => `Round ${esc(r.round)}`).join(' · ')}</small></summary>${rounds.map((r) => `<div class="job-earlier-round"><h4>Round ${esc(r.round)}</h4><div class="job-msg-att">${(r.proof || []).flatMap((p) => (p.shots || []).map((s) => roundThumbHtml(job, sub, r.round, s.file))).join('')}</div><ul class="job-receipt">${(r.checks || []).map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul></div>`).join('')}</details>`;
+  return `<details class="job-more job-earlier"><summary>Earlier rounds <small>${rounds.map((r) => `Round ${esc(r.round)}`).join(' · ')}</small></summary>${earlierBody(job, sub, rounds)}</details>`;
+}
+
+// The review step folds the conversation and earlier rounds into one line. It
+// stays open while the session is answering, since that is news.
+export function historyHtml(job, sub, { open = false } = {}) {
+  const rounds = Array.isArray(sub?.earlier) ? sub.earlier : [];
+  const msgs = hasThread(sub) ? sub.thread.length : 0;
+  const answering = threadState(job, sub)?.kind === 'answering';
+  if (!rounds.length && !msgs && !answering) return '';
+  const title = rounds.length && (msgs || answering) ? 'Earlier rounds and conversation' : rounds.length ? 'Earlier rounds' : 'Conversation';
+  const note = [rounds.map((r) => `Round ${esc(r.round)}`).join(' · '), msgs ? `${msgs} message${msgs === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+  return `<details class="job-more job-history" data-keep="history" ${open || answering ? 'open' : ''}><summary>${ICONS.terminal}${title}${note ? ` <small>${note}</small>` : ''}</summary>${msgs || answering ? threadHtml(job, sub) : ''}${rounds.length ? `<div class="job-earlier">${earlierBody(job, sub, rounds)}</div>` : ''}</details>`;
 }

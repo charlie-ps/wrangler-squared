@@ -75,20 +75,41 @@ function mediaHtml(job, sub, p, j = 0) {
   if (p.run) return termHtml(p.run);
   return `<span class="job-proof-thumb gap">${ICONS.info}</span>`;
 }
-const captionOf = (p) => p.couldNot || p.note || (p.run ? `${p.run.cmd} · exit ${p.run.exit}` : shotsOf(p)[0]?.url || '');
-
-export function proofGridHtml(job, sub) {
-  const items = proofItems(sub), s = proofSummary(sub);
-  return `<section class="job-proof"><div class="job-proof-head">${ICONS.eye}<span>Shown working</span><small>${esc(summaryText(s))}</small><span class="job-proof-round">Round ${s.round}</span></div>
-    <div class="job-proof-grid">${items.map((p, i) => {
-    const more = shotsOf(p).length > 1 ? `<em class="job-proof-count" title="${shotsOf(p).length} shots">${shotsOf(p).length}</em>` : '';
-    return `<button type="button" class="job-proof-card ${p.couldNot ? 'gap' : ''}" data-proof="${i}" title="${p.couldNot ? 'Could not show it: open for the reason' : 'Open full size'}"><span class="job-proof-media">${mediaHtml(job, sub, p)}${more}</span><span class="job-proof-ck"><span aria-hidden="true">${p.couldNot ? '!' : '✓'}</span><span>${esc(p.text)}</span></span><small>${esc(captionOf(p))}</small></button>`;
-  }).join('')}</div></section>`;
+// The review step's one list: a verdict that counts
+// every check, then each Show me item with its evidence at the end of its row,
+// opened in place for the full output, every shot and Ask; plain checks follow
+// as ordinary rows. `isOpen(key)` is the view's memory of which rows are open.
+export function verdictOf(sub) {
+  const s = proofSummary(sub), also = alsoChecked(sub).length;
+  return { ...s, checked: s.shown + also, all: s.total + also };
 }
-export const alsoCheckedHtml = (sub) => {
-  const also = alsoChecked(sub);
-  return also.length ? `<h3>Also checked</h3><ul class="job-receipt">${also.map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul>` : '';
-};
+export const verdictText = (v) => `${v.checked} of ${v.all} checked${v.gaps ? ` · ${v.gaps} couldn’t show` : ''}`;
+const firstSentence = (t) => { const m = String(t).match(/^.*?[.!?](?=\s|$)/); return m ? m[0] : String(t); };
+const mark = (p) => `<span class="job-proof-mk" aria-hidden="true">${p.couldNot ? '!' : '✓'}</span>`;
+function rowEvidence(job, sub, p) {
+  if (p.couldNot) return '<span class="job-proof-pill gap">couldn’t</span>';
+  const shots = shotsOf(p);
+  if (shots.length) return `${shots.slice(0, 2).map((s) => thumbHtml(job, sub, s.file, 'mini')).join('')}${shots.length > 2 ? `<small>+${shots.length - 2}</small>` : ''}`;
+  if (p.run) return `<span class="job-proof-pill ${p.run.exit === 0 ? '' : 'bad'}">exit ${esc(p.run.exit)}</span>`;
+  return '';
+}
+function rowDetail(job, sub, p, i, ask) {
+  const why = p.couldNot && firstSentence(p.couldNot) !== String(p.couldNot).trim() ? `<p class="gap">${esc(p.couldNot)}</p>` : '';
+  const shots = shotsOf(p).map((s, k) => `<button type="button" class="job-proof-shot" data-proof="${i}" data-proof-at="${k}" title="Open full size">${thumbHtml(job, sub, s.file)}<small>${esc([String(s.url || '').replace(/^https?:\/\//i, ''), s.viewport].filter(Boolean).join(' · '))}</small></button>`).join('');
+  const run = !shotsOf(p).length && p.run ? `<pre class="job-proof-run"><i>$</i> ${esc(p.run.cmd)}\n${esc(p.run.out)}\n<b class="${p.run.exit === 0 ? 'ok' : 'bad'}">exit ${esc(p.run.exit)}</b></pre>` : '';
+  const button = ask ? `<button type="button" data-proof-ask="${i}">${ICONS.edit}${p.couldNot ? 'Ask it to try another way' : 'Ask about this'}</button>` : '';
+  return `${why}${p.note ? `<p>${esc(p.note)}</p>` : ''}${shots ? `<div class="job-proof-shots-open">${shots}</div>` : ''}${run}${button ? `<div class="job-proof-ask">${button}</div>` : ''}`;
+}
+export function proofListHtml(job, sub, { isOpen = () => false, ask = true } = {}) {
+  const v = verdictOf(sub), round = proofRound(sub);
+  const rows = proofItems(sub).map((p, i) => {
+    const key = `proof-${round}-${i}`;
+    return `<details class="job-proof-item ${p.couldNot ? 'gap' : ''}" data-keep="${key}" ${isOpen(key) ? 'open' : ''}><summary>${mark(p)}<span class="t">${esc(p.text)}${p.couldNot ? `<small>${esc(firstSentence(p.couldNot))}</small>` : ''}</span><span class="job-proof-ev">${rowEvidence(job, sub, p)}</span></summary><div class="job-proof-open">${rowDetail(job, sub, p, i, ask)}</div></details>`;
+  }).join('');
+  const plain = alsoChecked(sub).map((c) => `<div class="job-proof-item plain">${mark({})}<span class="t">${esc(c)}</span></div>`).join('');
+  return `<section class="job-proof"><div class="job-proof-verdict"><b>${v.checked} of ${v.all} checked</b>${v.gaps ? `<span class="gap">· ${v.gaps} couldn’t show</span>` : ''}<small>Round ${round}</small></div>
+    <div class="job-proof-list">${rows}${plain}</div></section>`;
+}
 
 // The shot viewer: one item full size with where and how it was captured, the
 // other items as a strip, and the way back to the box with the question started.

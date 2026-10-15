@@ -1,9 +1,9 @@
 import { ICONS } from './icons.js';
-import { proofGridHtml } from './job-proof.js';
-import { runningBarHtml } from './job-running.js';
+import { proofListHtml } from './job-proof.js';
+import { runningChipHtml, stoppedHtml } from './job-running.js';
 
-// Figures drawn with the board's own markup for the Add idea composer, a proof
-// grid and the Running for you bar, fed with example data. Thumbnails are drawn
+// Figures drawn with the board's own markup for the Add idea composer, the proof
+// checklist and the running chip, fed with example data. Thumbnails are drawn
 // screenshots standing in for real proof.
 
 // A composer at rest or with words in it (jobs-view.js changeBoxHtml markup). The
@@ -30,10 +30,11 @@ const ITEMS = [
 ];
 // `shown` is how many items have their proof so far; the rest are still to come.
 export function proofFigure(shown = ITEMS.length, round = 1) {
-  const sub = { id: 'csv-pr', title: 'Add CSV export', show: ITEMS.map((i) => i.text), ready: { round, proof: ITEMS.slice(0, shown) } };
-  const grid = withShots(proofGridHtml(JOB, sub));
-  const pending = ITEMS.slice(shown).map((i) => `<span class="job-proof-card wn-pending"><span class="job-proof-media"><span class="job-proof-thumb">${ICONS.planned}</span></span><span class="job-proof-ck"><span aria-hidden="true">·</span><span>${i.text}</span></span><small>Not shown yet</small></span>`).join('');
-  return shown ? grid.replace('</div></section>', `${pending}</div></section>`) : `<section class="job-proof"><div class="job-proof-head">${ICONS.eye}<span>Show me</span><small>0 of ${ITEMS.length} shown</small></div><div class="job-proof-grid">${pending}</div></section>`;
+  const sub = { id: 'csv-pr', title: 'Add CSV export', show: ITEMS.map((i) => i.text), ready: { round, checks: ITEMS.slice(0, shown).map((i) => i.text), proof: ITEMS.slice(0, shown) } };
+  const list = shown ? withShots(proofListHtml(JOB, sub, { ask: false })) : `<section class="job-proof"><div class="job-proof-verdict"><b></b><small>Round ${round}</small></div><div class="job-proof-list"></div></section>`;
+  const pending = ITEMS.slice(shown).map((i) => `<div class="job-proof-item plain wn-pending"><span class="job-proof-mk" aria-hidden="true">·</span><span class="t">${i.text}</span><span class="job-proof-ev"><span class="job-proof-pill">not yet</span></span></div>`).join('');
+  const end = list.lastIndexOf('</div></section>');
+  return `${list.slice(0, end)}${pending}${list.slice(end)}`.replace(/<b>[^<]*<\/b>/, `<b>${shown} of ${ITEMS.length} checked</b>`);
 }
 
 export const runningBar = (state = 'on') => {
@@ -41,5 +42,5 @@ export const runningBar = (state = 'on') => {
   const sub = { id: 'csv-pr', ready: { round: 1 },
     running: state === 'stopped' ? { items: [], stopped: { reason: 'you approved round 1', results: [{ name: 'web', ok: true, detail: 'process group 48121 stopped' }, { name: 'api', ok: true, detail: 'docker compose down' }] } }
       : { items: [{ name: 'web', url: 'http://localhost:5173', pid: 48121, log: 'web.log' }, { name: 'api', url: 'http://localhost:8787', stop: 'docker compose down' }] } };
-  return runningBarHtml(JOB, sub);
+  return state === 'stopped' ? stoppedHtml(sub) : runningChipHtml(JOB, sub, { open: true });
 };

@@ -2162,16 +2162,19 @@ test('the sub-job and the plan\'s reading section say what must be shown, escape
   assert.equal(f.q('#job-dialog .job-show-list b'), null);
 });
 
-test('a ready receipt with proof is the Shown working grid, with the plain checks under Also checked, and no old list', (t) => {
+test('a ready receipt with proof is one checklist: the verdict, each Show me row with its evidence, the plain checks as rows, and no old list', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [proofSub()];
   f.view.update(f.data);
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   const dialog = f.q('#job-dialog');
-  assert.match(dialog.querySelector('.job-proof-head').textContent, /Shown working.*1 of 2 shown · 1 couldn’t.*Round 1/);
-  assert.deepEqual([...dialog.querySelectorAll('.job-proof-card')].map((c) => [c.classList.contains('gap'), c.querySelector('.job-proof-ck').textContent.trim()]), [[false, '✓Lists sign-ins'], [true, '!SSO appears']]);
+  assert.match(dialog.querySelector('.job-proof-verdict').textContent, /^2 of 3 checked· 1 couldn’t showRound 1$/);
+  assert.deepEqual([...dialog.querySelectorAll('.job-proof-item')].map((c) => [c.classList.contains('gap'), c.classList.contains('plain'), c.querySelector('.t').textContent.trim()]),
+    [[false, false, 'Lists sign-ins'], [true, false, 'SSO appears' + dialog.querySelector('.job-proof-item.gap .t small').textContent], [false, true, 'Lint clean']]);
+  assert.equal(dialog.querySelector('.job-proof-item.gap .job-proof-pill').textContent, 'couldn’t');
   assert.equal([...dialog.querySelectorAll('h3')].some((h) => h.textContent === 'Ready for review'), false);
-  assert.deepEqual([...dialog.querySelectorAll('.job-receipt li')].map((li) => li.textContent.trim()), ['✓ Lint clean']);
+  assert.equal(dialog.querySelector('.job-receipt'), null, 'no separate Also checked list');
+  assert.equal(dialog.querySelector('.job-pinned'), null, 'no round or tree hash beside Approve');
   assert.equal(f.sent.at(-1).type, 'job-evidence', 'the dialog asks for the round\'s thumbnails');
   assert.deepEqual(f.sent.at(-1), { type: 'job-evidence', id: 'job1', subJobId: 'api', round: 1 });
   const asked = f.sent.length; f.view.update(f.data);
@@ -2202,18 +2205,23 @@ test('a delivered sub-job keeps what it verified: the checks as Verified, or its
   job.subJobs = [proofSub({ stage: 'done', state: 'done' })];
   f.view.update(f.data);
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.ok(f.q('#job-dialog .job-proof'), 'the Shown working grid stays');
+  assert.ok(f.q('#job-dialog .job-proof'), 'the checklist stays');
   f.q('#job-dialog [data-proof="0"]').click();
   assert.equal(f.q('#job-dialog [data-proof-ask]'), null, 'nothing is left to ask a delivered step');
 });
 
-test('a card opens the shot viewer: where it was taken, a reason in full, a way back, and Ask about this starts the box', (t) => {
+test('a row opens in place, its shot opens the viewer: where it was taken, a reason in full, a way back, and Ask about this starts the box', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [proofSub()];
   f.view.update(f.data);
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  f.q('[data-proof="0"]').click();
   const dialog = f.q('#job-dialog');
+  const row = dialog.querySelector('.job-proof-item');
+  row.open = true; row.dispatchEvent(f.event('toggle'));
+  f.view.update(f.data);
+  assert.equal(dialog.querySelector('.job-proof-item').open, true, 'an opened row stays open across a tick');
+  assert.match(dialog.querySelector('.job-proof-item .job-proof-shot small').textContent, /localhost:5174\/audit · 1280x800/);
+  f.q('[data-proof="0"]').click();
   assert.equal(dialog.querySelector('h2').textContent, 'Shown working · 1 of 2');
   assert.match(dialog.querySelector('.job-proof-meta').textContent, /URLhttp:\/\/localhost:5174\/audit.*Viewport1280x800.*HowPlaywright/);
   assert.deepEqual(f.sent.at(-1), { type: 'job-evidence', id: 'job1', subJobId: 'api', round: 1, file: 'l.png' }, 'the full file is asked for once it is open');
@@ -2225,13 +2233,12 @@ test('a card opens the shot viewer: where it was taken, a reason in full, a way 
   assert.match(dialog.querySelector('.job-proof-stage.gap').textContent, /No SSO key in this worktree/);
   assert.match(dialog.querySelector('[data-proof-ask]').textContent, /Ask it to try another way/);
   f.q('[data-proof-back]').click();
-  assert.ok(dialog.querySelector('.job-proof-grid'), 'back is the step');
-  f.q('[data-proof="0"]').click();
-  f.q('[data-proof-ask]').click();
+  assert.ok(dialog.querySelector('.job-proof-list'), 'back is the step');
+  f.q('[data-proof-ask="0"]').click();
   const box = dialog.querySelector('.job-change textarea');
   assert.equal(box.value, 'About “Lists sign-ins”: ', 'the question is started, about this picture');
   assert.equal(dialog.querySelector('[data-change-send]').disabled, false);
-  assert.equal(dialog.querySelector('.job-proof-grid') != null, true);
+  assert.equal(dialog.querySelector('.job-proof-list') != null, true);
   f.view.update(f.data);
   assert.equal(dialog.querySelector('.job-change textarea').value, 'About “Lists sign-ins”: ', 'typed text survives the tick');
   box.value = `${box.value}is the order right?`; box.dispatchEvent(f.event('input'));
@@ -2244,7 +2251,7 @@ test('asking about a gap asks the agent to try another way', (t) => {
   job.subJobs = [proofSub()];
   f.view.update(f.data);
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  f.q('[data-proof="1"]').click(); f.q('[data-proof-ask]').click();
+  f.q('[data-proof-ask="1"]').click();
   assert.equal(f.q('#job-dialog .job-change textarea').value, 'You couldn’t show “SSO appears”. Please try another way: ');
 });
 
@@ -2275,14 +2282,18 @@ const parkedJob = (f, extra = {}, subExtra = {}) => {
   return job;
 };
 
-test('a Code review step with its session parked says so, and Open session goes to that card', (t) => {
+test('a Code review step with its session parked and nothing said draws no empty thread, and the thread folds once there is one', (t) => {
   const f = fixture(t); const job = parkedJob(f);
   assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'needs', text: 'Ready to review' }, 'a paused session is not a running step');
   assert.equal(jobNeedsReview(job, job.subJobs[0]), true);
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  const thread = f.q('#job-dialog .job-thread');
-  assert.match(thread.querySelector('.job-thread-head').textContent, /Its session is waiting on your review.*Paused · no slot · keeps its context.*Open session/);
-  assert.match(thread.textContent, /Ask about how it works/);
+  assert.equal(f.q('#job-dialog .job-thread'), null);
+  assert.equal(f.q('#job-dialog .job-history'), null);
+  job.subJobs[0].thread = [{ id: 'm1', at: 1, from: 'human', to: 'agent', text: 'Hi', round: 1 }]; f.view.update(f.data);
+  const fold = f.q('#job-dialog .job-history');
+  assert.equal(fold.open, false);
+  assert.match(fold.querySelector('summary').textContent, /Conversation 1 message/);
+  assert.match(fold.querySelector('.job-thread-head').textContent, /Its session is waiting on your review.*Open session/);
   f.q('[data-fab-session="s1"]').click();
   assert.deepEqual(f.sessions, ['s1']);
 });
@@ -2325,13 +2336,14 @@ test('with the session gone the thread stays as the record, and an approved roun
   assert.equal(f.q('#job-dialog .job-thread'), null, 'no session and nothing said: nothing to draw');
 });
 
-test('approval says which round and tree it is pinned to, and earlier rounds stay one click away', (t) => {
+test('approval names its round and tree only in its title, and earlier rounds stay one click away', (t) => {
   const f = fixture(t);
   parkedJob(f, {}, { ready: { ...proofSub().ready, round: 2, treeHash: 'a71d0e4ffff', receiptId: 'run_1#2' }, earlier: [{ round: 1, checks: ['Lint clean'], proof: [{ text: 'Lists sign-ins', shots: [{ file: 'l.png' }] }] }] });
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.equal(f.q('#job-dialog .job-pinned').textContent, 'round 2 · a71d0e4');
+  assert.equal(f.q('#job-dialog .job-pinned'), null);
+  assert.match(f.q('[data-action="approve-code"]').title, /Approval is tied to round 2 and working tree a71d0e4\./);
   assert.equal(f.q('#job-dialog [data-change-ref]').dataset.changeRef, 'run_1#2');
-  assert.match(f.q('#job-dialog .job-earlier summary').textContent, /Round 1/);
+  assert.match(f.q('#job-dialog .job-history summary').textContent, /Earlier rounds Round 1/);
   assert.equal(f.q('#job-dialog .job-earlier [data-ev-round="1"]').dataset.evFile, 'l.png');
   f.q('[data-action="approve-code"]').click();
   assert.equal(f.sent.at(-1).readyReceiptId, 'run_1#2');
@@ -2560,4 +2572,26 @@ test('plan review sets a PR\'s own base from its branch pill, and blank lands wh
   assert.equal(f.q('.job-node-base.own'), null);
   f.q('[data-action="approve-plan"]').click();
   assert.equal('base' in f.sent.at(-1).plan.subJobs[0], false, 'cleared, it is gone rather than empty');
+});
+
+test('what the agent left running is a chip among the step\'s own, its popover stays open across a tick, and Logs and Stop all act', (t) => {
+  const f = fixture(t);
+  const job = parkedJob(f, {}, { running: { items: [{ name: 'web', url: 'http://localhost:5174', pid: 4821, log: '/wt/web.log', up: true }, { name: 'api', url: 'http://localhost:8788', up: true }] } });
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const chip = f.q('#job-dialog .job-detail-meta .job-run-chip');
+  assert.equal(chip.textContent.trim(), '2 running');
+  assert.equal(f.q('#job-dialog .job-running'), null, 'no Running for you bar in the body');
+  const pop = f.q('#job-dialog .job-run-pop');
+  pop.open = true; pop.dispatchEvent(f.event('toggle'));
+  f.view.update(f.data);
+  assert.equal(f.q('#job-dialog .job-run-pop').open, true);
+  assert.deepEqual([...f.q('#job-dialog').querySelectorAll('.job-run-panel li a')].map((a) => a.textContent), ['localhost:5174 ↗', 'localhost:8788 ↗']);
+  f.q('[data-running-logs="web"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-running-logs', id: 'job1', subJobId: 'api', name: 'web' });
+  f.view.runningLog({ subJobId: 'api', name: 'web', text: 'ready in 300ms' });
+  assert.match(f.q('#job-dialog .job-run-panel .job-run-logs pre').textContent, /ready in 300ms/);
+  f.q('[data-running-stop]').click();
+  assert.equal(f.sent.at(-1).action, 'stop-running');
+  job.subJobs[0].running.items[0].up = false; f.view.update(f.data);
+  assert.equal(f.q('#job-dialog .job-run-chip').textContent.trim(), '1 of 2 running');
 });

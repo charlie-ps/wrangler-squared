@@ -20,9 +20,9 @@ import { mountModelPicker } from './model-picker.js';
 import { mountSandbox } from './job-sandbox.js';
 import { whatsNewHtml } from './updates.js';
 import { createIdeaCorner } from './idea-corner.js';
-import { threadHtml, earlierRoundsHtml } from './job-thread.js';
-import { runningBarHtml } from './job-running.js';
-import { EvidenceCache, hasProof, proofGridHtml, alsoCheckedHtml, proofViewerHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
+import { historyHtml } from './job-thread.js';
+import { runningChipHtml, stoppedHtml } from './job-running.js';
+import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
 // Mirrors server/jobs-schema.js MAX_SHOW.
 const MAX_SHOW = 8;
 const checkTone = (state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED', 'passing'].includes(state) ? 'passed' : ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'failing'].includes(state) ? 'failed' : '';
@@ -1047,7 +1047,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       + branchChip(job, sub)
       + (sub.pr ? `<a class="job-chip job-pipeline-status ${checkTone(sub.pr.checkStatus)}" ${/^https:\/\/github\.com\//.test(sub.pr.url || '') ? `href="${esc(sub.pr.url)}" target="_blank" rel="noopener noreferrer"` : ''} title="Pull request · checks ${esc(sub.pr.checkStatus)}${sub.pr.head ? ` · ${esc(sub.pr.head.slice(0, 8))}` : ''}">${ICONS.pr}<span>${n ? `#${esc(n)}` : 'PR'}</span></a>` : '')
       + (deploys ? chip(ICONS.rocket, sub.deploys.expected === false ? 'No deploy' : 'Deploys', { cls: 'job-deploys', title: deploys }) : '')
-      + costChip(sub.usd, sub.usdEstimated, `${SUB_COST_TITLE}${jobCostLabel(job.usd, job.usdEstimated) ? ` · job total ${jobCostLabel(job.usd, job.usdEstimated)}` : ''}`);
+      + costChip(sub.usd, sub.usdEstimated, `${SUB_COST_TITLE}${jobCostLabel(job.usd, job.usdEstimated) ? ` · job total ${jobCostLabel(job.usd, job.usdEstimated)}` : ''}`)
+      + (sub.stage === 'review' ? runningChipHtml(job, sub, { open: openMore.has('running'), logs: runLogs.get(sub.id) }) : '');
     const kicker = `<button class="job-back" data-open-job title="Back to the job">${ICONS.back}<span>${esc(job.title)}</span></button>`;
     const session = sub.sessions.length ? `<button id="job-session" ${runStatus(job, sub) === 'needs-you' ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>` : '';
     // Wrangler's own turn (Fixing) or a fix for you (Fix ready, a declared red's options)
@@ -1089,12 +1090,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         ${yours ? `<form id="job-human-form" data-state="${esc(sub.state)}"><label>Result for dependent work <small title="Up to 8,000 characters, passed to dependent agents">optional</small><textarea name="output" maxlength="8000" rows="4"></textarea></label><div class="job-actions tone-${STATES[state].tone}"><button class="primary" type="submit" title="${esc(hints.find((h) => h.startsWith('No agent')) || '')}">${ICONS.check}Mark done</button>${sub.state === 'doing' ? '' : '<button type="button" data-action="start-human">Mark in progress</button>'}</div></form>` : ''}`;
       actions = retry;
     } else {
-      body = `${sub.ready ? (hasProof(sub) ? `${proofGridHtml(job, sub)}${alsoCheckedHtml(sub)}` : `<h3>${sub.stage === 'review' ? 'Ready for review' : 'Verified'}</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${runningBarHtml(job, sub, { logs: runLogs.get(sub.id) })}${earlierRoundsHtml(job, sub)}${threadHtml(job, sub)}` : ''}
+      body = `${sub.ready ? (hasProof(sub) ? proofListHtml(job, sub, { isOpen: (k) => openMore.has(k), ask: sub.stage === 'review' }) : `<h3>${sub.stage === 'review' ? 'Ready for review' : 'Verified'}</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${stoppedHtml(sub)}${historyHtml(job, sub, { open: openMore.has('history') })}` : ''}
         ${sub.pr?.checks?.length ? `<h3>Checks</h3><ul class="job-checks">${sub.pr.checks.map((c) => `<li class="${checkTone(c.state)}">${checkMark(c.state)} ${esc(c.name)} <small>${esc(c.state.toLowerCase())}</small></li>`).join('')}</ul>` : ''}
         ${sub.pr ? commentsHtml(sub, commentsShown) : ''}
         ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
         ${sub.deployed ? `<h3>Landed</h3>${receiptHtml(sub.deployed.checks)}` : ''}${noteFor(sub)}${refusalHtml(sub)}`;
-      actions = `${codeAwaitingReview(sub) && !sub.error && !held ? `<button class="primary" data-action="approve-code" title="${esc(hints.find((h) => h.startsWith('Nothing is committed')) || '')}">${ICONS.check}Approve &amp; ${sub.pr ? 'push' : 'open PR'}</button>${sub.ready?.round ? `<span class="job-pinned" title="Approval is tied to this round and this exact working tree">round ${esc(sub.ready.round)}${sub.ready.treeHash ? ` · ${esc(sub.ready.treeHash.slice(0, 7))}` : ''}</span>` : ''}` : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="Merge head ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
+      actions = `${codeAwaitingReview(sub) && !sub.error && !held ? `<button class="primary" data-action="approve-code" title="${esc([hints.find((h) => h.startsWith('Nothing is committed')) || '', sub.ready?.round ? `Approval is tied to round ${sub.ready.round}${sub.ready.treeHash ? ` and working tree ${sub.ready.treeHash.slice(0, 7)}` : ''}.` : ''].filter(Boolean).join(' '))}">${ICONS.check}Approve &amp; ${sub.pr ? 'push' : 'open PR'}</button>` : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="Merge head ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
         ${sub.worktree && sub.stage !== 'done' ? `<button id="job-diff">${ICONS.code}Review code in Wrangler</button>` : ''}${sub.worktree?.path && sub.stage !== 'done' ? `<button id="job-ide">Review code in ${esc(ideApp())}</button>` : ''}${session}${retry}${sub.cleanupRefusal && sub.cleanupRefusal.pinned !== false && sub.stage === 'cleanup' && !sub.discard ? `<button class="danger" id="job-discard">${ICONS.x}Discard anyway</button>` : ''}
         ${sub.recoveredBy ? `<button data-open-sub="${esc(sub.recoveredBy)}" title="${esc(hints.at(-1))}">${ICONS.wrench}Open fix sub-job</button>` : ''}`;
     }
@@ -1115,20 +1116,22 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const items = [...new Set((show || []).map((t) => String(t).trim()).filter(Boolean))].slice(0, MAX_SHOW);
     return items.length ? { ...rest, show: items } : rest;
   }) });
+  const wireProofAsk = (sub) => dialog.querySelectorAll('[data-proof-ask]').forEach((b) => b.onclick = () => {
+    const item = proofItems(sub)[+b.dataset.proofAsk];
+    if (!item) return;
+    askDraft = { subId: sub.id, text: item.couldNot ? `You couldn’t show “${item.text}”. Please try another way: ` : `About “${item.text}”: ` };
+    proofView = null;
+    renderDetail();
+    askDraft = null;
+    const box = dialog.querySelector('.job-change textarea');
+    if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+  });
   function wireProofViewer(job, sub) {
     const item = proofItems(sub)[proofView.i], shot = shotsOf(item)[proofView.j || 0];
     dialog.querySelector('[data-proof-back]').onclick = () => { proofView = null; renderDetail(); };
     dialog.querySelectorAll('[data-proof-go]').forEach((b) => b.onclick = () => { proofView = { i: +b.dataset.proofGo, j: 0 }; renderDetail(); });
     dialog.querySelectorAll('[data-proof-shot]').forEach((b) => b.onclick = () => { proofView = { ...proofView, j: +b.dataset.proofShot }; renderDetail(); });
-    const ask = dialog.querySelector('[data-proof-ask]');
-    if (ask) ask.onclick = () => {
-      askDraft = { subId: sub.id, text: item.couldNot ? `You couldn’t show “${item.text}”. Please try another way: ` : `About “${item.text}”: ` };
-      proofView = null;
-      renderDetail();
-      askDraft = null;
-      const box = dialog.querySelector('.job-change textarea');
-      if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
-    };
+    wireProofAsk(sub);
     hydrateEvidence(dialog, evidence, send, shot ? { full: { jobId: job.id, subId: sub.id, round: proofRound(sub), file: shot.file } } : {});
   }
   function renderDetail() {
@@ -1164,8 +1167,17 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       renderDetail();
     });
     wireWriteReview(job, sub);
-    dialog.querySelectorAll('[data-proof]').forEach((b) => b.onclick = () => { proofView = { i: +b.dataset.proof, j: 0 }; renderDetail(); });
+    dialog.querySelectorAll('[data-proof]').forEach((b) => b.onclick = () => { proofView = { i: +b.dataset.proof, j: +b.dataset.proofAt || 0 }; renderDetail(); });
+    if (sub) wireProofAsk(sub);
     hydrateEvidence(dialog, evidence, send);
+    // The popover hangs from its chip, so near the dialog's right edge it slides left to stay inside.
+    const fitRunning = () => dialog.querySelectorAll('.job-run-pop[open] .job-run-panel').forEach((p) => {
+      p.style.left = '';
+      const over = p.getBoundingClientRect().right - (dialog.getBoundingClientRect().right - 16);
+      if (over > 0) p.style.left = `${-over}px`;
+    });
+    dialog.querySelectorAll('.job-run-pop').forEach((d) => d.addEventListener('toggle', fitRunning));
+    fitRunning();
     dialog.querySelectorAll('[data-running-stop]').forEach((b) => b.onclick = () => { b.disabled = true; runLogs.delete(sub.id); action('stop-running'); });
     dialog.querySelectorAll('[data-running-restart]').forEach((b) => b.onclick = () => { b.disabled = true; action('restart-running', b.dataset.runningRestart ? { name: b.dataset.runningRestart } : {}); });
     dialog.querySelectorAll('[data-running-logs]').forEach((b) => b.onclick = () => {

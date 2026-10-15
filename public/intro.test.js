@@ -180,12 +180,13 @@ test('Needs you plays a red step that Wrangler fixes uncounted, then a fix that 
   assert.deepEqual(seen.at(-1), ['Fix ready · Review fix', '2']);
 });
 
-test('See it working fills the Show me grid from the board’s own markup, then leaves the preview running, all inert', (t) => {
+test('See it working fills the Show me checklist from the board’s own markup, then leaves the preview running, all inert', (t) => {
   page(t);
   const els = frames(step('See it working'));
-  assert.deepEqual(els.map((el) => el.querySelectorAll('.job-proof-card:not(.wn-pending)').length), [0, 1, 2, 3, 3, 3]);
-  assert.equal(els[2].querySelector('.job-running'), null, 'nothing is running until the proof is in');
-  assert.match(els.at(-1).querySelector('.job-running').textContent, /Running for you/);
+  assert.deepEqual(els.map((el) => el.querySelectorAll('.job-proof-item:not(.wn-pending)').length), [0, 1, 2, 3, 3, 3]);
+  assert.deepEqual(els.map((el) => el.querySelector('.job-proof-verdict b').textContent), ['0 of 3 checked', '1 of 3 checked', '2 of 3 checked', '3 of 3 checked', '3 of 3 checked', '3 of 3 checked']);
+  assert.equal(els[2].querySelector('.job-run-pop'), null, 'nothing is running until the proof is in');
+  assert.equal(els.at(-1).querySelector('.job-run-chip').textContent.trim(), '2 running');
   assert.ok(els.at(-1).querySelector('.intro-inert').hasAttribute('inert'), 'its buttons and link do nothing here, so nobody can reach them');
 });
 
