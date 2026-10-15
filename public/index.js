@@ -105,6 +105,8 @@ export default {
         view?.images(msg);
       } else if (msg.event === 'job-evidence') {
         view?.evidence(msg);
+      } else if (msg.event === 'job-running-log') {
+        view?.runningLog(msg);
       } else if (msg.event === 'job-ide-opened') {
         toast(`Opened in ${msg.app}`);
       } else if (msg.event === 'job-ide-failed') {

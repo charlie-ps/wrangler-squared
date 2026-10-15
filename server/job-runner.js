@@ -8,6 +8,7 @@ import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from
 import { dropSub } from './job-sub-ops.js';
 import { draftsDecidedMail, threadMail } from './job-prompts.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
+import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps } from './job-running.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
@@ -24,8 +25,8 @@ export const IDLE_RECEIPT_GRACE_MS = 10 * 60 * 1000;
 // One process owns the store (the existing DATA_DIR instance lock). Claims are
 // durable before launch; an uncertain launch is blocked on restart, never replayed.
 export class JobRunner {
-  constructor({ store, runtime, github, onChange = async () => {}, now = Date.now, summarise = summariseComments, statusOf = () => null }) {
-    Object.assign(this, { store, runtime, github, onChange, now, summarise, statusOf });
+  constructor({ store, runtime, github, onChange = async () => {}, now = Date.now, summarise = summariseComments, statusOf = () => null, running = defaultDeps() }) {
+    Object.assign(this, { store, runtime, github, onChange, now, summarise, statusOf, running });
     this.busy = false;
     this.triaging = new Map(); this.pending = new Set();
   }
@@ -38,11 +39,43 @@ export class JobRunner {
     try {
       for (const job of this.store.snapshot().jobs) {
         try {
+          await this.sweepRunning(job.id);
           await this.settle(job.id);
           await this.advance(job.id);
         } catch (e) { this.store.update(job.id, (j) => { j.error = shortError(e); }); }
       }
     } finally { this.busy = false; if (before !== this.store.data) await this.onChange(); }
+  }
+  // What an agent left running for the human to try (job-running.js). A preview
+  // is probed while its review is open, written only when up/down flips (the
+  // graph rebuild reads the file). Whatever is due is torn down FIRST each tick,
+  // before cleanup removes the worktree its stop commands run in, and also at
+  // boot: a sub-job no longer in review owns nothing that should still answer.
+  // Teardown never fails the step it follows; a leftover is flagged on the card.
+  async sweepRunning(id) {
+    for (const initial of this.store.get(id).subJobs) {
+      const job = this.store.get(id);
+      const sub = job.subJobs.find((s) => s.id === initial.id);
+      if (!sub?.running) continue;
+      const due = dueTeardown(job, sub);
+      if (due.length) {
+        let outcome;
+        try { outcome = await teardown(due, { cwd: sub.worktree?.path, deps: this.running }); } catch (e) { outcome = { results: due.map((i) => ({ name: i.name, ok: false, detail: shortError(e) })), still: due.map((i) => i.name) }; }
+        const reason = stopReason(job, sub);
+        this.patchSub(id, sub.id, (s) => {
+          const gone = (list) => (list || []).filter((i) => !due.some((d) => sameItem(i, d)));
+          s.running = { ...s.running, items: gone(s.running.items), owed: gone(s.running.owed), stopped: { at: this.now(), reason, results: outcome.results, still: outcome.still } };
+        });
+      }
+      const now = this.store.get(id);
+      const kept = now.subJobs.find((s) => s.id === sub.id);
+      if (!holdsRunning(now, kept)) continue;
+      const items = runningOf(kept);
+      const ups = await Promise.all(items.map((i) => isUp(i, this.running)));
+      if (ups.some((up, n) => up !== items[n].up)) {
+        this.patchSub(id, sub.id, (s) => { for (const [n, i] of items.entries()) { const hit = s.running.items.find((x) => sameItem(x, i)); if (hit) hit.up = ups[n]; } });
+      }
+    }
   }
   patchSub(jobId, subId, fn) { return this.store.update(jobId, (j) => fn(j.subJobs.find((s) => s.id === subId), j)); }
   allowed(id) { const d = this.store.snapshot(); return !d.settings.paused && !d.jobs.find((j) => j.id === id)?.paused; }

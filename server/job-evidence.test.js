@@ -211,7 +211,7 @@ test('the implementer is told to show each item working, where to save proof and
   assert.match(text, /whose text is EXACTLY the item/);
   assert.match(text, /RUNNING build, never a mock-up: Playwright by default.*Claude in Chrome/);
   assert.match(text, /couldNot:"why you could not/);
-  assert.match(text, /Stop everything you started before you report/);
+  assert.match(text, /LEAVE RUNNING for the human to try/);
   assert.match(text, /A receipt that leaves an item out is refused/);
   const none = jobPrompt(job, { ...sub, show: undefined }, { id: 'run1', phase: 'implementation' });
   assert.match(none, /lists nothing it must show/);

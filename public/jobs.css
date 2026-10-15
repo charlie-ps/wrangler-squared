@@ -1133,3 +1133,28 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .job-change-tray .job-image.uploading { opacity:.55; }
 .job-change-tray .job-image-remove { position:absolute; top:2px; right:2px; width:18px; height:18px; padding:0; line-height:16px; border-radius:50%; }
 .job-change-paste { color:var(--fg-muted); font-size:11.5px; }
+
+/* What the agent left running for the human to try (job-running.js). */
+.job-running { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:14px; padding:10px 12px; border-radius:14px; border:1px solid var(--border-muted); background:var(--surface-2); font-size:12.5px; }
+.job-running > .icon { color:var(--fg-muted); }
+.job-running b { font-weight:600; }
+.job-running small { color:var(--fg-muted); font-size:11.5px; }
+.job-running a { color:var(--blue-fg); font:600 12.5px ui-monospace,SFMono-Regular,Menlo,monospace; text-decoration:none; }
+.job-running code { font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--blue-fg); background:var(--field-bg); padding:3px 7px; border-radius:6px; }
+.job-running .sp { margin-left:auto; display:inline-flex; gap:6px; }
+.job-running.on { border-color:color-mix(in srgb, var(--green) 50%, transparent); background:color-mix(in srgb, var(--green) 7%, var(--surface-2)); }
+.job-running.down, .job-running.warn { border-color:color-mix(in srgb, var(--warn) 55%, transparent); background:color-mix(in srgb, var(--warn) 8%, var(--surface-2)); }
+.job-run-dot { width:8px; height:8px; flex:none; border-radius:50%; background:var(--green); box-shadow:0 0 0 3px color-mix(in srgb, var(--green) 25%, transparent); }
+.job-run-dot.down, .job-run-dot.warn { background:var(--warn); box-shadow:0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent); }
+.job-plate-where .job-run-dot { width:7px; height:7px; margin-left:auto; }
+.job-run-svcs { flex-basis:100%; list-style:none; margin:0; padding:0; display:grid; gap:4px; }
+.job-run-svcs li { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.job-run-svcs li > span { font-weight:600; }
+.job-run-svcs li.down > span { color:var(--warn-fg); }
+.job-run-svcs .job-run-log { margin-left:auto; padding:1px 7px; font-size:11px; }
+.job-run-logs { flex-basis:100%; border:1px solid var(--border-muted); border-radius:10px; background:var(--field-bg); overflow:hidden; }
+.job-run-logs header { display:flex; gap:8px; align-items:baseline; padding:5px 10px; background:var(--surface-2); }
+.job-run-logs pre { margin:0; padding:8px 10px; max-height:220px; overflow:auto; font:11.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; word-break:break-word; }
+.job-run-log-err { margin:0; padding:8px 10px; color:var(--warn-fg); }
+@media (prefers-reduced-motion: no-preference) { .job-running.on .job-run-dot { animation:job-run-pulse 2.4s ease-in-out infinite; } }
+@keyframes job-run-pulse { 50% { box-shadow:0 0 0 5px color-mix(in srgb, var(--green) 10%, transparent); } }

@@ -125,8 +125,9 @@ after it are held while you work.
   needs (dev server, database, worker) on free ports and capture the RUNNING
   build, not a mock-up: Playwright by default (it needs nobody watching), or
   Claude in Chrome when you have it. For an API, CLI or migration show the
-  command, what it printed and its exit code. Stop everything you started before
-  you report.
+  command, what it printed and its exit code. What you started stays up for the
+  human to try (see "Leave it running" below) unless Code is on Auto, where you
+  stop everything before you report.
 - Answer **every** item in the `ready` receipt with a check whose `text` is
   exactly the item and one of: `shots:[{file, url?, viewport?, tool?}]` (a bare
   name works too), `run:{cmd, out, exit}` (`out` at most 4000 characters, the
@@ -139,6 +140,31 @@ after it are held while you work.
   output for what you changed helps.
 - Planning: give each PR sub-job `show`, 1–6 lines written as things to **see**
   ("Filters by result and IP prefix", "Unit tests pass"), never work to do.
+
+## Leave it running, so the human can try it
+
+- With Code on **You review**, what the change needs to run (dev server,
+  database, worker) is **left running** and listed in the receipt:
+  `running:[{name, url?, pid?, stop?, log?}]`, on `ready` and again on a `reply`
+  that restarts it. The board shows a Running for you bar with the link, Logs
+  and Stop.
+- Start each **detached** so it survives your session going dormant:
+  `setsid nohup <cmd> > "$JOB_EVIDENCE/<name>.log" 2>&1 &`, then `echo $!`. The
+  pid is a process-group leader. Pick free ports (check them first).
+- An entry needs a `url` (where to open it), a `pid` (the setsid leader) or a
+  `stop` command (`docker compose -p sec-412 down`, run in the worktree) for
+  what a pid cannot stop. `log` is the file you redirected output to, under the
+  worktree or `$JOB_EVIDENCE`; it is what the Logs button reads.
+- **You never tear it down.** Wrangler kills each pid's group, runs each `stop`,
+  and checks each url stopped answering when the human approves or drops the
+  step, when the plan changes it, at cleanup and at boot. It never fails an
+  approval over a leftover, but flags it. A later round's `ready` replaces the
+  list: anything it leaves out is stopped. List what is up **now**.
+- If the mail says an entry is down and asks you to start it again, start it as
+  before and answer with `reply` carrying `running:[…]` for everything now up.
+- Code on **Auto** leaves nothing running: stop what you started, and anything
+  you list is torn down at once. A Codex sandbox that stops you listening on a
+  port is a `couldNot` on the item, not a failure.
 
 ## After you report ready: your session stays open
 

@@ -5,6 +5,7 @@ import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
 import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode, checkText, unansweredShow } from './jobs-schema.js';
 import { adoptEvidence } from './job-evidence.js';
 import { parkedReadyRun, askAgent } from './job-parked.js';
+import { setRunning, owe, runningOf } from './job-running.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
@@ -294,6 +295,22 @@ export class JobStore {
         record(j, s, 'quick-change', payload.note || null, detail);
         return;
       }
+      // The preview the agent left running (job-running.js): Stop owes its teardown
+      // to the runner's next tick; Restart mails the parked session to start it again.
+      if (action === 'stop-running') {
+        if (!s || !owe(s, payload.name || null)) throw new Error('Nothing is running for this step');
+        record(j, s, 'stop-running', null, `Stopped what the agent left running on ${quoted(s.title)}`);
+        return;
+      }
+      if (action === 'restart-running') {
+        const run = s && parkedReadyRun(j, s);
+        const down = s ? runningOf(s).filter((i) => i.up === false && (!payload.name || i.name === payload.name)) : [];
+        if (!run || !s.ready) throw new Error('Its session is no longer open to ask: start it by hand, or ask for a change');
+        if (!down.length) throw new Error('Everything it left running is up');
+        askAgent(s, { from: 'system', text: `${down.map((i) => i.name).join(', ')} ${down.length === 1 ? 'is' : 'are'} no longer running and the human wants to try it. Start ${down.length === 1 ? 'it' : 'them'} again as before (detached with setsid, free ports) and answer with job_report kind:"reply", text:"…", running:[every entry now up, with its url, pid and stop]. Change nothing else.`, kind: 'restart' }, Date.now());
+        record(j, s, 'restart-running', null, `Asked the session to start ${down.map((i) => i.name).join(', ')} again`);
+        return;
+      }
       if (action === 'pause') { j.paused = true; return; }
       if (action === 'resume') { j.paused = false; return; }
       if (action === 'start') {
@@ -527,6 +544,7 @@ export class JobStore {
     const [kept] = report.shots || report.run ? adoptEvidence({ jobId: j.id, subId: s.id, round, prefix: `${id}-`, proof: [{ text: report.text, shots: report.shots, run: report.run }] }) : [null];
     (s.thread ||= []).push({ id, at: now, from: 'agent', text: report.text, round, ...(kept?.shots ? { shots: kept.shots } : {}), ...(report.run ? { run: report.run } : {}) });
     s.answering = null;
+    if (report.running) setRunning(s, report.running, { round, keep: true, now });
     Object.assign(r, { lastReply: report, parkedAt: now, mailedAt: null, idleSince: null });
   }
   // The Show me list is answered item by item, each by a check carrying shots, a
@@ -596,6 +614,9 @@ export class JobStore {
       s.ready = { checks: report.checks.map(checkText), ...(proof?.proof.length ? { proof: proof.proof } : {}), ...(proof ? { round: proof.round } : {}), ...(meta.treeHash ? { treeHash: meta.treeHash } : {}), receiptId, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
       if (proof) s.rounds = proof.round;
       s.answering = null;
+      // What it left running is kept only for a human to try: Code on Auto, or a
+      // receipt that did not park, owes it all straight to teardown.
+      if (report.running || runningOf(s).length) setRunning(s, report.running || [], { round: s.ready.round || 1, keep: reviewCode(j) && r.parkedFor === 'ready', now: Date.now() });
       if (r.parkedFor === 'ready' && proof?.round > 1) (s.thread ||= []).push({ id: `msg_${Date.now().toString(36)}r`, at: Date.now(), from: 'system', text: `Ready again with new proof.`, round: proof.round });
       if (!reviewCode(j)) { s.ready.approvedAt = s.ready.at; s.state = 'approved'; }
     }

@@ -127,7 +127,7 @@ export function threadMail(job, run, sub, messages) {
     `${job.title}: you reported ready (round ${round}) and the human has written back. They see your proof and the working tree as you left them.`,
     ...said,
     `A QUESTION: answer it from what you know, changing nothing: ${reportCall(run, 'kind:"reply", text:"your answer", shots?:[...], run?:{cmd,out,exit}')} Anything you capture to answer goes in $JOB_EVIDENCE (\`export JOB_EVIDENCE=${dir}\`).`,
-    `A CHANGE: make it in this worktree, leave it UNCOMMITTED, re-verify and answer every Show me item again for this new round: ${reportCall(run, 'kind:"ready", checks:[...]')} If it needs more than this PR, say so in a reply instead.`,
+    `A CHANGE: make it in this worktree, leave it UNCOMMITTED, re-verify and answer every Show me item again for this new round: ${reportCall(run, 'kind:"ready", checks:[...], running?:[...]')} List what is running in running again: anything the new receipt leaves out is stopped, and a restart you do not list is not kept. If it needs more than this PR, say so in a reply instead.`,
     'Then stop and wait: the session stays open for the next message.',
   );
 }
@@ -202,6 +202,12 @@ const thisPr = (sub, job) => `This PR (${sub?.repo ? path.basename(sub.repo) : '
 // itself, job-store.js) so the proof is kept and a short step publishes.
 export const leavesUncommitted = (job, sub) => reviewCode(job) || !!sub?.show?.length;
 const SHOT_SHAPE = '{file:"name.png", url?:"where it was taken", viewport?:"1280x800", tool?:"Playwright"}';
+// What to do with what the agent started to capture proof. With the human reviewing
+// it is left up for them to try (the extension only tears it down); on Auto nobody
+// tries it, so nothing may be left running.
+const runningLine = (job) => reviewCode(job)
+  ? 'What your change needs to run (dev server, database, worker) you LEAVE RUNNING for the human to try, started detached so it survives your session going dormant (`setsid nohup <cmd> > "$JOB_EVIDENCE/<name>.log" 2>&1 &`, then `echo $!` is the pid of a process-group leader) on ports you checked were free. List each in the receipt as running:[{name, url?, pid?, stop?, log?}]: url is where to open it, pid the setsid leader, stop a command that tears it down from the worktree when a pid is not enough (`docker compose -p <name> down`), log the file you redirected its output to (under the worktree or $JOB_EVIDENCE). Entries need a url, a pid or a stop. Wrangler tears every entry down when the human approves or drops the step, and anything a later round no longer lists; never start something you cannot list. A Codex sandbox that stops you listening on a port is a couldNot, not a failure.'
+  : 'Stop everything you started before you report: nothing may be left running, because no human reviews this step.';
 const proofBlock = (job, sub) => {
   if (!sub) return '';
   const dir = displayPath(inboxDir(job.id, sub.id));
@@ -209,7 +215,8 @@ const proofBlock = (job, sub) => {
   return lines(
     `Show your work. Proof goes in $JOB_EVIDENCE: run \`export JOB_EVIDENCE=${dir}\` and save every file there as a bare name (PNG, JPEG, GIF or WebM, at most 5 MB each).`,
     items.length ? `Show me before review (each is a thing the human will look at, so show it WORKING, not described):\n${items.map((t) => `- ${JSON.stringify(t)}`).join('\n')}` : 'This sub-job lists nothing it must show, but a screenshot or command output for what you changed helps the human; attach it the same way.',
-    'For a UI change start whatever it needs (dev server, database, worker) on free ports and capture a screenshot of the RUNNING build, never a mock-up: Playwright by default (it needs nobody watching), or Claude in Chrome if you have it. For a change with no UI show the command, what it printed and its exit code. Stop everything you started before you report.',
+    'For a UI change start whatever it needs (dev server, database, worker) on free ports and capture a screenshot of the RUNNING build, never a mock-up: Playwright by default (it needs nobody watching), or Claude in Chrome if you have it. For a change with no UI show the command, what it printed and its exit code.',
+    runningLine(job),
     `Answer each Show me item in the receipt with a check whose text is EXACTLY the item and one of: shots:[${SHOT_SHAPE}], run:{cmd, out (the relevant output, at most 4000 characters), exit}, or couldNot:"why you could not, and what covers it instead" (honest, never faked; the human sees it in amber). A receipt that leaves an item out is refused. Anything else you verified stays a plain string check.`,
   );
 };
@@ -289,9 +296,9 @@ export function jobPrompt(job, sub, run) {
       // before anything is committed; a later publish session commits and pushes,
       // so the branch rename waits for it too.
       leavesUncommitted(job, sub) ? `Leave every change UNCOMMITTED: ${reviewCode(job) ? 'the human reviews the working tree before anything is committed, and a ' : 'a '}later step commits and pushes it${sub?.pr ? ' to the open PR' : ' and opens the PR'}. Do not commit, push or open a PR.` : branchNaming(job, sub),
-      reviewCode(job) ? 'After you report ready your session stays open, paused, so the human can write to you by mail: a question is answered with job_report kind:"reply" (text, shots?, run?) and changes nothing; a change is made, re-verified and reported ready again as a new round. Do not end the session or clean up the worktree yourself.' : '',
+      reviewCode(job) ? 'After you report ready your session stays open, paused, so the human can write to you by mail: a question is answered with job_report kind:"reply" (text, shots?, run?, running?) and changes nothing; a change is made, re-verified and reported ready again as a new round. Do not end the session or clean up the worktree yourself.' : '',
       '',
-      leavesUncommitted(job, sub) ? report('kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]', 'When the working tree is ready to review, ') : publishLine,
+      leavesUncommitted(job, sub) ? report(`kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]${reviewCode(job) ? ', running?:[{name, url?, pid?, stop?, log?}]' : ''}`, 'When the working tree is ready to review, ') : publishLine,
     ),
     publish: lines(
       heading(job, sub),

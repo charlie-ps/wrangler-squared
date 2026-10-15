@@ -21,6 +21,7 @@ import { mountSandbox } from './job-sandbox.js';
 import { whatsNewHtml } from './updates.js';
 import { createIdeaCorner } from './idea-corner.js';
 import { threadHtml, earlierRoundsHtml } from './job-thread.js';
+import { runningBarHtml } from './job-running.js';
 import { EvidenceCache, hasProof, proofGridHtml, alsoCheckedHtml, proofViewerHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
 // Mirrors server/jobs-schema.js MAX_SHOW.
 const MAX_SHOW = 8;
@@ -304,6 +305,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // `job-evidence` frames, and which item the shot viewer has open.
   const evidence = new EvidenceCache();
   let proofView = null;
+  // The tail of a log the Logs button asked for (`job-running-log` frames), by sub-job.
+  const runLogs = new Map();
   // What "Ask about this" starts the Request changes box with, once.
   let askDraft = null;
   // Pictures pasted into a Code review box, staged as they land (api.images.stage); sent with the message.
@@ -1017,7 +1020,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         ${yours ? `<form id="job-human-form" data-state="${esc(sub.state)}"><label>Result for dependent work <small title="Up to 8,000 characters, passed to dependent agents">optional</small><textarea name="output" maxlength="8000" rows="4"></textarea></label><div class="job-actions tone-${STATES[state].tone}"><button class="primary" type="submit" title="${esc(hints.find((h) => h.startsWith('No agent')) || '')}">${ICONS.check}Mark done</button>${sub.state === 'doing' ? '' : '<button type="button" data-action="start-human">Mark in progress</button>'}</div></form>` : ''}`;
       actions = retry;
     } else {
-      body = `${sub.stage === 'review' && sub.ready ? (hasProof(sub) ? `${proofGridHtml(job, sub)}${alsoCheckedHtml(sub)}` : `<h3>Ready for review</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${earlierRoundsHtml(job, sub)}${threadHtml(job, sub)}` : ''}
+      body = `${sub.stage === 'review' && sub.ready ? (hasProof(sub) ? `${proofGridHtml(job, sub)}${alsoCheckedHtml(sub)}` : `<h3>Ready for review</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${runningBarHtml(job, sub, { logs: runLogs.get(sub.id) })}${earlierRoundsHtml(job, sub)}${threadHtml(job, sub)}` : ''}
         ${sub.pr?.checks?.length ? `<h3>Checks</h3><ul class="job-checks">${sub.pr.checks.map((c) => `<li class="${checkTone(c.state)}">${checkMark(c.state)} ${esc(c.name)} <small>${esc(c.state.toLowerCase())}</small></li>`).join('')}</ul>` : ''}
         ${sub.pr ? commentsHtml(sub, commentsShown) : ''}
         ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
@@ -1093,6 +1096,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     wireWriteReview(job, sub);
     dialog.querySelectorAll('[data-proof]').forEach((b) => b.onclick = () => { proofView = { i: +b.dataset.proof, j: 0 }; renderDetail(); });
     hydrateEvidence(dialog, evidence, send);
+    dialog.querySelectorAll('[data-running-stop]').forEach((b) => b.onclick = () => { b.disabled = true; runLogs.delete(sub.id); action('stop-running'); });
+    dialog.querySelectorAll('[data-running-restart]').forEach((b) => b.onclick = () => { b.disabled = true; action('restart-running', b.dataset.runningRestart ? { name: b.dataset.runningRestart } : {}); });
+    dialog.querySelectorAll('[data-running-logs]').forEach((b) => b.onclick = () => {
+      if (runLogs.get(sub.id)?.name === b.dataset.runningLogs) { runLogs.delete(sub.id); renderDetail(); return; }
+      send({ type: 'job-running-logs', id: job.id, subJobId: sub.id, name: b.dataset.runningLogs });
+    });
     dialog.querySelectorAll('[data-open-sub]').forEach((b) => b.onclick = () => openDetail(job.id, b.dataset.openSub));
     dialog.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
     dialog.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
@@ -1295,7 +1304,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     flags.note = { field: cp.field, head: job ? checkpointLabel(cp, youReview(job, cp.field)) : cp.name, body: msg.error, undo: false };
     paintFooter();
   }
-  return { update, newJob: createJob, reviewFailed, idea: idea.message, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
+  return { update, newJob: createJob, reviewFailed, idea: idea.message, runningLog: (msg) => { if (msg.subJobId && msg.name) { runLogs.set(msg.subJobId, { name: msg.name, text: msg.text, truncated: msg.truncated, error: msg.error }); if (dialog.open && selected?.subId === msg.subJobId) renderDetail(); } }, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
     // A checkpoint switch keeps the dialog: the footer is where it was made.
     if (msg?.action === 'set-review') {
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }

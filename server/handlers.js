@@ -6,6 +6,7 @@ import { runFile } from './job-github.js';
 import { thumbnailOf, readEvidence, keepAskImages } from './job-evidence.js';
 import { workingTreeHash } from './git.js';
 import { TREE_MOVED } from './job-store.js';
+import { readLog } from './job-running.js';
 
 // Control-WS handlers in the EXTENSION signature: `handler(msg, host)` — no
 // `ctx`, and therefore no `ctx.reply`. Core's control/handlers/jobs.js replied
@@ -167,6 +168,19 @@ export function makeEvidenceHandler({ run = runFile } = {}) {
 }
 export const jobEvidenceHandler = makeEvidenceHandler();
 
+// The Logs button on the Running for you bar: the tail of the file the agent sent
+// its process output to (job-running.js readLog decides what may be read). An
+// answer or a reason goes out as a frame; the board shows it under the bar.
+export const jobRunningLogsHandler = {
+  type: 'job-running-logs',
+  handler(msg, host) {
+    const job = host.stores.jobs.get(msg.id);
+    const sub = job?.subJobs.find((s) => s.id === msg.subJobId);
+    const got = sub ? readLog(job, sub, String(msg.name || '')) : { error: 'Sub-job not found' };
+    host.broadcast({ event: 'job-running-log', jobId: msg.id, subJobId: msg.subJobId, name: msg.name, ...got });
+  },
+};
+
 // The board's "Have an idea?" corner: a request becomes a PUBLIC issue on this
 // repo, filed by the reader's own `gh` login so it is theirs to follow. Title and
 // body travel as argv items through execFile, never a shell. `rid` is echoed so
@@ -216,4 +230,4 @@ export function makeFeatureRequestHandlers({ run = runFile } = {}) {
   }];
 }
 
-export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler, jobEvidenceHandler, ...makeFeatureRequestHandlers()];
+export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler, jobEvidenceHandler, jobRunningLogsHandler, ...makeFeatureRequestHandlers()];

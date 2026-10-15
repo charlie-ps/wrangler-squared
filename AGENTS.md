@@ -155,6 +155,18 @@ feature).
   temp index, `write-tree`) is read by the tool handler at the receipt; `approve-code` is
   refused unless the `job-action` handler's fresh read matches (`TREE_MOVED` also queues a
   `retell` message). Code on Auto never parks.
+- **What the agent leaves running is the agent's; tearing it down is ours** (`server/job-running.js`).
+  `ready` (and a restarting `reply`) may carry `running: [{name, url?, pid?, stop?, log?}]`, the
+  agent's own detached (`setsid`) dev server, database, worker; the extension never starts one. It is kept
+  as `sub.running` (`items` with a probed `up`, `owed` for entries a later round dropped, `stopped` after a
+  teardown). The runner's `sweepRunning` runs FIRST each tick (so before cleanup removes the worktree a
+  `stop` command runs in, and at boot): it tears down `dueTeardown` (owed, plus everything once
+  `holdsRunning` is false: approve, drop, cancel, replan, cleanup, retry), probes the rest, and writes only
+  when up/down flips. Teardown kills the pid's group (just the pid if it does not lead one; never our own
+  process), runs each `stop` in the worktree, then checks the URLs stopped answering, and NEVER fails an
+  approval: a leftover is `stopped.still`, drawn amber. Code on Auto owes everything at once. Logs reads only
+  from under the worktree or the proof inbox (symlinks resolved). `restart-running` mails the parked session
+  via `askAgent` (`kind: 'restart'`); `stop-running` just owes. The bar and dot are `public/job-running.js`.
 - **A PR's `show` list is answered with proof, not claims** (`server/job-evidence.js`).
   The implementer saves files into one inbox per sub-job (`$JOB_EVIDENCE`, given in
   its prompt and granted as `addDirs`); the `ready` receipt names them per check
