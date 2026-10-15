@@ -290,3 +290,17 @@ test('a session is told the outputs it must make and to account for every write 
   assert.match(text, /writes:\[\{id, outcome:"written"\|"already"\|"failed", url\?.*\] for every write above/);
   assert.doesNotMatch(jobPrompt({ ...planned, subJobs: [session] }, session, { ...run, phase: 'session' }), /writes:\[/, 'a session with nothing to write is asked for none');
 });
+
+test('a job with a base tells the planner and the publisher; one without is unchanged', () => {
+  const unreviewed = { ...job, reviewCode: false };
+  const based = { ...unreviewed, base: 'next' };
+  assert.doesNotMatch(jobPrompt(unreviewed, sub, run), /--base|landing on/);
+  assert.doesNotMatch(jobPrompt(job, null, { ...run, phase: 'planning' }), /lands on the branch/);
+  assert.match(jobPrompt(based, null, { ...run, phase: 'planning' }), /Every PR in this job lands on the branch `next`/);
+  assert.match(jobPrompt(based, sub, run), /open the PR with `gh pr create --base next`/);
+  assert.match(jobPrompt(based, sub, run), /This PR \(repo, landing on next\)/);
+  assert.match(jobPrompt(based, sub, { ...run, phase: 'publish' }), /gh pr create --base next/);
+  const open = { ...sub, pr: { url: 'https://github.com/org/repo/pull/1' } };
+  assert.doesNotMatch(jobPrompt(based, open, { ...run, phase: 'repair' }), /--base/, 'a repair pushes to the existing PR');
+  assert.doesNotMatch(jobPrompt(based, open, run), /gh pr create/);
+});

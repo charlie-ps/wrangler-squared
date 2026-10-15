@@ -170,7 +170,7 @@ const passingWorkflows = (sub) => workflowsWith(sub, 'passing');
 const postMergeLine = (sub) => sub?.acceptedRed && sub.acceptedRed.ref === sub.pr?.mergeCommit && sub.deploymentResult?.status === 'failing'
   ? `post-merge runs FAILED (${workflowsWith(sub, 'failing') || 'unknown workflow'}) and the human accepted that${sub.acceptedRed.note ? ` — "${sub.acceptedRed.note}"` : ''}`
   : `post-merge runs passed${passingWorkflows(sub) ? ` (${passingWorkflows(sub)})` : ''}`;
-const thisPr = (sub) => `This PR (${sub?.repo ? path.basename(sub.repo) : 'this repository'}): ${sub?.brief}`;
+const thisPr = (sub, job) => `This PR (${sub?.repo ? path.basename(sub.repo) : 'this repository'}${job?.base ? `, landing on ${job.base}` : ''}): ${sub?.brief}`;
 // Fix here on an open PR under code review: the worktree IS that PR's branch, so
 // the work is a change to it, and the push goes to the PR that already exists.
 const openPrLine = (sub) => sub?.pr?.url ? `PR ${sub.pr.url} is already open from this worktree's branch; this is a fix to it, requested by the human (see the history below).` : '';
@@ -197,13 +197,15 @@ export function jobPrompt(job, sub, run) {
   const checkouts = dir && displayPath(dir);
   const report = (body, lead = '') => `${lead}job_report {runId:"${run.id}", ${body}}. ${blockedLine}`;
   const attribution = `End the commit message${sub?.pr?.url ? '' : ' and the PR description'} with exactly this line:\n${ATTRIBUTION}`;
-  const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, `${attribution}\nCommit, push to the open PR, then `) : report('kind:"published", url:"<PR url>"', `${attribution}\nCommit, push, open the PR, then `);
+  const baseFlag = job.base ? ` with \`gh pr create --base ${job.base}\` (this job lands on ${job.base}, not the default branch)` : '';
+  const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, `${attribution}\nCommit, push to the open PR, then `) : report('kind:"published", url:"<PR url>"', `${attribution}\nCommit, push, open the PR${baseFlag}, then `);
   const prompts = {
     planning: lines(
       `Plan this job: ${job.title}`,
       '',
       `Goal: ${job.intent}`,
       `Repository hints (optional; discover others as needed): ${JSON.stringify(job.repos || [])}`,
+      job.base ? `Every PR in this job lands on the branch \`${job.base}\`, not the repository's default: worktrees are cut from origin/${job.base} and PRs are opened against it. Plan for that.` : '',
       `Planning guidance: ${job.planningPrompt || 'Prefer the smallest useful independently deployable change.'}`,
       '',
       'Split the goal into the sub-jobs that deliver it, grouped under Jira stories where the work is tracked in Jira. A "pr" sub-job is one repository, one PR, one session. A "session" sub-job is work on this machine that is not a repository change (a one-off script or migration, a console change, a spike later PRs need): no repo, a scratch workspace, a short receipt. A "human" sub-job is a step no agent can do at all (a click only you can make, a vendor, a signature): no repo, no check, nothing runs it — it waits on the board until you mark it done. Prefer a PR for anything that changes a repository. A step that only posts or announces is a write (below) made by a session.',
@@ -230,7 +232,7 @@ export function jobPrompt(job, sub, run) {
       '',
       contextLine(job),
       '',
-      thisPr(sub),
+      thisPr(sub, job),
       openPrLine(sub),
       sub?.check ? `Check after it lands: ${sub.check}` : '',
       afterLine(job, sub),
@@ -248,7 +250,7 @@ export function jobPrompt(job, sub, run) {
       '',
       contextLine(job),
       '',
-      thisPr(sub),
+      thisPr(sub, job),
       openPrLine(sub),
       humanOutputBlock(job, sub),
       historyBlock(job, sub, run),

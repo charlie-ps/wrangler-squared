@@ -87,14 +87,17 @@ export class JobRuntime {
       worktree = { branch: existing.branch, folderName: existing.path, auto: false };
     } else if (!planning) {
       await this.run('git', ['fetch', 'origin'], repo);
-      const remote = JSON.parse(await this.run('gh', ['repo', 'view', '--json', 'defaultBranchRef'], repo));
+      const baseName = job.base || JSON.parse(await this.run('gh', ['repo', 'view', '--json', 'defaultBranchRef'], repo)).defaultBranchRef.name;
       // A ref name, never the main checkout's possibly-local HEAD: the wrangler
       // hands it straight to `git worktree add -b` as the commit-ish.
-      const base = `refs/remotes/origin/${remote.defaultBranchRef.name}`;
+      const base = `refs/remotes/origin/${baseName}`;
       // The commit the branch is cut from. cleanup()'s compare-and-delete needs
       // it and neither the spawn result nor the hook payload carries it, so it
       // is read here and merged onto the record the wrangler settles on.
-      cleanupHead = await this.run('git', ['rev-parse', '--verify', base], repo);
+      cleanupHead = await this.run('git', ['rev-parse', '--verify', base], repo).catch((e) => {
+        if (job.base) throw new Error(`Base branch "${job.base}" does not exist on origin; push it or change the job's Land on branch`);
+        throw e;
+      });
       worktree = { branch: placeholderBranch(job, sub), base, auto: true };
     }
     // Correlating the dispatch to this run: core stamped `automationRun` onto the
@@ -239,7 +242,7 @@ export class JobRuntime {
     // was pushed (the PR head) or never left the base it was cut from.
     if (sub.worktree) await this.cleanupWorktree(sub.worktree, sub.pr?.head || sub.worktree.cleanupHead, { mergedHead: sub.pr?.head });
     if (sub.worktree && sub.pr && !sub.cancelledAt) await this.deleteRemoteBranch(sub.worktree, sub.pr.head);
-    if (job.updateMain && !sub.cancelledAt && sub.pr) {
+    if (job.updateMain && !sub.cancelledAt && sub.pr && await this.landedOnDefault(job, sub)) {
       const root = await gitRepoRoot(expandRepo(sub.repo));
       if (!root) throw new Error('Cannot resolve main checkout');
       const dirty = await this.run('git', ['status', '--porcelain'], root);
@@ -248,6 +251,14 @@ export class JobRuntime {
       await this.run('git', ['fetch', 'origin'], root);
       await this.run('git', ['merge', '--ff-only', `refs/remotes/origin/${sub.pr.base}`], root);
     }
+  }
+
+  // Fast-forwarding main is for work that landed on the default branch: a job
+  // that lands on an integration branch must not move main under the human.
+  async landedOnDefault(job, sub) {
+    if (!job.base) return true;
+    const remote = JSON.parse(await this.run('gh', ['repo', 'view', '--json', 'defaultBranchRef'], expandRepo(sub.repo)));
+    return sub.pr.base === remote.defaultBranchRef.name;
   }
 
   // A PR head can move on GitHub after the push (`gh pr update-branch`, the merge

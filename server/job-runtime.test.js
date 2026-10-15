@@ -342,3 +342,46 @@ test('attributeSpend bills a headless triage to the sub-job\'s latest card, and 
   assert.equal(runtime.attributeSpend({ sessions: ['s_gone'] }, 'live-2'), false, 'a purged card is the host\'s false, not a throw');
   assert.equal(billed.length, 1);
 });
+
+const launchWith = async (job, run) => {
+  const { host, spawned } = fakeHost();
+  await runtimeWith(host, { run }).launch({ id: 'job_12345678', title: 'Sign-in', agent: 'claude', ...job }, { id: 'api', repo: '/repo' }, { id: 'run_1', phase: 'implementation' }, () => {});
+  return spawned[0];
+};
+
+test('a job with no base cuts its worktree from the default branch, as before', async () => {
+  const calls = [];
+  const spawn = await launchWith({}, async (bin, args) => { calls.push([bin, ...args]); return bin === 'gh' ? JSON.stringify({ defaultBranchRef: { name: 'main' } }) : 'abc'; });
+  assert.equal(spawn.worktree.base, 'refs/remotes/origin/main');
+  assert.ok(calls.some((c) => c[0] === 'gh'));
+});
+
+test('a job with a base fetches, then cuts the worktree and its cleanup head from that branch', async () => {
+  const calls = [];
+  const spawn = await launchWith({ base: 'next' }, async (bin, args) => { calls.push([bin, ...args]); return 'abc'; });
+  assert.equal(spawn.worktree.base, 'refs/remotes/origin/next');
+  assert.deepEqual(calls[0], ['git', 'fetch', 'origin']);
+  assert.deepEqual(calls.at(-1), ['git', 'rev-parse', '--verify', 'refs/remotes/origin/next']);
+  assert.ok(!calls.some((c) => c[0] === 'gh'), 'the default branch is not consulted');
+});
+
+test('a base missing on origin fails the launch naming the branch, and spawns nothing', async () => {
+  const { host, spawned } = fakeHost();
+  const run = async (bin, args) => { if (args[0] === 'rev-parse') throw new Error('fatal: Needed a single revision'); return ''; };
+  await assert.rejects(runtimeWith(host, { run }).launch({ id: 'job_12345678', title: 'x', agent: 'claude', base: 'next' }, { id: 'api', repo: '/repo' }, { id: 'run_1', phase: 'implementation' }, () => {}), /Base branch "next" does not exist on origin/);
+  assert.deepEqual(spawned, []);
+});
+
+test('updateMain leaves main alone when the job landed on a non-default base', async () => {
+  const { host } = fakeHost();
+  const repo = fs.mkdtempSync(path.join(DATA_DIR, 'main-checkout-'));
+  await exec('git', ['init', '-q', repo]);
+  const sub = { id: 'api', repo, worktree: null, sessions: [], pr: { url: 'u', head: 'h', base: 'next' } };
+  const defaultIs = (name) => ({ overrides: { status: () => '', branch: () => 'main', repo: () => JSON.stringify({ defaultBranchRef: { name } }) } });
+  const away = fakeRun(defaultIs('main'));
+  await runtimeWith(host, { run: away.run }).cleanup({ updateMain: true, base: 'next' }, sub);
+  assert.ok(!away.calls.some((c) => c[0] === 'merge' || c[0] === 'fetch'), 'no surprise fast-forward');
+  const home = fakeRun({ overrides: { status: () => '', branch: () => 'next', repo: () => JSON.stringify({ defaultBranchRef: { name: 'next' } }) } });
+  await runtimeWith(host, { run: home.run }).cleanup({ updateMain: true, base: 'next' }, sub);
+  assert.deepEqual(home.calls.at(-1), ['merge', '--ff-only', 'refs/remotes/origin/next'], 'a base that IS the default still fast-forwards');
+});

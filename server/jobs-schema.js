@@ -14,6 +14,11 @@ const folderPath = z.string().trim().min(1).max(1000).refine(
   (s) => !/[\r\n\0]/.test(s) && (path.isAbsolute(s) || s.startsWith('~/')),
   'Use an absolute folder path or ~/path',
 );
+// A plausible git branch name (git check-ref-format's common rules), never a flag or a ref path.
+export const branchName = z.string().trim().min(1).max(200).refine(
+  (s) => /^[A-Za-z0-9._/-]+$/.test(s) && !/^[-/]|[/.]$|\.\.|\/\/|\/\.|\.lock(\/|$)|^refs\//.test(s),
+  'Use a plausible git branch name such as next or release/2.x',
+);
 export const checksSchema = z.array(line).min(1).max(8);
 export const briefSchema = z.string().trim().min(1).max(500);
 // A sub-job is one of four kinds. A PR changes a repository. An agent session
@@ -338,6 +343,10 @@ export const jobInputSchema = z.object({
   reviewPlan: z.boolean().optional(), reviewCode: z.boolean().optional(), reviewMerge: z.boolean().optional(), reviewSessions: z.boolean().optional(),
   // The default for a write with no `review` of its own (`writeReviewed`).
   reviewWrites: z.boolean().optional(),
+  // The branch this job's PRs land on, when it is not the repository's default
+  // (an integration branch for multi-PR work). Absent on a job saved before it,
+  // and then everything keeps targeting the default.
+  base: branchName.optional(),
   updateMain: z.boolean().default(false), taskId: z.string().nullable().default(null),
   // Names of images the job keeps in the host's per-extension store (`images:keep`),
   // already staged by the client's `api.images.stage`. `shareImages` decides whether

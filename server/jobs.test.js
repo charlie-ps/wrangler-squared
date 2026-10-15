@@ -2378,3 +2378,23 @@ test('a PR that stays behind gives up after repeated updates', async (t) => {
   for (let i = 0; i < 5; i++) { await f.tick(); await f.tick(); await f.tick(); }
   assert.equal(n, 3); assert.match(f.sub().error, /still behind/);
 });
+
+test('a job lands on its own base branch when it names one, and an old job has none', async (t) => {
+  const f = fixture(t);
+  assert.equal(f.store.create(input).base, undefined, 'no base means the default branch, as before');
+  assert.equal(f.store.create({ ...input, base: ' next ' }).base, 'next');
+  for (const bad of ['-D', 'a b', 'a..b', 'x/', '/x', 'refs/heads/x', 'x.lock', 'x;rm']) assert.throws(() => f.store.create({ ...input, base: bad }), /branch name/, bad);
+  const host = fakeHost(f);
+  stubRunner(t, host);
+  await jobCreateHandler.handler({ job: { ...input, base: 'release/2.x' } }, host);
+  assert.equal(f.store.get(host.broadcasts[0].jobId).base, 'release/2.x');
+});
+
+test('a merge into a branch no workflow runs on is the delivery', async () => {
+  const { inferDeploys } = await import('./job-deploys.js');
+  const workflows = [{ file: '.github/workflows/deploy.yml', text: 'name: Deploy\non:\n  push:\n    branches: [main]\n' }];
+  assert.equal(inferDeploys({ workflows, files: ['a.js'], base: 'main' }).expected, true);
+  const next = inferDeploys({ workflows, files: ['a.js'], base: 'next' });
+  assert.equal(next.expected, false, 'the runner then marks it MERGE_IS_DELIVERY');
+  assert.match(next.summary, /Merge completes it/);
+});
