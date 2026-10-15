@@ -906,6 +906,7 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .update-appbar .intro-count { margin-left:auto; }
 .jobs-update h2 { font-size:30px; line-height:1.2; letter-spacing:-.01em; margin-top:22px; }
 .jobs-update .update-panel>h2:first-child { margin-top:4px; }
+.jobs-update .intro-figure+h2 { margin-top:34px; }
 .update-body p { font-size:16px; line-height:1.6; margin:12px 0 0; max-width:62ch; }
 .update-body b { color:var(--fg); font-weight:500; }
 .update-body .intro-done li { align-items:flex-start; line-height:1.5; }
@@ -976,6 +977,27 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .wn-write small u { text-decoration:none; color:var(--blue-fg); font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; }
 .wn-fade { animation:wn-fade .35s ease-out; }
 @keyframes wn-fade { from { opacity:0; transform:translateY(4px); } }
+/* See it working: a PR's proof grid, then the bar and thread it leaves, in a slot
+   tall enough for the thread so frames never move the title below. */
+.intro-figure .job-proof-grid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.intro-figure .job-proof-card { padding:6px; gap:4px; }
+.intro-figure .job-proof-card small { -webkit-line-clamp:2; font-size:11px; }
+.intro-figure .job-proof-ck { font-size:12px; }
+.intro-figure .job-proof-head { font-size:13px; }
+.wn-slot .job-running ul { display:none; }
+.wn-pending { opacity:.55; }
+.wn-pending .job-proof-thumb { border-style:dashed; }
+.wn-see-top { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.wn-see-top .job-node { flex-direction:row; gap:14px; text-align:left; align-items:center; }
+.wn-see-top .job-node .job-node-title, .wn-see-top .job-node .job-status { display:block; }
+.wn-see-top .job-chips { margin-left:auto; }
+.wn-slot { display:grid; gap:10px; min-height:276px; align-content:start; }
+.wn-see-proof { min-height:222px; }
+.wn-slot .job-msg-att .job-proof-thumb { width:64px; }
+.wn-slot .job-thread { margin-top:0; }
+.wn-slot .job-change { margin:0; }
+.wn-slot-ghost { display:flex; gap:8px; align-items:center; padding:12px 14px; border:1px dashed var(--border); border-radius:14px; color:var(--fg-subtle); font-size:13px; }
+.wn-change-text { flex:1; min-width:0; padding:6px 2px; color:var(--fg); font:13.5px/1.5 var(--font); white-space:normal; overflow-wrap:anywhere; }
 @media(prefers-reduced-motion:reduce) { .wn-fade { animation:none; } .wn-edge,.wn-art,.wn-note { transition:none; } }
 @media(max-width:700px) {
   .jobs-update { padding:22px 20px; border-radius:20px; }

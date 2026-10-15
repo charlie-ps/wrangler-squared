@@ -25,17 +25,21 @@ const SAMPLE = [
   { id: 'c', date: '2026-11-01', title: 'Third release', body: '<p>Third body</p>' },
 ];
 
-test('the shipped registry is the two Writes pages and review defaults, and every frame of their figures draws', (t) => {
+test('the shipped registry is the two Writes pages, review defaults and See it working, and every frame of their figures draws', (t) => {
   const p = page(t);
-  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places', 'review-defaults']);
+  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places', 'review-defaults', 'see-it-working']);
   for (const u of UPDATES.filter((u) => u.anim)) {
     for (let i = 0; i < u.anim.frames; i++) assert.match(u.figure(i), /job-node/, `${u.id} frame ${i}`);
     assert.ok(u.anim.still < u.anim.frames, u.id);
   }
+  const see = UPDATES.find((u) => u.id === 'see-it-working');
+  assert.match(see.figure(4), /class="wn-change-text">Does it keep the column order when a filter is on\?</, 'the question shows in full, not in a one-row textarea');
+  assert.doesNotMatch(see.figure(4), /<textarea/);
+  assert.match(see.figure(8), /Stopped what the agent started/);
   const storage = memoryStorage();
   assert.equal(createUpdates({ storage }).maybeShow(), true);
   assert.equal(p.title(), 'See the design before anything is built');
-  assert.equal(p.q('.intro-count').textContent, '1 of 3');
+  assert.equal(p.q('.intro-count').textContent, '1 of 4');
   assert.ok(p.q('.update-panel .wn-row3'));
   p.click('[data-update="next"]');
   assert.match(p.title(), /^Jira, Slack and Confluence/);
@@ -43,7 +47,11 @@ test('the shipped registry is the two Writes pages and review defaults, and ever
   p.click('[data-update="next"]');
   assert.equal(p.title(), 'Choose where every new job’s checkpoints start');
   p.click('[data-update="next"]');
-  assert.deepEqual(seenIds(storage), ['review-defaults', 'writes-designs', 'writes-places']);
+  assert.equal(p.title(), 'See each PR working before you read its diff');
+  assert.ok(p.q('.update-panel .job-proof-grid'));
+  assert.equal(p.q('[data-update="next"]').textContent, 'Got it');
+  p.click('[data-update="next"]');
+  assert.deepEqual(seenIds(storage), ['review-defaults', 'see-it-working', 'writes-designs', 'writes-places']);
 });
 
 test('a reader behind on several releases steps through each unseen one, oldest first, with Next and Back', (t) => {
@@ -162,7 +170,7 @@ test('the client never opens an update on top of the first-run intro', (t) => {
   assert.equal(p.q('#jobs-update'), null);
   p.click('.jobs-intro .job-dialog-close');
   assert.equal(storage.get(SEEN_KEY), '1');
-  assert.deepEqual(seenIds(storage), ['review-defaults', 'writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
+  assert.deepEqual(seenIds(storage), ['review-defaults', 'see-it-working', 'writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
 });
 
 test('the client holds unseen updates until the reader opens the Jobs view', (t) => {

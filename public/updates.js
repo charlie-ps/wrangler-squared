@@ -1,4 +1,6 @@
 import { ICONS } from './icons.js';
+import { proofGridHtml } from './job-proof.js';
+import { runningBarHtml } from './job-running.js';
 
 // What's new: a splash for each bigger release, shown once per browser, and the
 // list Automation settings reads to show any of them again. Seen ids live in the
@@ -74,6 +76,80 @@ function tellFigure(phase) {
     </div>`;
 }
 
+// See it working, in the board's own markup (job-proof.js grid, job-running.js
+// bar, job-thread.js thread, jobs-view.js Add idea box) fed with example data.
+// The two thumbnails are drawn screenshots standing in for real proof.
+const svgUrl = (s) => `data:image/svg+xml;utf8,${encodeURIComponent(s)}`;
+const shotRows = (y0, n, cols) => Array.from({ length: n }, (_, i) => `<rect x="10" y="${y0 + i * 13}" width="300" height="12" fill="${i % 2 ? '#1c2128' : '#151b23'}"/>${cols.map((x, j) => `<rect x="${x}" y="${y0 + 4 + i * 13}" width="${[46, 60, 30, 38][j % 4]}" height="4" rx="2" fill="#9198a1" opacity="${j ? .55 : .85}"/>`).join('')}`).join('');
+const SHOTS = {
+  'filtered.png': svgUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200"><rect width="320" height="200" fill="#0d1117"/><rect x="10" y="10" width="90" height="8" rx="4" fill="#f0f6fc"/><rect x="10" y="28" width="70" height="14" rx="7" fill="#4493f8" opacity=".3"/><rect x="18" y="33" width="50" height="4" rx="2" fill="#79c0ff"/><rect x="236" y="26" width="74" height="18" rx="6" fill="#1f6feb"/><rect x="248" y="33" width="50" height="4" rx="2" fill="#fff"/>${shotRows(54, 10, [18, 80, 170, 230])}</svg>`),
+  'excel.png': svgUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200"><rect width="320" height="200" fill="#f6f8fa"/><rect width="320" height="22" fill="#1a7f37"/><rect x="10" y="8" width="80" height="6" rx="3" fill="#fff"/>${Array.from({ length: 12 }, (_, i) => `<line x1="0" x2="320" y1="${34 + i * 14}" y2="${34 + i * 14}" stroke="#d1d9e0"/>`).join('')}${[40, 110, 190, 250].map((x) => `<line x1="${x}" x2="${x}" y1="22" y2="200" stroke="#d1d9e0"/>`).join('')}${Array.from({ length: 11 }, (_, i) => [46, 116, 196, 256].map((x, j) => `<rect x="${x}" y="${39 + i * 14}" width="${[50, 60, 40, 44][j]}" height="4" rx="2" fill="#59636e" opacity="${i ? .55 : .95}"/>`).join('')).join('')}</svg>`),
+};
+// Each evidence slot's placeholder glyph swapped for its drawn screenshot.
+const withShots = (html) => html.replace(/(data-ev-file="([^"]+)"[^>]*>)<svg[\s\S]*?<\/svg>/g, (m, open, file) => SHOTS[file] ? `${open}<img alt="" src="${SHOTS[file]}">` : m);
+const SEE_JOB = { id: 'csv', runs: [{ subJobId: 'csv-pr', parkedFor: 'ready', sessionId: 's1' }] };
+const SEE_ITEMS = [
+  { text: 'Exports only the filtered rows', shots: [{ file: 'filtered.png', url: 'http://localhost:5173/customers?plan=pro' }] },
+  { text: 'Opens in Excel with the same columns', shots: [{ file: 'excel.png' }] },
+  { text: 'Unit tests pass', run: { cmd: 'npm test', out: '✓ csv export (14)\n✓ filters (9)\n23 passing', exit: 0 } },
+];
+// `shown` is how many items have their proof so far; the rest are still to come.
+function proofFigure(shown) {
+  const pending = SEE_ITEMS.slice(shown).map((i) => `<span class="job-proof-card wn-pending"><span class="job-proof-media"><span class="job-proof-thumb">${ICONS.planned}</span></span><span class="job-proof-ck"><span aria-hidden="true">·</span><span>${i.text}</span></span><small>Not shown yet</small></span>`).join('');
+  if (!shown) return `<section class="job-proof"><div class="job-proof-head">${ICONS.eye}<span>Show me</span><small>0 of ${SEE_ITEMS.length} shown</small></div><div class="job-proof-grid">${pending}</div></section>`;
+  const sub = { id: 'csv-pr', title: 'Add CSV export', show: SEE_ITEMS.map((i) => i.text), ready: { round: 1, proof: SEE_ITEMS.slice(0, shown) } };
+  return withShots(proofGridHtml(SEE_JOB, sub)).replace('</div></section>', `${pending}</div></section>`);
+}
+function runningBar(state) {
+  const running = state === 'stopped'
+    ? { items: [], stopped: { reason: 'you approved round 1', results: [{ name: 'web', ok: true, detail: 'process group 48121 stopped' }, { name: 'api', ok: true, detail: 'docker compose down' }] } }
+    : { items: [{ name: 'web', url: 'http://localhost:5173', pid: 48121, log: 'web.log' }, { name: 'api', url: 'http://localhost:8787', stop: 'docker compose down' }] };
+  return runningBarHtml(SEE_JOB, { id: 'csv-pr', ready: { round: 1 }, running });
+}
+// The Add idea box with words in it. A <div> where the board has a <textarea>,
+// so the words wrap and show in full rather than scrolling in one row.
+const composer = (text) => `<div class="job-change has-text is-open">
+  <div class="job-change-row"><span class="job-change-to"><i>T</i>This session</span><div class="wn-change-text">${text}</div><label class="job-change-attach">${ICONS.image}</label><button type="button" class="job-change-go" tabindex="-1">${ICONS.send}</button></div>
+  <div class="job-change-foot"><span>A question gets an answer. A change gets a new round.</span><span>Paste or drop a screenshot</span><kbd>⌘↵ to send</kbd></div></div>`;
+const thread = (msgs, state) => {
+  const head = { waiting: [ICONS.terminal, 'Its session is waiting on your review', 'Paused · no slot · keeps its context'], answering: [ICONS.spin, 'Answering you', 'Working on what you sent'], stopped: [ICONS.terminal, 'Session stopped', 'Approved round 1'] }[state];
+  const msg = ([from, text, at, att]) => `<div class="job-msg ${from} wn-fade"><span class="job-msg-who">${from === 'human' ? 'You' : 'Session'}</span><div><p>${text}<time>${at}</time></p>${att ? `<div class="job-msg-att"><span class="job-proof-thumb"><img alt="" src="${SHOTS[att]}"></span></div>` : ''}</div></div>`;
+  return `<section class="job-thread ${state}"><div class="job-thread-head">${head[0]}<b>${head[1]}</b><small>${head[2]}</small></div>${msgs.map(msg).join('')}</section>`;
+};
+
+// A PR shows each Show me item, leaves the preview running, answers a question
+// from its open session, and stops what it started once approved. The slot holds
+// the tallest frame, so the title below never moves.
+const SEE = scenes([
+  { pr: ['running', 'Writing the PR'], shown: 0, slot: 'idle' },
+  { pr: ['running', 'Showing it working'], shown: 1 },
+  { shown: 2 },
+  { pr: ['review', 'Ready to verify'], shown: 3, slot: 'bar' },
+  { slot: 'ask' },
+  { pr: ['running', 'Answering you'], slot: 'asked' },
+  { pr: ['review', 'Ready to verify'], slot: 'answered' },
+  {},
+  { pr: ['running', 'Committing & opening the PR'], slot: 'stopped' },
+  { pr: ['done', 'PR open · checks running'] },
+  {}, {},
+]);
+const Q = ['human', 'Does it keep the column order when a filter is on?', '14:02'];
+const A = ['agent', 'Yes. The export follows the table’s visible columns, filtered or not. Here it is with Plan = Pro.', '14:03', 'excel.png'];
+function seeFigure(phase) {
+  const f = SEE[phase];
+  const slot = {
+    idle: `<div class="wn-slot-ghost">${ICONS.play}<span>What it starts stays running for you to try</span></div>`,
+    bar: runningBar('on'),
+    ask: `${runningBar('on')}${composer(Q[1])}`,
+    asked: `${runningBar('on')}${thread([Q], 'answering')}`,
+    answered: `${runningBar('on')}${thread([Q, A], 'waiting')}`,
+    stopped: `${runningBar('stopped')}${thread([Q, A], 'stopped')}`,
+  }[f.slot];
+  return `<div class="wn-see-top">${node(f.pr[0], 'pr', 'Add CSV export', f.pr[1])}<div class="job-chips"><span class="job-chip job-plan-branch">${ICONS.branch}<span>next</span></span><span class="job-chip">${ICONS.eye}<span>Show me · 3 items</span></span></div></div>
+    <div class="wn-see-proof" role="img" aria-label="A pull request shows each Show me item working, leaves its preview running, answers a question from its open session, and stops the preview once you approve">${proofFigure(f.shown)}</div>
+    <div class="wn-slot">${slot}</div>`;
+}
+
 // Redraws a figure in place, so surviving nodes keep their identity: tones
 // transition, spinners keep turning and fade-ins play only for what is new.
 // Replacing innerHTML every tick made the whole figure flash.
@@ -124,6 +200,14 @@ export const UPDATES = [
       '<b>Jobs agents create</b> use them too, unless the agent picks a checkpoint itself.',
       '<b>Jobs already on the board keep their own.</b> Change one from its detail footer.',
     ])}` },
+  { id: 'see-it-working', date: '2026-10-15', icon: 'eye', tone: 'run',
+    title: 'See each PR working before you read its diff',
+    body: `<p>A PR can now carry a <b>Show me</b> list: the plan writes one, and you can edit it. Before anything is committed, the agent shows each item working on the running build, as a screenshot, a recording or a command’s output. Anything it couldn’t show is marked in amber with why.</p>${done([
+      '<b>Try it yourself</b>: what the agent started stays running for you, with a link, its logs and Stop. Approve, and it is stopped for you.',
+      '<b>Ask the session</b> in Add idea. It stays open while you review, answers with a shot or output, or makes the change as a new round.',
+      '<b>Approve means what you saw</b>: if a file changes after the receipt, the session is asked to show it again.',
+    ])}`,
+    anim: { frames: 12, ms: 1500, still: 6 }, figure: (phase) => seeFigure(phase) },
 ];
 
 const dateLabel = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
