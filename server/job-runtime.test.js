@@ -35,6 +35,7 @@ function fakeRun({ head = '', remote = '', log = '', overrides = {} } = {}) {
     if (args[0] === 'for-each-ref') return head;
     if (args[0] === 'ls-remote') return remote;
     if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'origin/main';
+    if (args[0] === 'rev-parse' && args[1] === '--verify') return 'tracked';
     if (args[0] === 'log') return log;
     return '';
   };
@@ -214,7 +215,7 @@ test('cleanup preserves a worktree that moved on since verification, and a branc
   const dir = fs.mkdtempSync(path.join(DATA_DIR, 'worktree-'));
   const wt = { path: dir, repoRoot: '/repo', branch: 'job-api' };
   for (const [ref, head] of [['refs/heads/somewhere-else', 'verified'], ['refs/heads/job-api', 'newer']]) {
-    const f = fakeRun({ log: `${head}\tLocal work`, overrides: { 'symbolic-ref': () => ref, 'rev-parse': (args) => args[1] === '--abbrev-ref' ? 'origin/main' : head } });
+    const f = fakeRun({ log: `${head}\tLocal work`, overrides: { 'symbolic-ref': () => ref, 'rev-parse': (args) => args[1] === '--abbrev-ref' ? 'origin/main' : args[1] === '--verify' ? 'tracked' : head } });
     await assert.rejects(runtimeWith(host, { run: f.run }).cleanupWorktree(wt, 'verified'), /preserve it for review/);
     assert.ok(!f.calls.some((c) => c[0] === 'worktree'), 'nothing is removed once the tree has changed');
   }
@@ -263,7 +264,7 @@ test('cleanup of a PR sub-job still preserves a local commit the merged head doe
   await assert.rejects(runtimeWith(host, { run: branch.run }).cleanup({}, sub), /1 commit not on origin\/main/);
   assert.ok(!branch.calls.some((c) => ['update-ref', 'push'].includes(c[0])));
   const dir = fs.mkdtempSync(path.join(DATA_DIR, 'worktree-'));
-  const tree = fakeRun({ log: 'local-extra\tExtra', overrides: { ...notAncestor, 'symbolic-ref': () => 'refs/heads/job-api', 'rev-parse': (args) => args[1] === '--abbrev-ref' ? 'origin/main' : 'local-extra' } });
+  const tree = fakeRun({ log: 'local-extra\tExtra', overrides: { ...notAncestor, 'symbolic-ref': () => 'refs/heads/job-api', 'rev-parse': (args) => args[1] === '--abbrev-ref' ? 'origin/main' : args[1] === '--verify' ? 'tracked' : 'local-extra' } });
   await assert.rejects(runtimeWith(host, { run: tree.run }).cleanup({}, { ...sub, worktree: { ...sub.worktree, path: dir } }), /preserve it for review/);
   assert.ok(!tree.calls.some((c) => c[0] === 'worktree'));
 });
@@ -577,4 +578,58 @@ test('a worktree too large to pin offers no Discard', async () => {
   assert.equal(shown.pinned, false);
   await refusalOf(r, { discard: shown });
   assert.ok(fs.existsSync(nested));
+});
+
+test('a Discard does not cover different bytes behind the same size and mtime', async () => {
+  const r = await gitRepo();
+  const file = path.join(r.wt.path, 'README.md');
+  fs.writeFileSync(file, 'shown1\n');
+  const { mtime } = fs.statSync(file);
+  const shown = await refusalOf(r);
+  fs.writeFileSync(file, 'UNSEEN\n'); fs.utimesSync(file, mtime, mtime);
+  const again = await refusalOf(r, { discard: shown });
+  assert.notEqual(again.fingerprint, shown.fingerprint);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'UNSEEN\n');
+});
+
+test('a Discard does not cover commits that origin dropped after the human looked', async () => {
+  const r = await gitRepo();
+  await r.commit(r.wt.path, 'b.js', 'B: on main when shown');
+  await r.git(r.wt.path, 'push', '-q', 'origin', 'HEAD:main');
+  await r.commit(r.wt.path, 'c.js', 'C: local only');
+  const shown = await refusalOf(r);
+  assert.deepEqual(shown.commits.map((c) => c.subject), ['C: local only']);
+  await r.git(r.repo, 'push', '-q', '--force', 'origin', `${r.wt.cleanupHead}:main`);
+  const again = await refusalOf(r, { discard: shown });
+  assert.deepEqual(again.commits.map((c) => c.subject), ['C: local only', 'B: on main when shown']);
+  assert.ok(await r.branchExists());
+});
+
+test('a default branch origin has deleted is not trusted from its cached tracking ref', async () => {
+  const r = await gitRepo();
+  await r.commit(r.wt.path, 'b.js', 'B');
+  await r.git(r.wt.path, 'push', '-q', 'origin', 'HEAD:main');
+  await r.git(r.repo, 'fetch', '-q', 'origin');
+  const origin = path.join(path.dirname(r.repo), 'origin.git');
+  await r.git(origin, 'branch', 'trunk', r.wt.cleanupHead);
+  await r.git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/trunk');
+  await r.git(origin, 'branch', '-D', 'main');
+  const shown = await refusalOf(r);
+  assert.equal(shown.base, 'trunk', 'origin\'s live HEAD, not the cached origin/HEAD');
+  assert.deepEqual(shown.commits.map((c) => c.subject), ['B']);
+  assert.ok(fs.existsSync(r.wt.path));
+});
+
+test('a worktree holding a dirty submodule cannot be pinned, so it offers no Discard', async () => {
+  const r = await gitRepo();
+  const lib = path.join(path.dirname(r.repo), 'lib');
+  await exec('git', ['init', '-q', '-b', 'main', lib]);
+  await r.commit(lib, 'file', 'lib');
+  await r.git(r.wt.path, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', lib, 'lib');
+  fs.writeFileSync(path.join(r.wt.path, 'lib', 'file'), 'dirty\n');
+  const shown = await refusalOf(r);
+  assert.ok(shown.files.some((f) => f.change === 'submodule' && f.path === 'lib'));
+  assert.equal(shown.pinned, false);
+  await refusalOf(r, { discard: shown });
+  assert.ok(fs.existsSync(path.join(r.wt.path, 'lib', 'file')));
 });

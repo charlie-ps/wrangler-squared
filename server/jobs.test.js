@@ -957,6 +957,9 @@ test('a Discard the disk no longer matches is spent: the fresh refusal replaces 
   assert.throws(() => f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'h1', fingerprint: 'fp1' }), /changed since you looked/);
   f.store.action(f.job.id, 'retry', { subJobId: 'api' });
   assert.equal(f.sub().cleanupRefusal, null, 'Retry clears the old refusal; the next attempt writes a fresh one');
+  refusal = { ...refusal, head: 'h3', pinned: false };
+  await f.tick();
+  assert.throws(() => f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'h3', fingerprint: 'fp1' }), /cannot be pinned/);
 });
 
 test('cancelling before there are sub-jobs stops the planner quietly, ignores its late plan and finishes without launching anything', async (t) => {
