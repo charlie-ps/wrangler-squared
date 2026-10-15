@@ -194,7 +194,7 @@ test('the planner is told to write the context once and never to describe a depl
   assert.match(text, /kind:"pr"\|"session"\|"human"/);
   assert.match(text, /kind:"plan", plan:\{context, stories:\[\{id,key\?,project\?,title,fields\?:\[\{name,value\}\]\}\]/);
   assert.doesNotMatch(text, /deployment:\{|pendingChecks|value[?:]|business value/);
-  assert.ok(text.split(/\s+/).length < 900, 'the protocol lives in the job-worker skill, not in every prompt');
+  assert.ok(text.split(/\s+/).length < 1100, 'the protocol lives in the job-worker skill, not in every prompt');
 });
 
 test('the planner is told stories are optional, and a ticketless sub-job is told to name its branch without a key', () => {
@@ -297,8 +297,14 @@ test('a PR\'s own base overrides the job\'s in its prompts, and the planner is t
   assert.match(jobPrompt(unreviewed, own, run), /This PR \(repo, landing on release\/2\.x\)/);
   assert.match(jobPrompt(unreviewed, own, run), /--base release\/2\.x` \(this PR lands on release\/2\.x/);
   assert.match(jobPrompt({ ...job, reviewCode: false }, own, run), /--base release\/2\.x/, 'with no job base too');
-  assert.match(jobPrompt(job, null, { ...run, phase: 'planning' }), /base:"<branch>": only a PR not landing on the default branch/);
-  assert.match(jobPrompt({ ...job, base: 'next' }, null, { ...run, phase: 'planning' }), /only a PR not landing on `next`/);
+  const planning = jobPrompt(job, null, { ...run, phase: 'planning' });
+  assert.match(planning, /set `base:"<branch>"` on each PR that is meant to land elsewhere than the repository's default branch/);
+  assert.match(planning, /Do not leave that intent in prose only/);
+  assert.match(planning, /git ls-remote --heads origin/);
+  assert.match(planning, /Never invent a branch name/);
+  const overridden = jobPrompt({ ...job, base: 'next' }, null, { ...run, phase: 'planning' });
+  assert.match(overridden, /elsewhere than `next`/);
+  assert.match(overridden, /the human set it for the whole job; keep it unless a PR clearly needs another/);
 });
 
 test('a job with a base tells the planner and the publisher; one without is unchanged', () => {

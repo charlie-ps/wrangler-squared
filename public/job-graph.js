@@ -37,14 +37,15 @@ import { STATES, stateIconHtml, stateSolid } from './job-state.js';
 // job's, with the branch it would land on as its placeholder.
 export const dependencyEditorHtml = (s, others, depKey) => others.filter((d) => !isWriteSub(d)).map((d) => `<label><input type="checkbox" data-dep="${esc(depKey)}" value="${esc(d.id)}" ${s.after.includes(d.id) ? 'checked' : ''}>${kindChipHtml(d)}<span>${esc(d.title)}</span></label>`).join('') || '<span>No other sub-jobs</span>';
 // Blank lands where the job does; the summary names the branch only once it differs.
-// A PR tile's branch line: its worktree branch once cut, then where it lands. The
-// target is muted when it is the repository's default, and the override is marked.
+// A PR tile's branch line: its worktree branch once cut, then where it lands. A PR
+// on the default branch with no worktree yet shows nothing: that is the usual case.
 const landingHtml = (s, base) => {
   const target = targetOf({ base }, s), branch = s.worktree?.branch;
-  const tip = [branch ? `Branch ${branch}` : '', `Lands on ${target || 'the default branch'}`].join('\n');
-  return `<span class="job-node-landing" title="${esc(tip)}">${branch ? `<span class="job-node-wt">${esc(branch)}</span>` : ''}<span class="job-node-arrow" aria-hidden="true">→</span><span class="job-node-base ${target ? '' : 'default'} ${offBase({ base }, s) ? 'own' : ''}">${esc(target || 'default branch')}</span></span>`;
+  if (!target && !branch) return '';
+  const tip = [branch ? `Branch ${branch}` : '', `Lands on ${target || 'the default branch'}`].filter(Boolean).join('\n');
+  return `<span class="job-node-landing" title="${esc(tip)}">${branch ? `<span class="job-node-wt">${esc(branch)}</span>` : ''}${target ? `<span class="job-node-arrow" aria-hidden="true">→</span><span class="job-node-base ${offBase({ base }, s) ? 'own' : ''}">${esc(target)}</span>` : ''}</span>`;
 };
-const branchEditorHtml = (s, i, base, open) => `<details class="job-node-deps job-node-branch ${s.base ? 'set' : ''}" data-base-of="${esc(s.id)}" ${open ? 'open' : ''}><summary title="Lands on ${esc(targetOf({ base }, s) || 'the default branch')} · change">${ICONS.branch}<span>${esc(s.base || base || 'default branch')}</span></summary>
+const branchEditorHtml = (s, i, base, open) => `<details class="job-node-deps job-node-branch ${s.base ? 'set' : base ? '' : 'unset'}" data-base-of="${esc(s.id)}" ${open ? 'open' : ''}><summary title="Lands on ${esc(targetOf({ base }, s) || 'the default branch')} · change">${ICONS.branch}<span>${esc(s.base || base || 'default branch')}</span></summary>
   <input data-base="${i}" value="${esc(s.base || '')}" placeholder="${esc(base || 'Default branch')}" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Land on branch"><span>Blank lands where the job does. The worktree is cut from origin/&lt;branch&gt; and the PR opens against it.</span></details>`;
 // A place pill's parts: the glyph, a short mono label, a dot per write in its
 // state, and ↗ once the place exists.

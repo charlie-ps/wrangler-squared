@@ -18,10 +18,12 @@ export const isFrozen = (sub) => !!sub.cancelledAt || ['deployment', 'cleanup', 
 // reason and the channel or page it names are what it IS, so they edit like a
 // brief: same place, different write.
 const EDITABLE = ['title', 'brief', 'check', 'after', 'action', 'on', 'by', 'review', 'why', 'place'];
-// Kind, repository, base, story and place type decide where a sub-job's work
-// lives (its worktree, its PR, its ticket, its channel), so changing one is new
-// work under a new id, not an edit.
-const FIXED = ['kind', 'repo', 'base', 'storyId', 'place.type'];
+// Kind, repository, story and place type decide where a sub-job's work lives
+// (its worktree, its PR, its ticket, its channel), so changing one is new work
+// under a new id, not an edit. A PR's base is the same until its worktree or PR
+// exists: before that it is only a plan.
+const FIXED = ['kind', 'repo', 'storyId', 'place.type'];
+const baseFixed = (sub) => !!(sub?.worktree || sub?.pr);
 const fixedOf = (s, k) => (k === 'place.type' ? s.place?.type : s[k]);
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const norm = (s) => ({ ...s, kind: s.kind || 'pr', after: s.after || [], check: s.check || undefined });
@@ -47,7 +49,7 @@ export function mergeReplan(job, proposal) {
     const next = proposed.get(p.id);
     const sub = live.get(p.id);
     if (!sub || frozen.includes(p.id)) {
-      if (next && (EDITABLE.some((k) => !same(norm(p)[k], next[k])) || FIXED.some((k) => !same(fixedOf(norm(p), k), fixedOf(next, k))))) throw new Error(`${p.id} has already ${sub?.cancelledAt ? 'been dropped' : 'landed'}; keep it exactly as it is`);
+      if (next && ([...EDITABLE, 'base'].some((k) => !same(norm(p)[k], next[k])) || FIXED.some((k) => !same(fixedOf(norm(p), k), fixedOf(next, k))))) throw new Error(`${p.id} has already ${sub?.cancelledAt ? 'been dropped' : 'landed'}; keep it exactly as it is`);
       subJobs.push(p); continue;
     }
     // Stories outlive every proposal, so the write that creates one does too,
@@ -57,10 +59,11 @@ export function mergeReplan(job, proposal) {
     if (!next) { changes.removed.push(p.id); subJobs.push(p); continue; }
     const fixed = FIXED.filter((k) => !same(fixedOf(norm(p), k), fixedOf(next, k)));
     if (fixed.length) throw new Error(`${p.id}: ${fixed.join(', ')} cannot change; remove it and add the new work under a new id`);
-    const fields = EDITABLE.filter((k) => !same(norm(p)[k], next[k]));
+    if (!same(p.base, next.base) && baseFixed(sub)) throw new Error(`${p.id}: base cannot change, its branch is already cut${sub.pr ? ' and its PR open' : ''}; remove it and add the new work under a new id`);
+    const fields = [...EDITABLE, 'base'].filter((k) => !same(norm(p)[k], next[k]));
     if (fields.length) changes.edited.push({ id: p.id, fields });
     else changes.kept.push(p.id);
-    subJobs.push({ ...p, ...Object.fromEntries(EDITABLE.map((k) => [k, next[k]])) });
+    subJobs.push({ ...p, ...Object.fromEntries([...EDITABLE, 'base'].map((k) => [k, next[k]])) });
   }
   for (const s of proposal.subJobs) if (!current.has(s.id)) { changes.added.push(s.id); subJobs.push(norm(s)); }
   // An existing story keeps its key: it is part of what the human already agreed

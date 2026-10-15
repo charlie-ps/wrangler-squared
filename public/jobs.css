@@ -1026,8 +1026,10 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .job-node-landing>.job-node-base { flex:0 0 auto; max-width:11ch; }
 .job-node-arrow { flex:none; color:var(--fg-subtle); }
 .job-node-base.own { color:var(--fg); }
-.job-node-base.default { color:var(--fg-subtle); font-style:italic; }
 .job-node-branch summary>span { display:inline-block; max-width:16ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom; color:var(--fg-subtle); }
+.job-node-branch.unset:not([open]) { display:none; }
+.job-node:hover .job-node-branch.unset, .job-node:focus-within .job-node-branch.unset { display:block; }
+.job-node-branch summary svg { flex:none; }
 .job-node-branch.set summary>span { color:var(--fg); }
 .job-node-branch.set summary { color:var(--fg); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .job-node-branch input { display:block; width:100%; min-width:16ch; margin-top:6px; font:12px ui-monospace,SFMono-Regular,Menlo,monospace; }

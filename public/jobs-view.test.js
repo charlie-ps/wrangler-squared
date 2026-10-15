@@ -453,9 +453,9 @@ test('the plan review names no worktree branch, and a cut PR tile shows it; a su
   job.subJobs = [{ ...sub('api'), stage: 'implementation', worktree: { path: '/wt/api', branch: 'fix/AUTH-1-api', repoRoot: '/repo' } }, { ...sub('web', ['api']), stage: 'implementation' }]; f.view.update(f.data);
   f.q('.job-plate-open[data-job=\"job1\"]').click();
   assert.equal(f.q('[data-node="api"] .job-node-wt').textContent, 'fix/AUTH-1-api', 'a cut PR shows its worktree branch on its tile');
-  assert.equal(f.q('[data-node="api"] .job-node-landing').textContent, 'fix/AUTH-1-api→default branch');
+  assert.equal(f.q('[data-node="api"] .job-node-landing').textContent, 'fix/AUTH-1-api', 'default branch: no arrow, nothing to say');
   assert.equal(f.q('[data-node="web"] .job-node-wt'), null, 'not cut yet: only where it lands');
-  assert.ok(f.q('[data-node="web"] .job-node-base.default'), 'muted when it is the default branch');
+  assert.equal(f.q('[data-node="web"] .job-node-landing'), null, 'a PR on the default branch with no worktree shows nothing');
   assert.match(f.q('[data-open-sub="api"]').title, /Lands on the default branch\nBranch fix\/AUTH-1-api/, 'both are a hover away');
   f.q('[data-open-sub="api"]').click();
   assert.equal(f.q('.job-detail-meta .job-plan-branch').textContent, 'fix/AUTH-1-api');
@@ -765,7 +765,7 @@ test('new job is a brief beside a property sidebar, and the brief is the descrip
   assert.equal(brief.querySelector('details'), null, 'no folded planning guidance or repository hints');
   assert.deepEqual([...brief.querySelectorAll('textarea')].map((e) => e.name), ['intent']);
   assert.equal(form.elements.repos, undefined); assert.equal(form.elements.planningPrompt, undefined);
-  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Sandbox', 'Images', 'Land on', 'After delivery']);
+  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Sandbox', 'Images', 'After delivery']);
   assert.deepEqual([...brief.querySelectorAll('legend')].map((l) => l.textContent), ['Review checkpoints']);
   for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'shareImages', 'updateMain']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
   for (const name of ['reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites']) assert.ok(brief.contains(form.querySelector(`[name="${name}"]`)), `${name} is a tile under the brief`);
@@ -2154,15 +2154,12 @@ test('New job\'s Sandbox section follows the agent and round-trips its mode and 
   assert.deepEqual([f.sent[0].type, f.sent[0].job.agent, f.sent[0].job.sandbox, f.sent[0].job.writableDirs], ['job-create', 'codex', 'locked', ['~/.docker']]);
 });
 
-test('Land on is optional: left blank the job carries no base, filled it is sent trimmed', (t) => {
+test('New job has no Land on field: the plan chooses each PR\'s branch, so the job carries no base', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
-  assert.equal(form.elements.base.placeholder, 'Default branch');
+  assert.equal(form.elements.base, undefined);
   form.elements.intent.value = 'Deliver something useful';
   form.dispatchEvent(f.event('submit'));
   assert.equal('base' in f.sent[0].job, false);
-  form.elements.base.value = '  next ';
-  form.dispatchEvent(f.event('submit'));
-  assert.equal(f.sent.at(-1).job.base, 'next');
 });
 
 test('a refused cleanup on a dropped sub-job shows what would be lost, and Discard echoes back exactly the list it showed', (t) => {

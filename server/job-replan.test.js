@@ -149,9 +149,14 @@ test('a write added or moved to a session that has finished is refused; to one r
   assert.match(lines.find((l) => l.sub.id === 'r2').detail, /sent “Run r2” back to work/);
 });
 
-test('a PR\'s base is where its worktree was cut, so a proposal cannot change it', () => {
-  const subs = [spec('a', [], { base: 'next' })];
-  const j = job(subs, [live(subs[0])]);
-  assert.throws(() => mergeReplan(j, { context: '', stories: [], subJobs: [spec('a')] }), /base cannot change/);
-  assert.deepEqual(mergeReplan(j, { context: '', stories: [], subJobs: [spec('a', [], { base: 'next' })] }).changes.kept, ['a']);
+test('a PR\'s base moves in a replan until its worktree or PR exists, then it is fixed', () => {
+  const subs = [spec('a'), spec('b', [], { base: 'next' })];
+  const j = job(subs, [live(subs[0]), live(subs[1], { worktree: { branch: 'b-br' } })]);
+  const { plan, changes } = mergeReplan(j, { context: '', stories: [], subJobs: [spec('a', [], { base: 'next' }), spec('b', [], { base: 'next' })] });
+  assert.equal(plan.subJobs[0].base, 'next');
+  assert.deepEqual(changes.edited, [{ id: 'a', fields: ['base'] }]);
+  assert.throws(() => mergeReplan(j, { context: '', stories: [], subJobs: [spec('a'), spec('b')] }), /b: base cannot change, its branch is already cut/);
+  const k = job(subs, [live(subs[0]), live(subs[1], { pr: { url: 'u' } })]);
+  assert.throws(() => mergeReplan(k, { context: '', stories: [], subJobs: [spec('a'), spec('b', [], { base: 'main' })] }), /PR open/);
+  assert.deepEqual(mergeReplan(j, { context: '', stories: [], subJobs: [spec('a'), spec('b', [], { base: 'next' })] }).changes.kept, ['a', 'b']);
 });
