@@ -45,35 +45,61 @@ export class CleanupRefused extends Error {
 }
 const LOSS_LIST_CAP = 50;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const changeOf = (type, xy) => type === '?' ? 'untracked' : type === 'u' ? 'conflicted'
+const changeOf = (type, xy, sub) => type === '?' ? 'untracked' : sub?.[0] === 'S' ? 'submodule' : type === 'u' ? 'conflicted'
   : /D/.test(xy) ? 'deleted' : /A/.test(xy) ? 'added' : /R/.test(xy) ? 'renamed' : 'modified';
 // `git status --porcelain=v2 -z`: a path may contain spaces, so it is everything
 // after the fixed fields, and a rename carries its old path as the next entry.
+// An untracked directory still listed whole under --untracked-files=all is a
+// nested repository: git will not look inside it, so nor can the list.
 export function parseStatus(out) {
   const entries = out.split('\0');
   const files = [];
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
     const fixed = { 1: 8, 2: 9, u: 10 }[e[0]];
-    if (e[0] === '?') files.push({ change: 'untracked', path: e.slice(2) });
+    if (e[0] === '?') files.push({ change: e.endsWith('/') ? 'nested repository' : 'untracked', path: e.slice(2) });
     else if (fixed) {
       const f = e.split(' ');
-      files.push({ change: changeOf(e[0], f[1]), path: f.slice(fixed).join(' ') });
+      files.push({ change: changeOf(e[0], f[1], f[2]), path: f.slice(fixed).join(' ') });
       if (e[0] === '2') i++;
     }
   }
   return files;
 }
-// Size and mtime stand in for content: any edit after the human looked moves
-// one of them, and hashing a large tree's bytes is not worth the wait.
-function fingerprintOf(dir, head, files) {
-  const h = crypto.createHash('sha256').update(String(head));
+const OPAQUE = new Set(['submodule', 'nested repository']);
+const PIN_WALK_CAP = 20000;
+// Every file under a submodule or nested repository, its own .git included:
+// the parent's status sees one entry there, so an edit inside would otherwise
+// leave the pin unchanged. Past the cap the tree cannot be pinned at all.
+function walk(root, rel, out) {
+  let names;
+  try { names = fs.readdirSync(path.join(root, rel)).sort(); } catch { return true; }
+  for (const name of names) {
+    if (out.length >= PIN_WALK_CAP) return false;
+    const r = path.join(rel, name);
+    const st = fs.lstatSync(path.join(root, r));
+    out.push(`${r}\0${st.size}:${st.mtimeMs}`);
+    if (st.isDirectory() && !walk(root, r, out)) return false;
+  }
+  return true;
+}
+// The raw status carries the index side (modes and staged blob ids), so a change
+// only to what is staged moves it; size and mtime stand in for working-file
+// content, since hashing a large tree's bytes is not worth the wait.
+function fingerprintOf(dir, head, status, files) {
+  const h = crypto.createHash('sha256').update(`${head}\0${status}`);
+  let pinned = true;
   for (const f of files) {
     let st = null;
     try { st = fs.lstatSync(path.join(dir, f.path)); } catch {}
-    h.update(`\0${f.change}\0${f.path}\0${st ? `${st.size}:${st.mtimeMs}` : '-'}`);
+    h.update(`\0${f.path}\0${st ? `${st.size}:${st.mtimeMs}` : '-'}`);
+    if (st?.isDirectory() && OPAQUE.has(f.change)) {
+      const inner = [];
+      pinned = walk(dir, f.path, inner) && pinned;
+      h.update(inner.join('\0'));
+    }
   }
-  return h.digest('hex').slice(0, 16);
+  return { fingerprint: h.digest('hex').slice(0, 16), pinned };
 }
 
 export class JobRuntime {
@@ -333,52 +359,57 @@ export class JobRuntime {
       const branch = await this.run('git', ['symbolic-ref', 'HEAD'], wt.path);
       if (branch !== ref) throw new Error('Worktree has changed since verification; preserve it for review');
       head = await this.run('git', ['rev-parse', 'HEAD'], wt.path);
-      const files = tree ? parseStatus(await this.run('git', ['status', '--porcelain=v2', '-z', '--untracked-files=all'], wt.path)) : [];
-      await this.assertDisposable(wt, { head, files }, expectedHead, { mergedHead, base, discard });
-      await removeWorktree({ worktreePath: wt.path, repoRoot: wt.repoRoot });
+      const status = tree ? await this.run('git', ['status', '--porcelain=v2', '-z', '--untracked-files=all'], wt.path) : '';
+      const discarded = await this.assertDisposable(wt, { head, status, files: parseStatus(status) }, expectedHead, { mergedHead, base, discard });
+      // Only a matched Discard forces: otherwise git itself refuses a tree that
+      // gained work after the inspection above (a planning tree is scratch).
+      await removeWorktree({ worktreePath: wt.path, repoRoot: wt.repoRoot, force: discarded || !tree });
     }
     const trees = await this.run('git', ['worktree', 'list', '--porcelain'], wt.repoRoot);
     if (trees.split('\n').includes(`branch ${ref}`)) throw new Error('Branch is in use by another worktree');
     const existing = await this.run('git', ['for-each-ref', '--format=%(objectname)', ref], wt.repoRoot);
     if (!existing) return;
-    if (existing !== head) await this.assertDisposable(wt, { head: existing, files: [] }, expectedHead, { mergedHead, base, discard });
+    if (existing !== head) await this.assertDisposable(wt, { head: existing, status: '', files: [] }, expectedHead, { mergedHead, base, discard });
     await this.run('git', ['update-ref', '-d', ref, existing], wt.repoRoot);
   }
 
-  async assertDisposable(wt, { head, files }, expectedHead, { mergedHead, base, discard }) {
-    const fingerprint = fingerprintOf(wt.path, head, files);
+  async assertDisposable(wt, { head, status, files }, expectedHead, { mergedHead, base, discard }) {
+    const { fingerprint, pinned } = fingerprintOf(wt.path, head, status, files);
     if (discard) {
-      if (discard.head === head && discard.fingerprint === fingerprint) return;
-    } else if (!files.length && head === expectedHead) return;
+      if (pinned && discard.head === head && discard.fingerprint === fingerprint) return true;
+    } else if (!files.length && head === expectedHead) return false;
     // At the verified head, or behind the merged one, there is nothing to
     // compare, so a dirty tree is refused (with its Discard) even when origin's
     // default branch is unknowable.
     const retained = head === expectedHead || (!!mergedHead && await this.isMergedAncestor(head, mergedHead, wt.repoRoot));
     const target = retained ? base || null : base || await this.defaultBranch(wt.repoRoot);
-    const commits = retained ? [] : await this.unmergedCommits(wt.repoRoot, head, target);
+    const { commits, stale } = retained ? { commits: [], stale: false } : await this.unmergedCommits(wt.repoRoot, head, target);
     // Nothing to lose is disposable whatever the fingerprint: a human who saved
     // their work after looking is not asked to Discard a clean tree again.
-    if (!files.length && !commits.length) return;
-    const lost = [commits.length && `${plural(commits.length, 'commit')} not on origin/${target}`, files.length && plural(files.length, 'uncommitted file')].filter(Boolean).join(', ');
+    if (!files.length && !commits.length && !stale) return false;
+    const lost = [commits.length && `${plural(commits.length, 'commit')} not on origin/${target}`, files.length && plural(files.length, 'uncommitted file'),
+      stale && `origin unreachable, so origin/${target} could not be confirmed`].filter(Boolean).join(', ');
     const message = discard ? `Worktree changed after you chose to discard it${lost ? ` (${lost})` : ''}; review it again`
       : `Worktree has work that would be lost (${lost}); preserve it for review`;
-    throw new CleanupRefused(message, { path: wt.path, branch: wt.branch, base: target, head, fingerprint,
+    throw new CleanupRefused(message, { path: wt.path, branch: wt.branch, base: target, head, fingerprint, pinned, stale,
       commits: commits.slice(0, LOSS_LIST_CAP), commitCount: commits.length, files: files.slice(0, LOSS_LIST_CAP), fileCount: files.length });
   }
 
-  // Commits on `head` that origin's default branch does not have, after a fetch
-  // (a failed fetch only leaves origin staler, which can add commits here, never
-  // hide one). Each says whether some other origin branch carries it — pushed
-  // work survives a local delete, but is not on the branch that ships.
+  // Commits on `head` that origin's default branch does not have. Without a
+  // fresh fetch the answer is `stale`: a remote force-reset since the last one
+  // can leave the tracking ref holding commits origin no longer has, so a stale
+  // empty list is never taken as "nothing to lose". Each commit says whether
+  // some origin branch carries it — pushed work survives a local delete, but is
+  // not on the branch that ships.
   async unmergedCommits(repoRoot, head, target) {
-    await this.run('git', ['fetch', 'origin'], repoRoot).catch(() => {});
+    const stale = await this.run('git', ['fetch', 'origin'], repoRoot).then(() => false, () => true);
     const log = await this.run('git', ['log', '--format=%H%x09%s', head, '--not', `refs/remotes/origin/${target}`], repoRoot);
-    if (!log) return [];
+    if (!log) return { commits: [], stale };
     const unpushed = new Set((await this.run('git', ['rev-list', head, '--not', '--remotes=origin'], repoRoot)).split('\n').filter(Boolean));
-    return log.split('\n').map((line) => {
+    return { stale, commits: log.split('\n').map((line) => {
       const [sha, ...subject] = line.split('\t');
       return { sha, subject: subject.join('\t'), pushed: !unpushed.has(sha) };
-    });
+    }) };
   }
 
   async defaultBranch(repoRoot) {

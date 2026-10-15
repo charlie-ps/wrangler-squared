@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { JobRuntime, LAUNCH_GRACE_MS, CleanupRefused, parseStatus } from './job-runtime.js';
 import { DATA_DIR } from './data-dir.js';
 import { fakeHost } from './test-helpers.js';
+import { runFile } from './job-github.js';
 
 // What survives of agent-wrangler's job-runtime.test.js (`job-system` branch)
 // once the runtime talks to the host façade instead of a SessionManager: the launch
@@ -489,9 +490,10 @@ test('Discard of a branch whose worktree is already gone deletes it only at the 
 
 test('parseStatus reads porcelain v2: renames carry their old path as the next entry, and paths keep their spaces', () => {
   const out = ['1 .M N... 100644 100644 100644 aaa bbb src/app.js', '2 R. N... 100644 100644 100644 aaa bbb R100 new name.js', 'old name.js',
-    'u UU N... 100644 100644 100644 100644 aaa bbb ccc conflict.js', '? notes/todo list.md', ''].join('\0');
+    'u UU N... 100644 100644 100644 100644 aaa bbb ccc conflict.js', '? notes/todo list.md', '1 .M S.M. 160000 160000 160000 aaa aaa vendor/lib', '? scratch/', ''].join('\0');
   assert.deepEqual(parseStatus(out), [{ change: 'modified', path: 'src/app.js' }, { change: 'renamed', path: 'new name.js' },
-    { change: 'conflicted', path: 'conflict.js' }, { change: 'untracked', path: 'notes/todo list.md' }]);
+    { change: 'conflicted', path: 'conflict.js' }, { change: 'untracked', path: 'notes/todo list.md' },
+    { change: 'submodule', path: 'vendor/lib' }, { change: 'nested repository', path: 'scratch/' }]);
 });
 
 test('a Discard on a tree the human has since emptied of work just cleans it up, without asking again', async () => {
@@ -509,4 +511,70 @@ test('a planning worktree\'s scratch files are not grounds to refuse: the job ha
   await r.runtime.cleanupPlanning({ runs: [], planningWorktrees: [r.wt] });
   assert.equal(fs.existsSync(r.wt.path), false);
   assert.equal(await r.branchExists(), false);
+});
+
+const refusalOf = (r, opts) => r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, opts).then(() => assert.fail('expected a refusal'), (e) => { assert.ok(e instanceof CleanupRefused, e.message); return e.refusal; });
+
+test('a Discard does not cover a change only to what is staged', async () => {
+  const r = await gitRepo();
+  fs.writeFileSync(path.join(r.wt.path, 'README.md'), 'edited\n');
+  const shown = await refusalOf(r);
+  const staged = path.join(DATA_DIR, `staged-${++paths}`);
+  fs.writeFileSync(staged, 'staged later\n');
+  const blob = await r.git(r.wt.path, 'hash-object', '-w', staged);
+  const before = fs.statSync(path.join(r.wt.path, 'README.md'));
+  await r.git(r.wt.path, 'update-index', '--cacheinfo', `100644,${blob},README.md`);
+  assert.equal(fs.statSync(path.join(r.wt.path, 'README.md')).mtimeMs, before.mtimeMs, 'the working file is untouched');
+  const again = await refusalOf(r, { discard: shown });
+  assert.notEqual(again.fingerprint, shown.fingerprint);
+  assert.ok(fs.existsSync(r.wt.path));
+});
+
+test('a Discard does not cover an edit inside a nested repository the parent sees as one entry', async () => {
+  const r = await gitRepo();
+  const nested = path.join(r.wt.path, 'scratch');
+  await exec('git', ['init', '-q', nested]);
+  fs.writeFileSync(path.join(nested, 'child.txt'), 'one\n');
+  const shown = await refusalOf(r);
+  assert.deepEqual(shown.files, [{ change: 'nested repository', path: 'scratch/' }]);
+  fs.writeFileSync(path.join(nested, 'child.txt'), 'two\n');
+  fs.utimesSync(path.join(nested, 'child.txt'), new Date(), new Date(Date.now() + 5000));
+  const again = await refusalOf(r, { discard: shown });
+  assert.notEqual(again.fingerprint, shown.fingerprint);
+  assert.ok(fs.existsSync(path.join(nested, 'child.txt')));
+});
+
+test('without a fresh fetch, an empty commit list is not taken as nothing to lose', async () => {
+  const r = await gitRepo();
+  await r.commit(r.wt.path, 'a.js', 'Landed on main, then force-reset away');
+  await r.git(r.wt.path, 'push', '-q', 'origin', 'HEAD:main');
+  await r.git(r.repo, 'fetch', '-q', 'origin');
+  await r.git(r.repo, 'remote', 'set-url', 'origin', path.join(DATA_DIR, 'unreachable-origin'));
+  const shown = await refusalOf(r);
+  assert.deepEqual([shown.stale, shown.commitCount, shown.fileCount], [true, 0, 0]);
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: shown });
+  assert.equal(fs.existsSync(r.wt.path), false, 'the human may still Discard it');
+});
+
+test('cleanup without a Discard leaves the tree if a file appears between the inspection and the delete', async () => {
+  const r = await gitRepo();
+  const real = runFile;
+  const runtime = runtimeWith(fakeHost().host, { run: async (bin, args, cwd) => {
+    const out = await real(bin, args, cwd);
+    if (args[0] === 'status') fs.writeFileSync(path.join(r.wt.path, 'UNSEEN.txt'), 'late\n');
+    return out;
+  } });
+  await assert.rejects(runtime.cleanupWorktree(r.wt, r.wt.cleanupHead), /modified or untracked files/);
+  assert.ok(fs.existsSync(path.join(r.wt.path, 'UNSEEN.txt')));
+});
+
+test('a worktree too large to pin offers no Discard', async () => {
+  const r = await gitRepo();
+  const nested = path.join(r.wt.path, 'vendor');
+  await exec('git', ['init', '-q', nested]);
+  for (let i = 0; i < 20001; i++) fs.writeFileSync(path.join(nested, `f${i}`), '');
+  const shown = await refusalOf(r);
+  assert.equal(shown.pinned, false);
+  await refusalOf(r, { discard: shown });
+  assert.ok(fs.existsSync(nested));
 });

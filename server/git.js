@@ -28,19 +28,22 @@ export async function gitRepoRoot(cwd) {
   }
 }
 
-// Uncommitted and untracked files included: every caller has already decided the
-// work is disposable (cleanup checked the head and a clean tree, or the human
-// chose Discard for exactly the state it was shown). A missing dir is a no-op
-// success.
-export async function removeWorktree({ worktreePath, repoRoot = '' }) {
+// `force` deletes uncommitted and untracked files too: only for a caller that
+// has decided they are disposable (a Discard of exactly the state it was shown).
+// Unforced, git refuses a tree that is not clean, which closes the gap between
+// cleanup's inspection and the delete; ignored files go either way. A tree
+// holding a submodule cannot be removed unforced at all, so a clean one is
+// retried forced. A missing dir is a no-op success.
+export async function removeWorktree({ worktreePath, repoRoot = '', force = true }) {
   if (!worktreePath) throw new WorktreeError('No worktree path');
   if (!fs.existsSync(worktreePath)) return { ok: true, alreadyGone: true };
   const root = repoRoot || (await gitRepoRoot(worktreePath));
   if (!root) throw new WorktreeError('Could not resolve the repository for this worktree');
   try {
-    await exec('git', ['-C', root, 'worktree', 'remove', '--force', worktreePath]);
+    await exec('git', ['-C', root, 'worktree', 'remove', ...(force ? ['--force'] : []), worktreePath]);
     return { ok: true };
   } catch (e) {
+    if (!force && /submodules/.test(e.stderr || '')) return removeWorktree({ worktreePath, repoRoot: root, force: true });
     throw new WorktreeError(`git worktree remove failed: ${(e.stderr || e.message || '').toString().trim()}`);
   }
 }
