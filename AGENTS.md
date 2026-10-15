@@ -113,6 +113,21 @@ feature).
   resumable agent (the tree's or result's session, an open PR's repair session)
   else the planner, which proposes a plan change. The box is not a `<form>`, so
   a tick's redraw is held back only while text is typed in it.
+- **Red steps go up one level before the human** (`server/job-red.js`). A sub-job
+  with an `error` is sent to the planner by the runner's `triageRed` when
+  `settings.maxReplans` > 0 (0 = the old "red waits for you"), one replan at a
+  time, stamped `run.red` and counted per step; the replan carries `job.replan.red
+  = {sub, auto, n}` and holds only that step and its dependants (`heldBy`, mirrored
+  client-side as `heldByReplan`/`redScope`: use them, never `!job.replan`, for
+  per-sub gates). The sixth checkpoint `reviewRed` (true = "You decide", the
+  default) only chooses whether the proposal waits; Accept red, Mark and Recover
+  are never applied automatically. A red is DECLARED by `declareRed` (tries used up,
+  `escalate`, a planner that blocked or died, an empty proposal) and its
+  `declared.ref` is `redRef` (error, head, merge commit, run count): a new
+  failure, head or run un-declares it and a decision about the old one
+  (`red.held`) never carries over. `blocked`, `replan` and `escalate` are the
+  "go up one level" receipts. The board's states are `redFixing` (not counted in
+  Needs you), `redFixReady` and `redDeclared` in `public/jobs.js`.
 - **A proposal can carry actions and up to three ranked options**
   (`server/job-actions.js`, applied by `approveReplan`): `accept-red`, `mark`
   (merged/done, `evidence` required), `rework` and `recover {fix}` on a live

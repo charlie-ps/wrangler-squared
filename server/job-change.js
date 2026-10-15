@@ -2,6 +2,7 @@ import { isPrSub, isSessionSub, isWriteSub } from './jobs-schema.js';
 import { reworkSub } from './job-sub-ops.js';
 import { requestReplan, mergeReplan } from './job-replan.js';
 import { chipAction, stampActions } from './job-actions.js';
+import { isDeclared } from './job-red.js';
 
 // request-change: the one way a human's idea enters a job, from the plan, a code
 // review, a session's result, an open PR, a write, or a pending proposal. The
@@ -45,6 +46,13 @@ export function requestChange(job, sub, { at, ref, text }, { now }) {
   const view = changeView(job, sub);
   if (!view) throw new Error(sub ? 'Nothing is left to change here' : 'The job has nothing to change right now');
   if (view.at !== at || view.ref !== String(ref)) throw new Error('This changed since you looked. Review the latest version and ask again.');
+  // A declared red is the planner's: it has already tried, so the idea goes to it
+  // with everything it found, and still holds only that step.
+  if (sub && isDeclared(job, sub)) {
+    const d = sub.red.declared;
+    requestReplan(job, `About ${quoted(sub.title)} (${sub.id}), which was declared red: ${d.summary}${d.tried?.length ? `\nTried: ${d.tried.join(' | ')}` : ''}${d.ask ? `\nThe decision asked of the human: ${d.ask}` : ''}\nThe human says: ${idea}`, now, { sub: sub.id, auto: false, human: true });
+    return { detail: `Sent the declared red on ${quoted(sub.title)} back to the planner`, route: 'planner' };
+  }
   if (STEP_AGENT.has(view.at)) {
     if (liveRun(job, sub.id)) throw new Error('Wait for the session to stop');
     if (job.replan) throw new Error('A plan change is pending. Approve or discard it first.');

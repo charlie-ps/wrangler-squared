@@ -2,7 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, runStatus, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, runStatus, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 
@@ -187,8 +187,12 @@ export function plateAsk(job) {
   const detail = `${n ? `#${n} · ` : ''}${lead.title}${peers > 0 ? ` +${peers}` : ''}`;
   const ask = (label, button, icon, act = 'open') => ({ tone, label, detail, button, icon, act, sub: lead.id });
   if (state === 'failing') {
+    // The only red you act on: Wrangler gave up and says why. With options it
+    // opens the proposal on the job; without, the sub-job holds what it found.
+    if (redDeclared(job, lead) && !job.error) { const a = ask('Declared red', 'Decide', ICONS.x); return job.replan?.proposal ? { ...a, sub: '' } : a; }
     return ask(subLine(job, lead).replace(/^#\d+ · /, ''), 'Resolve', ICONS.x);
   }
+  if (redFixReady(job, lead)) return { ...ask('Fix ready', 'Review fix', ICONS.eye), sub: '' };
   // A draft (or a published output) waiting on you is decided from the plate
   // as it stands; the dialog is where it is edited first.
   if (writeAwaitingReview(lead)) {

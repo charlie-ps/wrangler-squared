@@ -1,8 +1,9 @@
 import { runnable, dependencySatisfied, dependenciesSatisfied, MERGE_IS_DELIVERY } from './job-store.js';
 import { summariseComments, commentsBlockMerge } from './job-comments.js';
-import { awaitsTicket } from './jobs-schema.js';
+import { awaitsTicket, settingsSchema } from './jobs-schema.js';
 import { logWarn } from './log.js';
 import { isFrozen } from './job-replan.js';
+import { heldBy, needsTriage, triesOn, triesAllowed, startRed, failRedReplan } from './job-red.js';
 import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from './job-writes.js';
 import { dropSub } from './job-sub-ops.js';
 import { draftsDecidedMail } from './job-prompts.js';
@@ -10,6 +11,8 @@ const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
 export const acceptedRedLine = (sub) => `Post-merge run accepted red${sub.acceptedRed?.note ? `: ${sub.acceptedRed.note}` : ''}`;
+// Which red step a planning run was sent after: counted against that step's tries.
+const redStamp = (job) => job.replan?.red && !job.replan.red.human ? { red: { sub: job.replan.red.sub } } : undefined;
 const activeFor = (j, s) => j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null));
 // A worker that stopped WORKING without reporting has finished in the only sense
 // this runner can observe. The grace is long because "idle" is also what a
@@ -86,7 +89,10 @@ export class JobRunner {
           const s = j.subJobs.find((s) => s.id === r.subJobId);
           // On the run as well as the card: retry clears the card's, and the
           // history a later session reads (job-prompts.js) needs the run's.
-          if (error) { r.error = error; (s || j).error = error; }
+          // A red step's planner that died is that step's to declare, not the job's:
+          // `job.error` would hold every sub-job for one step's trouble.
+          if (error && !failRedReplan(j, r, error.replace(/\. .*$/, ''), this.now())) { r.error = error; (s || j).error = error; }
+          else if (error) r.error = error;
         });
       } catch (e) {
         this.store.update(id, (j) => { j.error = shortError(e); });
@@ -159,7 +165,7 @@ export class JobRunner {
     // edit or cancel: no new step, no merge, no human approval (job-store.js).
     // Steps already running carry on, PRs keep being watched, and work past the
     // point of no return (a verify after deploy) lands as it would have.
-    if (sub && this.store.get(job.id).replan && !isFrozen(sub)) return;
+    if (sub && heldBy(this.store.get(job.id), sub) && !isFrozen(sub)) return;
     const run = this.store.claim(job.id, sub?.id || null, phase, extra);
     if (!run) return;
     try {
@@ -184,8 +190,10 @@ export class JobRunner {
     if (job.cancelledAt && job.stage !== 'active') { if (!job.runs.some(runnable)) await this.finish(id); return; }
     if (job.stage === 'planning' && !job.plan && !activeFor(job)) { await this.launch(job, null, 'planning'); return; }
     if (job.stage !== 'active') return;
+    if (!job.replan) await this.triageRed(id);
+    job = this.store.get(id);
     if (job.replan && !job.replan.proposal && !activeFor(job)) {
-      await this.launch(job, null, 'planning');
+      await this.launch(job, null, 'planning', redStamp(job));
       job = this.store.get(id);
     }
     for (const initial of job.subJobs) {
@@ -201,7 +209,7 @@ export class JobRunner {
           // drafts are still with the human is not run again until they are
           // decided. An if-dropped one whose trigger landed is not needed.
           const trigger = triggerStatus(job, sub);
-          if (trigger === 'not-needed' && !job.replan) this.patchSub(id, sub.id, (s) => { dropSub(s, this.now()); s.notNeeded = true; });
+          if (trigger === 'not-needed' && !heldBy(job, sub)) this.patchSub(id, sub.id, (s) => { dropSub(s, this.now()); s.notNeeded = true; });
           else if (trigger === 'due' && dependenciesSatisfied(job, sub) && !awaitsKeys(job, sub) && !inReview(job, sub).length) await this.launch(job, sub, 'session');
         } else if (sub.stage === 'human') {
           // The one stage this runner never launches anything for. A human task
@@ -214,7 +222,7 @@ export class JobRunner {
           // if it finished without reporting it). A pending plan change may still
           // edit or drop it, so it waits.
           // Tried on this tick's copy first: an idle tick must not rewrite the file.
-          if (!job.replan && advanceWrite(job, sub, this.now())) this.store.update(id, (j) => advanceWrite(j, j.subJobs.find((s) => s.id === sub.id), this.now()));
+          if (!heldBy(job, sub) && advanceWrite(job, sub, this.now())) this.store.update(id, (j) => advanceWrite(j, j.subJobs.find((s) => s.id === sub.id), this.now()));
         } else if (sub.stage === 'implementation') {
           // One session per PR: work, commit, push, open the PR. Every
           // prerequisite gates the start: the worktree is cut from the default
@@ -264,14 +272,14 @@ export class JobRunner {
           } else if (pr.behind && sub.acceptedRed?.ref !== pr.head) {
             // Green but behind a base that requires up-to-date branches: bring it
             // up to date and keep watching, since the new head re-runs the checks.
-            if (!job.replan && dependenciesSatisfied(job, sub)) await this.updateBranch(id, sub, pr);
-          } else if (!job.replan && (pr.checkStatus === 'passing' || sub.acceptedRed?.ref === pr.head) && dependenciesSatisfied(job, sub) && (sub.mergeApprovedHead === pr.head || (!job.reviewMerge && !commentsBlockMerge(sub)))) {
+            if (!heldBy(job, sub) && dependenciesSatisfied(job, sub)) await this.updateBranch(id, sub, pr);
+          } else if (!heldBy(job, sub) && (pr.checkStatus === 'passing' || sub.acceptedRed?.ref === pr.head) && dependenciesSatisfied(job, sub) && (sub.mergeApprovedHead === pr.head || (!job.reviewMerge && !commentsBlockMerge(sub)))) {
             // An accepted-red head merges whatever its checks say — the move
             // pinned both the acceptance and the merge approval to this head.
             // Match-head on GitHub closes the push-vs-merge race; re-poll after
             // success instead of pretending an accepted merge-queue entry merged.
             if (sub.mergeRequestedHead !== pr.head) {
-              await this.github.merge(sub, { canMerge: () => this.allowed(id) && !this.store.get(id).replan });
+              await this.github.merge(sub, { canMerge: () => this.allowed(id) && !heldBy(this.store.get(id), sub) });
               this.patchSub(id, sub.id, (s) => { s.mergeRequestedHead = pr.head; });
             }
           }
@@ -331,6 +339,24 @@ export class JobRunner {
     for (const run of job.runs.filter((r) => draftsDecided(job, r))) await this.resumeDrafted(id, run);
     job = this.store.get(id);
     if (job.subJobs.length && job.subJobs.every((s) => s.stage === 'done')) await this.finish(id);
+  }
+  // A red step goes up one level before it goes to the human: the planner looks
+  // at it (job-red.js), holding only that step and what follows it. One replan at
+  // a time, so a second red step waits its turn. Out of tries it is declared red
+  // to the human with every attempt listed. `maxReplans` 0 leaves red to the human.
+  async triageRed(id) {
+    const job = this.store.get(id);
+    // Parsed, so a settings file from before `maxReplans` reads the default, not 0.
+    const settings = settingsSchema.parse(this.store.snapshot().settings ?? {});
+    if (job.replan || job.stage !== 'active' || job.cancelledAt || !settings.maxReplans || !this.allowed(id) || job.runs.some((r) => !r.stopped && !r.subJobId)) return;
+    const sub = job.subJobs.find((s) => needsTriage(job, s));
+    if (!sub) return;
+    const tries = triesOn(job, sub.id), limit = triesAllowed(settings, sub);
+    if (tries >= limit) {
+      this.store.declareOutOfTries(id, sub.id, limit);
+      return;
+    }
+    this.store.update(id, (j) => startRed(j, j.subJobs.find((x) => x.id === sub.id), { tries, limit, now: this.now() }));
   }
   // Every draft a parked session sent is decided: tell it which writes to make
   // and with what text, waking its card first if it went dormant meanwhile. A

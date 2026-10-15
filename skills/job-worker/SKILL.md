@@ -32,9 +32,17 @@ the `runId` from your prompt and the receipt kind it names.
   real limitation or acceptance criterion.
 - **Never claim a check you did not perform.** A check you couldn't run is a
   blocked receipt, not an optimistic bullet.
-- **Blocked is one sentence**: `{kind:"blocked", summary:"…"}`. It goes to the
-  human, who answers with Retry or by sending a change in through Request
-  changes; you never name a move or change the plan.
+- **When you cannot go on, go up one level** — never straight to the human, and
+  you never name a move or change the plan:
+  - `{kind:"blocked", summary:"…"}`: one sentence, you are stuck.
+  - `{kind:"replan", summary:"…", why?:"…"}`: the work needs more than your
+    step (a prerequisite, another repository, a different plan). Say why.
+  - Both go to Wrangler's planner first, which fixes your step, changes the
+    plan, or declares the step red to the human.
+  - `{kind:"escalate", summary:"what you found", tried?:["what you tried"],
+    ask:"the one decision you need"}`: only a human can decide this (a
+    credential, a sign-off, a trade-off). It declares your step red straight
+    away. Up to six `tried` lines, each one line.
 - Save your files before reporting: a successful report ends the run (all but
   `drafts`, which waits for mail; see below).
 - A report that failed on a connection error is **safe to retry identically**.
@@ -47,6 +55,28 @@ the `runId` from your prompt and the receipt kind it names.
 When your prompt is a plan change, your `plan` receipt is a **proposal**: nothing
 applies until the human approves it, and each action is refused at approval if
 the PR head, merge commit or stage it was written against has moved.
+
+### A red step Wrangler sent you after
+
+Your prompt says `RED STEP` when a step went red and Wrangler (not the human)
+asked you to look. It tells you what failed, what the step's own agent said, and
+what you already tried (try *n* of the limit). Only that step and the sub-jobs
+after it are held while you work.
+
+- Find the cause, then fix the step (`rework` action), change the plan around
+  it, or both. With **Red steps = "Wrangler replans"** a `rework` (and plan edits
+  only when the job's Plan checkpoint is Auto, none cancelling a PR) is applied
+  by itself; `accept-red`, `mark` and `recover` **never are**, so propose them
+  only when they are the honest answer, with evidence. Under "You decide"
+  everything waits for the human.
+- If neither a fix nor a plan change can get past it without a decision only the
+  human can make, report `escalate` instead of a plan:
+  `{kind:"escalate", summary:"what you found", tried?:["what you tried"],
+  ask:"the one decision you need", sub?:"<red step id>", options?:[{label, why?,
+  plan, actions?}]}`. The step is declared red; `options` (at most three, ranked,
+  each a whole plan) open in the proposal view when the human clicks Decide.
+- After the job's "Replans per step" tries, an unresolved step is declared red
+  without you: say what you tried, so the next reader does not repeat it.
 
 - `diagnosis:{summary, evidence?:[{label, detail}]}` says what you found, with up
   to six pieces of evidence (a run, a file, a PR).

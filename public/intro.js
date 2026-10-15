@@ -129,7 +129,7 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
   let timer = null;
   let playing = -1;
   const phases = INTRO_STEPS.map(() => 0);
-  const reviews = { reviewPlan: true, reviewCode: true, reviewMerge: false, reviewSessions: true, reviewWrites: false };
+  const reviews = { reviewPlan: true, reviewCode: true, reviewMerge: false, reviewSessions: true, reviewWrites: false, reviewRed: true };
   const win = () => document.defaultView;
   const still = () => !win() || !!win().matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const relayout = () => layoutGraphEdges(dialog?.querySelector('.intro-graph'));

@@ -59,12 +59,12 @@ test('a job created without review flags takes the saved review defaults; a flag
   runnerFor(host).tick = async () => {};
   assert.deepEqual(settingsSchema.parse({}).reviewDefaults, REVIEW_DEFAULTS, 'settings saved before the key parse to the original form');
   await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, start: false });
-  await handler('job-settings').handler({ patch: { reviewDefaults: { reviewPlan: false, reviewCode: true, reviewMerge: false, reviewSessions: true, reviewWrites: true } } }, host);
+  await handler('job-settings').handler({ patch: { reviewDefaults: { reviewPlan: false, reviewCode: true, reviewMerge: false, reviewSessions: true, reviewWrites: true, reviewRed: false } } }, host);
   await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, start: false });
   await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, reviewPlan: true, reviewWrites: false, start: false });
   const flags = (j) => Object.keys(REVIEW_DEFAULTS).map((f) => j[f]);
   assert.deepEqual(host.stores.jobs.snapshot().jobs.map(flags), [
-    [true, true, true, true, false], [false, true, false, true, true], [true, true, false, true, false],
+    [true, true, true, true, false, true], [false, true, false, true, true, false], [true, true, false, true, false, false],
   ]);
 });
 

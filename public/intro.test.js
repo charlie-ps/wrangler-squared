@@ -132,7 +132,7 @@ test('the arrow keys step through, and the review checkpoints are a picture that
   createIntro({ storage: memoryStorage() }).open(6);
   assert.match(p.title(), /stops for you\./);
   const row = () => p.q('.intro-checkpoint[data-checkpoint="reviewMerge"]');
-  assert.deepEqual([...p.window.document.querySelectorAll('.intro-checkpoint .job-review-name')].map((n) => n.firstChild.textContent), ['Plan', 'Code', 'Merge', 'Session results', 'Writes'], 'all five checkpoints, in the form’s words');
+  assert.deepEqual([...p.window.document.querySelectorAll('.intro-checkpoint .job-review-name')].map((n) => n.firstChild.textContent), ['Plan', 'Code', 'Merge', 'Session results', 'Writes', 'Red steps'], 'all six checkpoints, in the form’s words');
   const toggle = () => row().querySelector('input[role="switch"]');
   assert.equal(row().querySelectorAll('input').length, 1, 'one control flips the checkpoint');
   assert.equal(toggle().checked, false);
