@@ -325,7 +325,7 @@ export class JobRuntime {
   // rebase onto newer main moves the head without adding work). The ref is
   // deleted at the value inspected, so a racing local commit is refused.
   // `discard` is the human's override, pinned to the head and fingerprint shown.
-  async cleanupWorktree(wt, expectedHead, { mergedHead, base, discard } = {}) {
+  async cleanupWorktree(wt, expectedHead, { mergedHead, base, discard, tree = true } = {}) {
     if (!expectedHead && !discard) throw new Error('Cannot clean up without the verified branch head');
     const ref = `refs/heads/${wt.branch}`;
     let head = null;
@@ -333,7 +333,7 @@ export class JobRuntime {
       const branch = await this.run('git', ['symbolic-ref', 'HEAD'], wt.path);
       if (branch !== ref) throw new Error('Worktree has changed since verification; preserve it for review');
       head = await this.run('git', ['rev-parse', 'HEAD'], wt.path);
-      const files = parseStatus(await this.run('git', ['status', '--porcelain=v2', '-z', '--untracked-files=all'], wt.path));
+      const files = tree ? parseStatus(await this.run('git', ['status', '--porcelain=v2', '-z', '--untracked-files=all'], wt.path)) : [];
       await this.assertDisposable(wt, { head, files }, expectedHead, { mergedHead, base, discard });
       await removeWorktree({ worktreePath: wt.path, repoRoot: wt.repoRoot });
     }
@@ -356,7 +356,9 @@ export class JobRuntime {
     const retained = head === expectedHead || (!!mergedHead && await this.isMergedAncestor(head, mergedHead, wt.repoRoot));
     const target = retained ? base || null : base || await this.defaultBranch(wt.repoRoot);
     const commits = retained ? [] : await this.unmergedCommits(wt.repoRoot, head, target);
-    if (!discard && !files.length && !commits.length) return;
+    // Nothing to lose is disposable whatever the fingerprint: a human who saved
+    // their work after looking is not asked to Discard a clean tree again.
+    if (!files.length && !commits.length) return;
     const lost = [commits.length && `${plural(commits.length, 'commit')} not on origin/${target}`, files.length && plural(files.length, 'uncommitted file')].filter(Boolean).join(', ');
     const message = discard ? `Worktree changed after you chose to discard it${lost ? ` (${lost})` : ''}; review it again`
       : `Worktree has work that would be lost (${lost}); preserve it for review`;
@@ -406,8 +408,10 @@ export class JobRuntime {
     for (const run of job.runs.filter((r) => (r.phase === 'planning' || r.phase === 'write') && r.sessionId)) {
       await this.stop(run);
     }
+    // A planning tree holds scratch, never deliverable work, and the job has no
+    // Discard to offer for it, so its files are not grounds to refuse.
     for (const wt of job.planningWorktrees || []) {
-      await this.cleanupWorktree(wt, wt.cleanupHead);
+      await this.cleanupWorktree(wt, wt.cleanupHead, { tree: false });
     }
   }
 }

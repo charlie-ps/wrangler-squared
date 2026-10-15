@@ -265,11 +265,11 @@ export function authorityText(job, plan) {
 const plural = (n) => n === 1 ? '' : 's';
 const andMore = (shown, total) => total > shown ? `<li><small>and ${total - shown} more</small></li>` : '';
 export function lossHtml(r) {
-  return `${r.commitCount ? `<h4>${r.commitCount} commit${plural(r.commitCount)} not on origin/${esc(r.base)}</h4><ul class="job-checks job-loss">${r.commits.map((c) => `<li><code>${esc(c.sha.slice(0, 8))}</code> ${esc(c.subject)} <small>${c.pushed ? 'pushed to another branch' : 'not pushed'}</small></li>`).join('')}${andMore(r.commits.length, r.commitCount)}</ul>` : ''}
+  return `${r.commitCount ? `<h4>${r.commitCount} commit${plural(r.commitCount)} not on origin/${esc(r.base)}</h4><ul class="job-checks job-loss">${r.commits.map((c) => `<li><code>${esc(c.sha.slice(0, 8))}</code> ${esc(c.subject)} <small>${c.pushed ? 'on a branch on origin' : 'not pushed'}</small></li>`).join('')}${andMore(r.commits.length, r.commitCount)}</ul>` : ''}
     ${r.fileCount ? `<h4>${r.fileCount} uncommitted file${plural(r.fileCount)}</h4><ul class="job-checks job-loss">${r.files.map((f) => `<li><code>${esc(f.path)}</code> <small>${esc(f.change)}</small></li>`).join('')}${andMore(r.files.length, r.fileCount)}</ul>` : ''}
     ${!r.commitCount && !r.fileCount ? `<p>Branch <code>${esc(r.branch)}</code> at ${esc(String(r.head).slice(0, 8))}.</p>` : ''}`;
 }
-const refusalHtml = (sub) => sub.cleanupRefusal ? `<h3>Kept for you <small>Cleanup would lose this</small></h3>${lossHtml(sub.cleanupRefusal)}<p class="job-authority">Save anything you want from <code>${esc(tildify(sub.cleanupRefusal.path || sub.worktree?.path || ''))}</code>, then Retry; or Discard anyway to delete the worktree and its local branch as listed here.</p>` : '';
+const refusalHtml = (sub) => sub.cleanupRefusal && !sub.discard ? `<h3>Kept for you <small>Cleanup would lose this</small></h3>${lossHtml(sub.cleanupRefusal)}<p class="job-authority">Save anything you want from <code>${esc(tildify(sub.cleanupRefusal.path || sub.worktree?.path || ''))}</code>, then Retry; or Discard anyway to delete the worktree and its local branch as listed here.</p>` : '';
 
 // The board's own Cmd/Ctrl+Enter handlers only reach the elements they own, and
 // this dialog hangs off <body> outside every one of them, so the chord is matched
@@ -546,7 +546,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   // What a whole-job cancel did and what it left: the sub-job nodes say Dropped
   // one by one, this is the sentence that says why all of them do.
   const cancelledText = (job) => `Cancelled ${when(job.cancelledAt)}. ${job.stage === 'done' ? 'Every unfinished sub-job was dropped and cleaned up' : 'Every unfinished sub-job was dropped; running steps are being stopped and cleaned up'}. Merged work stays merged, open pull requests stay open on GitHub, and a worktree holding work that is not on the default branch is kept for you to look at${kept(job)}.`;
-  const kept = (job) => { const n = job.subJobs.filter((x) => x.cleanupRefusal).length; return n ? ` (${n} kept now; open ${n === 1 ? 'it' : 'each'} to Retry or Discard)` : ''; };
+  const kept = (job) => { const n = job.subJobs.filter((x) => x.cleanupRefusal && !x.discard).length; return n ? ` (${n} kept now; open ${n === 1 ? 'it' : 'each'} to Retry or Discard)` : ''; };
   // Confirmed first, like Drop, and wrapped in a form so a live graph tick does not
   // re-render the detail view over the question (render() leaves any open form alone).
   function openCancel(job) {
@@ -1016,7 +1016,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     // runner has replaced since is refused by the server instead of discarded unseen.
     bind('#job-discard', () => {
       const r = sub.cleanupRefusal;
-      show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Discard ${esc(sub.title)}’s worktree?</h2><form id="job-discard-form"><p>This force-removes <code>${esc(tildify(r.path || sub.worktree?.path || ''))}</code> and deletes the local branch <code>${esc(r.branch)}</code>. This is lost for good:</p>${lossHtml(r)}<p class="job-authority">If anything changes before cleanup runs, nothing is deleted and you are shown the new list.</p><div class="job-actions"><button type="button" class="danger" data-discard="1">Discard anyway</button><button type="button" id="job-move-back">Keep it</button></div></form>`);
+      show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Discard ${esc(sub.title)}’s worktree?</h2><form id="job-discard-form"><p>This force-removes <code>${esc(tildify(r.path || sub.worktree?.path || ''))}</code> and deletes the local branch <code>${esc(r.branch)}</code>. This is lost for good, along with any gitignored files in it (build output, a local <code>.env</code>):</p>${lossHtml(r)}<p class="job-authority">If anything changes before cleanup runs, nothing is deleted and you are shown the new list.</p><div class="job-actions"><button type="button" class="danger" data-discard="1">Discard anyway</button><button type="button" id="job-move-back">Keep it</button></div></form>`);
       dialog.querySelector('[data-discard]').onclick = () => action('discard-worktree', { discardHead: r.head, fingerprint: r.fingerprint });
       dialog.querySelector('#job-move-back').onclick = () => renderDetail();
     });

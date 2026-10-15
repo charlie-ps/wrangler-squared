@@ -493,3 +493,20 @@ test('parseStatus reads porcelain v2: renames carry their old path as the next e
   assert.deepEqual(parseStatus(out), [{ change: 'modified', path: 'src/app.js' }, { change: 'renamed', path: 'new name.js' },
     { change: 'conflicted', path: 'conflict.js' }, { change: 'untracked', path: 'notes/todo list.md' }]);
 });
+
+test('a Discard on a tree the human has since emptied of work just cleans it up, without asking again', async () => {
+  const r = await gitRepo();
+  fs.writeFileSync(path.join(r.wt.path, 'notes.txt'), 'x\n');
+  const shown = (await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e)).refusal;
+  fs.rmSync(path.join(r.wt.path, 'notes.txt'));
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: shown });
+  assert.equal(fs.existsSync(r.wt.path), false);
+});
+
+test('a planning worktree\'s scratch files are not grounds to refuse: the job has no Discard for it', async () => {
+  const r = await gitRepo();
+  fs.writeFileSync(path.join(r.wt.path, 'plan-draft.md'), 'x\n');
+  await r.runtime.cleanupPlanning({ runs: [], planningWorktrees: [r.wt] });
+  assert.equal(fs.existsSync(r.wt.path), false);
+  assert.equal(await r.branchExists(), false);
+});
