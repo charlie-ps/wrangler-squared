@@ -3,6 +3,7 @@ import { jobCards, jobNeedsReview } from './jobs.js';
 import { diffReturnTarget } from './diff-return.js';
 import { createIntro } from './intro.js';
 import { createUpdates } from './updates.js';
+import { ICONS } from './icons.js';
 
 // The client half: one `view` slot contribution (agent-wrangler public/slots.js),
 // which the board draws a rail button, a `#view=ext:jobs:board` route and a
@@ -24,8 +25,6 @@ import { createUpdates } from './updates.js';
 //    the same diff-return.js decision core's app.js did (reviewDiff below).
 //  - `getAgents()` read the board's connect-time `agents` list → `api.agents()`
 //    (host api 1.25), the same live-catalog list, read each time New job opens.
-
-const ICON = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16M5 8h2M11 11h2M17 8h2"/></svg>';
 
 const TOAST_MS = 3000;
 
@@ -146,7 +145,7 @@ export default {
     slots.register('view', {
       id: 'board',
       label: 'Jobs',
-      icon: ICON,
+      icon: ICONS.jobs,
       mount(el, api) {
         // jobs-view.js finds both by id, as it did in core's index.html. The
         // dialog goes on <body>, not in the host: a <dialog> under a display:none
