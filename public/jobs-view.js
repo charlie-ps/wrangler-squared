@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
 import { holdSkies, mountSkies, mountMastSky } from './job-skylines.js';
@@ -675,14 +675,22 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   // The job dialog's one extended button: the single most urgent thing the job is
   // waiting on. A green PR awaiting approval merges from here, pinned to the head
   // on display; anything that needs reading first opens its sub-job instead.
+  function promptFab(job) {
+    const prompts = promptsWaiting(job);
+    if (!prompts.length) return '';
+    const [p] = prompts, more = prompts.length - 1;
+    const title = esc(`${promptWhere(job, p)} · Prompt waiting${more ? ` · +${more} more waiting` : ''}`);
+    return `<button class="primary" data-fab-session="${esc(p.sessionId)}" title="${title}">${ICONS.terminal}Answer prompt</button>`;
+  }
   function leadFab(job) {
+    const prompt = promptFab(job);
+    if (prompt) return prompt;
     const state = jobState(job);
     const lead = leadSub(job, state);
     if (!lead || !['failing', 'needs'].includes(state)) return '';
     const n = isPrSub(lead) ? prNumber(lead) : '';
     const title = esc(`${lead.title} · ${subLabel(job, lead)}`);
     if (state === 'needs' && mergeApprovable(job, lead)) return `<button class="primary" data-action="approve-merge" data-sub="${esc(lead.id)}" title="${title}">${ICONS.merge}Merge${n ? ` #${n}` : ''}</button>`;
-    if (state === 'needs' && runStatus(job, lead) === 'needs-you' && lead.sessions.length) return `<button class="primary" data-fab-session="${esc(lead.sessions.at(-1))}" title="${title}">${ICONS.terminal}Answer prompt</button>`;
     const [icon, text] = state === 'failing' ? [ICONS.wrench, 'Resolve'] : codeAwaitingReview(lead) ? [ICONS.code, 'Review code'] : isSessionSub(lead) ? [ICONS.doc, 'Review result'] : isHumanSub(lead) ? [ICONS.person, 'Open task'] : [ICONS.eye, 'Open'];
     return `<button class="primary" data-open-sub="${esc(lead.id)}" title="${title}">${icon}${text}${n ? ` #${n}` : ''}</button>`;
   }
@@ -811,6 +819,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     else if (job.stage === 'backlog' && !job.cancelledAt) fab = `<button class="primary" data-action="start" title="${esc(hints[0])}">${ICONS.play}Start planning</button>`;
     else if (replanProposed(job)) fab = `<button class="primary" data-action="approve-replan" title="${esc(hints.at(-1))}" ${job.runs.some((r) => !r.stopped && !r.subJobId) ? 'disabled' : ''}>${ICONS.check}Approve change</button>`;
     else if (job.stage === 'active') fab = leadFab(job);
+    else if (!fab) fab = promptFab(job);
     if (job.stage === 'active' && !job.cancelledAt) extra = replanProposed(job) ? `<button id="job-refine">${ICONS.edit}Request changes</button><button data-action="discard-replan">${ICONS.x}Discard</button>`
       : replanPending(job) ? `<button data-action="discard-replan" title="Stop re-planning and keep the plan as it is">${ICONS.x}Discard change</button>`
       : `<button id="job-refine" title="Ask for a new plan from where the job stands. Nothing changes until you approve it.">${ICONS.edit}Change plan</button>`;
@@ -1206,12 +1215,12 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   q('.jobs-rail').onclick = (e) => { const b = e.target.closest('[data-filter]'); if (b) { filter = b.dataset.filter; render(); } };
   // A plate's stub does what it names (Merge, Answer, approve or skip a draft, a
   // move) or opens what has to be read first; a node opens its sub-job, the title the job.
-  function runAsk(jobId, subId, act) {
+  function runAsk(jobId, subId, act, session) {
     const job = data.jobs.find((j) => j.id === jobId);
     const sub = job?.subJobs.find((s) => s.id === subId);
     if (!job) return;
     if (act === 'merge' && sub) return send({ type: 'job-action', id: job.id, subJobId: sub.id, action: 'approve-merge', head: sub.pr?.head, ...(sub.ready ? { readyReceiptId: sub.ready.receiptId } : {}) });
-    if (act === 'session' && sub) return onSession(sub.sessions.at(-1));
+    if (act === 'session' && session) return onSession(session);
     if (['approve-write', 'skip-write'].includes(act) && sub) return send({ type: 'job-action', id: job.id, subJobId: sub.id, action: act });
     openDetail(job.id, subId);
     if (act.startsWith('move:') && sub) openMove(job, sub, act.slice(5));
@@ -1242,7 +1251,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     const chip = e.target.closest('[data-place]'); if (chip) return openPlacePop(chip);
     const go = e.target.closest('[data-ask]');
     // One click per decision: a sent one disables the stub until the next tick redraws it.
-    if (go) { if (['merge', 'approve-write', 'skip-write'].includes(go.dataset.ask)) go.parentElement.querySelectorAll('button').forEach((b) => { b.disabled = true; }); return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask); }
+    if (go) { if (['merge', 'approve-write', 'skip-write'].includes(go.dataset.ask)) go.parentElement.querySelectorAll('button').forEach((b) => { b.disabled = true; }); return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask, go.dataset.session); }
     const el = e.target.closest('[data-job]'); if (el) return openDetail(el.getAttribute('data-job'), el.getAttribute('data-sub'));
     // Anywhere else on a plate (the sky, the gaps between chips) opens the job, as the title does.
     const plate = e.target.closest('.job-plate'); if (plate && !e.target.closest('a,button')) openDetail(plate.dataset.board, '');

@@ -149,6 +149,31 @@ test('a step waiting on a prompt is the human’s: it says so, and it counts und
   f.q('#job-dialog [data-fab-session]').click(); assert.deepEqual(f.sessions, ['s9'], 'the job’s one button opens the prompt');
 });
 
+test('a planning session waiting on a prompt is one click away, from the plate and from the job', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.plan = null;
+  job.runs = [{ id: 'p1', subJobId: null, phase: 'planning', stopped: false, status: 'needs-you', sessionId: 'plan-card' }];
+  f.view.update(f.data);
+  assert.equal(f.q('[data-board="job1"] .job-plate-detail').textContent, 'Planning');
+  f.q('[data-board="job1"] .job-plate-go').click();
+  assert.deepEqual(f.sessions, ['plan-card'], 'Answer goes straight to the planning card');
+  f.q('.job-plate-open').click();
+  const fab = f.q('#job-dialog [data-fab-session]');
+  assert.equal(fab.title, 'Planning · Prompt waiting');
+  fab.click(); assert.deepEqual(f.sessions, ['plan-card', 'plan-card']); assert.equal(f.q('#job-dialog').open, false);
+});
+
+test('the job’s button answers a waiting prompt before a merge, and says how many more wait', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'head1', checkStatus: 'passing', checks: [] } },
+    { ...sub('docs'), kind: 'session', stage: 'session', sessions: ['docs-card'] }, { ...sub('ui'), kind: 'session', stage: 'session', sessions: ['ui-card'] }];
+  job.runs = [{ id: 'r1', subJobId: 'docs', phase: 'session', stopped: false, status: 'needs-you', startedAt: 1 }, { id: 'r2', subJobId: 'ui', phase: 'session', stopped: false, status: 'needs-you', sessionId: 'ui-card', startedAt: 2 }];
+  f.view.update(f.data); f.q('.job-plate-open').click();
+  assert.equal(f.q('#job-dialog [data-action="approve-merge"]'), null, 'the merge waits behind the prompt');
+  const fab = f.q('#job-dialog [data-fab-session]');
+  assert.equal(fab.title, 'Deliver docs · Prompt waiting · +1 more waiting');
+  fab.click(); assert.deepEqual(f.sessions, ['docs-card']);
+});
+
 test('the event box names what happened and the move the agent suggested, and that move is the hot one', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', error: 'The <proto> files are out of sync with the API',

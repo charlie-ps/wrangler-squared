@@ -263,6 +263,12 @@ const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === 
 // tick (server/index.js withRunStatus). 'needs-you' is the one the board acts on:
 // an automated step stuck on a prompt is nobody's but the human's.
 export const runStatus = (job, sub) => liveRun(job, sub)?.status ?? null;
+// Every live run stuck on a prompt, oldest first, with the card to answer it on:
+// the run's own, since a planning run has no sub-job to look one up on.
+export const promptsWaiting = (job) => job.runs.filter((r) => !r.stopped && r.status === 'needs-you')
+  .map((run) => { const sub = job.subJobs?.find((s) => s.id === run.subJobId) || null; return { run, sub, sessionId: run.sessionId || sub?.sessions?.at(-1) || null }; })
+  .filter((p) => p.sessionId).sort((a, b) => (a.run.startedAt || 0) - (b.run.startedAt || 0));
+export const promptWhere = (job, p) => p.sub?.title || (job.stage === 'active' ? 'Re-planning' : 'Planning');
 export const sessionColumn = (job, sub) => sub.stage === 'session' ? (liveRun(job, sub) ? 'running' : 'queued') : sub.stage === 'review' ? 'review' : 'done';
 export const humanColumn = (sub) => sub.stage !== 'human' ? 'done' : sub.state === 'doing' ? 'doing' : 'waiting';
 // Nothing automatic will ever move a waiting human task whose prerequisites are

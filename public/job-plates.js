@@ -2,7 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, runStatus, codeAwaitingReview, deploymentStalled, mergeApprovable, eventFor, movesFor, replanProposed } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, eventFor, movesFor, replanProposed } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub } from './job-state.js';
 
 // The board as a wall of night skies: each job's plan is drawn into a quiet sky
@@ -174,10 +174,17 @@ export function placePopHtml(job, i) {
 // read first. Null when nothing needs you.
 export function plateAsk(job) {
   const state = jobState(job);
-  if (!['needs', 'failing'].includes(state)) return null;
   const tone = state === 'failing' ? 'bad' : 'warn';
   const whole = (label, button, detail = '') => ({ tone, label, detail, button, icon: state === 'failing' ? ICONS.x : ICONS.doc, act: 'open', sub: '' });
   if (job.error) return whole('Needs attention', 'Open');
+  // An agent stuck on a prompt outranks anything else waiting on you, and is
+  // answered on its own card whether or not the job rolls up to "needs you".
+  const prompts = promptsWaiting(job);
+  if (prompts.length) {
+    const [p] = prompts;
+    return { tone, label: 'Prompt waiting', detail: `${promptWhere(job, p)}${prompts.length > 1 ? ` +${prompts.length - 1}` : ''}`, button: 'Answer', icon: ICONS.terminal, act: 'session', sub: p.sub?.id || '', session: p.sessionId };
+  }
+  if (!['needs', 'failing'].includes(state)) return null;
   if (!live(job)) return job.plan ? whole('Plan ready', 'Review plan', kindCountLabel(job.plan.subJobs)) : whole(jobLabel(job), 'Open');
   const lead = leadSub(job, state);
   if (!lead) return whole(jobLabel(job), replanProposed(job) ? 'Review' : 'Open');
@@ -196,7 +203,6 @@ export function plateAsk(job) {
     const made = isMakeWrite(lead);
     return { tone, label: made ? 'Check output' : 'Draft ready', detail: '', button: writeVerb(lead), icon: ICONS.eye, act: 'approve-write', sub: lead.id, alt: made ? null : { label: 'Skip', act: 'skip-write' } };
   }
-  if (runStatus(job, lead) === 'needs-you' && lead.sessions.length) return ask(subLabel(job, lead), 'Answer', ICONS.terminal, 'session');
   if (mergeApprovable(job, lead)) return { ...ask(`Merge${n ? ` #${n}` : ''}`, 'Merge', ICONS.merge, 'merge'), detail: `Checks green · ${detail}` };
   if (codeAwaitingReview(lead)) return ask('Review code', 'Review', ICONS.code);
   if (isSessionSub(lead)) return ask(subLabel(job, lead), 'Review', ICONS.doc);
@@ -219,7 +225,7 @@ export function plateHtml(job, scene, art = 'quiet') {
   const empty = job.stage === 'planning' && !job.plan && !job.cancelledAt ? 'Planning' : 'Not planned yet';
   const tip = [subs.length ? kindCountLabel(subs) : '', reviewFlagsLabel(job)].filter(Boolean).join(' · ');
   const foot = ask
-    ? `<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span>${ask.alt ? `<button type="button" class="job-plate-alt" data-ask="${esc(ask.alt.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.alt.label)}</button>` : ''}<button type="button" class="job-plate-go" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.button)}</button></div>`
+    ? `<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span>${ask.alt ? `<button type="button" class="job-plate-alt" data-ask="${esc(ask.alt.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.alt.label)}</button>` : ''}<button type="button" class="job-plate-go" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}"${ask.session ? ` data-session="${esc(ask.session)}"` : ''}>${esc(ask.button)}</button></div>`
     : `<div class="job-plate-foot"><span class="job-plate-glyph">${stateIconHtml(state)}</span><span class="job-status">${esc(jobLabel(job))}</span>${when ? `<span class="job-plate-when">${esc(when)}</span>` : ''}</div>`;
   const repo = repoLine(job), graph = work.length ? skyGraphHtml(job, scene, lvl, full) : null;
   const dim = !stateSolid(state);

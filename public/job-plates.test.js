@@ -39,6 +39,19 @@ test('the stub names the one thing a job needs from you, and nothing when it nee
   assert.equal(plateAsk(job({ paused: true, subJobs: [green] })), null, 'a paused job asks nothing');
 });
 
+test('a prompt waiting anywhere is the stub, answered on the waiting run’s own card', () => {
+  const planning = plateAsk(job({ stage: 'planning', plan: null, runs: [{ id: 'p', subJobId: null, stopped: false, status: 'needs-you', sessionId: 'plan-card' }] }));
+  assert.deepEqual(['label', 'detail', 'button', 'act', 'sub', 'session'].map((k) => planning[k]), ['Prompt waiting', 'Planning', 'Answer', 'session', '', 'plan-card'], 'the planning run has no sub-job, but it has a card');
+  const green = sub('api', { stage: 'pr', pr: { url: 'https://github.com/o/r/pull/7', head: 'h7', checkStatus: 'passing', checks: [] } });
+  const note = sub('note', { kind: 'session', stage: 'session', sessions: ['old-card'] });
+  const docs = sub('docs', { kind: 'session', stage: 'session' });
+  const behind = plateAsk(job({ subJobs: [green, note], runs: [{ id: 'n', subJobId: 'note', stopped: false, status: 'needs-you', sessionId: 'note-card' }] }));
+  assert.deepEqual(['label', 'detail', 'act', 'sub', 'session'].map((k) => behind[k]), ['Prompt waiting', 'Deliver note', 'session', 'note', 'note-card'], 'a prompt outranks a green PR earlier in the plan');
+  const two = plateAsk(job({ subJobs: [green, note, docs], runs: [{ id: 'd', subJobId: 'docs', stopped: false, status: 'needs-you', sessionId: 'docs-card', startedAt: 1 }, { id: 'n', subJobId: 'note', stopped: false, status: 'needs-you', sessionId: 'note-card', startedAt: 2 }] }));
+  assert.deepEqual([two.detail, two.session], ['Deliver docs +1', 'docs-card'], 'the longest-waiting first, the rest counted');
+  assert.match(plateHtml(job({ subJobs: [note], runs: [{ id: 'n', subJobId: 'note', stopped: false, status: 'needs-you', sessionId: 'note-card' }] }), 'sonnet'), /data-ask="session" data-job="job1" data-sub="note" data-session="note-card"/);
+});
+
 test('a plate draws its plan as kind shapes in the sky, dashed where work waits for a deploy, and escapes what agents wrote', () => {
   const j = job({ title: '<script>x</script>', subJobs: [sub('api', { stage: 'done', deployed: { at: 1 } }), sub('web', { after: ['api'], stage: 'implementation' }), sub('s', { kind: 'session', after: ['web'], stage: 'session' }), sub('h', { kind: 'human', after: ['s'], stage: 'human' })], runs: [{ id: 'r', subJobId: 'web', stopped: false, status: 'working' }] });
   const html = plateHtml(j, 'opus');
