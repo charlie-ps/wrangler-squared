@@ -308,6 +308,44 @@ export function redPipeline(sub) {
   return null;
 }
 export const redAccepted = (sub) => !!sub?.acceptedRed && sub.acceptedRed.ref === (sub.stage === 'pr' ? sub.pr?.head : sub.stage === 'deployment' ? sub.pr?.mergeCommit : undefined);
+// A proposal's options as the human picks between them (server/job-replan.js
+// optionsOf): the recommended one first, then up to two alternatives. Each has
+// its own merged plan, changes and pinned actions.
+export const proposalOptions = (proposal) => [proposal, ...(proposal?.alternatives || [])];
+// What an action says it does and what it is pinned to, in words; the node it
+// acts on carries `actionMark` in the graph (job-graph.js MARKS).
+export const actionMark = (a) => (a.type === 'mark' ? `mark-${a.position}` : a.type);
+const PIN_NOUN = { head: 'head', merge: 'merge', stage: 'stage' };
+export const pinLine = (pin) => pin ? `pinned to ${PIN_NOUN[pin.at] || pin.at} ${String(pin.ref ?? 'none').slice(0, 9)}` : '';
+export function actionLine(a, plan) {
+  const title = (id) => plan.subJobs.find((s) => s.id === id)?.title || id;
+  const name = title(a.sub);
+  if (a.type === 'accept-red') return { text: `Accept red: ${name}`, detail: a.pin?.at === 'merge' ? 'count the merge as landed' : 'merge as it stands' };
+  if (a.type === 'recover') return { text: `Recover: ${name}`, detail: `lands when “${title(a.fix)}” deploys` };
+  if (a.type === 'mark') return { text: `Mark ${a.position === 'merged' ? 'merged' : 'done'}: ${name}`, detail: a.evidence || '' };
+  return { text: `Rework: ${name}`, detail: a.note || '' };
+}
+// The chips under a step's Request changes box (server/job-actions.js). An instant
+// chip builds its proposal with no agent (the `quick-change` action); a Claude chip
+// only pre-fills the box. Mirrors the server's gates, so one it would refuse is not
+// drawn, and none while a plan change is pending.
+export function quickChips(job, sub) {
+  if (!sub || job.stage !== 'active' || job.cancelledAt || replanPending(job)) return [];
+  if (sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage) || isWriteSub(sub)) return [];
+  const pr = isPrSub(sub), human = isHumanSub(sub);
+  const red = redPipeline(sub);
+  const instant = [
+    red && { kind: 'accept-red', label: 'Accept red', hint: red === 'checks' ? 'Merge this PR as it stands, red checks and all. Builds a proposal pinned to this head; no agent runs.' : 'Count the merge as landed despite the failing post-merge run. Builds a proposal pinned to this merge commit; no agent runs.' },
+    pr && sub.stage === 'pr' && { kind: 'mark-merged', label: 'Mark merged', hint: 'You merged it yourself. The next poll reads the merge commit and takes the normal merged path.' },
+    !human && { kind: 'mark-done', label: 'Mark done', hint: 'Done elsewhere, or already covered. Releases whatever waits on it.' },
+    !isFrozen(sub) && { kind: 'drop', label: 'Drop', hint: 'Leave this sub-job out. The proposal shows anything that would then wait forever.' },
+  ].filter(Boolean).map((c) => ({ ...c, instant: true }));
+  const claude = human ? [] : [
+    { label: 'Fix it with a note…', fill: `Fix ${sub.title}: ` },
+    ...(pr ? [{ label: 'Split out a follow-up PR…', fill: `Split out of ${sub.title}: ` }, { label: 'This needs a new ticket…', fill: 'New ticket for: ' }] : []),
+  ].map((c) => ({ ...c, instant: false }));
+  return [...instant, ...claude];
+}
 // Who an idea at each view goes to (server/job-change.js routes it): the agent
 // that holds the work when there is one, else the planner.
 const CHANGE_HINT = {

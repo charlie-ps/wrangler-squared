@@ -56,7 +56,8 @@ function placeHeadHtml(p) {
 
 // A proposed change to a running job's plan (`markOf`) is drawn static, each
 // node in its live state and labelled with what approval would do to it.
-const MARKS = { frozen: 'Locked · already landed', removed: 'Will be cancelled', added: 'New', edited: 'Edited', kept: 'Unchanged' };
+const MARKS = { frozen: 'Locked · already landed', removed: 'Will be cancelled', added: 'New', edited: 'Edited', kept: 'Unchanged',
+  'accept-red': 'Accept red', recover: 'Waits for its fix', rework: 'Rework', 'mark-done': 'Marked done', 'mark-merged': 'Marked merged' };
 export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, openDeps = new Set(), openTickets = new Set(), editing = null, reviewWrites = false } = {}) {
   const subs = plan.subJobs;
   if (!subs.length) return '';

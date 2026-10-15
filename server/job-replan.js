@@ -1,6 +1,7 @@
 import { isPrSub, isWriteSub, isStoryCreate, isMakeWrite, withStoryCreates } from './jobs-schema.js';
 import { dropSub, reworkSub, validatePlan, notStarted } from './job-sub-ops.js';
 import { milestoneReached } from './job-writes.js';
+import { stampActions, checkActions, applyActions } from './job-actions.js';
 
 // Changing the plan of a job that is already running. The human asks with
 // feedback, a planning session proposes a whole plan, and nothing changes until
@@ -133,20 +134,35 @@ export function discardReplan(job) {
 
 // The receipt of a re-planning run is a proposal, never the plan. Merged here so
 // a proposal that breaks a rule is refused to the agent that can still fix it.
-export function proposeReplan(job, run, plan, now) {
-  const { plan: merged, changes } = mergeReplan(job, plan);
-  job.replan = { ...job.replan, proposal: { id: run.id, plan, merged, changes, at: now } };
+// Up to three ranked options: the receipt's own plan first (recommended), then its
+// alternatives; each is merged and its actions stamped with the pins they were
+// written against, so a bad second option refuses the whole receipt.
+export function proposeReplan(job, run, report, now) {
+  const option = (o) => {
+    const { plan: merged, changes } = mergeReplan(job, o.plan);
+    return { label: o.label || null, why: o.why || null, plan: o.plan, merged, changes, actions: stampActions(job, o.actions, merged, changes) };
+  };
+  const [first, ...rest] = [report, ...(report.alternatives || [])].map(option);
+  job.replan = { ...job.replan, proposal: { id: run.id, ...first, ...(report.diagnosis ? { diagnosis: report.diagnosis } : {}), alternatives: rest, at: now } };
 }
+// The proposal's options as the human picks between them: the first is the one
+// recommended, and the only one a proposal without alternatives has.
+export const optionsOf = (proposal) => [proposal, ...(proposal.alternatives || [])];
 
 // Pinned to the proposal the human read, and merged again against the job as it
 // is now: something may have landed since, which is fine unless the proposal
 // changes it. An edit under a live step would change the brief out from under
 // the session working to it; launches are held while a proposal waits, so the
 // step finishes and the human approves again.
-export function approveReplan(job, proposalId, { now, buildSubJob }) {
+export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 }) {
   const proposal = job.replan?.proposal;
   if (!proposal || proposal.id !== proposalId) throw new Error('The proposal changed. Review the latest version before approving.');
-  const { plan, changes } = mergeReplan(job, proposal.plan);
+  const chosen = optionsOf(proposal)[option];
+  if (!chosen) throw new Error('Choose one of the proposal\'s options');
+  const { plan, changes } = mergeReplan(job, chosen.plan);
+  // Every action's pin must still be true, before anything is touched: a claim
+  // about a head or merge commit is refused once that has moved.
+  checkActions(job, chosen.actions, plan);
   // A write is busy while its session runs, the one it leaves or the one it
   // goes to: that session was told its writes as they stood, and a parked one is
   // waiting on its drafts.
@@ -181,6 +197,7 @@ export function approveReplan(job, proposalId, { now, buildSubJob }) {
     job.subJobs.push(sub);
     lines.push({ sub, detail: `Plan change added ${quoted(sub.title)}` });
   }
+  for (const l of applyActions(job, chosen.actions, { now })) lines.push(l);
   // A session waiting on review of its result runs again for a write it now has
   // to make, as Retry on a failed write sends it (job-writes.js reopenWrite).
   const reopened = new Set();
@@ -193,7 +210,7 @@ export function approveReplan(job, proposalId, { now, buildSubJob }) {
     lines.push({ sub: session, detail: `Plan change sent ${quoted(session.title)} back to work to make ${quoted(w.title)}` });
   }
   const summary = [changes.added.length && `${changes.added.length} added`, changes.edited.length && `${changes.edited.length} edited`,
-    changes.removed.length && `${changes.removed.length} cancelled`].filter(Boolean).join(', ') || 'no sub-job changed';
+    changes.removed.length && `${changes.removed.length} cancelled`, chosen.actions?.length && `${chosen.actions.length} ${chosen.actions.length === 1 ? 'action' : 'actions'}`].filter(Boolean).join(', ') || 'no sub-job changed';
   const feedback = job.replan.feedback;
   clearPlanningError(job);
   job.replan = null;
@@ -206,7 +223,9 @@ export function replanStatus(job, sub) {
   const pr = isPrSub(sub) && sub.pr?.url ? ` · PR ${sub.pr.url}` : '';
   const write = isWriteSub(sub) ? ` · ${JSON.stringify(sub.place || { type: 'jira' })} ${JSON.stringify(sub.action)}${sub.by ? ` by ${sub.by}` : ' (predates session-owned writes)'}${sub.result?.url ? ` · at ${sub.result.url}` : ''}`
     : sub.on ? ` · on ${sub.on.sub}/${sub.on.at}` : '';
+  const red = sub.pr?.checkStatus === 'failing' && sub.stage === 'pr' ? ` · checks FAILING at head ${sub.pr.head}${sub.pr.dirty ? ' (merge conflicts)' : ''}`
+    : sub.stage === 'deployment' && sub.deploymentResult?.status === 'failing' ? ` · post-merge run FAILING at merge ${sub.pr?.mergeCommit}${sub.recoveredBy ? ` (recovering via ${sub.recoveredBy})` : ''}` : '';
   const run = liveRun(job, sub.id) ? ' · a step is running' : '';
   const state = sub.cancelledAt ? 'cancelled' : `${sub.stage}${sub.state ? `/${sub.state}` : ''}`;
-  return `- ${sub.id} (${sub.kind || 'pr'}) ${JSON.stringify(sub.title)}: ${state}${pr}${write}${run}${isFrozen(sub) ? ' · FROZEN' : ''}`;
+  return `- ${sub.id} (${sub.kind || 'pr'}) ${JSON.stringify(sub.title)}: ${state}${pr}${red}${write}${run}${isFrozen(sub) ? ' · FROZEN' : ''}`;
 }

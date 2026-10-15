@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeHint, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeHint, quickChips, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
 import { mountSkies } from './job-skylines.js';
@@ -383,6 +383,9 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     if (!dialog.open) dialog.showModal();
   }
   const more = (key, summary, body, cls = '') => `<details class="job-more ${cls}" data-keep="${key}" ${openMore.has(key) ? 'open' : ''}><summary>${summary}</summary>${body}</details>`;
+  // Which of a proposal's options is picked; it resets with a new proposal.
+  let optionPick = { id: null, i: 0 };
+  const pickedOption = (job) => (optionPick.id === job.replan?.proposal?.id && proposalOptions(job.replan.proposal)[optionPick.i] ? optionPick.i : 0);
   function action(name, extra = {}, subId = selected.subId) {
     send({ type: 'job-action', id: selected.jobId, subJobId: subId || undefined, action: name, ...extra });
   }
@@ -557,7 +560,9 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   function changeBoxHtml(job, sub, { fold = false } = {}) {
     const view = changeView(job, sub);
     if (!view || (replanPending(job) && (!sub ? !job.replan.proposal : ['code', 'session', 'pr'].includes(view.at)))) return '';
-    const box = `<div class="job-change" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}"><label>What should change?<small>${esc(changeHint(view.at))}</small><textarea rows="3" maxlength="8000" aria-label="Request changes"></textarea></label><div class="job-change-send"><button type="button" class="primary" data-change-send disabled>${ICONS.edit}Send</button></div></div>`;
+    const chips = quickChips(job, sub);
+    const quick = chips.length ? `<div class="job-quick"><div class="job-quick-chips">${chips.map((c, i) => `<button type="button" ${c.instant ? `data-quick="${c.kind}"` : `data-fill="${i}"`} title="${esc(c.hint || 'Pre-fills the box below. An agent works out the change.')}"><i class="${c.instant ? '' : 'agent'}">${c.instant ? 'Instant' : 'Claude'}</i>${esc(c.label)}</button>`).join('')}</div></div>` : '';
+    const box = `<div class="job-change" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}">${quick}<label>What should change?<small>${esc(changeHint(view.at))}</small><textarea rows="3" maxlength="8000" aria-label="Request changes"></textarea></label><div class="job-change-send"><button type="button" class="primary" data-change-send disabled>${ICONS.edit}Send</button></div></div>`;
     return fold ? more('change', `${ICONS.edit}${sub ? 'Request changes' : 'Change plan'}`, box) : `<h3>Request changes</h3>${box}`;
   }
   const appbar = (title, chips, kicker = '') => `<header class="job-appbar">${kicker}<h2>${esc(title)}</h2><div class="job-chips job-detail-meta">${chips}</div></header>`;
@@ -623,15 +628,23 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   // The proposal laid over the live job (server/job-replan.js): every node in its
   // current state, labelled with what approving does to it, and the same in words.
   function proposalHtml(job) {
-    const { merged, changes } = job.replan.proposal;
+    const proposal = job.replan.proposal;
+    const options = proposalOptions(proposal);
+    const picked = pickedOption(job);
+    const { merged, changes, actions = [] } = options[picked];
     const liveSub = (id) => job.subJobs.find((x) => x.id === id);
-    const markOf = (s) => changes.frozen.includes(s.id) ? 'frozen' : changes.removed.includes(s.id) ? 'removed' : changes.added.includes(s.id) ? 'added' : changes.edited.some((e) => e.id === s.id) ? 'edited' : 'kept';
+    const acting = new Map(actions.map((a) => [a.sub, a]));
+    const markOf = (s) => acting.has(s.id) ? actionMark(acting.get(s.id)) : changes.frozen.includes(s.id) ? 'frozen' : changes.removed.includes(s.id) ? 'removed' : changes.added.includes(s.id) ? 'added' : changes.edited.some((e) => e.id === s.id) ? 'edited' : 'kept';
     const title = (id) => merged.subJobs.find((s) => s.id === id)?.title || id;
     const pr = (id) => { const s = liveSub(id); return s?.pr?.url ? ` · ${link(s.pr.url, `PR #${prNumber(s)}`)} stays open on GitHub` : ''; };
     const items = [...changes.added.map((id) => `<li class="job-mark-added">New: ${esc(title(id))}</li>`),
       ...changes.edited.map((e) => `<li class="job-mark-edited">Edited: ${esc(title(e.id))} <small>${esc(e.fields.join(', '))}</small></li>`),
-      ...changes.removed.map((id) => `<li class="job-mark-removed">Will be cancelled: ${esc(title(id))}${pr(id)}</li>`)];
-    return `<p class="job-replan-ask"><b>You asked</b> ${esc(job.replan.feedback)}</p>${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, openTickets, reviewWrites: job.reviewWrites })}
+      ...changes.removed.map((id) => `<li class="job-mark-removed">Will be cancelled: ${esc(title(id))}${pr(id)}</li>`),
+      ...actions.map((a) => { const l = actionLine(a, merged); return `<li class="job-mark-act">${esc(l.text)} <small>${esc(l.detail)}</small><small class="pinned">${esc(pinLine(a.pin))}</small></li>`; })];
+    const d = proposal.diagnosis;
+    const diagnosis = d ? `<div class="job-triage"><header>${ICONS.sparkle}<b>Wrangler looked into it</b></header><p>${esc(d.summary)}</p>${d.evidence?.length ? `<ul>${d.evidence.map((e) => `<li><span>${esc(e.label)}</span>${esc(e.detail)}</li>`).join('')}</ul>` : ''}</div>` : '';
+    const choose = options.length > 1 ? `<fieldset class="job-options"><legend>Options</legend>${options.map((o, i) => `<label class="job-option ${i === picked ? 'sel' : ''}"><input type="radio" name="opt" value="${i}" ${i === picked ? 'checked' : ''}><span><b>${esc(o.label || `Option ${i + 1}`)}${i === 0 ? '<span class="job-option-rec">Recommended</span>' : ''}</b>${o.why ? `<small>${esc(o.why)}</small>` : ''}</span></label>`).join('')}</fieldset>` : '';
+    return `<p class="job-replan-ask"><b>You asked</b> ${esc(job.replan.feedback)}</p>${diagnosis}${choose}${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, openTickets, reviewWrites: job.reviewWrites })}
       <ul class="job-replan-changes">${items.join('') || '<li>No sub-job changes</li>'}</ul>${planMoreHtml(job, merged)}`;
   }
   // The job dialog's one extended button: the single most urgent thing the job is
@@ -950,7 +963,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     dialog.querySelectorAll('[data-action]').forEach((b) => b.onclick = () => {
       const name = b.dataset.action;
       const target = b.dataset.sub ? job.subJobs.find((s) => s.id === b.dataset.sub) : sub;
-      action(name, name === 'approve-plan' ? { plan: planDraft, revision } : name === 'approve-replan' ? { proposalId: job.replan.proposal.id }
+      action(name, name === 'approve-plan' ? { plan: planDraft, revision } : name === 'approve-replan' ? { proposalId: job.replan.proposal.id, ...(job.replan.proposal.alternatives?.length ? { option: pickedOption(job) } : {}) }
         : { head: target?.pr?.head, sessionReceiptId: target?.result?.receiptId, ...(target?.ready ? { readyReceiptId: target.ready.receiptId } : {}) }, target?.id);
     });
     const humanForm = dialog.querySelector('#job-human-form');
@@ -977,7 +990,11 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       const text = box.querySelector('textarea'), send = box.querySelector('[data-change-send]');
       text.oninput = () => { send.disabled = !text.value.trim(); };
       send.onclick = () => { if (text.value.trim()) action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim() }); };
+      // An instant chip sends what is typed as its note; a Claude chip only fills the box.
+      box.querySelectorAll('[data-quick]').forEach((b) => b.onclick = () => action('quick-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, kind: b.dataset.quick, ...(text.value.trim() ? { note: text.value.trim().slice(0, 180) } : {}) }));
+      box.querySelectorAll('[data-fill]').forEach((b) => b.onclick = () => { text.value = quickChips(job, sub)[+b.dataset.fill].fill; send.disabled = false; text.focus(); text.setSelectionRange(text.value.length, text.value.length); });
     });
+    dialog.querySelectorAll('input[name="opt"]').forEach((r) => r.onchange = () => { optionPick = { id: job.replan.proposal.id, i: +r.value }; renderDetail(); });
     // The note is what the retried session reads as the last line of its
     // history (server/job-prompts.js): a blocked step usually needs one sentence
     // from the human ("that file is a template, stage it"), and Retry was the one
@@ -1161,6 +1178,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }
       return;
     }
+    if (msg?.action === 'quick-change' && msg.jobId === selected?.jobId) { openDetail(msg.jobId); return; }
     if (dialog.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;
     dialog.close();
   }, openDetail };

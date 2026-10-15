@@ -2340,3 +2340,49 @@ test('a merge into a branch no workflow runs on is the delivery', async () => {
   assert.equal(next.expected, false, 'the runner then marks it MERGE_IS_DELIVERY');
   assert.match(next.summary, /Merge completes it/);
 });
+
+// --- Proposals that carry actions (design A2) ---
+
+test('an instant chip proposes an action with no agent, and approving applies it only while its pin holds', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web', ['api'])]));
+  f.alive.delete(f.workerFor('api').sid); await f.tick();
+  const redPr = (head) => f.store.update(f.job.id, (j) => { Object.assign(j.subJobs[0], { stage: 'pr', state: 'watching', pr: { url: 'https://github.com/o/r/pull/1', head, checkStatus: 'failing' } }); });
+  redPr('h1');
+  const view = changeView(f.store.get(f.job.id), f.store.get(f.job.id).subJobs[0]);
+  assert.throws(() => f.store.action(f.job.id, 'quick-change', { subJobId: 'api', at: view.at, ref: 'old', kind: 'accept-red' }), /changed since you looked/);
+  const launched = f.launched.length;
+  f.store.action(f.job.id, 'quick-change', { subJobId: 'api', at: view.at, ref: view.ref, kind: 'accept-red', note: 'flaky e2e' });
+  await f.tick();
+  let job = f.store.get(f.job.id);
+  assert.deepEqual(job.replan.proposal.actions.map((a) => [a.type, a.sub, a.pin]), [['accept-red', 'api', { at: 'head', ref: 'h1' }]]);
+  assert.equal(job.subJobs[0].acceptedRed, undefined);
+  assert.equal(f.launched.length, launched, 'no planner runs for an instant chip');
+  redPr('h2');
+  assert.throws(() => f.store.action(f.job.id, 'approve-replan', { proposalId: job.replan.proposal.id }), /has moved since this was proposed/);
+  redPr('h1');
+  f.store.action(f.job.id, 'approve-replan', { proposalId: job.replan.proposal.id, option: 0 });
+  job = f.store.get(f.job.id);
+  assert.equal(job.replan, null);
+  assert.deepEqual([job.subJobs[0].acceptedRed.ref, job.subJobs[0].acceptedRed.note, job.subJobs[0].mergeApprovedHead], ['h1', 'flaky e2e', 'h1']);
+  assert.deepEqual(job.moves.filter((m) => /quick|replan/.test(m.move)).map((m) => m.move), ['quick-change', 'approve-replan', 'replan']);
+});
+
+test('a planner\'s receipt may carry a diagnosis, ranked options and actions; the human picks one', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web', ['api'])]));
+  f.alive.delete(f.workerFor('api').sid); await f.tick();
+  f.store.update(f.job.id, (j) => { Object.assign(j.subJobs[0], { stage: 'deployment', state: 'watching', pr: { url: 'https://github.com/o/r/pull/1', head: 'h1', mergeCommit: 'm1' }, deploymentResult: { status: 'failing' } }); });
+  change(f, 'api', 'The deploy failed'); await f.tick();
+  const planner = f.last();
+  const prompt = jobPrompt(f.store.get(f.job.id), null, planner.run);
+  assert.match(prompt, /post-merge run FAILING at merge m1/); assert.match(prompt, /ACTIONS on a live sub-job/); assert.match(prompt, /alternatives\?/);
+  const both = plan([spec('api'), spec('web', ['api']), spec('fix')]);
+  assert.throws(() => f.report({ kind: 'plan', plan: both, actions: [{ type: 'recover', sub: 'api', fix: 'ghost' }] }, planner), /id of a PR sub-job/);
+  f.report({ kind: 'plan', plan: both, label: 'Recover with a PR', why: 'Fix the migration', actions: [{ type: 'recover', sub: 'api', fix: 'fix' }],
+    diagnosis: { summary: 'The migration is not idempotent', evidence: [{ label: 'run 1', detail: 'column exists' }] },
+    alternatives: [{ label: 'Accept the failed run', plan: plan([spec('api'), spec('web', ['api'])]), actions: [{ type: 'accept-red', sub: 'api' }] }] }, planner);
+  const proposal = f.store.get(f.job.id).replan.proposal;
+  assert.deepEqual([proposal.label, proposal.diagnosis.summary, proposal.alternatives.length, proposal.actions[0].pin], ['Recover with a PR', 'The migration is not idempotent', 1, { at: 'merge', ref: 'm1' }]);
+  f.store.action(f.job.id, 'approve-replan', { proposalId: proposal.id, option: 1 });
+  const job = f.store.get(f.job.id);
+  assert.deepEqual([job.subJobs[0].acceptedRed.ref, job.subJobs[0].recoveredBy, job.subJobs.some((s) => s.id === 'fix')], ['m1', undefined, false]);
+});

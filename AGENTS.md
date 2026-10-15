@@ -113,6 +113,18 @@ feature).
   resumable agent (the tree's or result's session, an open PR's repair session)
   else the planner, which proposes a plan change. The box is not a `<form>`, so
   a tick's redraw is held back only while text is typed in it.
+- **A proposal can carry actions and up to three ranked options**
+  (`server/job-actions.js`, applied by `approveReplan`): `accept-red`, `mark`
+  (merged/done, `evidence` required), `rework` and `recover {fix}` on a live
+  sub-job. The server stamps each with a pin (PR head, merge commit or stage) at
+  proposal time and `approve-replan` refuses if it moved; the planner never
+  writes a pin (the schema is strict). Options are the receipt's own plan first,
+  then `alternatives` (max 2), each merged and stamped when the receipt lands, so
+  one bad option refuses the whole receipt; approve takes `option`. The instant
+  chips (Accept red, Mark merged/done, Drop) are `quick-change`
+  (`job-change.js quickChange`): the same proposal built with no agent, id
+  `quick_<ms>`, `instant: true`. `quickChips` in `public/jobs.js` mirrors the
+  gates; an action is drawn as a mark on its graph node (`actionMark`).
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one

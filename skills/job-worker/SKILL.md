@@ -42,6 +42,25 @@ the `runId` from your prompt and the receipt kind it names.
 - Keep your final terminal output under 8 short lines — nobody reads it unless
   something went wrong.
 
+## Planning a change to a running job
+
+When your prompt is a plan change, your `plan` receipt is a **proposal**: nothing
+applies until the human approves it, and each action is refused at approval if
+the PR head, merge commit or stage it was written against has moved.
+
+- `diagnosis:{summary, evidence?:[{label, detail}]}` says what you found, with up
+  to six pieces of evidence (a run, a file, a PR).
+- `actions:[{type, sub, …}]` act on live sub-jobs, one per sub-job:
+  `accept-red {note?}` (unrelated failing checks, or a failing post-merge run),
+  `mark {position:"merged"|"done", evidence}` (**`evidence` is required**: the PR
+  or ticket that shows it), `rework {note}` (back to its own agent), and
+  `recover {fix}` for a merged sub-job whose post-merge run failed: add a PR
+  sub-job that fixes it and name its id as `fix`. Never use accept-red or mark
+  to hide a real failure.
+- Up to three ranked options: your own `plan` and `actions` are option 1, the
+  recommended one, with `label` and `why`; `alternatives:[{label, why?, plan,
+  actions?}]` hold at most two more, each a whole plan.
+
 ## Working in a worktree (PR steps)
 
 - **If your prompt says to leave the changes uncommitted, do exactly that.** The

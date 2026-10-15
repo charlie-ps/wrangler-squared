@@ -1931,3 +1931,75 @@ test('Land on is optional: left blank the job carries no base, filled it is sent
   form.dispatchEvent(f.event('submit'));
   assert.equal(f.sent.at(-1).job.base, 'next');
 });
+
+test('a red PR offers instant chips (no agent) and Claude chips (pre-fill); an instant one sends its pin and the typed note', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', checkStatus: 'failing', checks: [] } }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
+  f.view.update(f.data); f.q('.job-plate-graph [data-sub="api"]').dispatchEvent(f.event('click'));
+  const chips = () => [...document.querySelectorAll('.job-quick-chips button')].map((b) => b.textContent);
+  assert.deepEqual(chips(), ['InstantAccept red', 'InstantMark merged', 'InstantMark done', 'InstantDrop', 'ClaudeFix it with a note…', 'ClaudeSplit out a follow-up PR…', 'ClaudeThis needs a new ticket…']);
+  f.q('[data-fill="4"]').click();
+  assert.equal(f.q('.job-change textarea').value, 'Fix Deliver api: ');
+  assert.equal(f.q('[data-change-send]').disabled, false, 'a pre-filled box can be sent');
+  assert.equal(f.sent.at(-1)?.action, undefined, 'a Claude chip sends nothing by itself');
+  const text = f.q('.job-change textarea'); text.value = 'flaky e2e'; text.dispatchEvent(f.event('input'));
+  f.q('[data-quick="accept-red"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'quick-change', at: 'pr', ref: 'h1', kind: 'accept-red', note: 'flaky e2e' }, 'pinned to the head on screen');
+  f.q('.job-dialog-close').click();
+  f.q('.job-plate-graph [data-sub="web"]').dispatchEvent(f.event('click'));
+  assert.deepEqual(chips(), ['InstantMark done', 'InstantDrop', 'ClaudeFix it with a note…', 'ClaudeSplit out a follow-up PR…', 'ClaudeThis needs a new ticket…'], 'accept red and mark merged only where there is something red or an open PR');
+});
+
+test('no chips while a plan change is pending, and a merged sub-job offers Accept red but not Drop', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'deployment', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', mergeCommit: 'm1' }, deploymentResult: { status: 'failing', runs: [] } }, { ...sub('web'), stage: 'implementation', state: 'queued' }];
+  f.view.update(f.data); f.q('.job-plate-graph [data-sub="api"]').dispatchEvent(f.event('click'));
+  const chips = () => [...document.querySelectorAll('.job-quick-chips button')].map((b) => b.textContent.replace(/^(Instant|Claude)/, ''));
+  assert.deepEqual(chips().slice(0, 2), ['Accept red', 'Mark done'], 'a merged sub-job can accept its failing post-merge run but cannot be dropped');
+  assert.ok(!chips().includes('Drop'));
+  job.replan = { feedback: 'x', at: 1, proposal: null }; f.view.update(f.data);
+  assert.deepEqual(chips(), []);
+});
+
+test('a proposal with a diagnosis, ranked options and actions: options switch the graph, actions are marks on the node, approve names the option', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  const pr = { url: 'https://github.com/org/repo/pull/7', head: 'h1', checkStatus: 'failing' };
+  job.subJobs = [{ ...sub('api'), stage: 'pr', state: 'watching', pr }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
+  job.plan = { ...plan, subJobs: [sub('api'), sub('web', ['api'])] };
+  const changes = (extra) => ({ frozen: [], kept: ['api', 'web'], edited: [], added: [], removed: [], ...extra });
+  const fixed = { ...job.plan, subJobs: [sub('flake'), { ...sub('api'), after: ['flake'] }, sub('web', ['api'])] };
+  job.replan = { feedback: 'Checks red', at: 1, previous: null, proposal: { id: 'run_p', label: 'Accept the red checks', why: 'Unrelated <i>flake</i>', plan: job.plan, merged: job.plan, changes: changes(),
+    actions: [{ type: 'accept-red', sub: 'api', pin: { at: 'head', ref: 'h1abcdef123' } }],
+    diagnosis: { summary: 'login-flow.spec <b>times out</b>', evidence: [{ label: 'run 88213', detail: 'e2e' }] },
+    alternatives: [{ label: 'Fix the flaky test first', why: 'A new PR first', plan: fixed, merged: fixed, changes: changes({ added: ['flake'], edited: [{ id: 'api', fields: ['after'] }], kept: ['web'] }), actions: [] }] } };
+  f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
+  const html = () => f.q('#job-dialog').innerHTML;
+  assert.match(f.q('.job-triage').textContent, /Wrangler looked into it.*times out.*run 88213e2e/);
+  assert.ok(!html().includes('<b>times out</b>') && !html().includes('<i>flake</i>'), 'agent text is escaped');
+  assert.deepEqual([...document.querySelectorAll('.job-option b')].map((b) => b.textContent), ['Accept the red checksRecommended', 'Fix the flaky test first']);
+  assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Accept red', 'the action is drawn on the node it acts on');
+  assert.match(f.q('.job-replan-changes .job-mark-act').textContent, /Accept red: Deliver api\s*merge as it stands\s*pinned to head h1abcdef1/);
+  f.q('[data-action="approve-replan"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_p', option: 0 });
+  const second = f.q('input[name="opt"][value="1"]'); second.checked = true; second.dispatchEvent(f.event('change'));
+  assert.equal(f.q('.job-node[data-node="flake"] .job-mark').textContent, 'New');
+  assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Edited');
+  assert.equal(document.querySelectorAll('.job-replan-changes .job-mark-act').length, 0, 'the other option\'s action is not shown');
+  assert.ok(f.q('.job-option.sel').textContent.includes('Fix the flaky test first'));
+  f.q('[data-action="approve-replan"]').click();
+  assert.equal(f.sent.at(-1).option, 1);
+});
+
+test('a recover is a mark on the merged node that waits for its fix, and a proposal without options sends no option', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'deployment', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', mergeCommit: 'm1' }, deploymentResult: { status: 'failing' } }];
+  job.plan = { ...plan, subJobs: [sub('api')] };
+  const merged = { ...job.plan, subJobs: [sub('api'), sub('fix')] };
+  job.replan = { feedback: 'Deploy failed', at: 1, previous: null, proposal: { id: 'run_q', plan: merged, merged, changes: { frozen: ['api'], kept: [], edited: [], added: ['fix'], removed: [] }, actions: [{ type: 'recover', sub: 'api', fix: 'fix', pin: { at: 'merge', ref: 'm1' } }] } };
+  f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
+  assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Waits for its fix');
+  assert.match(f.q('.job-replan-changes .job-mark-act').textContent, /Recover: Deliver api\s*lands when “Deliver fix” deploys\s*pinned to merge m1/);
+  assert.equal(f.q('.job-options'), null, 'one option needs no chooser');
+  f.q('[data-action="approve-replan"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_q' });
+});

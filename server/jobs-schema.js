@@ -404,8 +404,24 @@ export const outputSchema = z.union([z.object({ id, url: placeLinkSchema, title:
 // being its channel or page.
 export const draftSchema = z.object({ id, text: commentSchema.optional(), title: line.optional(), to: line.optional(), comment: commentSchema.optional(),
   where: z.string().trim().min(1).max(500).refine((s) => !/[\r\n]/.test(s), 'Use one line').optional(), fields: z.array(storyFieldSchema).max(25).optional() }).strict();
+// What approving a plan change can DO beyond editing the plan (job-actions.js):
+// each acts on a live sub-job and is pinned by the server to the head, merge
+// commit or stage it was written against. `evidence` is mandatory on a mark: the
+// PR or ticket that shows it is true. `fix` is the sub-job whose landing a
+// recover waits for.
+export const ACTION_TYPES = ['rework', 'accept-red', 'mark', 'recover'];
+export const actionSchema = z.object({ type: z.enum(ACTION_TYPES), sub: id, note: line.optional(), position: z.enum(['merged', 'done']).optional(),
+  evidence: line.optional(), fix: id.optional() }).strict();
+export const MAX_OPTIONS = 3;
+export const diagnosisSchema = z.object({ summary: z.string().trim().min(1).max(1200),
+  evidence: z.array(z.object({ label: line, detail: line }).strict()).max(6).optional() }).strict();
+// Up to three ranked options: the receipt's own plan is the first (recommended),
+// `alternatives` are the rest. Each is a whole plan plus the actions it carries.
+const optionShape = { label: line, why: z.string().trim().max(400).optional(), actions: z.array(actionSchema).max(6).optional() };
+export const alternativeSchema = z.object({ ...optionShape, plan: planSchema }).strict();
 export const reportSchema = z.discriminatedUnion('kind', [
-  receipt({ kind: z.literal('plan'), plan: planSchema }),
+  receipt({ kind: z.literal('plan'), plan: planSchema, ...optionShape, label: line.optional(), diagnosis: diagnosisSchema.optional(),
+    alternatives: z.array(alternativeSchema).max(MAX_OPTIONS - 1).optional() }),
   receipt({ kind: z.literal('ready'), checks: checksSchema }),
   receipt({ kind: z.literal('published'), url: prUrlSchema }),
   receipt({ kind: z.literal('repaired'), changes: checksSchema, checks: checksSchema }),

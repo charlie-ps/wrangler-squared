@@ -6,7 +6,7 @@ import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSche
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
-import { requestChange } from './job-change.js';
+import { requestChange, quickChange } from './job-change.js';
 import { discardReplan, proposeReplan, approveReplan } from './job-replan.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
 
@@ -282,6 +282,13 @@ export class JobStore {
         record(j, s, 'request-change', payload.text, detail);
         return;
       }
+      // The instant chips (job-change.js): a proposal built with no agent, for the
+      // human to read and approve like any other.
+      if (action === 'quick-change') {
+        const { detail } = quickChange(j, s, payload, { now: Date.now() });
+        record(j, s, 'quick-change', payload.note || null, detail);
+        return;
+      }
       if (action === 'pause') { j.paused = true; return; }
       if (action === 'resume') { j.paused = false; return; }
       if (action === 'start') {
@@ -290,7 +297,7 @@ export class JobStore {
       }
       if (action === 'discard-replan') { discardReplan(j); record(j, null, 'discard-replan', null, 'Discarded the proposed plan change'); return; }
       if (action === 'approve-replan') {
-        const { lines, detail, feedback: asked } = approveReplan(j, payload.proposalId, { now: Date.now(), buildSubJob });
+        const { lines, detail, feedback: asked } = approveReplan(j, payload.proposalId, { now: Date.now(), buildSubJob, option: Number.isInteger(payload.option) ? payload.option : 0 });
         j.repos = planRepos(j.plan);
         record(j, null, 'approve-replan', asked.slice(0, 180), detail);
         for (const l of lines) record(j, l.sub, 'replan', null, l.detail);
@@ -452,7 +459,7 @@ export class JobStore {
   _applyReceipt(j, r, s, report) {
     if (report.kind === 'plan' && j.stage === 'active') {
       // Discarded while the planner worked: kept on the run, applied nowhere.
-      if (j.replan) proposeReplan(j, r, report.plan, Date.now());
+      if (j.replan) proposeReplan(j, r, report, Date.now());
       return;
     }
     // With plan review off the planner's own receipt is the approval: the
