@@ -105,14 +105,18 @@ feature).
   failed on load (`job-store.js migrateSessionWrites`), never run;
   `validatePlan` looks past it so a plan edit still works on that job.
 - **One action brings an idea in: `request-change {subJobId?, at, ref, text}`**
-  (`server/job-change.js`), from the Request changes box on every step, review
-  and proposal; it replaced `revise-session`, both `replan` forms, `fix-here`
+  (`server/job-change.js`), from the Add idea box (`changeBoxHtml`, plain words
+  plus pictures, no chips) on every step, review and proposal; it replaced `revise-session`, both `replan` forms, `fix-here`
   and the seven moves (Retry stays a button). `at`/`ref` pin it to what the
   human read (`changeView`, mirrored client-side in `public/jobs.js`): a moved
   head, receipt, revision or proposal refuses it. It routes to the step's
   resumable agent (the tree's or result's session, an open PR's repair session)
   else the planner, which proposes a plan change. The box is not a `<form>`, so
-  a tick's redraw is held back only while text is typed in it.
+  a tick's redraw is held back only while text is typed in it. Its pictures are
+  kept on every route (`handlers.js prepare`: the round's folder, else
+  `ideasDir`); outside a parked review they reach the agent as paths appended to
+  the idea's words. What was sent stays as a bubble (`askSent`) until the dialog
+  moves on, ticked by `job-action-complete`, refused back into the box.
 - **Red steps go up one level before the human** (`server/job-red.js`). A sub-job
   with an `error` is sent to the planner by the runner's `triageRed` when
   `settings.maxReplans` > 0 (0 = the old "red waits for you"), one replan at a
@@ -138,8 +142,9 @@ feature).
   one bad option refuses the whole receipt; approve takes `option`. The instant
   chips (Accept red, Mark merged/done, Drop) are `quick-change`
   (`job-change.js quickChange`): the same proposal built with no agent, id
-  `quick_<ms>`, `instant: true`. `quickChips` in `public/jobs.js` mirrors the
-  gates; an action is drawn as a mark on its graph node (`actionMark`).
+  `quick_<ms>`, `instant: true`. The board no longer draws chips for them (the
+  human chose a plain-words box), so `quick-change` has no UI caller for now; an
+  action is drawn as a mark on its graph node (`actionMark`).
 - **A session parks after `ready`, so the human can ask it things** (`server/job-parked.js`).
   With Code on You review the `ready` receipt does NOT set `run.report` (that ends a run):
   it sets `run.readyReport`, `parkedFor: 'ready'`, `parkedAt` and clears `mailedAt`, like a

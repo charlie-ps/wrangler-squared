@@ -41,9 +41,15 @@ export function changeView(job, sub) {
   return step;
 }
 
+// An idea's pictures outside a parked review ride in its words, as paths the
+// agent reads (server/handlers.js prepare kept them on disk).
+const withImages = (idea, attachments) => attachments?.length ? `${idea}\n(Pasted images, read them: ${attachments.map((a) => JSON.stringify(a.path)).join(', ')})` : idea;
+
 export function requestChange(job, sub, { at, ref, text, attachments }, { now }) {
-  const idea = String(text || '').trim().slice(0, CHANGE_TEXT_MAX);
-  if (!idea) throw new Error('Explain the change you want');
+  const typed = String(text || '').trim().slice(0, CHANGE_TEXT_MAX);
+  if (!typed) throw new Error('Explain the change you want');
+  const files = (attachments || []).filter((a) => typeof a?.path === 'string');
+  const idea = withImages(typed, files);
   const view = changeView(job, sub);
   if (!view) throw new Error(sub ? 'Nothing is left to change here' : 'The job has nothing to change right now');
   if (view.at !== at || view.ref !== String(ref)) throw new Error('This changed since you looked. Review the latest version and ask again.');
@@ -60,7 +66,7 @@ export function requestChange(job, sub, { at, ref, text, attachments }, { now })
     // written to it, and it answers or reworks and reports ready again.
     const parked = view.at === 'code' && sub.state === 'verified' && parkedReadyRun(job, sub);
     if (parked) {
-      const id = askAgent(sub, { from: 'human', text: idea, images: attachments }, now);
+      const id = askAgent(sub, { from: 'human', text: typed, images: attachments?.map(({ file, mime }) => ({ file, mime })) }, now);
       return { detail: `${sub.answering.kind === 'ask' ? 'Asked' : 'Asked for a change to'} ${quoted(sub.title)}`, route: 'parked', messageId: id };
     }
     if (liveRun(job, sub.id)) throw new Error('Wait for the session to stop');

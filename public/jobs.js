@@ -339,36 +339,19 @@ export function actionLine(a, plan) {
   if (a.type === 'mark') return { text: `Mark ${a.position === 'merged' ? 'merged' : 'done'}: ${name}`, detail: a.evidence || '' };
   return { text: `Rework: ${name}`, detail: a.note || '' };
 }
-// The chips under a step's Request changes box (server/job-actions.js). An instant
-// chip builds its proposal with no agent (the `quick-change` action); a Claude chip
-// only pre-fills the box. Mirrors the server's gates, so one it would refuse is not
-// drawn, and none while a plan change is pending.
-export function quickChips(job, sub) {
-  if (!sub || job.stage !== 'active' || job.cancelledAt || replanPending(job)) return [];
-  if (sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage) || isWriteSub(sub)) return [];
-  const pr = isPrSub(sub), human = isHumanSub(sub);
-  const red = redPipeline(sub);
-  const instant = [
-    red && { kind: 'accept-red', label: 'Accept red', hint: red === 'checks' ? 'Merge this PR as it stands, red checks and all. Builds a proposal pinned to this head; no agent runs.' : 'Count the merge as landed despite the failing post-merge run. Builds a proposal pinned to this merge commit; no agent runs.' },
-    pr && sub.stage === 'pr' && { kind: 'mark-merged', label: 'Mark merged', hint: 'You merged it yourself. The next poll reads the merge commit and takes the normal merged path.' },
-    !human && { kind: 'mark-done', label: 'Mark done', hint: 'Done elsewhere, or already covered. Releases whatever waits on it.' },
-    !isFrozen(sub) && { kind: 'drop', label: 'Drop', hint: 'Leave this sub-job out. The proposal shows anything that would then wait forever.' },
-  ].filter(Boolean).map((c) => ({ ...c, instant: true }));
-  const claude = human ? [] : [
-    { label: 'Fix it with a note…', fill: `Fix ${sub.title}: ` },
-    ...(pr ? [{ label: 'Split out a follow-up PR…', fill: `Split out of ${sub.title}: ` }, { label: 'This needs a new ticket…', fill: 'New ticket for: ' }] : []),
-  ].map((c) => ({ ...c, instant: false }));
-  return [...instant, ...claude];
-}
 // Who an idea at each view goes to (server/job-change.js routes it): the agent
-// that holds the work when there is one, else the planner.
-const CHANGE_HINT = {
-  plan: 'Goes to the planner, which redraws the plan for you to review.',
-  code: 'Ask about it or say what should change. It goes to the session that wrote this working tree: a question gets an answer, a change gets a new round.',
-  session: 'Goes back to the session that made this result, which reports again.',
-  pr: 'Goes to a repair session on this PR.',
+// that holds the work when there is one, else the planner. `to` names it on the
+// box, `hint` says what it does with the idea.
+const PLANNER = { to: 'Planner', placeholder: 'Add an idea for the planner…', hint: 'Proposes a plan change. Nothing changes until you approve.' };
+const CHANGE_ROUTE = {
+  plan: { ...PLANNER, hint: 'Redraws the plan for you to review.' },
+  proposal: { to: 'Planner', placeholder: 'Add to this proposal…', hint: 'Redraws the proposal.' },
+  code: { to: 'This session', placeholder: 'Ask about it, or say what to change…', hint: 'A question gets an answer. A change gets a new round.' },
+  session: { to: 'This session', placeholder: 'What should it do again?', hint: 'It works again and reports back.' },
+  pr: { to: 'Repair session', placeholder: 'What should the repair do?', hint: 'Picks it up on this PR.' },
 };
-export const changeHint = (at, job = null, sub = null) => sub && job && redDeclared(job, sub) ? 'Goes to the planner, with everything it already found and tried. It proposes a change for you to approve.' : CHANGE_HINT[at] || 'Goes to the planner, which proposes a plan change for you to approve.';
+export const changeRoute = (at, job = null, sub = null) => sub && job && redDeclared(job, sub) ? { ...PLANNER, hint: 'Gets everything already tried, and proposes a fix for you to approve.' } : CHANGE_ROUTE[at] || PLANNER;
+export const changeHint = (at, job = null, sub = null) => changeRoute(at, job, sub).hint;
 // What the human is looking at, and the exact thing in it, which Request changes
 // pins its idea to. Mirrors server/job-change.js changeView: the server refuses a
 // request whose pin no longer matches. Null means nothing is left to change.

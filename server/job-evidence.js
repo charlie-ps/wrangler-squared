@@ -29,6 +29,8 @@ export const evidenceName = (n) => typeof n === 'string' && /^[A-Za-z0-9][A-Za-z
 const rootOf = (jobId, subId) => path.join(DATA_DIR, 'evidence', jobId, subId);
 export const inboxDir = (jobId, subId) => path.join(rootOf(jobId, subId), 'inbox');
 export const roundDir = (jobId, subId, round) => path.join(rootOf(jobId, subId), `round-${round}`);
+// Pictures pasted into an idea that no review round holds: the job's own, or a step's.
+export const ideasDir = (jobId, subId) => subId ? path.join(rootOf(jobId, subId), 'ideas') : path.join(DATA_DIR, 'evidence', jobId, '_ideas');
 export const ensureInbox = (jobId, subId) => { const dir = inboxDir(jobId, subId); fs.mkdirSync(dir, { recursive: true }); return dir; };
 
 // What the bytes ARE, not what the name claims: a renamed text file is refused.
@@ -75,7 +77,7 @@ export function adoptEvidence({ jobId, subId, round, proof, prefix = '' }) {
 // TODO(host-api mail:images): mail carries text only, so the session is mailed the
 // file's path and reads it itself, where spawn({ images }) would attach it.
 export function keepAskImages({ jobId, subId, round, messageId, images }) {
-  const dest = roundDir(jobId, subId, round);
+  const dest = round == null ? ideasDir(jobId, subId) : roundDir(jobId, subId, round);
   const kept = [];
   for (const { bytes } of images) {
     const kind = sniffKind(bytes);

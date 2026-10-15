@@ -96,11 +96,11 @@ export default {
         toast(msg.error);
       } else if (msg.event === 'job-action-complete') {
         view?.created(msg);
-        // A checkpoint switch says what it did in the footer it was made from.
-        if (msg.action !== 'set-review') toast('Job updated');
+        // A checkpoint switch says what it did in the footer it was made from, an idea in its own bubble.
+        if (!['set-review', 'request-change'].includes(msg.action)) toast('Job updated');
       } else if (msg.event === 'job-action-failed') {
         if (msg.action === 'set-review') view?.reviewFailed(msg);
-        else toast(msg.error);
+        else if (!(msg.action === 'request-change' && view?.changeFailed(msg))) toast(msg.error);
       } else if (msg.event === 'job-images') {
         view?.images(msg);
       } else if (msg.event === 'job-evidence') {

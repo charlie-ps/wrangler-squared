@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { JobStore, holdsSlot, TREE_MOVED } from './job-store.js';
 import { JobRunner } from './job-runner.js';
 import { changeView } from './job-change.js';
-import { ensureInbox, roundDir } from './job-evidence.js';
+import { ensureInbox, roundDir, ideasDir } from './job-evidence.js';
 import { workingTreeHash } from './git.js';
 import { threadMail, jobPrompt } from './job-prompts.js';
 import { jobActionHandler } from './handlers.js';
@@ -225,6 +225,22 @@ test('pasted images go to the evidence folder and the session is mailed their pa
   assert.deepEqual(Object.keys(images), [], 'the staged copy is released');
   const text = threadMail(f.store.get(f.job.id), f.run(), f.sub(), [m]);
   assert.ok(text.includes(path.join(roundDir(f.job.id, 'api', 1), m.images[0].file)));
+});
+
+test('an idea for the planner keeps its pasted images too, and hands the planner their paths in the words', async (t) => {
+  const f = fixture(t); await f.start();
+  const images = { 'pasted.png': { mime: 'image/png', bytes: PNG } };
+  const host = hostFor(t, f, images);
+  const view = changeView(f.store.get(f.job.id), null);
+  assert.equal(view.at, 'job');
+  await jobActionHandler.handler({ id: f.job.id, action: 'request-change', at: view.at, ref: view.ref, text: 'Split web in two', images: ['pasted.png'] }, host);
+  const job = f.store.get(f.job.id);
+  const [file] = fs.readdirSync(ideasDir(f.job.id));
+  assert.match(file, /^ask-.*-1\.png$/);
+  assert.ok(job.replan.feedback.startsWith('Split web in two\n(Pasted images, read them: '));
+  assert.ok(job.replan.feedback.includes(JSON.stringify(path.join(ideasDir(f.job.id), file))));
+  assert.equal(job.moves.at(-1).note, 'Split web in two', 'the history keeps the words, not the paths');
+  assert.deepEqual(Object.keys(images), [], 'the staged copy is released');
 });
 
 test('a plan change that reworks the sub-job ends the parked session and starts a new one', async (t) => {

@@ -40,8 +40,9 @@ export const jobCreateHandler = makeJobCreateHandler();
 
 // The two actions that need something only an async read can give: the tree as
 // it is NOW (approve-code is pinned to the one the agent reported) and the
-// pictures pasted into the Request changes box, kept beside the round they were
-// sent in. Whatever the client sent under these names is discarded.
+// pictures pasted into an idea, kept beside the round they were sent in (or the
+// job's or step's own ideas folder when no round holds it). Whatever the client
+// sent under these names is discarded.
 export const ASK_IMAGES_MAX = 4;
 async function prepare(msg, host) {
   const { treeHash: _t, attachments: _a, ...clean } = msg;
@@ -50,12 +51,12 @@ async function prepare(msg, host) {
   if (msg.action === 'approve-code' && sub?.ready?.treeHash && sub.worktree?.path) {
     return { ...clean, treeHash: await workingTreeHash(sub.worktree.path).catch(() => null) };
   }
-  if (msg.action === 'request-change' && Array.isArray(msg.images) && msg.images.length && sub?.ready) {
+  if (msg.action === 'request-change' && Array.isArray(msg.images) && msg.images.length && job) {
     const names = msg.images.filter((n) => typeof n === 'string').slice(0, ASK_IMAGES_MAX);
     const got = names.map((n) => host.images.read(n)).filter(Boolean);
-    const kept = keepAskImages({ jobId: job.id, subId: sub.id, round: sub.ready.round, messageId: Date.now().toString(36), images: got });
+    const kept = keepAskImages({ jobId: job.id, subId: sub?.id, round: sub?.ready?.round, messageId: Date.now().toString(36), images: got });
     for (const n of names) host.images.remove(n);
-    return { ...clean, attachments: kept.map(({ file, mime }) => ({ file, mime })) };
+    return { ...clean, attachments: kept.map(({ file, mime, path }) => ({ file, mime, path })) };
   }
   return clean;
 }

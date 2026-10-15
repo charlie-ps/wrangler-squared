@@ -616,12 +616,6 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-option small { color:var(--fg-muted); font-size:12px; line-height:1.4; }
 .job-option.sel { border-color:var(--blue); background:color-mix(in srgb, var(--blue) 10%, var(--surface)); }
 .job-option-rec { font-size:10.5px; font-weight:600; color:var(--blue-fg); margin-left:6px; }
-.job-quick { display:grid; gap:8px; margin:4px 0; }
-.job-quick-chips { display:flex; flex-wrap:wrap; gap:6px; }
-.job-quick-chips button { display:inline-flex; align-items:center; gap:7px; padding:6px 12px; border-radius:999px; border:1px solid var(--border-muted); background:var(--surface-2); font-size:12.5px; color:var(--fg); }
-.job-quick-chips button i { font:normal 600 9.5px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.06em; text-transform:uppercase; color:var(--green-fg); }
-.job-quick-chips button i.agent { color:var(--wf); }
-.job-quick-hint { font-size:12px; color:var(--fg-muted); min-height:1.4em; }
 .job-replan-changes { margin:12px 0; padding-left:18px; font-size:13px; }
 .job-replan-changes small { color:var(--fg-muted); }
 .job-superseded { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--fg-muted) !important; }
@@ -1029,11 +1023,54 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .jobs-idea-kept { font-size:11.5px; color:var(--fg-subtle); }
 @media(max-width:640px) { .jobs-idea { right:12px; left:12px; bottom:12px; } .jobs-idea-panel { width:100%; max-width:none; } }
 @media(prefers-reduced-motion:reduce) { .jobs-idea-teaser { transition:none; } .jobs-idea-teaser:hover { transform:none; } }
-.job-change { display:grid; gap:8px; margin:4px 0; }
-.job-change label { display:grid; gap:4px; font-size:13px; color:var(--fg); }
-.job-change label small { color:var(--fg-muted); font-size:12px; }
-.job-change textarea { width:100%; resize:vertical; }
-.job-change-send { display:flex; gap:8px; }
+/* Add idea: a one-line composer that names who hears it, opens on focus, words or a picture, and
+   lifts what was sent into a bubble above it. The board's accent is the route colour. */
+.job-change { position:relative; display:grid; gap:6px; margin:8px 0 4px; padding:6px 6px 6px 8px; border-radius:18px; border:1px solid var(--border); background:var(--field-bg, var(--surface)); transition:border-color .2s, box-shadow .2s; }
+.job-change:focus-within, .job-change.drag { border-color:var(--accent); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.job-change.drag::after { content:"Drop to attach"; position:absolute; inset:0; display:grid; place-items:center; border-radius:inherit; background:color-mix(in srgb, var(--accent) 14%, var(--surface)); color:var(--fg); font-size:13px; font-weight:600; pointer-events:none; }
+.job-change-row { display:flex; align-items:flex-end; gap:6px; }
+.job-change-to { align-self:center; display:inline-flex; align-items:center; gap:6px; padding:3px 9px 3px 3px; border-radius:999px; background:color-mix(in srgb, var(--accent) 13%, transparent); color:var(--fg); font-size:11.5px; font-weight:600; white-space:nowrap; }
+.job-change-to i { width:18px; height:18px; border-radius:50%; display:grid; place-items:center; background:var(--accent); color:var(--accent-fg); font:normal 700 10px/1 var(--font); }
+.job-change textarea { flex:1; min-width:0; min-height:22px; max-height:160px; margin:0; padding:6px 2px; border:0; border-radius:0; background:none; box-shadow:none; color:var(--fg); font:13.5px/1.5 var(--font); resize:none; overflow:auto; }
+.job-change textarea:focus, .job-change textarea:focus-visible { outline:none; box-shadow:none; }
+.job-change textarea::placeholder { color:var(--fg-subtle); }
+.job-change-attach { position:relative; flex:none; display:grid; place-items:center; width:30px; height:34px; border-radius:10px; color:var(--fg-subtle); cursor:pointer; }
+.job-change-attach:hover, .job-change-attach:focus-within { color:var(--fg); background:var(--surface-2); }
+.job-change-attach input { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+.job-change-attach .icon, .job-change-go .icon { width:16px; height:16px; }
+.job-change-go { flex:none; display:grid; place-items:center; width:34px; height:34px; padding:0; border:0; border-radius:50%; background:var(--border); color:var(--surface); cursor:pointer; transition:background .2s, transform .15s; }
+.job-change-go:disabled { cursor:default; opacity:1; }
+.job-change-go:not(:disabled) { background:var(--accent); color:var(--accent-fg); }
+.job-change-go:not(:disabled):hover { transform:scale(1.06); }
+.job-change-foot { display:none; flex-wrap:wrap; align-items:center; gap:4px 12px; padding:0 4px 2px; font-size:11.5px; color:var(--fg-subtle); }
+.job-change:focus-within .job-change-foot, .job-change.has-text .job-change-foot, .job-change.has-img .job-change-foot, .job-change.is-open .job-change-foot { display:flex; }
+.job-change-foot kbd { margin-left:auto; font:500 10.5px var(--jobs-mono, ui-monospace, monospace); color:var(--fg-subtle); background:none; border:0; padding:0; }
+.job-sent { display:grid; gap:6px; margin:8px 0 4px; }
+.job-sent-bubble { justify-self:end; max-width:86%; display:grid; gap:6px; padding:9px 13px; border-radius:16px 16px 4px 16px; background:var(--fg); color:var(--bg); font-size:13.5px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; transform-origin:bottom right; }
+.job-sent-imgs { display:flex; flex-wrap:wrap; gap:6px; }
+.job-sent-imgs img { width:72px; height:52px; object-fit:cover; border-radius:8px; display:block; }
+.job-sent.failed .job-sent-bubble { opacity:.55; }
+.job-sent-meta { justify-self:end; display:inline-flex; align-items:center; gap:7px; font-size:11.5px; color:var(--fg-muted); }
+.job-sent-meta.failed { color:var(--red-fg); }
+.job-sent-meta .icon { width:12px; height:12px; }
+.job-sent-tick { width:16px; height:16px; border-radius:50%; display:grid; place-items:center; background:var(--green-fg); color:var(--surface); }
+.job-sent-tick .icon { width:10px; height:10px; stroke-width:3; }
+.job-sent-next { justify-self:end; font-size:11.5px; color:var(--fg-subtle); }
+.job-sent-sending { background:linear-gradient(90deg, var(--fg-muted) 0 40%, var(--fg) 50%, var(--fg-muted) 60% 100%); background-size:250% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; }
+@media(prefers-reduced-motion:no-preference) {
+  .job-change-go:not(:disabled) { animation:job-idea-pop .25s; }
+  .job-sent.fresh .job-sent-bubble { animation:job-idea-rise .5s cubic-bezier(.2,.9,.25,1.15); }
+  .job-sent.fresh .job-sent-meta, .job-sent.fresh .job-sent-next { animation:job-idea-fade .3s .25s both; }
+  .job-sent.sent.fresh .job-sent-tick .icon path { stroke-dasharray:20; stroke-dashoffset:20; animation:job-idea-draw .35s .15s ease-out forwards; }
+  .job-sent-sending { animation:job-idea-shine 1.6s linear infinite; }
+  .job-change-tray .job-image { animation:job-idea-drop .3s cubic-bezier(.2,.9,.25,1.3); }
+}
+@keyframes job-idea-pop { 50% { transform:scale(1.12); } }
+@keyframes job-idea-rise { from { opacity:0; transform:translateY(34px) scale(.9); } }
+@keyframes job-idea-fade { from { opacity:0; transform:translateY(4px); } }
+@keyframes job-idea-draw { to { stroke-dashoffset:0; } }
+@keyframes job-idea-shine { from { background-position:100% 0; } to { background-position:-150% 0; } }
+@keyframes job-idea-drop { from { opacity:0; transform:scale(.7); } }
 
 /* Show me and proof (job-proof.js). Colour only through the board's variables; a gap is --warn, never red. */
 .job-node-show { font-size:11px; color:var(--fg-muted); max-width:100%; }
@@ -1127,12 +1164,13 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .job-earlier { margin-top:10px; }
 .job-earlier-round h4 { margin:8px 0 4px; font-size:12px; color:var(--fg-muted); }
 .job-pinned { align-self:center; font-size:11px; color:var(--fg-subtle); }
-.job-change-tray { display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:0; list-style:none; }
-.job-change-tray .job-image { position:relative; width:84px; height:60px; border-radius:8px; overflow:hidden; border:1px solid var(--border-muted); }
-.job-change-tray .job-image img { width:100%; height:100%; object-fit:cover; }
-.job-change-tray .job-image.uploading { opacity:.55; }
-.job-change-tray .job-image-remove { position:absolute; top:2px; right:2px; width:18px; height:18px; padding:0; line-height:16px; border-radius:50%; }
-.job-change-paste { color:var(--fg-muted); font-size:11.5px; }
+.job-change-tray { display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:4px 2px 2px; list-style:none; }
+.job-change-tray[hidden] { display:none; }
+.job-change-tray .job-image { position:relative; width:64px; height:48px; border-radius:9px; overflow:hidden; border:1px solid var(--border); }
+.job-change-tray .job-image img { width:100%; height:100%; object-fit:cover; display:block; transition:opacity .2s, filter .2s; }
+.job-change-tray .job-image.uploading img { opacity:.45; filter:blur(1px); }
+.job-change-tray .job-image.uploading::after { content:""; position:absolute; left:50%; top:50%; width:14px; height:14px; margin:-7px; border-radius:50%; border:2px solid var(--accent); border-right-color:transparent; animation:job-spin .8s linear infinite; }
+.job-change-tray .job-image-remove { top:3px; right:3px; width:18px; height:18px; line-height:18px; font-size:12px; }
 
 /* What the agent left running for the human to try (job-running.js). */
 .job-running { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:14px; padding:10px 12px; border-radius:14px; border:1px solid var(--border-muted); background:var(--surface-2); font-size:12.5px; }
