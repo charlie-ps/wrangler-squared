@@ -132,17 +132,3 @@ function rework(job, sub, note, now) {
   if (sub.stage === 'implementation') { sub.note = note; sub.error = null; sub.blocked = null; sub.state = 'queued'; return `Ran ${quoted(sub.title)} again`; }
   return reworkSub(job, sub, note, now);
 }
-
-// What an instant chip builds without an agent: one action, or a drop. Every
-// chip's claim is the human's own, so its evidence is their note or the click.
-const CHIPS = {
-  'accept-red': (note) => ({ type: 'accept-red', ...(note && { note }) }),
-  'mark-merged': (note) => ({ type: 'mark', position: 'merged', evidence: note || 'Merged by hand' }),
-  'mark-done': (note) => ({ type: 'mark', position: 'done', evidence: note || 'Marked done by hand' }),
-  drop: () => null,
-};
-const noteOf = (note) => String(note || '').trim().slice(0, 180) || null;
-export function chipAction(kind, note) {
-  if (!CHIPS[kind]) throw new Error('Unknown quick change');
-  return CHIPS[kind](noteOf(note));
-}

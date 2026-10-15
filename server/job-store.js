@@ -9,7 +9,7 @@ import { setRunning, owe, runningOf } from './job-running.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
-import { requestChange, quickChange } from './job-change.js';
+import { requestChange } from './job-change.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
@@ -289,13 +289,6 @@ export class JobStore {
       if (action === 'request-change') {
         const { detail } = requestChange(j, s, payload, { now: Date.now() });
         record(j, s, 'request-change', payload.text, detail);
-        return;
-      }
-      // The instant chips (job-change.js): a proposal built with no agent, for the
-      // human to read and approve like any other.
-      if (action === 'quick-change') {
-        const { detail } = quickChange(j, s, payload, { now: Date.now() });
-        record(j, s, 'quick-change', payload.note || null, detail);
         return;
       }
       // The preview the agent left running (job-running.js): Stop owes its teardown

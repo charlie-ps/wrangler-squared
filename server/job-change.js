@@ -1,7 +1,6 @@
 import { isPrSub, isSessionSub, isWriteSub } from './jobs-schema.js';
 import { reworkSub } from './job-sub-ops.js';
-import { requestReplan, mergeReplan } from './job-replan.js';
-import { chipAction, stampActions } from './job-actions.js';
+import { requestReplan } from './job-replan.js';
 import { parkedReadyRun, askAgent } from './job-parked.js';
 import { isDeclared } from './job-red.js';
 
@@ -89,31 +88,3 @@ export function requestChange(job, sub, { at, ref, text, attachments }, { now })
   return { detail: sub ? `Asked the planner to change the plan around ${quoted(sub.title)}` : 'Asked the planner to change the plan', route: 'planner' };
 }
 
-const CHIP_FEEDBACK = {
-  'accept-red': (t) => `Accept the red pipeline on ${t}`,
-  'mark-merged': (t) => `Mark ${t} merged`,
-  'mark-done': (t) => `Mark ${t} done`,
-  drop: (t) => `Drop ${t}`,
-};
-
-// An instant chip (Accept red, Mark merged, Mark done, Drop): the same proposal
-// an agent would write for it, built here with no agent, pinned to the head,
-// merge commit or stage on screen. The human still reads it in the proposal view
-// and approves it; nothing changes until then.
-export function quickChange(job, sub, { at, ref, kind, note }, { now }) {
-  if (!sub) throw new Error('Choose a sub-job');
-  const view = changeView(job, sub);
-  if (!view) throw new Error('Nothing is left to change here');
-  if (view.at !== at || view.ref !== String(ref)) throw new Error('This changed since you looked. Review the latest version and ask again.');
-  if (job.stage !== 'active') throw new Error('Only a running job has a plan to change');
-  if (job.replan) throw new Error('A plan change is pending. Approve or discard it first.');
-  if (job.runs.some((r) => !r.stopped && !r.subJobId)) throw new Error('Wait for the planning step to finish');
-  const action = chipAction(kind, note);
-  const plan = action ? job.plan : { ...job.plan, subJobs: job.plan.subJobs.filter((s) => s.id !== sub.id) };
-  const { plan: merged, changes } = mergeReplan(job, plan);
-  if (!action && !changes.removed.includes(sub.id)) throw new Error(`${quoted(sub.title)} has landed and cannot be dropped`);
-  const actions = action ? stampActions(job, [{ ...action, sub: sub.id }], merged, changes) : [];
-  const feedback = CHIP_FEEDBACK[kind](quoted(sub.title));
-  job.replan = { feedback, at: now, previous: null, proposal: { id: `quick_${now}`, label: null, why: null, plan, merged, changes, actions, alternatives: [], instant: true, at: now } };
-  return { detail: `Proposed: ${feedback}` };
-}

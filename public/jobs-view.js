@@ -1393,7 +1393,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }
       return;
     }
-    if (msg?.action === 'quick-change' && msg.jobId === selected?.jobId) { openDetail(msg.jobId); return; }
     // An idea stays on screen as its bubble: the tick is the confirmation, not a closed dialog.
     if (msg?.action === 'request-change' && askSent?.state === 'sending' && msg.jobId === askSent.jobId && (msg.subJobId ?? null) === askSent.subId) { askSent.state = 'sent'; askSent.at = Date.now(); if (dialog.open) renderDetail(); return; }
     if (dialog.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;

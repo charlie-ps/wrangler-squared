@@ -88,7 +88,7 @@ export function redFeedback(job, sub, n, limit) {
 // cancels work that has a PR. Anything claiming something about the outside world
 // is the human's. Judged on the recommended option only.
 export function autoApplicable(job, proposal) {
-  if (proposal.escalation || proposal.instant) return false;
+  if (proposal.escalation) return false;
   const { added, edited, removed } = proposal.changes;
   if (!proposal.actions.length && !added.length && !edited.length && !removed.length) return false;
   if (proposal.actions.some((a) => a.type !== 'rework')) return false;

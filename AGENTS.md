@@ -139,12 +139,8 @@ feature).
   proposal time and `approve-replan` refuses if it moved; the planner never
   writes a pin (the schema is strict). Options are the receipt's own plan first,
   then `alternatives` (max 2), each merged and stamped when the receipt lands, so
-  one bad option refuses the whole receipt; approve takes `option`. The instant
-  chips (Accept red, Mark merged/done, Drop) are `quick-change`
-  (`job-change.js quickChange`): the same proposal built with no agent, id
-  `quick_<ms>`, `instant: true`. The board no longer draws chips for them (the
-  human chose a plain-words box), so `quick-change` has no UI caller for now; an
-  action is drawn as a mark on its graph node (`actionMark`).
+  one bad option refuses the whole receipt; approve takes `option`. An action is
+  drawn as a mark on its graph node (`actionMark`).
 - **A session parks after `ready`, so the human can ask it things** (`server/job-parked.js`).
   With Code on You review the `ready` receipt does NOT set `run.report` (that ends a run):
   it sets `run.readyReport`, `parkedFor: 'ready'`, `parkedAt` and clears `mailedAt`, like a

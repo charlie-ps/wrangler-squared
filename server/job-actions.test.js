@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { gateAction, stampActions, checkActions, applyActions, chipAction } from './job-actions.js';
+import { gateAction, stampActions, checkActions, applyActions } from './job-actions.js';
 import { proposeReplan, approveReplan, optionsOf } from './job-replan.js';
-import { quickChange, changeView } from './job-change.js';
+import { changeView } from './job-change.js';
 import { reportSchema } from './jobs-schema.js';
 import { buildSubJob } from './job-store.js';
 
@@ -141,33 +141,4 @@ test('a recover and its fix are one proposal: the fix is added, then the merged 
   proposeReplan(j, { id: 'run_1' }, { plan, actions: [{ type: 'recover', sub: 'api', fix: 'fix' }] }, 1);
   approveReplan(j, 'run_1', { now: 2, buildSubJob });
   assert.deepEqual([subOf(j, 'api').recoveredBy, subOf(j, 'api').state, !!subOf(j, 'fix')], ['fix', 'awaiting-fix', true]);
-});
-
-test('instant chips build a pinned proposal with no agent, for the human to approve', () => {
-  const j = job([spec('api'), spec('web', ['api'])], { api: redOf() });
-  const at = (sub) => changeView(j, sub);
-  const api = subOf(j, 'api');
-  quickChange(j, api, { ...at(api), kind: 'accept-red', note: 'flaky e2e' }, { now: 100 });
-  const p = j.replan.proposal;
-  assert.deepEqual([p.id, p.instant, p.label, p.actions], ['quick_100', true, null, [{ type: 'accept-red', note: 'flaky e2e', sub: 'api', pin: { at: 'head', ref: 'h1' } }]]);
-  assert.equal(j.replan.feedback, 'Accept the red pipeline on “Deliver api”');
-  assert.equal(api.acceptedRed, undefined, 'nothing happens until approved');
-  assert.throws(() => quickChange(j, api, { ...at(api), kind: 'drop' }, { now: 101 }), /pending/);
-  approveReplan(j, 'quick_100', { now: 102, buildSubJob });
-  assert.equal(api.acceptedRed.note, 'flaky e2e');
-});
-
-test('Drop leaves the sub-job out, refuses one that landed or a step that moved, and the mark chips default their evidence', () => {
-  const j = job([spec('api'), spec('web'), spec('done')], { api: redOf(), done: { stage: 'deployment', state: 'watching' } });
-  const api = subOf(j, 'api');
-  assert.throws(() => quickChange(j, api, { at: 'pr', ref: 'stale', kind: 'drop' }, { now: 1 }), /changed since you looked/);
-  assert.throws(() => quickChange(j, subOf(j, 'done'), { ...changeView(j, subOf(j, 'done')), kind: 'drop' }, { now: 1 }), /has landed/);
-  quickChange(j, api, { ...changeView(j, api), kind: 'drop' }, { now: 2 });
-  assert.deepEqual([j.replan.proposal.changes.removed, j.replan.proposal.actions], [['api'], []]);
-  approveReplan(j, 'quick_2', { now: 3, buildSubJob });
-  assert.ok(api.cancelledAt);
-  assert.deepEqual(chipAction('mark-merged'), { type: 'mark', position: 'merged', evidence: 'Merged by hand' });
-  assert.deepEqual(chipAction('mark-done', 'covered by #421'), { type: 'mark', position: 'done', evidence: 'covered by #421' });
-  assert.equal(chipAction('drop'), null);
-  assert.throws(() => chipAction('nuke'), /Unknown quick change/);
 });
