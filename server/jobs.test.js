@@ -2444,3 +2444,12 @@ test('a merge into a branch no workflow runs on is the delivery', async () => {
   assert.equal(next.expected, false, 'the runner then marks it MERGE_IS_DELIVERY');
   assert.match(next.summary, /Merge completes it/);
 });
+
+test('a PR may land on its own base; an old plan has none, and no other kind may name one', async () => {
+  const { planSchema } = await import('./jobs-schema.js');
+  const plan = (s) => ({ context: '', subJobs: [{ id: 'a', title: 'A', brief: 'b', ...s }] });
+  assert.equal(planSchema.parse(plan({ repo: '/repo' })).subJobs[0].base, undefined);
+  assert.equal(planSchema.parse(plan({ repo: '/repo', base: ' release/2.x ' })).subJobs[0].base, 'release/2.x');
+  assert.throws(() => planSchema.parse(plan({ repo: '/repo', base: '-D' })), /branch name/);
+  assert.throws(() => planSchema.parse(plan({ kind: 'session', base: 'next' })), /only a PR lands on a branch/);
+});

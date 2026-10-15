@@ -291,6 +291,16 @@ test('a session is told the outputs it must make and to account for every write 
   assert.doesNotMatch(jobPrompt({ ...planned, subJobs: [session] }, session, { ...run, phase: 'session' }), /writes:\[/, 'a session with nothing to write is asked for none');
 });
 
+test('a PR\'s own base overrides the job\'s in its prompts, and the planner is told when to set one', () => {
+  const unreviewed = { ...job, reviewCode: false, base: 'next' };
+  const own = { ...sub, base: 'release/2.x' };
+  assert.match(jobPrompt(unreviewed, own, run), /This PR \(repo, landing on release\/2\.x\)/);
+  assert.match(jobPrompt(unreviewed, own, run), /--base release\/2\.x` \(this PR lands on release\/2\.x/);
+  assert.match(jobPrompt({ ...job, reviewCode: false }, own, run), /--base release\/2\.x/, 'with no job base too');
+  assert.match(jobPrompt(job, null, { ...run, phase: 'planning' }), /base:"<branch>": only a PR not landing on the default branch/);
+  assert.match(jobPrompt({ ...job, base: 'next' }, null, { ...run, phase: 'planning' }), /only a PR not landing on `next`/);
+});
+
 test('a job with a base tells the planner and the publisher; one without is unchanged', () => {
   const unreviewed = { ...job, reviewCode: false };
   const based = { ...unreviewed, base: 'next' };

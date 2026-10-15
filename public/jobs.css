@@ -1002,3 +1002,9 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .jobs-idea-kept { font-size:11.5px; color:var(--fg-subtle); }
 @media(max-width:640px) { .jobs-idea { right:12px; left:12px; bottom:12px; } .jobs-idea-panel { width:100%; max-width:none; } }
 @media(prefers-reduced-motion:reduce) { .jobs-idea-teaser { transition:none; } .jobs-idea-teaser:hover { transform:none; } }
+.job-node-edit { display:flex; flex-wrap:wrap; justify-content:center; gap:2px; max-width:100%; }
+.job-node-base { color:var(--fg); }
+.job-node-branch.set summary { color:var(--fg); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.job-node-branch input { display:block; width:100%; min-width:16ch; margin-top:6px; font:12px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.job-node-branch>span { max-width:24ch; text-align:left; }
+.job-node-edit>details[open] { flex-basis:100%; }

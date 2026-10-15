@@ -15,6 +15,10 @@ export const writeReviewed = (job, sub) => sub?.review ?? job?.reviewWrites ?? f
 // Mirrors server/jobs-schema.js isPrSub: a PR is the only kind with a repository,
 // a pipeline and a deploy gate, so "not a PR" is what those rules turn on.
 export const isPrSub = (sub) => !isSessionSub(sub) && !isHumanSub(sub) && !isWriteSub(sub);
+// Mirrors server/jobs-schema.js targetOf; null is the repository's default.
+export const targetOf = (job, sub) => sub?.base || job?.base || null;
+// A PR whose own base differs from the job's: the only branch a graph tile shows.
+export const offBase = (job, sub) => isPrSub(sub) && !!sub.base && sub.base !== job?.base;
 // The stories session never stops for Session results review: its writes are
 // its result (server/job-store.js), so it alone does not make the switch matter.
 export const reviewedSession = (sub) => isSessionSub(sub) && !sub.stories;

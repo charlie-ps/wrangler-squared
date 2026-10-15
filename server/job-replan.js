@@ -18,10 +18,10 @@ export const isFrozen = (sub) => !!sub.cancelledAt || ['deployment', 'cleanup', 
 // reason and the channel or page it names are what it IS, so they edit like a
 // brief: same place, different write.
 const EDITABLE = ['title', 'brief', 'check', 'after', 'action', 'on', 'by', 'review', 'why', 'place'];
-// Kind, repository, story and place type decide where a sub-job's work lives
-// (its worktree, its PR, its ticket, its channel), so changing one is new work
-// under a new id, not an edit.
-const FIXED = ['kind', 'repo', 'storyId', 'place.type'];
+// Kind, repository, base, story and place type decide where a sub-job's work
+// lives (its worktree, its PR, its ticket, its channel), so changing one is new
+// work under a new id, not an edit.
+const FIXED = ['kind', 'repo', 'base', 'storyId', 'place.type'];
 const fixedOf = (s, k) => (k === 'place.type' ? s.place?.type : s[k]);
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const norm = (s) => ({ ...s, kind: s.kind || 'pr', after: s.after || [], check: s.check || undefined });

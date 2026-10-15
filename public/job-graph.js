@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS, ROCKET_PATH } from './icons.js';
-import { isPrSub, isSessionSub, isWriteSub, isMakeWrite, writeReviewed, writeWhen, writeAction, placeKey, placesOf, webUrl, PLACES, triggerLine, edgesOf, KIND_TITLE, kindChipHtml, kindLabel, kindClass, dependencyLevels, dependencyLine, storyLabel } from './jobs.js';
+import { isPrSub, targetOf, offBase, isSessionSub, isWriteSub, isMakeWrite, writeReviewed, writeWhen, writeAction, placeKey, placesOf, webUrl, PLACES, triggerLine, edgesOf, KIND_TITLE, kindChipHtml, kindLabel, kindClass, dependencyLevels, dependencyLine, storyLabel } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid } from './job-state.js';
 
 // A job's sub-jobs drawn as a horizontal stepper: one column per wave (a
@@ -30,7 +30,15 @@ import { STATES, stateIconHtml, stateSolid } from './job-state.js';
 // sub-job. Under review each row also carries an eye that flips whether that
 // write stops for review: a sibling of the row's button, since a button cannot
 // hold another. `reviewWrites` is the job's default for a write that does not say.
+//
+// A PR's tile names a branch only where it lands somewhere other than the job
+// (`base`, the job's own): its repo line gains → <branch>. Under review every PR
+// has a branch pill beside its dependencies, blank until it overrides the job's.
+// Where it lands, and its worktree's branch once cut, are in the tooltip.
 export const dependencyEditorHtml = (s, others, depKey) => others.filter((d) => !isWriteSub(d)).map((d) => `<label><input type="checkbox" data-dep="${esc(depKey)}" value="${esc(d.id)}" ${s.after.includes(d.id) ? 'checked' : ''}>${kindChipHtml(d)}<span>${esc(d.title)}</span></label>`).join('') || '<span>No other sub-jobs</span>';
+// Blank lands where the job does; the summary names the branch only once it differs.
+const branchEditorHtml = (s, i, base, open) => `<details class="job-node-deps job-node-branch ${s.base ? 'set' : ''}" data-base-of="${esc(s.id)}" ${open ? 'open' : ''}><summary title="Lands on ${esc(targetOf({ base }, s) || 'the default branch')} · change">${ICONS.branch}${s.base ? `<span>${esc(s.base)}</span>` : ''}</summary>
+  <input data-base="${i}" value="${esc(s.base || '')}" placeholder="${esc(base || 'Default branch')}" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Land on branch"><span>Blank lands where the job does. The worktree is cut from origin/&lt;branch&gt; and the PR opens against it.</span></details>`;
 // A place pill's parts: the glyph, a short mono label, a dot per write in its
 // state, and ↗ once the place exists.
 const urgentOf = (states) => ['failing', 'needs'].find((st) => states.includes(st));
@@ -158,7 +166,7 @@ export function graphGrid(cols, work, levels, styleOf) {
 // node in its live state and labelled with what approval would do to it.
 export const rocketHtml = (id) => `<g class="job-edge-glyph" data-glyph="${esc(id)}"><circle r="12"/><g transform="translate(-9.6 -9.6) scale(.8)">${ROCKET_PATH}</g></g>`;
 const MARKS = { frozen: 'Locked · already landed', removed: 'Will be cancelled', added: 'New', edited: 'Edited', kept: 'Unchanged' };
-export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, openDeps = new Set(), openTickets = new Set(), editing = null, reviewWrites = false } = {}) {
+export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, openDeps = new Set(), openTickets = new Set(), editing = null, reviewWrites = false, base = null } = {}) {
   const subs = plan.subJobs;
   if (!subs.length) return '';
   const levels = dependencyLevels(plan);
@@ -209,15 +217,16 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
   const node = (s, i) => {
     const state = stateOf ? stateOf(s) : 'planned';
     const deps = dependencyLine(plan, s);
-    const tip = [KIND_TITLE[kindClass(s)], story(s), isPrSub(s) ? tildify(s.repo) : '', deps, stateOf ? STATES[state].label : ''].filter(Boolean).join('\n');
+    const lands = isPrSub(s) ? `Lands on ${targetOf({ base }, s) || 'the default branch'}${offBase({ base }, s) ? `, not the job's ${base || 'default branch'}` : ''}` : '';
+    const tip = [KIND_TITLE[kindClass(s)], story(s), isPrSub(s) ? tildify(s.repo) : '', lands, isPrSub(s) && s.worktree?.branch ? `Branch ${s.worktree.branch}` : '', deps, stateOf ? STATES[state].label : ''].filter(Boolean).join('\n');
     const tile = `<span class="job-node-tile ${stateSolid(state) ? 'on' : ''}">${kindChipHtml(s)}<span class="job-node-state">${stateIconHtml(state)}</span></span>`;
     const cls = `job-node tone-${STATES[state].tone} ${kindClass(s)}`;
-    const repo = isPrSub(s) && s.kind !== 'jira' && s.repo ? `<span class="job-node-repo">${esc(tildify(s.repo).split('/').pop())}</span>`
+    const repo = isPrSub(s) && s.kind !== 'jira' && s.repo ? `<span class="job-node-repo">${esc(tildify(s.repo).split('/').pop())}${offBase({ base }, s) ? ` <span class="job-node-base">→ ${esc(s.base)}</span>` : ''}</span>`
       : triggerLine(plan, s) ? `<span class="job-node-repo job-node-on" title="Starts at this milestone">${esc(triggerLine(plan, s))}</span>` : '';
     if (editable) {
       const others = subs.filter((d) => d.id !== s.id && !isWriteSub(d));
       return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<textarea class="job-node-title" aria-label="${kindLabel(s)} title ${i + 1}" data-title="${i}" maxlength="180" rows="3">${esc(s.title)}</textarea>${repo}
-        <details class="job-node-deps" data-deps="${esc(s.id)}" ${openDeps.has(s.id) ? 'open' : ''}><summary title="${esc(deps || 'Independent')} · change">${ICONS.link}<span>${s.after.length || 'None'}</span></summary>${dependencyEditorHtml(s, others, String(i))}</details></div>`;
+        <div class="job-node-edit"><details class="job-node-deps" data-deps="${esc(s.id)}" ${openDeps.has(s.id) ? 'open' : ''}><summary title="${esc(deps || 'Independent')} · change">${ICONS.link}<span>${s.after.length || 'None'}</span></summary>${dependencyEditorHtml(s, others, String(i))}</details>${isPrSub(s) ? branchEditorHtml(s, i, base, openDeps.has(`base:${s.id}`)) : ''}</div></div>`;
     }
     if (markOf) { const mark = markOf(s); return `<div class="${cls} job-mark-${mark}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}<span class="job-mark">${mark === 'frozen' ? ICONS.lock : ''}${esc(MARKS[mark])}</span></div>`; }
     if (!stateOf) return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}</div>`;

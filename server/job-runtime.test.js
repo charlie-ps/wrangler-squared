@@ -643,3 +643,12 @@ test('a dropped sub-job of a job that lands on another branch is compared agains
   assert.ok(f.calls.some((c) => c[0] === 'log' && c.includes('refs/remotes/origin/next')));
   assert.ok(!f.calls.some((c) => c[0] === 'ls-remote'), 'the job\'s base is known, so origin\'s default is not asked for');
 });
+
+test('a PR\'s own base wins over the job\'s when its worktree is cut', async () => {
+  const { host, spawned } = fakeHost();
+  const run = async () => 'abc';
+  await runtimeWith(host, { run }).launch({ id: 'job_12345678', title: 'x', agent: 'claude', base: 'next' }, { id: 'api', repo: '/repo', base: 'release/2.x' }, { id: 'run_1', phase: 'implementation' }, () => {});
+  assert.equal(spawned[0].worktree.base, 'refs/remotes/origin/release/2.x');
+  const missing = async (bin, args) => { if (args[0] === 'rev-parse') throw new Error('fatal'); return ''; };
+  await assert.rejects(runtimeWith(fakeHost().host, { run: missing }).launch({ id: 'job_12345678', title: 'x', agent: 'claude' }, { id: 'api', repo: '/repo', base: 'release/2.x' }, { id: 'run_1', phase: 'implementation' }, () => {}), /"release\/2\.x" does not exist on origin; push it or change this PR's/);
+});

@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
 import { mountSkies } from './job-skylines.js';
@@ -25,6 +25,14 @@ const link = (url, title) => /^https:\/\/github\.com\//.test(url || '') ? `<a hr
 const commentWhere = (c) => c.kind === 'review' ? `review · ${c.state.toLowerCase().replace('_', ' ')}` : c.kind === 'thread' ? `${c.path || 'thread'}${c.line != null ? `:${c.line}` : ''}${c.outdated ? ' · outdated' : ''}${c.resolved ? ' · resolved' : ''}` : 'comment';
 // An assist chip: a glyph and a few words, the sentence behind them in its tooltip.
 const chip = (icon, text, { cls = '', title = '' } = {}) => `<span class="job-chip ${cls}"${title ? ` title="${esc(title)}"` : ''}>${icon}${text ? `<span>${esc(text)}</span>` : ''}</span>`;
+// A PR's worktree branch and where it lands as one chip, `branch → target`; a
+// PR on the default branch shows only its branch, and nothing until it is cut.
+function branchChip(job, sub) {
+  const branch = sub.worktree?.branch, target = isPrSub(sub) ? targetOf(job, sub) : null;
+  if (!branch && !target) return '';
+  const lands = target ? `Lands on ${target}${sub.base ? ' (this PR\'s own branch)' : ' (the job\'s branch)'}` : '';
+  return chip(ICONS.branch, [branch, target ? `→ ${target}` : ''].filter(Boolean).join(' '), { cls: `${branch ? 'job-plan-branch' : ''} ${offBase(job, sub) ? 'job-chip-base' : ''}`, title: [branch ? `Branch ${branch}` : '', lands].filter(Boolean).join('\n') });
+}
 // The state chip carries every explanatory sentence the step has, so they cost a
 // hover rather than a paragraph; the info glyph says there is something to read.
 const stateChip = (state, text, hints = []) => `<span class="job-chip job-chip-state tone-${STATES[state].tone}"${hints.length ? ` title="${esc(hints.join('\n\n'))}"` : ''}>${stateIconHtml(state)}<span>${esc(text)}</span>${hints.length ? ICONS.info : ''}</span>`;
@@ -412,6 +420,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     renderDetail();
   }
   const reviewDefault = () => !!data.jobs.find((j) => j.id === selected?.jobId)?.reviewWrites;
+  const jobBase = () => data.jobs.find((j) => j.id === selected?.jobId)?.base || null;
   // Connectors follow the tiles' rendered rectangles, so anything that can move a
   // node (a dependency editor opening, the dialog resizing) re-traces them.
   const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => layoutGraphEdges(dialog.querySelector('.job-graph'))) : null;
@@ -444,11 +453,23 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     // A dependency change can move the node to another wave, so the stepper is
     // redrawn from the draft rather than patched; the changed checkbox keeps focus.
     graph.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
+    const redraw = () => { graph.outerHTML = planGraphHtml(planDraft, { editable: true, openDeps, openTickets, editing: writeEdit, reviewWrites: reviewDefault(), base: jobBase() }); wireGraph(); };
     graph.querySelectorAll('[data-dep]').forEach((e) => e.onchange = () => {
       const s = planDraft.subJobs[+e.dataset.dep]; s.after = e.checked ? [...s.after, e.value] : s.after.filter((d) => d !== e.value);
-      graph.outerHTML = planGraphHtml(planDraft, { editable: true, openDeps, openTickets, editing: writeEdit, reviewWrites: reviewDefault() });
-      wireGraph();
+      redraw();
       [...dialog.querySelectorAll(`[data-dep="${e.dataset.dep}"]`)].find((c) => c.value === e.value)?.focus();
+    });
+    // A PR's own base, blank for the job's: the tile's repo line follows it, so it redraws once settled.
+    graph.querySelectorAll('details[data-base-of]').forEach((d) => d.ontoggle = () => { if (d.open) openDeps.add(`base:${d.dataset.baseOf}`); else openDeps.delete(`base:${d.dataset.baseOf}`); layoutGraphEdges(graph); });
+    graph.querySelectorAll('[data-base]').forEach((e) => {
+      const commit = () => {
+        const s = planDraft.subJobs[+e.dataset.base], v = e.value.trim();
+        if ((s.base || '') === v) return;
+        if (v) s.base = v; else delete s.base;
+        redraw(); dialog.querySelector(`[data-base="${e.dataset.base}"]`)?.focus();
+      };
+      e.onchange = commit;
+      e.onkeydown = (k) => { if (k.key === 'Enter' && !isPrimaryActionKey(k)) { k.preventDefault(); commit(); } };
     });
     observer?.observe(graph.querySelector('.job-graph-canvas'));
     layoutGraphEdges(graph);
@@ -646,7 +667,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     const items = [...changes.added.map((id) => `<li class="job-mark-added">New: ${esc(title(id))}</li>`),
       ...changes.edited.map((e) => `<li class="job-mark-edited">Edited: ${esc(title(e.id))} <small>${esc(e.fields.join(', '))}</small></li>`),
       ...changes.removed.map((id) => `<li class="job-mark-removed">Will be cancelled: ${esc(title(id))}${pr(id)}</li>`)];
-    return `<p class="job-replan-ask"><b>You asked</b> ${esc(job.replan.feedback)}</p>${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, openTickets, reviewWrites: job.reviewWrites })}
+    return `<p class="job-replan-ask"><b>You asked</b> ${esc(job.replan.feedback)}</p>${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, openTickets, reviewWrites: job.reviewWrites, base: job.base })}
       <ul class="job-replan-changes">${items.join('') || '<li>No sub-job changes</li>'}</ul>${planMoreHtml(job, merged)}`;
   }
   // The job dialog's one extended button: the single most urgent thing the job is
@@ -768,7 +789,8 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       job.stage === 'backlog' && !job.cancelledAt ? 'Planning proposes Jira story titles without touching Jira. You review the plan before tickets are created or work begins.' : '',
       job.stage === 'planning' && !job.plan && !job.cancelledAt ? 'Wrangler will bring the plan here for review.' : '',
       replanPending(job) ? replanProposed(job) ? 'Approving applies the change: new sub-jobs are added, edited ones take their new brief, removed ones are cancelled with any PR left open on GitHub. Locked sub-jobs have already landed and stay as they are. No new step starts until you approve or discard.' : 'Wrangler is re-planning and will bring the proposal here. No new step starts meanwhile; running steps carry on.' : ''].filter(Boolean);
-    const chips = stateChip(state, jobLabel(job), hints) + (plan ? storyChips(plan.stories || []) : repoChips(job.repos)) + costChip(job.usd, job.usdEstimated, `${JOB_COST_TITLE}${job.usdEstimated ? ' · includes an estimate for Codex sessions' : ''}`);
+    const chips = stateChip(state, jobLabel(job), hints) + (plan ? storyChips(plan.stories || []) : repoChips(job.repos))
+      + (job.base ? chip(ICONS.branch, `→ ${job.base}`, { title: `Every PR lands on ${job.base} unless it names another branch` }) : '') + costChip(job.usd, job.usdEstimated, `${JOB_COST_TITLE}${job.usdEstimated ? ' · includes an estimate for Codex sessions' : ''}`);
     let body = '', fab = '', extra = '';
     if (planDraft) {
       const writes = planDraft.subJobs.filter(isWriteSub);
@@ -776,12 +798,12 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       const reviewed = reviewedOf(writes);
       const bad = planDraft.subJobs.filter(writeProblem);
       if (writeEdit != null && !isWriteSub(planDraft.subJobs[writeEdit])) writeEdit = null;
-      body = `${writes.length ? `<div class="job-chips job-write-count">${chip(ICONS.link, `${writes.length} write${writes.length === 1 ? '' : 's'}${reviewed ? ` · ${reviewed} reviewed` : ''}`, { cls: 'job-chip-quiet', title: 'Open a place under its step to change its writes; its eye says whether it stops for your review' })}</div>` : ''}${planGraphHtml(planDraft, { editable: true, openDeps, openTickets, editing: writeEdit, reviewWrites: reviewDefault() })}${writeEdit != null ? writeEditorHtml(job, planDraft, writeEdit) : ''}${planMoreHtml(job, planDraft)}`;
+      body = `${writes.length ? `<div class="job-chips job-write-count">${chip(ICONS.link, `${writes.length} write${writes.length === 1 ? '' : 's'}${reviewed ? ` · ${reviewed} reviewed` : ''}`, { cls: 'job-chip-quiet', title: 'Open a place under its step to change its writes; its eye says whether it stops for your review' })}</div>` : ''}${planGraphHtml(planDraft, { editable: true, openDeps, openTickets, editing: writeEdit, reviewWrites: reviewDefault(), base: job.base })}${writeEdit != null ? writeEditorHtml(job, planDraft, writeEdit) : ''}${planMoreHtml(job, planDraft)}`;
       const authority = authorityText(job, planDraft);
       fab = `<button class="primary" data-action="approve-plan" title="${esc(bad.length ? `Finish ${bad.length === 1 ? 'the write' : `${bad.length} writes`} first: ${writeProblem(bad[0])}` : authority)}" ${running || bad.length ? 'disabled' : ''}>${ICONS.check}Approve ${planDraft.subJobs.filter((s) => !isWriteSub(s)).length}</button>`;
       extra = `<button id="job-refine">${ICONS.edit}Request changes</button>`;
     } else if (replanProposed(job)) body = proposalHtml(job);
-    else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b> ${esc(job.replan.feedback)}</p>` : ''}${supersededHtml(job)}${planGraphHtml({ ...job.plan, subJobs: job.subJobs }, { stateOf: (s) => subState(job, s), lineOf: (s) => subLine(job, s), openTickets, reviewWrites: job.reviewWrites })}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
+    else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b> ${esc(job.replan.feedback)}</p>` : ''}${supersededHtml(job)}${planGraphHtml({ ...job.plan, subJobs: job.subJobs }, { stateOf: (s) => subState(job, s), lineOf: (s) => subLine(job, s), openTickets, reviewWrites: job.reviewWrites, base: job.base })}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
     else body = `<p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}`;
     if (job.error) fab = `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>`;
     else if (job.stage === 'backlog' && !job.cancelledAt) fab = `<button class="primary" data-action="start" title="${esc(hints[0])}">${ICONS.play}Start planning</button>`;
@@ -891,8 +913,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       + `<span class="job-chip" title="${esc(KIND_TITLE[kindClass(sub)])}">${kindChipHtml(sub)}<span>${kindLabel(sub)}</span></span>`
       + chip(ICONS.story, sub.jiraKey || (sub.storyId ? 'Ticket pending' : 'No ticket'), { title: story?.title || '' })
       + (pr ? chip(ICONS.folder, tildify(sub.repo).split('/').pop(), { title: tildify(sub.repo) }) : '')
-      + (sub.worktree?.branch ? chip(ICONS.branch, sub.worktree.branch, { cls: 'job-plan-branch', title: 'Branch' }) : '')
-      + (pr && job.base ? chip(ICONS.branch, `→ ${job.base}`, { title: `Lands on ${job.base}, not the default branch` }) : '')
+      + branchChip(job, sub)
       + (sub.pr ? `<a class="job-chip job-pipeline-status ${checkTone(sub.pr.checkStatus)}" ${/^https:\/\/github\.com\//.test(sub.pr.url || '') ? `href="${esc(sub.pr.url)}" target="_blank" rel="noopener noreferrer"` : ''} title="Pull request · checks ${esc(sub.pr.checkStatus)}${sub.pr.head ? ` · ${esc(sub.pr.head.slice(0, 8))}` : ''}">${ICONS.pr}<span>${n ? `#${esc(n)}` : 'PR'}</span></a>` : '')
       + (deploys ? chip(ICONS.rocket, sub.deploys.expected === false ? 'No deploy' : 'Deploys', { cls: 'job-deploys', title: deploys }) : '')
       + costChip(sub.usd, sub.usdEstimated, `${SUB_COST_TITLE}${jobCostLabel(job.usd, job.usdEstimated) ? ` · job total ${jobCostLabel(job.usd, job.usdEstimated)}` : ''}`);

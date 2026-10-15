@@ -78,6 +78,9 @@ export const writeActionSchema = z.object({ type: z.enum(WRITE_ACTIONS), to: lin
 export const triggerSchema = z.object({ sub: id, at: z.enum(MILESTONES) });
 export const subJobSchema = z.object({
   id, title: line, kind: z.enum(['pr', 'session', 'human', 'write']).default('pr'), repo: repoPath.optional(),
+  // A PR that lands somewhere other than the job's base (a backport, a release
+  // branch). Absent, it lands where the job does (`targetOf`).
+  base: branchName.optional(),
   storyId: id.optional(), jiraKey: jira.optional(), after: z.array(id).max(30).default([]),
   brief: briefSchema.optional(), check: line.optional(),
   // `on` is a session's: it starts once that sub-job reaches the milestone (and
@@ -105,6 +108,8 @@ export const writeReviewed = (job, sub) => sub?.review ?? job?.reviewWrites ?? f
 // A PR is the only kind with a repository, a pipeline and a deploy gate,
 // so "not a PR" — not "is a session" — is what every one of those rules turns on.
 export const isPrSub = (sub) => !isSessionSub(sub) && !isHumanSub(sub) && !isWriteSub(sub);
+// The branch a PR is cut from and lands on; null is the repository's default.
+export const targetOf = (job, sub) => sub?.base || job?.base || null;
 // The write that creates a story is what gives it a key, so it is the one
 // sub-job naming a keyless story that never waits for one.
 export const awaitsTicket = (sub) => !!sub?.storyId && !sub?.jiraKey && !isStoryCreate(sub);
@@ -193,6 +198,7 @@ export const planSchema = z.object({
     if (isHumanSub(s) && s.repo) issue(`${s.id}: a human sub-job has no repo`);
     if (isHumanSub(s) && s.check) issue(`${s.id}: a human sub-job has nothing to check after it lands`);
     if (isPrSub(s) && !s.repo) issue(`${s.id}: a PR sub-job needs repo`);
+    if (s.base && !isPrSub(s)) issue(`${s.id}: only a PR lands on a branch (base)`);
     if (!isWriteSub(s) && !s.brief) issue(`${s.id}: brief is required`);
     if (!isWriteSub(s) && (s.action || s.by || s.place)) issue(`${s.id}: only a write has a place, an action or a session that makes it (by)`);
     if (s.on && isWriteSub(s)) issue(`${s.id}: a write is made by its session (by); put the milestone (on) on that session`);

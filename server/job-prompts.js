@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { ATTRIBUTION, isHumanSub, reviewCode, placeOf, isMakeWrite } from './jobs-schema.js';
+import { ATTRIBUTION, targetOf, isHumanSub, reviewCode, placeOf, isMakeWrite } from './jobs-schema.js';
 import { checkoutsDir, displayPath } from './data-dir.js';
 import { isFrozen, replanStatus } from './job-replan.js';
 import { writeBrief, openWrites, draftingFor, WRITE_RESULT_SHAPE } from './job-writes.js';
@@ -170,7 +170,7 @@ const passingWorkflows = (sub) => workflowsWith(sub, 'passing');
 const postMergeLine = (sub) => sub?.acceptedRed && sub.acceptedRed.ref === sub.pr?.mergeCommit && sub.deploymentResult?.status === 'failing'
   ? `post-merge runs FAILED (${workflowsWith(sub, 'failing') || 'unknown workflow'}) and the human accepted that${sub.acceptedRed.note ? ` — "${sub.acceptedRed.note}"` : ''}`
   : `post-merge runs passed${passingWorkflows(sub) ? ` (${passingWorkflows(sub)})` : ''}`;
-const thisPr = (sub, job) => `This PR (${sub?.repo ? path.basename(sub.repo) : 'this repository'}${job?.base ? `, landing on ${job.base}` : ''}): ${sub?.brief}`;
+const thisPr = (sub, job) => `This PR (${sub?.repo ? path.basename(sub.repo) : 'this repository'}${targetOf(job, sub) ? `, landing on ${targetOf(job, sub)}` : ''}): ${sub?.brief}`;
 // Fix here on an open PR under code review: the worktree IS that PR's branch, so
 // the work is a change to it, and the push goes to the PR that already exists.
 const openPrLine = (sub) => sub?.pr?.url ? `PR ${sub.pr.url} is already open from this worktree's branch; this is a fix to it, requested by the human (see the history below).` : '';
@@ -197,7 +197,8 @@ export function jobPrompt(job, sub, run) {
   const checkouts = dir && displayPath(dir);
   const report = (body, lead = '') => `${lead}job_report {runId:"${run.id}", ${body}}. ${blockedLine}`;
   const attribution = `End the commit message${sub?.pr?.url ? '' : ' and the PR description'} with exactly this line:\n${ATTRIBUTION}`;
-  const baseFlag = job.base ? ` with \`gh pr create --base ${job.base}\` (this job lands on ${job.base}, not the default branch)` : '';
+  const target = targetOf(job, sub);
+  const baseFlag = target ? ` with \`gh pr create --base ${target}\` (this ${sub?.base ? 'PR' : 'job'} lands on ${target}, not the default branch)` : '';
   const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, `${attribution}\nCommit, push to the open PR, then `) : report('kind:"published", url:"<PR url>"', `${attribution}\nCommit, push, open the PR${baseFlag}, then `);
   const prompts = {
     planning: lines(
@@ -223,9 +224,10 @@ export function jobPrompt(job, sub, run) {
       'Write `context` ONCE for the whole job (≤2000 chars), the way a human writes a dispatch: the shared background, conventions and constraints every worker needs. Each `brief` (≤500 chars) is a dispatch intent that refers to the context rather than repeating it.',
       'Never describe deployments or verification steps: Wrangler reads the repository\'s workflows to know whether a merge deploys and watches whatever GitHub starts. Give `check` (one line) ONLY when the pipeline cannot prove the change works where it lands, e.g. "helm shows the release in dev and prod". A session or human sub-job has no check: a session\'s receipt is its check.',
       '`after` means START AFTER: a sub-job waits until every PR it is after has deployed and every session or human sub-job it is after is done (its output is an input). Each edge serialises the work, so add one only when the dependent needs the prerequisite live or its output. Minimise dependencies and PRs while keeping each piece independently deliverable. Do not propose branch names: the implementing session names its own.',
+      `base:"<branch>": only a PR not landing on ${job.base ? `\`${job.base}\`` : 'the default branch'}.`,
       job.replan ? replanBlock(job) : job.plan || job.previousPlan || job.feedback ? `Previous plan / feedback: ${JSON.stringify({ plan: job.plan || job.previousPlan, feedback: job.feedback })}` : '',
       '',
-      report('kind:"plan", plan:{context, stories:[{id,key?,project?,title,fields?:[{name,value}]}], workflows:{PROJECT:[status]}, jiraSite?, subJobs:[{id,title,kind:"pr"|"session"|"human"|"write",repo,storyId?,jiraKey?,after:[],brief,check?,on?:{sub,at},place?:{type,ref?,name?},action?,by?,review?,why?}]}'),
+      report('kind:"plan", plan:{context, stories:[{id,key?,project?,title,fields?:[{name,value}]}], workflows:{PROJECT:[status]}, jiraSite?, subJobs:[{id,title,kind:"pr"|"session"|"human"|"write",repo,base?,storyId?,jiraKey?,after:[],brief,check?,on?:{sub,at},place?:{type,ref?,name?},action?,by?,review?,why?}]}'),
     ),
     implementation: lines(
       heading(job, sub),

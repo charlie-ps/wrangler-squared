@@ -55,7 +55,7 @@ export function validatePlan(plan) {
 function addPrSubJob(job, sub, data, { storyId, jiraKey, story, position, buildSubJob }) {
   if (!isPrSub(sub)) throw new Error('This sub-job has no repository to open a PR in');
   const taken = new Set(job.plan.subJobs.map((s) => s.id));
-  const spec = { id: freeId(taken, sub.id, 2), title: data.title, kind: 'pr', repo: sub.repo,
+  const spec = { id: freeId(taken, sub.id, 2), title: data.title, kind: 'pr', repo: sub.repo, ...(sub.base ? { base: sub.base } : {}),
     ...(storyId ? { storyId } : {}), after: [], brief: data.brief, ...(data.check ? { check: data.check } : {}), ...(jiraKey ? { jiraKey } : {}) };
   const projected = { ...job.plan, stories: [...job.plan.stories, ...(story ? [story] : [])],
     subJobs: [...job.plan.subJobs.map((s) => ({ ...s })), spec] };

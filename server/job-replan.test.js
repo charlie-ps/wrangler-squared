@@ -148,3 +148,10 @@ test('a write added or moved to a session that has finished is refused; to one r
   assert.equal(lines.filter((l) => l.sub.id === 'r2').length, 1, 'said once, however many writes it gained');
   assert.match(lines.find((l) => l.sub.id === 'r2').detail, /sent “Run r2” back to work/);
 });
+
+test('a PR\'s base is where its worktree was cut, so a proposal cannot change it', () => {
+  const subs = [spec('a', [], { base: 'next' })];
+  const j = job(subs, [live(subs[0])]);
+  assert.throws(() => mergeReplan(j, { context: '', stories: [], subJobs: [spec('a')] }), /base cannot change/);
+  assert.deepEqual(mergeReplan(j, { context: '', stories: [], subJobs: [spec('a', [], { base: 'next' })] }).changes.kept, ['a']);
+});
