@@ -22,6 +22,10 @@ const branchNaming = (job, sub) => (!sub?.worktree?.branch || sub.worktree.branc
 // The receipt is the only thing that advances a job, so every prompt ends with
 // the exact call. Nothing an agent reports ever changes the plan itself.
 const blockedLine = 'Blocked: {kind:"blocked", summary:"one sentence"}.';
+// Up one level (job-red.js): blocked and replan go to the planner, which fixes the
+// step, changes the plan or escalates; escalate is for a decision only the human
+// can make, with what you found and tried.
+const upLine = 'Needs more than this step (a plan change): {kind:"replan", summary:"one sentence", why?:"the reason"}. Only the human can decide it: {kind:"escalate", summary:"what you found", tried?:["what you tried"], ask:"the one decision you need"}.';
 const lines = (...parts) => parts.filter(Boolean).join('\n');
 const afterLine = (job, sub) => `After: ${(sub?.after || []).map((id) => (job.subJobs || []).find((s) => s.id === id)?.title || id).join(' · ') || 'none'}.`;
 const HUMAN_OUTPUT_PROMPT_MAX = 24000;
@@ -146,7 +150,8 @@ const joinChecks = (list) => (list || []).map(checkText).join(' · ');
 const outcome = (r) => {
   const p = r.report || r.readyReport;
   if (!p) return r.error || 'stopped without a receipt';
-  if (p.kind === 'blocked') return `blocked: ${p.summary}`;
+  if (p.kind === 'blocked' || p.kind === 'replan') return `${p.kind === 'replan' ? 'asked for a replan' : 'blocked'}: ${p.summary}`;
+  if (p.kind === 'escalate') return `declared red: ${p.summary.slice(0, 240)}`;
   if (p.kind === 'published') return `published: ${p.url}`;
   if (p.kind === 'repaired') return `repaired: ${joinChecks(p.changes)}`;
   return `${p.kind}: ${joinChecks(p.checks)}`;
@@ -216,7 +221,7 @@ const openPrLine = (sub) => sub?.pr?.url ? `PR ${sub.pr.url} is already open fro
 // sub-job stands, which ones it may no longer touch, and returns the WHOLE plan
 // as a proposal the human approves.
 const replanBlock = (job) => lines(
-  'This job is ALREADY RUNNING and the human wants its plan changed. Where each sub-job stands now:',
+  job.replan.red ? 'This job is ALREADY RUNNING and one of its steps has gone red, so Wrangler (not the human) asks you to look at it. Where each sub-job stands now:' : 'This job is ALREADY RUNNING and the human wants its plan changed. Where each sub-job stands now:',
   ...job.subJobs.map((s) => replanStatus(job, s)),
   `Frozen (delivered or past the point of no return; keep each exactly as it is): ${job.subJobs.filter(isFrozen).map((s) => s.id).join(', ') || 'none'}.`,
   'Return the WHOLE plan. Keep an id to keep or edit that sub-job: only its title, brief, check, show and after may change, a session\'s on, and a write\'s action, by, review, why and place.ref (its kind, repo, story and place type are fixed, so new work in another place is a new id). A write goes with the session that makes it, and a session you cancel takes its writes with it. Leave an unfrozen sub-job out to cancel it: it stays on the board as cancelled and any open PR stays open on GitHub. Give new work a new id. Do not make anything wait on a sub-job you cancel. Do not repeat work a frozen sub-job already delivered. Your plan is a proposal: nothing changes until the human approves it, and new steps are held meanwhile.',
@@ -234,7 +239,7 @@ const cloneInto = (dir) => dir ? `into ${dir}/<repository-name>` : 'beside your 
 export function jobPrompt(job, sub, run) {
   const dir = checkoutsDir();
   const checkouts = dir && displayPath(dir);
-  const report = (body, lead = '') => `${lead}job_report {runId:"${run.id}", ${body}}. ${blockedLine}`;
+  const report = (body, lead = '') => `${lead}job_report {runId:"${run.id}", ${body}}. ${blockedLine}${run.phase === 'planning' ? '' : ` ${upLine}`}`;
   const attribution = `End the commit message${sub?.pr?.url ? '' : ' and the PR description'} with exactly this line:\n${ATTRIBUTION}`;
   const baseFlag = job.base ? ` with \`gh pr create --base ${job.base}\` (this job lands on ${job.base}, not the default branch)` : '';
   const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, `${attribution}\nCommit, push to the open PR, then `) : report('kind:"published", url:"<PR url>"', `${attribution}\nCommit, push, open the PR${baseFlag}, then `);
@@ -265,6 +270,7 @@ export function jobPrompt(job, sub, run) {
       '`after` means START AFTER: a sub-job waits until every PR it is after has deployed and every session or human sub-job it is after is done (its output is an input). Each edge serialises the work, so add one only when the dependent needs the prerequisite live or its output. Minimise dependencies and PRs while keeping each piece independently deliverable. Do not propose branch names: the implementing session names its own.',
       job.replan ? replanBlock(job) : job.plan || job.previousPlan || job.feedback ? `Previous plan / feedback: ${JSON.stringify({ plan: job.plan || job.previousPlan, feedback: job.feedback })}` : '',
       '',
+      job.replan?.red ? `If no fix or plan change can get this step past red without a decision only the human can make, declare it red instead: ${reportCall(run, 'kind:"escalate", summary:"what you found", tried?:["what you tried"], ask:"the one decision you need", sub?:"<the red step\'s id>", options?:[{label, why?, plan, actions?}] (at most three, ranked)')}` : '',
       report(`kind:"plan", ${job.replan ? 'label?, why?, actions?:[{type,sub,note?,position?,evidence?,fix?}], diagnosis?:{summary,evidence?:[{label,detail}]}, alternatives?:[{label,why?,plan,actions?}], ' : ''}plan:{context, stories:[{id,key?,project?,title,fields?:[{name,value}]}], workflows:{PROJECT:[status]}, jiraSite?, subJobs:[{id,title,kind:"pr"|"session"|"human"|"write",repo,storyId?,jiraKey?,after:[],brief,check?,show?:["a thing to see"],on?:{sub,at},place?:{type,ref?,name?},action?,by?,review?,why?}]}`),
     ),
     implementation: lines(

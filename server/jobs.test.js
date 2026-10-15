@@ -49,6 +49,9 @@ function fixture(t, jobInput = input) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-jobs-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const store = new JobStore(path.join(dir, 'jobs.json'));
+  // Red handling (job-red.js) is off by default here, so a red step waits for the
+  // human as these suites assume; its own tests turn it on.
+  store.settings({ maxReplans: 0 });
   const launched = [], stopped = [], merged = [], cleaned = [], mailed = [], alive = new Set();
   let clock = Date.now();
   const runtime = {
@@ -2386,4 +2389,197 @@ test('a planner\'s receipt may carry a diagnosis, ranked options and actions; th
   f.store.action(f.job.id, 'approve-replan', { proposalId: proposal.id, option: 1 });
   const job = f.store.get(f.job.id);
   assert.deepEqual([job.subJobs[0].acceptedRed.ref, job.subJobs[0].recoveredBy, job.subJobs.some((s) => s.id === 'fix')], ['m1', undefined, false]);
+});
+
+// ---- Red steps (job-red.js): a red step goes up one level before it goes to the human ----
+// api is at its PR with failing checks and no CI repairs left, so it is red; red handling is on.
+async function redApi(t, { flags = {}, settings = {}, specs = [spec('api')] } = {}) {
+  const f = fixture(t);
+  f.store.settings({ maxRepairs: 0, maxReplans: 2, ...settings });
+  f.store.update(f.job.id, (j) => { j.reviewMerge = false; });
+  await f.approve(plan(specs));
+  f.report({ kind: 'published', url: PR_URL }, f.workerFor('api'));
+  f.store.update(f.job.id, (j) => Object.assign(j, flags));
+  f.setPr({ checkStatus: 'failing', checks: [{ name: 'e2e', state: 'FAILURE' }] }); await f.tick();
+  assert.match(f.sub().error, /repair limit/);
+  return f;
+}
+const redJob = (f) => f.store.get(f.job.id);
+const rework = (note = 'Stabilise the e2e wait') => [{ type: 'rework', sub: 'api', note }];
+
+test('Red steps is the sixth checkpoint: You decide by default, switched per job; Replans per step is a setting', async (t) => {
+  const f = fixture(t);
+  assert.equal(f.job.reviewRed, true);
+  assert.equal(f.store.snapshot().settings.reviewDefaults.reviewRed, true);
+  assert.equal(f.store.snapshot().settings.maxReplans, 0, 'this fixture turns it off');
+  assert.equal(new JobStore(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'aw-jobs-')), 'jobs.json')).snapshot().settings.maxReplans, 2, 'two tries per step by default');
+  assert.throws(() => f.store.settings({ maxReplans: 6 })); assert.throws(() => f.store.settings({ maxReplans: -1 }));
+  await f.approve();
+  f.store.action(f.job.id, 'set-review', { field: 'reviewRed', you: false });
+  assert.equal(redJob(f).reviewRed, false);
+  assert.equal(redJob(f).moves.at(-1).detail, 'Switched Red steps to Wrangler replans');
+  f.store.action(f.job.id, 'set-review', { field: 'reviewRed', you: true });
+  assert.equal(redJob(f).moves.at(-1).detail, 'Switched Red steps to You decide');
+  assert.equal(f.store.create({ ...input, reviewRed: false }).reviewRed, false, 'a new job takes it too');
+});
+
+test('a red step is sent to the planner, which holds only that step; "Replans per step" 0 leaves red to the human', async (t) => {
+  const f = await redApi(t, { specs: [spec('api'), spec('web'), spec('later', ['api'])] });
+  await f.tick();
+  const planner = f.last();
+  assert.deepEqual([planner.run.phase, planner.sub, planner.run.red], ['planning', null, { sub: 'api' }]);
+  assert.deepEqual(redJob(f).replan.red, { sub: 'api', auto: false, n: 1 });
+  const prompt = jobPrompt(redJob(f), null, planner.run);
+  assert.match(prompt, /one of its steps has gone red/); assert.match(prompt, /RED STEP: “Deliver api” \(api, pr\/watching\).*try 1 of 2/);
+  assert.match(prompt, /failing checks: e2e/); assert.match(prompt, /"You decide": whatever you propose waits/); assert.match(prompt, /kind:"escalate"/);
+  // Only the red step and what follows it are held: web carries on, the rest of the job is not frozen.
+  f.store.update(f.job.id, (j) => { const w = j.subJobs.find((s) => s.id === 'web'); w.stage = 'review'; w.state = 'verified'; w.ready = { checks: ['ok'], receiptId: 'rcpt', at: 1 }; });
+  f.store.action(f.job.id, 'approve-code', { subJobId: 'web', readyReceiptId: 'rcpt' });
+  assert.throws(() => f.store.action(f.job.id, 'approve-merge', { subJobId: 'later', head: 'h' }), /plan change is pending/);
+  assert.equal(f.launched.filter((w) => w.run.red).length, 1, 'one replan at a time');
+  await f.tick();
+  assert.equal(f.launched.filter((w) => w.run.red).length, 1);
+
+  const g = await redApi(t, { settings: { maxReplans: 0 } }); await g.tick();
+  assert.ok(!redJob(g).replan, 'handling is off: it waits for the human as before');
+  assert.equal(g.launched.filter((w) => w.run.phase === 'planning').length, 1, 'only the first plan');
+});
+
+test('under You decide the proposed fix waits; discarding it is not asked again for that failure, and Retry grants one more try', async (t) => {
+  const f = await redApi(t); await f.tick();
+  const planner = f.last();
+  f.report({ kind: 'plan', plan: redJob(f).plan, diagnosis: { summary: 'The e2e times out on the SSO stub' }, actions: rework() }, planner);
+  let job = redJob(f);
+  assert.equal(job.replan.proposal.actions[0].type, 'rework');
+  assert.match(job.subJobs[0].error, /repair limit/, 'nothing applied by itself');
+  assert.deepEqual(job.subJobs[0].red.attempts.map((a) => [a.summary, a.outcome]), [['The e2e times out on the SSO stub', 'proposed']]);
+  f.store.action(f.job.id, 'discard-replan', {});
+  await f.tick(); await f.tick();
+  assert.equal(redJob(f).replan, null);
+  assert.equal(f.launched.filter((w) => w.run.red).length, 1, 'the human turned this fix down: no second triage of the same red');
+  f.store.action(f.job.id, 'retry', { subJobId: 'api' });
+  assert.equal(redJob(f).subJobs[0].replanAllowance, 1);
+  assert.equal(redJob(f).subJobs[0].red.held, null);
+});
+
+test('under Wrangler replans a rework applies by itself, recorded as the human\'s approval would be', async (t) => {
+  const f = await redApi(t, { flags: { reviewRed: false } }); await f.tick();
+  assert.equal(redJob(f).replan.red.auto, true);
+  f.report({ kind: 'plan', plan: redJob(f).plan, diagnosis: { summary: 'Flaky wait on the SSO stub' }, actions: rework() }, f.last());
+  const job = redJob(f);
+  assert.equal(job.replan, null);
+  assert.deepEqual([job.subJobs[0].error, job.subJobs[0].stage, job.subJobs[0].note], [null, 'implementation', 'Stabilise the e2e wait']);
+  assert.deepEqual(job.moves.filter((m) => /replan/.test(m.move)).map((m) => m.move), ['approve-replan', 'replan']);
+  assert.match(job.moves.find((m) => m.move === 'approve-replan').detail, /\(Red steps: Wrangler replans\)/);
+  assert.deepEqual(job.subJobs[0].red.attempts.map((a) => a.outcome), ['applied']);
+});
+
+test('Wrangler replans never applies Accept red, Mark done, Recover, a plan edit under Plan: You, or a cancelled PR', async (t) => {
+  // accept-red claims something about the outside world: always the human's.
+  const f = await redApi(t, { flags: { reviewRed: false } }); await f.tick();
+  f.report({ kind: 'plan', plan: redJob(f).plan, diagnosis: { summary: 'Unrelated flake' }, actions: [{ type: 'accept-red', sub: 'api', note: 'flaky' }] }, f.last());
+  assert.ok(redJob(f).replan.proposal, 'waits as Fix ready'); assert.match(redJob(f).subJobs[0].error, /repair limit/);
+  // A plan edit waits unless the Plan checkpoint is Auto.
+  const g = await redApi(t, { flags: { reviewRed: false } }); await g.tick();
+  g.report({ kind: 'plan', plan: plan([spec('api'), spec('docs')]), diagnosis: { summary: 'Add docs' } }, g.last());
+  assert.ok(redJob(g).replan.proposal);
+  const h = await redApi(t, { flags: { reviewRed: false, reviewPlan: false } }); await h.tick();
+  h.report({ kind: 'plan', plan: plan([spec('api'), spec('docs')]), diagnosis: { summary: 'Add docs' }, actions: rework() }, h.last());
+  assert.equal(redJob(h).replan, null); assert.ok(redJob(h).subJobs.some((s) => s.id === 'docs'), 'Plan on Auto lets it through');
+  // Cancelling a sub-job whose PR is open is never automatic, even then.
+  const k = await redApi(t, { flags: { reviewRed: false, reviewPlan: false }, specs: [spec('api'), spec('web')] }); await k.tick();
+  k.report({ kind: 'plan', plan: plan([spec('web')]), diagnosis: { summary: 'Drop api' } }, k.last());
+  assert.ok(redJob(k).replan.proposal, 'api has an open PR');
+});
+
+test('a proposal with nothing to change declares the step red instead of waiting on nothing', async (t) => {
+  const f = await redApi(t); await f.tick();
+  f.report({ kind: 'plan', plan: redJob(f).plan, diagnosis: { summary: 'I cannot tell why it fails' } }, f.last());
+  const job = redJob(f);
+  assert.equal(job.replan, null);
+  assert.equal(job.subJobs[0].red.declared.summary, 'I cannot tell why it fails');
+  assert.deepEqual(job.moves.filter((m) => m.move === 'declare-red').length, 1);
+});
+
+test('out of tries, a step is declared red with every attempt listed; a declared red is not triaged again', async (t) => {
+  const f = await redApi(t, { flags: { reviewRed: false }, settings: { maxReplans: 1 } }); await f.tick();
+  f.report({ kind: 'plan', plan: redJob(f).plan, diagnosis: { summary: 'Raised the e2e timeout' }, actions: rework('Raise the timeout') }, f.last());
+  f.store.update(f.job.id, (j) => { j.subJobs[0].error = 'Automatic repair limit reached. Review changes, then retry if needed.'; });
+  await f.tick();
+  const job = redJob(f);
+  assert.equal(job.replan, null); assert.equal(f.launched.filter((w) => w.run.red).length, 1);
+  const declared = job.subJobs[0].red.declared;
+  assert.deepEqual([declared.auto, declared.tried], [true, ['Replan 1: Raised the e2e timeout']]);
+  assert.match(declared.summary, /used its 1 automatic try on this step/);
+  assert.match(job.moves.at(-1).detail, /Declared “Deliver api” red to you: 1 automatic try used/);
+  await f.tick(); await f.tick();
+  assert.equal(f.launched.filter((w) => w.run.red).length, 1);
+  // The human's Retry is one more try, and a new failure is judged afresh.
+  f.store.action(f.job.id, 'retry', { subJobId: 'api' });
+  assert.equal(redJob(f).subJobs[0].red.declared, null);
+});
+
+test('the planner escalates with options: the step is declared red and the options open as the proposal', async (t) => {
+  const f = await redApi(t); await f.tick();
+  const planner = f.last();
+  assert.throws(() => f.report({ kind: 'escalate', summary: 'x', ask: 'Merge or wait?', sub: 'ghost' }, planner), /not one/);
+  f.report({ kind: 'escalate', summary: 'login-flow.spec is flaky on main and quarantining it needs QA sign-off', tried: ['Reran e2e twice', 'Added a wait'], ask: 'Merge #1 with the red check, or hold it?',
+    options: [{ label: 'Accept red and merge', plan: redJob(f).plan, actions: [{ type: 'accept-red', sub: 'api' }] }, { label: 'Hold for QA', plan: redJob(f).plan, actions: rework('Wait for QA') }] }, planner);
+  const job = redJob(f);
+  assert.deepEqual([job.subJobs[0].red.declared.ask, job.subJobs[0].red.declared.tried.slice(-2)], ['Merge #1 with the red check, or hold it?', ['Reran e2e twice', 'Added a wait']]);
+  assert.equal(job.replan.proposal.escalation.sub, 'api'); assert.equal(job.replan.proposal.alternatives.length, 1);
+  assert.equal(job.replan.proposal.diagnosis.summary, job.subJobs[0].red.declared.summary);
+  f.store.action(f.job.id, 'approve-replan', { proposalId: job.replan.proposal.id, option: 0 });
+  assert.equal(redJob(f).subJobs[0].acceptedRed.ref, 'head1');
+  assert.equal(redJob(f).replan, null);
+});
+
+test('a step agent may declare its own step red, or ask for a replan: blocked and replan go to the planner, escalate to you', async (t) => {
+  const f = fixture(t); f.store.settings({ maxReplans: 2 }); await f.approve();
+  assert.throws(() => f.report({ kind: 'escalate', summary: 'x', ask: 'y', options: [{ label: 'a', plan: plan() }] }), /Only the planner/);
+  f.report({ kind: 'replan', summary: 'The API needs a schema change first', why: 'Another service owns the table' }); await f.tick();
+  let job = redJob(f);
+  assert.deepEqual([job.subJobs[0].error, job.subJobs[0].blocked.kind, job.subJobs[0].blocked.why], ['The API needs a schema change first', 'replan', 'Another service owns the table']);
+  await f.tick();
+  assert.match(redJob(f).replan.feedback, /said it needs more than its step: The API needs a schema change first \(Another service owns the table\)/);
+  assert.equal(f.last().run.phase, 'planning');
+
+  const g = fixture(t); g.store.settings({ maxReplans: 2 }); await g.approve();
+  g.report({ kind: 'escalate', summary: 'Production creds are needed to test this', tried: ['Looked in the vault'], ask: 'Can you supply a read-only key?' });
+  await g.tick(); await g.tick();
+  job = g.store.get(g.job.id);
+  assert.equal(job.subJobs[0].red.declared.ask, 'Can you supply a read-only key?');
+  assert.ok(!job.replan, 'declared by its own agent: nobody is sent after it');
+  assert.equal(g.launched.filter((w) => w.run.phase === 'planning').length, 1, 'only the first plan');
+  assert.throws(() => g.report({ kind: 'replan', summary: 'x' }, g.launched.find((w) => w.run.phase === 'planning')), /already submitted|must submit/);
+});
+
+test('a planner that blocks or dies on a red step declares it; the job is never held with job.error', async (t) => {
+  const f = await redApi(t); await f.tick();
+  f.report({ kind: 'blocked', summary: 'Cannot read the CI logs' }, f.last());
+  let job = redJob(f);
+  assert.deepEqual([job.error ?? null, job.replan], [null, null]);
+  assert.match(job.subJobs[0].red.declared.summary, /could not replan this step: Cannot read the CI logs/);
+  const g = await redApi(t); await g.tick();
+  g.alive.delete(g.last().sid); await g.tick();
+  job = g.store.get(g.job.id);
+  assert.deepEqual([job.error ?? null, job.replan], [null, null]);
+  assert.match(job.subJobs[0].red.declared.summary, /Session stopped without a receipt/);
+});
+
+test('a human\'s idea on a declared red goes to the planner with what it found, still holding only that step', async (t) => {
+  const f = await redApi(t); await f.tick();
+  f.report({ kind: 'escalate', summary: 'Needs QA sign-off', ask: 'Wait for QA?' }, f.last()); await f.tick();
+  change(f, 'api', 'QA is away; accept it'); 
+  const job = redJob(f);
+  assert.deepEqual([job.replan.red.sub, job.replan.red.human, job.replan.red.auto], ['api', true, false]);
+  assert.match(job.replan.feedback, /Needs QA sign-off/); assert.match(job.replan.feedback, /QA is away; accept it/);
+});
+
+test('settings saved before Replans per step existed read the default of two, so red handling is on for an upgraded install', async (t) => {
+  const f = await redApi(t, { settings: {} });
+  // Simulate a jobs.json written before the setting: the key is simply absent.
+  f.store.change((d) => { delete d.settings.maxReplans; });
+  await f.tick();
+  assert.deepEqual(redJob(f).replan?.red, { sub: 'api', auto: false, n: 1 });
 });

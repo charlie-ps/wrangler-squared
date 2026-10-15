@@ -9,7 +9,8 @@ import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
 import { requestChange, quickChange } from './job-change.js';
-import { discardReplan, proposeReplan, approveReplan } from './job-replan.js';
+import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
+import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
 
 const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
@@ -86,7 +87,8 @@ function cancelJob(j, now) {
 // Writes is only the default: a write's own `review` (true or false) beats it
 // (`writeReviewed`), so only writes without one are released, and a session
 // already drafting under it lands its drafts approved (job-writes.js applyDrafts).
-export const REVIEW_POINTS = { reviewPlan: 'Plan', reviewCode: 'Code', reviewMerge: 'Merge', reviewSessions: 'Session results', reviewWrites: 'Writes' };
+export const REVIEW_POINTS = { reviewPlan: 'Plan', reviewCode: 'Code', reviewMerge: 'Merge', reviewSessions: 'Session results', reviewWrites: 'Writes', reviewRed: 'Red steps' };
+const checkpointWord = (field, you) => field === 'reviewRed' ? (you ? 'You decide' : 'Wrangler replans') : you ? 'You review' : 'Auto';
 const flagOf = (j, field) => field === 'reviewCode' ? reviewCode(j) : field === 'reviewMerge' || field === 'reviewWrites' ? !!j[field] : j[field] ?? true;
 function releaseWaiting(j, field, { plan, revision }, now) {
   if (field === 'reviewPlan') {
@@ -115,7 +117,7 @@ function setReview(j, { field, you, release, plan, revision }, now) {
   const released = !you && release ? releaseWaiting(j, field, { plan, revision }, now) : 0;
   if (flagOf(j, field) === you && !released) return;
   j[field] = you;
-  record(j, null, 'set-review', null, `Switched ${name} to ${you ? 'You review' : 'Auto'}${released ? `, releasing ${released === 1 ? 'what was waiting' : `${released} waiting`}` : ''}`);
+  record(j, null, 'set-review', null, `Switched ${name} to ${checkpointWord(field, you)}${released ? `, releasing ${released === 1 ? 'what was waiting' : `${released} waiting`}` : ''}`);
 }
 const HELD_BY_REPLAN = new Set(['approve-code', 'approve-merge', 'approve-session', 'start-human', 'finish-human', 'approve-write', 'skip-write', 'edit-write']);
 export const MERGE_IS_DELIVERY = 'Merged; nothing runs on push for these paths';
@@ -276,7 +278,7 @@ export class JobStore {
       // A pending plan change freezes the job where it stands: a sub-job that
       // moves on under the planner (approved, merged, marked done) is no longer
       // the job the proposal was written against.
-      if (j.replan && HELD_BY_REPLAN.has(action)) throw new Error('A plan change is pending. Approve or discard it first.');
+      if (j.replan && HELD_BY_REPLAN.has(action) && (!s || heldBy(j, s))) throw new Error('A plan change is pending. Approve or discard it first.');
       if (action === 'set-review') { setReview(j, payload, Date.now()); return; }
       // The one way an idea comes in (job-change.js): to the step's own agent
       // when it has one, else the planner.
@@ -298,12 +300,15 @@ export class JobStore {
         if (j.stage !== 'backlog') throw new Error('Job has already started');
         j.stage = 'planning'; return;
       }
-      if (action === 'discard-replan') { discardReplan(j); record(j, null, 'discard-replan', null, 'Discarded the proposed plan change'); return; }
+      if (action === 'discard-replan') {
+        // A red step's fix the human turned down is not proposed again for the same failure.
+        if (j.replan?.red) holdRed(j, j.replan.red.sub);
+        discardReplan(j); record(j, null, 'discard-replan', null, 'Discarded the proposed plan change'); return;
+      }
       if (action === 'approve-replan') {
-        const { lines, detail, feedback: asked } = approveReplan(j, payload.proposalId, { now: Date.now(), buildSubJob, option: Number.isInteger(payload.option) ? payload.option : 0 });
-        j.repos = planRepos(j.plan);
-        record(j, null, 'approve-replan', asked.slice(0, 180), detail);
-        for (const l of lines) record(j, l.sub, 'replan', null, l.detail);
+        const red = j.replan?.red;
+        this._approveReplan(j, payload.proposalId, Number.isInteger(payload.option) ? payload.option : 0);
+        if (red) holdRed(j, red.sub);
         return;
       }
       if (action === 'retry') {
@@ -321,6 +326,10 @@ export class JobStore {
         if (s) {
           s.state = s.cancelledAt ? 'cancelled' : s.stage === 'review' ? (s.ready?.approvedAt ? 'approved' : 'verified') : 'queued';
           s.repairAllowance = (s.repairAllowance || 0) + 1;
+          // A retry is one more automatic try for a red step, and wipes the human's
+          // "leave it" on that failure.
+          s.replanAllowance = (s.replanAllowance || 0) + 1;
+          if (s.red) s.red = { ...s.red, held: null, declared: null };
           if (note) s.note = note;
         }
         record(j, s, 'retry', note, s ? `Retried ${quoted(s.title)}` : 'Retried the job');
@@ -387,6 +396,14 @@ export class JobStore {
       throw new Error('Unknown job action');
     });
   }
+  // Red handling's last rung: the automatic tries on this step are spent.
+  declareOutOfTries(jobId, subId, limit) {
+    return this.update(jobId, (j) => {
+      const s = j.subJobs.find((x) => x.id === subId);
+      declareOutOfTries(j, s, limit, Date.now());
+      record(j, s, 'declare-red', null, `Declared ${quoted(s.title)} red to you: ${limit} automatic ${limit === 1 ? 'try' : 'tries'} used`);
+    });
+  }
   claim(jobId, subJobId, phase, extra = {}) {
     const job = this.data.jobs.find((j) => j.id === jobId);
     if (!job || job.paused || job.cancelledAt || this.data.settings.paused
@@ -451,7 +468,10 @@ export class JobStore {
       // the batched writer's, which no longer exists: nothing it says is taken.
       const expected = { planning: ['plan'], write: [], implementation: ['ready', 'reply', 'published'], publish: ['published'], repair: ['repaired'], verify: ['deployed'], session: ['completed', 'drafts'] }[r.phase];
       if (!expected.length) throw new Error('This run predates session-owned writes; stop now');
-      if (!expected.includes(report.kind) && report.kind !== 'blocked') throw new Error(`This run must submit ${expected.join(' or ')}`);
+      // Going up one level is always open: blocked and escalate from any step, replan
+      // from every step but the planner's own (which has no one above it but you).
+      const up = report.kind === 'blocked' || report.kind === 'escalate' || (report.kind === 'replan' && r.phase !== 'planning');
+      if (!expected.includes(report.kind) && !up) throw new Error(`This run must submit ${expected.join(' or ')}`);
       const s = j.subJobs.find((s) => s.id === r.subJobId);
       // Drafts park the run rather than end it: the session waits for mail with
       // the human's decision (job-runner.js), then completes. Its receipt is the
@@ -520,10 +540,37 @@ export class JobStore {
     const proofs = report.checks.filter((c) => typeof c !== 'string');
     return { round, proof: adoptEvidence({ jobId: j.id, subId: s.id, round, proof: proofs }) };
   }
+  // The one road an approved plan change takes, by the human's click or by Wrangler
+  // itself under Red steps; the history reads the same either way.
+  _approveReplan(j, proposalId, option, by = null) {
+    const { lines, detail, feedback: asked } = approveReplan(j, proposalId, { now: Date.now(), buildSubJob, option });
+    j.repos = planRepos(j.plan);
+    record(j, null, 'approve-replan', asked.slice(0, 180), by ? `${detail} (${by})` : detail);
+    for (const l of lines) record(j, l.sub, 'replan', null, l.detail);
+  }
   _applyReceipt(j, r, s, report, proof = null, meta = {}) {
     if (report.kind === 'plan' && j.stage === 'active') {
       // Discarded while the planner worked: kept on the run, applied nowhere.
-      if (j.replan) proposeReplan(j, r, report, Date.now());
+      if (j.replan) {
+        proposeReplan(j, r, report, Date.now());
+        if (j.replan.red) {
+          const fate = settleProposal(j, r, { now: Date.now(), apply: () => this._approveReplan(j, j.replan.proposal.id, 0, 'Red steps: Wrangler replans') });
+          if (fate === 'declared') record(j, null, 'declare-red', null, 'Declared the red step to you');
+        }
+      }
+      return;
+    }
+    // The planner says a red step is beyond a fix: declared to the human, its
+    // options (when it gave any) waiting in the proposal view.
+    if (report.kind === 'escalate' && !s) {
+      if (!j.replan && !report.sub) throw new Error('Name the sub-job you are declaring red (sub)');
+      const sub = j.subJobs.find((x) => x.id === (report.sub || j.replan?.red?.sub));
+      escalate(j, r, report, { now: Date.now(), propose: proposeOptions });
+      record(j, sub, 'declare-red', null, `Declared ${quoted(sub.title)} red to you`);
+      return;
+    }
+    if (report.kind === 'blocked' && !s && j.replan?.red) {
+      failRedReplan(j, r, report.summary, Date.now());
       return;
     }
     // With plan review off the planner's own receipt is the approval: the
@@ -570,11 +617,20 @@ export class JobStore {
       s.result = { ...report, receiptId: r.id, at: Date.now() }; s.feedback = null; s.note = null; s.stage = review ? 'review' : 'cleanup'; s.state = review ? 'verified' : 'queued';
     }
     if (report.kind === 'deployed') { s.deployed = { checks: report.checks, at: Date.now(), commit: s.pr?.mergeCommit || null }; s.stage = 'cleanup'; s.state = 'queued'; }
-    // The event box on the card: the agent's own sentence.
-    if (report.kind === 'blocked') {
+    // The event box on the card: the agent's own sentence. All three go up one
+    // level, to the planner (job-runner.js triageRed), and on to the human only
+    // when it escalates, runs out of tries, or red handling is off.
+    if (report.kind === 'blocked' || report.kind === 'replan') {
       const target = s || j;
       target.error = report.summary;
-      target.blocked = { summary: report.summary, phase: r.phase, at: Date.now() };
+      target.blocked = { summary: report.summary, phase: r.phase, at: Date.now(), ...(report.kind === 'replan' ? { kind: 'replan', ...(report.why ? { why: report.why } : {}) } : {}) };
+    }
+    if (report.kind === 'escalate' && s) {
+      if (report.options?.length) throw new Error('Only the planner can attach options to an escalation; say the decision you need in ask');
+      s.error = report.summary.split('\n')[0].slice(0, 240);
+      s.blocked = { summary: s.error, phase: r.phase, at: Date.now(), kind: 'escalate' };
+      declareRed(j, s, { summary: report.summary, tried: report.tried, ask: report.ask }, Date.now());
+      record(j, s, 'declare-red', null, `${quoted(s.title)} was declared red to you by its agent`);
     }
   }
 }

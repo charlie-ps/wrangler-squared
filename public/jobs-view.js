@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeHint, quickChips, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeHint, quickChips, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
 import { mountSkies } from './job-skylines.js';
@@ -68,7 +68,15 @@ const staleHint = (sub) => {
 function eventHtml(job, sub) {
   const ev = eventFor(job, sub);
   if (!ev) return '';
-  return `<div class="job-event">${ICONS.x}<div><b>${esc(ev.title)}</b><p>${esc(ev.detail)}</p></div></div>`;
+  const f = ev.fix;
+  // Under the failure, what Wrangler did about it (job-red.js): looking at it, a fix
+  // waiting for you, or given up on with what it tried and the decision it needs.
+  const fix = !f ? '' : f.kind === 'fixing'
+    ? `<div class="job-event-fix fixing">${ICONS.spin}<span><b>${esc(f.title)}</b>${esc(f.detail)}<small>Replanning · try ${f.n}</small></span></div>`
+    : f.kind === 'ready'
+      ? `<div class="job-event-fix ready">${ICONS.sparkle}<span><b>${esc(f.title)}</b>${esc(f.detail)}<small>${f.waits ? 'Waiting because Red steps is “You decide”' : 'Waiting for you: it changes the plan or claims something about the outside world'}</small></span></div>`
+      : `<div class="job-event-fix declared">${ICONS.x}<span><b>${esc(f.title)}</b>${esc(f.detail)}${f.tried.length ? `<ul>${f.tried.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}${f.ask ? `<span class="ask">Needs you: ${esc(f.ask)}</span>` : ''}<small>${f.auto ? 'Declared automatically' : 'Declared by the planner'}${f.options ? ' · options are in the job’s plan change' : ''}</small></span></div>`;
+  return `<div class="job-event">${ICONS.x}<div><b>${esc(ev.title)}</b><p>${esc(ev.detail)}</p>${fix}</div></div>`;
 }
 // One sub-job's prerequisites as small chips: met, dropped, or still holding it.
 function depsHtml(job, sub) {
@@ -280,7 +288,7 @@ const MAX_ASK_IMAGES = 4;
 export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, updates = null }) {
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
-  let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, deploymentStaleMinutes: 30 } };
+  let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, maxReplans: 2, deploymentStaleMinutes: 30 } };
   let filter = 'all', selected = null, planDraft = null, revision = null, basePlan = null, writeEdit = null;
   // A story create in review: its summary and fields as the panel holds them,
   // so adding or removing a field (which redraws) keeps what was typed.
@@ -626,10 +634,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // A step's own agent can only take an idea while no plan change is pending.
   function changeBoxHtml(job, sub, { fold = false } = {}) {
     const view = changeView(job, sub);
-    if (!view || (replanPending(job) && (!sub ? !job.replan.proposal : ['code', 'session', 'pr'].includes(view.at)))) return '';
+    // A step's own agent can only take an idea while no plan change is pending; one
+    // Wrangler is fixing is the planner's for now, and a declared red is the planner's to take.
+    if (!view || (sub && redFixing(job, sub)) || (replanPending(job) && !(sub && redDeclared(job, sub)) && (!sub ? !job.replan.proposal : ['code', 'session', 'pr'].includes(view.at)))) return '';
     const chips = quickChips(job, sub);
     const quick = chips.length ? `<div class="job-quick"><div class="job-quick-chips">${chips.map((c, i) => `<button type="button" ${c.instant ? `data-quick="${c.kind}"` : `data-fill="${i}"`} title="${esc(c.hint || 'Pre-fills the box below. An agent works out the change.')}"><i class="${c.instant ? '' : 'agent'}">${c.instant ? 'Instant' : 'Claude'}</i>${esc(c.label)}</button>`).join('')}</div></div>` : '';
-    const box = `<div class="job-change" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}">${quick}<label>What should change?<small>${esc(changeHint(view.at))}</small><textarea rows="3" maxlength="8000" aria-label="Request changes">${esc(askDraft && askDraft.subId === sub?.id ? askDraft.text : '')}</textarea></label>${view.at === 'code' ? `<ul class="job-change-tray" ${askImages.length ? '' : 'hidden'}>${askTrayHtml()}</ul><small class="job-change-paste">Paste a screenshot to show what you mean.</small>` : ''}<div class="job-change-send"><button type="button" class="primary" data-change-send ${askDraft && askDraft.subId === sub?.id ? '' : 'disabled'}>${ICONS.edit}Send</button></div></div>`;
+    const box = `<div class="job-change" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}">${quick}<label>What should change?<small>${esc(changeHint(view.at, job, sub))}</small><textarea rows="3" maxlength="8000" aria-label="Request changes">${esc(askDraft && askDraft.subId === sub?.id ? askDraft.text : '')}</textarea></label>${view.at === 'code' ? `<ul class="job-change-tray" ${askImages.length ? '' : 'hidden'}>${askTrayHtml()}</ul><small class="job-change-paste">Paste a screenshot to show what you mean.</small>` : ''}<div class="job-change-send"><button type="button" class="primary" data-change-send ${askDraft && askDraft.subId === sub?.id ? '' : 'disabled'}>${ICONS.edit}Send</button></div></div>`;
     return fold ? more('change', `${ICONS.edit}${sub ? 'Request changes' : 'Change plan'}`, box) : `<h3>Request changes</h3>${box}`;
   }
   const appbar = (title, chips, kicker = '') => `<header class="job-appbar">${kicker}<h2>${esc(title)}</h2><div class="job-chips job-detail-meta">${chips}</div></header>`;
@@ -711,9 +721,13 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       ...changes.removed.map((id) => `<li class="job-mark-removed">Will be cancelled: ${esc(title(id))}${pr(id)}</li>`),
       ...actions.map((a) => { const l = actionLine(a, merged); return `<li class="job-mark-act">${esc(l.text)} <small>${esc(l.detail)}</small><small class="pinned">${esc(pinLine(a.pin))}</small></li>`; })];
     const d = proposal.diagnosis;
-    const diagnosis = d ? `<div class="job-triage"><header>${ICONS.sparkle}<b>Wrangler looked into it</b></header><p>${esc(d.summary)}</p>${d.evidence?.length ? `<ul>${d.evidence.map((e) => `<li><span>${esc(e.label)}</span>${esc(e.detail)}</li>`).join('')}</ul>` : ''}</div>` : '';
+    const diagnosis = d ? `<div class="job-triage"><header>${ICONS.sparkle}<b>${proposal.escalation ? 'What Wrangler found' : 'Wrangler looked into it'}</b></header><p>${esc(d.summary)}</p>${d.evidence?.length ? `<ul>${d.evidence.map((e) => `<li><span>${esc(e.label)}</span>${esc(e.detail)}</li>`).join('')}</ul>` : ''}</div>` : '';
     const choose = options.length > 1 ? `<fieldset class="job-options"><legend>Options</legend>${options.map((o, i) => `<label class="job-option ${i === picked ? 'sel' : ''}"><input type="radio" name="opt" value="${i}" ${i === picked ? 'checked' : ''}><span><b>${esc(o.label || `Option ${i + 1}`)}${i === 0 ? '<span class="job-option-rec">Recommended</span>' : ''}</b>${o.why ? `<small>${esc(o.why)}</small>` : ''}</span></label>`).join('')}</fieldset>` : '';
-    return `<p class="job-replan-ask"><b>You asked</b> ${esc(job.replan.feedback)}</p>${diagnosis}${choose}${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, openTickets, reviewWrites: job.reviewWrites })}
+    // A red step's replan was Wrangler's own (job-red.js): say which step, not what a human typed.
+    const red = job.replan.red && !job.replan.red.human ? job.replan.red : null;
+    const redSub = red && liveSub(red.sub);
+    const asked = red ? `<p class="job-replan-ask"><b>${proposal.escalation ? 'Declared red' : 'Red step'}</b> ${esc(redSub?.title || red.sub)}${redSub?.error ? ` · ${esc(redSub.error)}` : ''}${proposal.escalation?.ask ? `<br><b>Needs you</b> ${esc(proposal.escalation.ask)}` : ''}</p>` : `<p class="job-replan-ask"><b>You asked</b> ${esc(job.replan.feedback)}</p>`;
+    return `${asked}${diagnosis}${choose}${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, openTickets, reviewWrites: job.reviewWrites })}
       <ul class="job-replan-changes">${items.join('') || '<li>No sub-job changes</li>'}</ul>${planMoreHtml(job, merged)}`;
   }
   // The job dialog's one extended button: the single most urgent thing the job is
@@ -727,7 +741,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const title = esc(`${lead.title} · ${subLabel(job, lead)}`);
     if (state === 'needs' && mergeApprovable(job, lead)) return `<button class="primary" data-action="approve-merge" data-sub="${esc(lead.id)}" title="${title}">${ICONS.merge}Merge${n ? ` #${n}` : ''}</button>`;
     if (state === 'needs' && runStatus(job, lead) === 'needs-you' && lead.sessions.length) return `<button class="primary" data-fab-session="${esc(lead.sessions.at(-1))}" title="${title}">${ICONS.terminal}Answer prompt</button>`;
-    const [icon, text] = state === 'failing' ? [ICONS.wrench, 'Resolve'] : codeAwaitingReview(lead) ? [ICONS.code, 'Review code'] : isSessionSub(lead) ? [ICONS.doc, 'Review result'] : isHumanSub(lead) ? [ICONS.person, 'Open task'] : [ICONS.eye, 'Open'];
+    const [icon, text] = redDeclared(job, lead) && state === 'failing' ? [ICONS.eye, 'Decide'] : redFixReady(job, lead) ? [ICONS.eye, 'Review fix'] : state === 'failing' ? [ICONS.wrench, 'Resolve'] : codeAwaitingReview(lead) ? [ICONS.code, 'Review code'] : isSessionSub(lead) ? [ICONS.doc, 'Review result'] : isHumanSub(lead) ? [ICONS.person, 'Open task'] : [ICONS.eye, 'Open'];
     return `<button class="primary" data-open-sub="${esc(lead.id)}" title="${title}">${icon}${text}${n ? ` #${n}` : ''}</button>`;
   }
   // A switch counts from the next gate the job reaches (server/job-store.js
@@ -937,7 +951,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const held = heldByReplan(job, sub);
     const yours = isHumanSub(sub) && sub.stage === 'human' && !held;
     const hints = [dropped, orphan,
-      held ? 'Frozen while the plan is being changed: nothing here starts, merges or can be approved until you approve or discard the change on the job.' : '',
+      held ? (job.replan?.red ? 'Held while Wrangler fixes a red step this one waits on: nothing here starts, merges or can be approved until the fix is in or you decide on it.' : 'Frozen while the plan is being changed: nothing here starts, merges or can be approved until you approve or discard the change on the job.') : '',
       isSessionSub(sub) && sub.stage === 'review' ? 'Approving marks the session done and lets the work depending on it start.' : '',
       parkedRun(job, sub) ? (draftsWaiting(job, sub).length ? `Paused on ${draftsWaiting(job, sub).length} draft${draftsWaiting(job, sub).length === 1 ? '' : 's'} for your review. Approve, edit or skip each; once all are decided the session is told which to make and carries on.` : 'Every draft is decided: the session is being told which writes to make.') : '',
       sessionDormant(job, sub) ? `${triggerLine(job, sub)}: it is dropped itself once ${trigger?.title || sub.on.sub} lands.` : '',
@@ -964,7 +978,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       + costChip(sub.usd, sub.usdEstimated, `${SUB_COST_TITLE}${jobCostLabel(job.usd, job.usdEstimated) ? ` · job total ${jobCostLabel(job.usd, job.usdEstimated)}` : ''}`);
     const kicker = `<button class="job-back" data-open-job title="Back to the job">${ICONS.back}<span>${esc(job.title)}</span></button>`;
     const session = sub.sessions.length ? `<button id="job-session" ${runStatus(job, sub) === 'needs-you' ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>` : '';
-    const retry = sub.error || job.error ? `<button id="job-retry" ${sub.error ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button>` : '';
+    // Wrangler's own turn (Fixing) or a fix for you (Fix ready, a declared red's options)
+    // outranks Retry as the primary action; Retry stays for a transient failure.
+    const redAsk = sub.error && !job.error && (redFixReady(job, sub) || (redDeclared(job, sub) && job.replan?.proposal)) ? `<button class="primary" data-open-job title="Opens the job dialog on the proposal">${ICONS.eye}${redFixReady(job, sub) ? 'Review fix' : 'Decide'}</button>` : '';
+    const retry = sub.error || job.error ? `${redAsk}<button id="job-retry" ${sub.error && !redAsk && !redFixing(job, sub) ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button>` : '';
     let body = '', actions = '';
     const reviewing = ['code', 'session'].includes(changeView(job, sub)?.at);
     if (isWriteSub(sub)) {
@@ -1248,9 +1265,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   q('#jobs-intro-open').onclick = () => onIntro();
   q('#jobs-settings').onclick = () => {
     selected = null; planDraft = null;
-    show(`<h2>Automation settings</h2><form id="job-settings-form"><label>Automatic CI repair attempts per sub-job<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label>Minutes a merged PR may wait for a post-merge run to start before it is flagged<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label><label>Application for “Review code in…” <small>A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…</small><input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label><label>Plate art <small>What each job’s plate on the board is drawn over</small><select name="plateArt">${[['quiet', 'Skylines'], ['full', 'Launch-page scenes']].map(([v, l]) => `<option value="${v}" ${v === (data.settings.plateArt === 'full' ? 'full' : 'quiet') ? 'selected' : ''}>${l}</option>`).join('')}</select></label><fieldset class="job-prop job-settings-review"><legend>Review checkpoints for new jobs</legend><p>Every New job form starts here, and so does a job an agent creates without choosing. Jobs already on the board keep their own.</p>${reviewPointsHtml(reviewDefaultsOf(data.settings), { warn: true })}</fieldset><div class="job-actions"><button class="primary" title="These limits apply across all automated jobs. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.">Save settings</button><button type="button" id="job-settings-intro">${ICONS.info}How Jobs works</button></div></form>${whatsNewHtml(updates?.list() || [])}`);
+    show(`<h2>Automation settings</h2><form id="job-settings-form"><label>Automatic CI repair attempts per sub-job<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label>Automatic replans per red step before it is declared red to you <small>Red steps set to “Wrangler replans” (or “You decide”) go to the planner this many times. 0 leaves every red step to you.</small><input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label><label>Minutes a merged PR may wait for a post-merge run to start before it is flagged<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label><label>Application for “Review code in…” <small>A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…</small><input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label><label>Plate art <small>What each job’s plate on the board is drawn over</small><select name="plateArt">${[['quiet', 'Skylines'], ['full', 'Launch-page scenes']].map(([v, l]) => `<option value="${v}" ${v === (data.settings.plateArt === 'full' ? 'full' : 'quiet') ? 'selected' : ''}>${l}</option>`).join('')}</select></label><fieldset class="job-prop job-settings-review"><legend>Review checkpoints for new jobs</legend><p>Every New job form starts here, and so does a job an agent creates without choosing. Jobs already on the board keep their own.</p>${reviewPointsHtml(reviewDefaultsOf(data.settings), { warn: true })}</fieldset><div class="job-actions"><button class="primary" title="These limits apply across all automated jobs. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.">Save settings</button><button type="button" id="job-settings-intro">${ICONS.info}How Jobs works</button></div></form>${whatsNewHtml(updates?.list() || [])}`);
     const settingsForm = dialog.querySelector('form'); bindReviewPoints(settingsForm);
-    settingsForm.onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); send({ type: 'job-settings', patch: { maxRepairs: +f.get('maxRepairs'), deploymentStaleMinutes: +f.get('deploymentStaleMinutes'), ideApp: String(f.get('ideApp')).trim(), plateArt: String(f.get('plateArt')), reviewDefaults: reviewFlagsOf(f) } }); dialog.close(); };
+    settingsForm.onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); send({ type: 'job-settings', patch: { maxRepairs: +f.get('maxRepairs'), maxReplans: +f.get('maxReplans'), deploymentStaleMinutes: +f.get('deploymentStaleMinutes'), ideApp: String(f.get('ideApp')).trim(), plateArt: String(f.get('plateArt')), reviewDefaults: reviewFlagsOf(f) } }); dialog.close(); };
     dialog.querySelector('#job-settings-intro').onclick = () => { dialog.close(); onIntro(); };
     dialog.querySelector('.update-section').onclick = (e) => { const b = e.target.closest('[data-update-id]'); if (b) { dialog.close(); updates.open(b.dataset.updateId); } };
   };

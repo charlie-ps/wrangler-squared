@@ -112,13 +112,13 @@ export function mergeReplan(job, proposal) {
 
 // A request replaces any proposal still waiting: the planner reads that one as
 // what the human just asked it to change.
-export function requestReplan(job, feedback, now) {
+export function requestReplan(job, feedback, now, red = null) {
   if (job.stage !== 'active') throw new Error('Only a running job has a plan to change');
   if (job.runs.some((r) => !r.stopped && !r.subJobId)) throw new Error('Wait for the planning step to finish');
   const text = String(feedback || '').trim().slice(0, 8000);
   if (!text) throw new Error('Explain the change you want');
   clearPlanningError(job);
-  job.replan = { feedback: text, at: now, proposal: null, previous: job.replan?.proposal?.plan || null };
+  job.replan = { feedback: text, at: now, proposal: null, previous: job.replan?.proposal?.plan || null, ...(red ? { red } : job.replan?.red ? { red: { ...job.replan.red, auto: false, human: true } } : {}) };
 }
 
 // A planning session that died or blocked set the job's error, which holds the
@@ -140,12 +140,17 @@ export function discardReplan(job) {
 // alternatives; each is merged and its actions stamped with the pins they were
 // written against, so a bad second option refuses the whole receipt.
 export function proposeReplan(job, run, report, now) {
+  proposeOptions(job, run, [report, ...(report.alternatives || [])], report.diagnosis ? { diagnosis: report.diagnosis } : {}, now);
+}
+// The same road for a planner's escalation (job-red.js): its options are the
+// proposal the human opens from a declared red.
+export function proposeOptions(job, run, options, extra, now) {
   const option = (o) => {
     const { plan: merged, changes } = mergeReplan(job, o.plan);
     return { label: o.label || null, why: o.why || null, plan: o.plan, merged, changes, actions: stampActions(job, o.actions, merged, changes) };
   };
-  const [first, ...rest] = [report, ...(report.alternatives || [])].map(option);
-  job.replan = { ...job.replan, proposal: { id: run.id, ...first, ...(report.diagnosis ? { diagnosis: report.diagnosis } : {}), alternatives: rest, at: now } };
+  const [first, ...rest] = options.map(option);
+  job.replan = { ...job.replan, proposal: { id: run.id, ...first, ...extra, alternatives: rest, at: now } };
 }
 // The proposal's options as the human picks between them: the first is the one
 // recommended, and the only one a proposal without alternatives has.

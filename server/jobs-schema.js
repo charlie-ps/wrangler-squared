@@ -146,6 +146,8 @@ export const writeRefs = (sub) => [...`${sub.action?.comment || ''} ${sub.action
 // PR. Off, one session does all of it. Read through this helper: a job created
 // before the flag existed has no field and reviews like a new one.
 export const reviewCode = (job) => job?.reviewCode ?? true;
+// Red steps: true (also what a job from before the flag reads) is "You decide".
+export const reviewRed = (job) => job?.reviewRed ?? true;
 // The one line every PR description and squash commit a job lands must end with.
 export const ATTRIBUTION = 'Made with Agent Wrangler and the charlie-ps/wrangler-squared extension';
 // A story either already exists in Jira (key) or is a proposal (no key, optional
@@ -357,7 +359,9 @@ function jiraRules(s, plan, issue) {
 export const MAX_IMAGES = 8;
 const imageName = z.string().regex(/^paste-\d{1,20}-[a-f0-9]{4,32}\.(?:png|jpg|gif|webp)$/);
 // The checkpoints a new job starts with when nobody chose: New job's original form.
-export const REVIEW_DEFAULTS = { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false };
+// `reviewRed` is the sixth: true is "You decide" (a red step gets a fix proposed
+// and waits for you), false is "Wrangler replans" (job-red.js).
+export const REVIEW_DEFAULTS = { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true };
 export const SANDBOX_MODES = ['locked', 'auto', 'full'];
 export const jobInputSchema = z.object({
   title: line.optional(), intent: z.string().trim().min(1).max(16000),
@@ -371,6 +375,9 @@ export const jobInputSchema = z.object({
   reviewPlan: z.boolean().optional(), reviewCode: z.boolean().optional(), reviewMerge: z.boolean().optional(), reviewSessions: z.boolean().optional(),
   // The default for a write with no `review` of its own (`writeReviewed`).
   reviewWrites: z.boolean().optional(),
+  // Red steps: true waits for you to decide each proposed fix, false lets Wrangler
+  // apply the safe ones (job-red.js).
+  reviewRed: z.boolean().optional(),
   // The branch this job's PRs land on, when it is not the repository's default
   // (an integration branch for multi-PR work). Absent on a job saved before it,
   // and then everything keeps targeting the default.
@@ -390,6 +397,9 @@ export const jobInputSchema = z.object({
 export const settingsSchema = z.object({
   concurrency: z.number().int().min(1).max(16).default(8),
   maxRepairs: z.number().int().min(0).max(5).default(2),
+  // Automatic replans of one red step before it is declared red to the human
+  // (job-red.js). 0 turns red handling off: a red step just waits, as it always did.
+  maxReplans: z.number().int().min(0).max(5).default(2),
   // How long a merged sub-job may wait for a post-merge workflow to show ANY run
   // on the merge commit before the board flags it (job-runner.js).
   deploymentStaleMinutes: z.number().int().min(5).max(1440).default(30),
@@ -408,7 +418,7 @@ export const settingsSchema = z.object({
     agent: z.enum(['claude', 'codex']), model: z.string().max(150), effort: z.string().max(40).default(''),
   }).nullable().default(null),
   // What New job's checkpoints start on, and what a create_job that leaves one out
-  // gets. The board always sends all five: `settings(patch)` merges shallowly.
+  // gets. The board always sends all six: `settings(patch)` merges shallowly.
   reviewDefaults: z.object(Object.fromEntries(Object.entries(REVIEW_DEFAULTS).map(([f, v]) => [f, z.boolean().default(v)]))).default({}),
 });
 // Strict, so a receipt carrying a field this system no longer has (an
@@ -461,5 +471,12 @@ export const reportSchema = z.discriminatedUnion('kind', [
   receipt({ kind: z.literal('completed'), checks: checksSchema, writes: z.array(writeResultSchema).max(50).optional(), outputs: z.array(outputSchema).max(30).optional() }),
   // Mid-run, not the end of it: the session waits for mail with the human's decisions.
   receipt({ kind: z.literal('drafts'), drafts: z.array(draftSchema).min(1).max(50) }),
+  // Up one level, never to the human first: `blocked` and `replan` hand a step
+  // that cannot go on to the planner (job-red.js), `escalate` declares it red to
+  // the human with what was found, what was tried and the decision it needs. Only
+  // the planner's escalation can carry options, which open in the proposal view.
   receipt({ kind: z.literal('blocked'), summary: line }),
+  receipt({ kind: z.literal('replan'), summary: line, why: z.string().trim().min(1).max(1200).optional() }),
+  receipt({ kind: z.literal('escalate'), summary: z.string().trim().min(1).max(1200), tried: z.array(line).max(6).optional(), ask: line,
+    sub: id.optional(), options: z.array(alternativeSchema).max(MAX_OPTIONS).optional() }),
 ]);

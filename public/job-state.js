@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber } from './jobs.js';
 
 // The one state vocabulary every surface draws: a tone (the colour, see the
 // .tone-* rules in jobs.css), a glyph and a short name. Every stage, run status,
@@ -26,6 +26,9 @@ export function subState(job, sub) {
   if (!sub.stage) return 'planned';
   if (sub.cancelledAt) return 'dropped';
   if (sub.stage === 'done') return 'done';
+  // Red, but Wrangler has it (Fixing), or has a fix for you (Fix ready): neither is the failing red you act on.
+  if (!job.error && redFixing(job, sub)) return 'running';
+  if (!job.error && redFixReady(job, sub)) return 'needs';
   if (job.error || cancelledDependencies(job, sub).length || (eventFor(job, sub) && !deploymentStalled(sub))) return 'failing';
   if (job.paused || heldByReplan(job, sub)) return 'paused';
   if (jobNeedsReview(job, sub)) return 'needs';
@@ -63,12 +66,14 @@ export function subLabel(job, sub) {
   const state = subState(job, sub);
   const n = prNumber(sub);
   if (state === 'failing') {
+    if (redDeclared(job, sub) && !job.error) return 'Declared red';
     if (cancelledDependencies(job, sub).length) return triggerDropped(job, sub) ? 'Trigger dropped' : 'Prerequisite dropped';
     if (sub.error || eventFor(job, sub)) return eventFor(job, sub).title;
     if (job.error) return 'Needs attention';
     return redPipeline(sub) === 'checks' ? 'Checks failing' : 'Deploy failing';
   }
   if (state === 'needs') {
+    if (redFixReady(job, sub)) return 'Fix ready';
     if (runStatus(job, sub) === 'needs-you') return 'Prompt waiting';
     if (deploymentStalled(sub)) return 'Nothing deployed';
     if (codeAwaitingReview(sub)) return 'Review code';
@@ -82,7 +87,7 @@ export function subLabel(job, sub) {
 // The one coloured line under a stepper node: the PR it is, and how it stands.
 export function subLine(job, sub) {
   const n = isPrSub(sub) ? prNumber(sub) : '';
-  const red = subState(job, sub) === 'failing' && redPipeline(sub) === 'checks' ? redChecks(sub) : 0;
+  const red = subState(job, sub) === 'failing' && redPipeline(sub) === 'checks' && !redDeclared(job, sub) ? redChecks(sub) : 0;
   const text = red ? `${red} check${red === 1 ? '' : 's'} red` : subLabel(job, sub);
   return n && !text.includes(`#${n}`) ? `#${n} · ${text}` : text;
 }
@@ -95,8 +100,8 @@ export function jobLabel(job) {
   if (job.stage !== 'active') return jobStatus(job, null).text;
   if (state === 'done') return 'Delivered';
   if (state === 'paused') return 'Paused';
-  if (state === 'needs' && replanProposed(job)) return 'Plan change ready';
-  if (state === 'running' && replanPending(job) && !replanProposed(job)) return 'Re-planning';
+  if (state === 'needs' && replanProposed(job) && !job.replan.red) return 'Plan change ready';
+  if (state === 'running' && replanPending(job) && !replanProposed(job)) return job.replan.red ? 'Fixing' : 'Re-planning';
   const peers = job.subJobs.filter((s) => subState(job, s) === state);
   return `${subLabel(job, peers[0])}${peers.length > 1 ? ` +${peers.length - 1}` : ''}`;
 }

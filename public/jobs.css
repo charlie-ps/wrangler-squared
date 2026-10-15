@@ -562,6 +562,17 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-event>.icon { font-size:16px; color:var(--st-bad-fg); }
 .job-event b { color:var(--st-bad-fg); }
 .job-event p { margin:4px 0 0; color:var(--fg); }
+/* What Wrangler did about the failure above it: fixing (spinner), a fix waiting for
+   you, or declared red with what it tried and the one decision it needs. */
+.job-event-fix { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:start; margin-top:10px; padding-top:10px; border-top:1px dashed color-mix(in srgb, var(--st-bad) 40%, transparent); }
+.job-event-fix>.icon { color:var(--wf); margin-top:2px; }
+.job-event-fix.fixing>.icon { color:var(--st-run-fg); }
+.job-event-fix b { color:var(--fg); margin-right:4px; }
+.job-event-fix>span { color:var(--fg); }
+.job-event-fix small { display:block; color:var(--fg-muted); margin-top:3px; }
+.job-event-fix.declared>.icon, .job-event-fix.declared b { color:var(--st-bad-fg); }
+.job-event-fix ul { margin:6px 0 0; padding-left:16px; color:var(--fg-muted); font-size:11.5px; }
+.job-event-fix .ask { display:block; margin-top:6px; color:var(--fg); font-weight:500; }
 .job-move-log { list-style:none; padding:0; margin:8px 0 0; font-size:12px; }
 .job-move-log li { display:flex; justify-content:space-between; align-items:baseline; gap:14px; padding:6px 0; border-top:1px solid var(--border-muted); line-height:1.5; overflow-wrap:anywhere; }
 .job-move-log li:first-child { border-top:0; }
