@@ -54,8 +54,54 @@ function placeHeadHtml(p) {
   return p.type === 'file' && p.url ? `${head}<div class="job-place-path"><code>${esc(p.url)}</code><button type="button" data-copy-path="${esc(p.url)}" title="Copy the path">${ICONS.copy}Copy</button></div>` : head;
 }
 
+// Each wave's column, top to bottom. A connector that skips waves reserves a
+// pass (an empty slot) in every column it crosses, so it is drawn through clear
+// space rather than over the tiles in between. Rows are then ordered to keep
+// connectors short and uncrossed: sweeping right, each column by the mean row of
+// its items' predecessors in the column before; sweeping left, by the mean row
+// of their successors in the column after (so the first column can move too).
+// A few rounds, keeping whichever order crossed least; ties, and an item with no
+// neighbour on that side, keep their place, so a plan with nothing to untangle
+// reads in plan order.
+const SWEEPS = 4;
+export function graphRows(work, levels, waves) {
+  const rows = Array.from({ length: waves }, () => []);
+  const preds = new Map(), succs = new Map();
+  const link = (from, to) => { preds.set(to, [...(preds.get(to) || []), from]); succs.set(from, [...(succs.get(from) || []), to]); };
+  for (const s of work) rows[levels.get(s.id)].push({ key: s.id, sub: s });
+  for (const s of work) for (const id of edgesOf(s).filter((d) => levels.has(d))) {
+    let prev = id;
+    for (let w = levels.get(id) + 1; w < levels.get(s.id); w++) {
+      const key = `${id}>${s.id}@${w}`;
+      rows[w].push({ key, pass: `${id}>${s.id}` });
+      link(prev, key); prev = key;
+    }
+    link(prev, s.id);
+  }
+  const order = (col, side, next) => {
+    const at = new Map(side.map((it, i) => [it.key, i * col.length / Math.max(side.length, 1)]));
+    const mean = (it, i) => { const ns = (next.get(it.key) || []).map((k) => at.get(k)).filter((n) => n != null); return ns.length ? ns.reduce((x, y) => x + y, 0) / ns.length : i; };
+    return col.map((it, i) => ({ it, m: mean(it, i), i })).sort((p, q) => p.m - q.m || p.i - q.i).map(({ it }) => it);
+  };
+  const crossings = (rs) => rs.slice(1).reduce((n, col, w) => {
+    const at = new Map(rs[w].map((it, i) => [it.key, i]));
+    const links = col.flatMap((it, j) => (preds.get(it.key) || []).filter((k) => at.has(k)).map((k) => [at.get(k), j]));
+    return n + links.reduce((c, [a, b], i) => c + links.slice(i + 1).filter(([x, y]) => (x - a) * (y - b) < 0).length, 0);
+  }, 0);
+  let best = rows.map((c) => [...c]), least = crossings(rows);
+  const keep = () => { const n = crossings(rows); if (n < least) { best = rows.map((c) => [...c]); least = n; } };
+  for (let round = 0; round < SWEEPS && least; round++) {
+    for (let w = 1; w < waves; w++) rows[w] = order(rows[w], rows[w - 1], preds);
+    keep();
+    for (let w = waves - 2; w >= 0; w--) rows[w] = order(rows[w], rows[w + 1], succs);
+    keep();
+  }
+  return best;
+}
+
 // A proposed change to a running job's plan (`markOf`) is drawn static, each
 // node in its live state and labelled with what approval would do to it.
+export const rocketHtml = (id) => `<g class="job-edge-glyph" data-glyph="${esc(id)}"><circle r="12"/><g transform="translate(-9.6 -9.6) scale(.8)">${ROCKET_PATH}</g></g>`;
 const MARKS = { frozen: 'Locked · already landed', removed: 'Will be cancelled', added: 'New', edited: 'Edited', kept: 'Unchanged' };
 export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, openDeps = new Set(), openTickets = new Set(), editing = null, reviewWrites = false } = {}) {
   const subs = plan.subJobs;
@@ -123,34 +169,50 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     return `<button type="button" class="${cls} ${state === 'done' ? 'done' : ''}" data-node="${esc(s.id)}" data-open-sub="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}<span class="job-status">${esc(lineOf ? lineOf(s) : STATES[state].label)}</span></button>`;
   };
   const loose = subs.filter((w) => isWriteSub(w) && !hangsOn(w));
-  const columns = Array.from({ length: waves }, (_, w) => `<div class="job-graph-col">${w === 0 && loose.length ? `<div class="job-stack job-stack-loose"><div class="job-places">${pills(loose, '')}</div></div>` : ''}${subs.map((s, i) => levels.get(s.id) === w && !isWriteSub(s) ? `<div class="job-stack">${node(s, i)}${hanging(s)}</div>` : '').join('')}</div>`).join('');
+  const rows = graphRows(subs.filter((s) => !isWriteSub(s)), levels, waves);
+  const columns = rows.map((col, w) => `<div class="job-graph-col">${w === 0 && loose.length ? `<div class="job-stack job-stack-loose"><div class="job-places">${pills(loose, '')}</div></div>` : ''}${col.map((it) => it.pass ? `<div class="job-graph-pass" data-pass="${esc(it.pass)}"></div>`
+    : `<div class="job-stack">${node(it.sub, subs.indexOf(it.sub))}${hanging(it.sub)}</div>`).join('')}</div>`).join('');
   const edges = subs.flatMap((s) => edgesOf(s).filter((id) => levels.has(id)).map((id) => {
     const deploy = isPrSub(byId.get(id)) && s.after.includes(id);
-    return `<path class="${deploy ? 'deploy' : s.after.includes(id) ? 'start' : 'on'}" data-from="${esc(id)}" data-to="${esc(s.id)}"/>${deploy ? `<g class="job-edge-glyph" data-glyph="${esc(id)}>${esc(s.id)}"><circle r="12"/><g transform="translate(-9.6 -9.6) scale(.8)">${ROCKET_PATH}</g></g>` : ''}`;
+    return `<path class="${deploy ? 'deploy' : s.after.includes(id) ? 'start' : 'on'}" data-from="${esc(id)}" data-to="${esc(s.id)}"/>`;
   })).join('');
+  // Every deploy connector out of a PR says the same thing (it waits for that
+  // PR to deploy), so the PR gets one rocket, beside its tile, not one per connector.
+  const rockets = subs.filter((s) => isPrSub(s) && subs.some((t) => t.after.includes(s.id) && levels.has(s.id))).map((s) => rocketHtml(s.id)).join('');
   return `<div class="job-graph ${editable ? 'editable' : ''}"><div class="job-graph-scroll"><div class="job-graph-canvas" style="--waves:${waves}"><div class="job-graph-columns">${columns}</div>
-    <svg class="job-graph-edges" aria-hidden="true">${edges}</svg></div></div></div>`;
+    <svg class="job-graph-edges" aria-hidden="true">${edges}${rockets}</svg></div></div></div>`;
 }
 
 // Trace each connector between the tiles it names, in the canvas's own pixel
 // space (the SVG fills the canvas and has no viewBox, so user units are CSS px).
 // A canvas with no size — hidden, or a DOM with no layout — leaves the paths
-// without geometry rather than drawing them all at the origin.
+// without geometry rather than drawing them all at the origin. A connector that
+// skips waves curves from pass to pass (`graphRows`), straight across each, so
+// every leg is drawn like a connector to the next wave.
+const curve = (xa, ya, xb, yb) => { const bend = Math.max(24, Math.abs(xb - xa) / 2); return ` C${xa + bend} ${ya}, ${xb - bend} ${yb}, ${xb} ${yb}`; };
 export function layoutGraphEdges(graph) {
   const canvas = graph?.querySelector('.job-graph-canvas');
   if (!canvas) return;
   const base = canvas.getBoundingClientRect();
   if (!base.width) return;
   const boxes = new Map([...graph.querySelectorAll('[data-node]')].map((el) => [el.dataset.node, (el.querySelector('.job-node-tile') || el).getBoundingClientRect()]));
-  const glyphs = new Map([...graph.querySelectorAll('.job-edge-glyph')].map((g) => [g.dataset.glyph, g]));
+  const passes = new Map();
+  for (const el of graph.querySelectorAll('.job-graph-pass')) passes.set(el.dataset.pass, [...(passes.get(el.dataset.pass) || []), el.getBoundingClientRect()]);
   for (const path of graph.querySelectorAll('.job-graph-edges path[data-from]')) {
     const a = boxes.get(path.dataset.from), b = boxes.get(path.dataset.to);
-    const glyph = glyphs.get(`${path.dataset.from}>${path.dataset.to}`);
-    if (!a || !b) { path.removeAttribute('d'); glyph?.removeAttribute('transform'); continue; }
-    const x1 = a.right - base.left + 6, y1 = a.top + a.height / 2 - base.top;
-    const x2 = b.left - base.left - 6, y2 = b.top + b.height / 2 - base.top;
-    const bend = Math.max(24, Math.abs(x2 - x1) / 2);
-    path.setAttribute('d', `M${x1} ${y1} C${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`);
-    glyph?.setAttribute('transform', `translate(${(x1 + x2) / 2} ${(y1 + y2) / 2})`);
+    if (!a || !b) { path.removeAttribute('d'); continue; }
+    let x = a.right - base.left + 6, y = a.top + a.height / 2 - base.top, d = `M${x} ${y}`;
+    for (const p of [...(passes.get(`${path.dataset.from}>${path.dataset.to}`) || []), null]) {
+      const [xb, yb] = p ? [p.left - base.left, p.top + p.height / 2 - base.top] : [b.left - base.left - 6, b.top + b.height / 2 - base.top];
+      d += curve(x, y, xb, yb);
+      [x, y] = p ? [p.right - base.left, yb] : [xb, yb];
+      if (p) d += ` H${x}`;
+    }
+    path.setAttribute('d', d);
+  }
+  // A PR's rocket sits where its connectors leave its tile, before any of them bends away.
+  for (const g of graph.querySelectorAll('.job-edge-glyph')) {
+    const a = boxes.get(g.dataset.glyph);
+    if (a) g.setAttribute('transform', `translate(${a.right - base.left + 20} ${a.top + a.height / 2 - base.top})`); else g.removeAttribute('transform');
   }
 }

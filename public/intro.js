@@ -1,5 +1,5 @@
-import { ICONS, ROCKET_PATH } from './icons.js';
-import { layoutGraphEdges } from './job-graph.js';
+import { ICONS } from './icons.js';
+import { layoutGraphEdges, rocketHtml } from './job-graph.js';
 import { CHECKPOINTS, checkpointFlagHtml, checkpointHint, checkpointToggleHtml } from './jobs.js';
 
 // The "How Jobs works" walkthrough: shown once to every browser that has not
@@ -49,7 +49,7 @@ function graph(phase) {
     const [tone, glyph, on] = ST[state];
     return `<div class="job-node tone-${tone}${state === 'done' ? ' done' : ''}" data-node="${s.id}" title="${s.repo}"><span class="job-node-tile${on ? ' on' : ''}">${ICONS[s.kind]}<span class="job-node-state">${ICONS[glyph]}</span></span><strong class="job-node-title">${s.title}</strong><span class="job-node-repo">${s.repo}</span><span class="job-status">${line}</span></div>`;
   };
-  const edges = SUBS.flatMap((s) => (s.after || []).map((from) => `<path class="deploy${sc[from][0] === 'done' ? ' landed' : ''}" data-from="${from}" data-to="${s.id}"/><g class="job-edge-glyph" data-glyph="${from}>${s.id}"><circle r="12"/><g transform="translate(-9.6 -9.6) scale(.8)">${ROCKET_PATH}</g></g>`)).join('');
+  const edges = SUBS.flatMap((s) => (s.after || []).map((from) => `<path class="deploy${sc[from][0] === 'done' ? ' landed' : ''}" data-from="${from}" data-to="${s.id}"/>`)).join('') + SUBS.filter((s) => SUBS.some((t) => t.after?.includes(s.id))).map((s) => rocketHtml(s.id)).join('');
   const [tone, line] = sc.goal;
   return `<div class="intro-goal tone-${tone}"><span class="job-avatar">${ICONS[GOAL_GLYPH[tone]]}</span><strong>Split full name into first and last name</strong><span class="job-status">${line}</span></div>
     <div class="job-graph intro-graph" role="img" aria-label="One job: a pull request each in the desktop app and the API running in parallel, then a backfill session once both deploy"><div class="job-graph-canvas" style="--waves:2"><div class="job-graph-columns"><div class="job-graph-col">${tile(SUBS[0])}${tile(SUBS[1])}</div><div class="job-graph-col">${tile(SUBS[2])}</div></div><svg class="job-graph-edges" aria-hidden="true">${edges}</svg></div></div>`;

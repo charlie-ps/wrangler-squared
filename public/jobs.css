@@ -329,6 +329,7 @@ textarea.job-node-title:hover,textarea.job-node-title:focus { border-color:var(-
    them; the pill opens to its place and a row per write (job-graph.js). */
 .job-stack { display:flex; flex-direction:column; align-items:center; gap:8px; min-width:0; }
 .job-stack-loose { margin-bottom:10px; }
+.job-graph-pass { height:20px; }
 .job-places { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:6px; max-width:100%; }
 .job-place { display:flex; flex-direction:column; align-items:center; max-width:100%; }
 .job-place>summary,.job-place-chip,.job-place-add { display:inline-flex; align-items:center; gap:6px; max-width:100%; box-sizing:border-box; padding:3px 9px 3px 7px; border:1px solid var(--border); border-radius:99px; background:var(--surface); color:var(--fg); font:inherit; font-size:11px; text-decoration:none; cursor:pointer; list-style:none; }

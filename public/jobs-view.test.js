@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isPrimaryActionKey, primaryAction } from './jobs-view.js';
 import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, movesFor, eventFor, writeReviewed } from './jobs.js';
-import { planGraphHtml } from './job-graph.js';
+import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml } from './job-plates.js';
 
 const sub = (id, after = []) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Implement it and open the PR', sessions: [], repairs: [] });
@@ -1150,6 +1150,31 @@ test('a PR node names its repo under the title in every graph mode; session, hum
     assert.equal(document.querySelector('.job-node-title + .job-node-repo')?.textContent, 'wrangler-squared', 'the repo sits right under the title');
     assert.match(document.querySelector('[data-node="api"]').title, /wrangler-squared/);
   }
+});
+
+test('a connector that skips a wave reserves a pass in the column between and is drawn through it, never over a tile', () => {
+  const plan = { stories: [], subJobs: [sub('api'), sub('web', ['api']), sub('docs', ['api', 'web'])] };
+  const { document } = new Window();
+  document.body.innerHTML = planGraphHtml(plan, {});
+  assert.deepEqual([...document.querySelectorAll('.job-graph-col')].map((c) => [...c.children].map((e) => e.querySelector('[data-node]')?.dataset.node || e.dataset.pass)), [['api'], ['web', 'api>docs'], ['docs']]);
+  const rect = (left, top, width, height) => () => ({ left, top, width, height, right: left + width, bottom: top + height });
+  const at = (el, r) => { el.getBoundingClientRect = r; };
+  at(document.querySelector('.job-graph-canvas'), rect(0, 0, 540, 240));
+  ['api', 'web', 'docs'].forEach((id, i) => at(document.querySelector(`[data-node="${id}"] .job-node-tile`), rect(i * 196 + 44, 0, 60, 60)));
+  at(document.querySelector('.job-graph-pass'), rect(196, 218, 148, 20));
+  layoutGraphEdges(document.querySelector('.job-graph'));
+  const d = (from, to) => document.querySelector(`path[data-from="${from}"][data-to="${to}"]`).getAttribute('d');
+  assert.equal(d('api', 'web'), 'M110 30 C172 30, 172 30, 234 30', 'a next-wave connector is still one curve between the tiles');
+  assert.equal(d('api', 'docs'), 'M110 30 C153 30, 153 228, 196 228 H344 C387 228, 387 30, 430 30', 'it curves into the pass under web, straight across it, and curves up to docs');
+  assert.deepEqual([...document.querySelectorAll('.job-edge-glyph')].map((g) => [g.dataset.glyph, g.getAttribute('transform')]), [['api', 'translate(124 30)'], ['web', 'translate(320 30)']],
+    'a PR has one rocket, beside its tile, however many connectors wait for it to deploy');
+});
+
+test('each column after the first is ordered by where its predecessors sit, so connectors run short and uncrossed', () => {
+  const plan = { stories: [], subJobs: [sub('a'), sub('b'), sub('late', ['b']), sub('early', ['a'])] };
+  const { document } = new Window();
+  document.body.innerHTML = planGraphHtml(plan, {});
+  assert.deepEqual([...document.querySelectorAll('.job-graph-col')].map((c) => [...c.querySelectorAll('[data-node]')].map((n) => n.dataset.node)), [['a', 'b'], ['early', 'late']]);
 });
 
 test('a merge that deploys nothing says so in the detail', (t) => {
