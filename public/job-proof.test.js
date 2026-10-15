@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { showOf, proofItems, hasProof, proofSummary, summaryText, alsoChecked, filmFiles, proofGridHtml, alsoCheckedHtml, proofViewerHtml, filmHtml, hydrateEvidence, EvidenceCache } from './job-proof.js';
+import { showOf, shotsOf, proofItems, hasProof, proofSummary, summaryText, alsoChecked, filmFiles, proofGridHtml, alsoCheckedHtml, proofViewerHtml, filmHtml, hydrateEvidence, EvidenceCache } from './job-proof.js';
 
 const job = { id: 'job1' };
 const shot = (file, extra = {}) => ({ file, mime: 'image/png', at: 1700000000000, url: 'http://localhost:5174/audit', viewport: '1280x800', tool: 'Playwright', ...extra });
@@ -75,6 +75,23 @@ test('the viewer says where a shot was taken, shows a reason in full, and a run 
   assert.match(multi, /<dt>How<\/dt><dd>Screenshot<\/dd>/, 'an agent that did not say how is not credited with a tool');
   assert.equal(proofViewerHtml(job, { ...sub(), ready: null }, { i: 0 }, cache), '');
   assert.match(proofViewerHtml(job, sub(), { i: 99 }, cache), /4 of 4/, 'an index past the end lands on the last item');
+});
+
+test('a multi-shot item labels its own shots apart from the strip of checks, and a file named twice is one shot', () => {
+  const cache = new EvidenceCache();
+  const four = sub({ ready: { round: 1, checks: ['Wizard', 'B', 'C'], proof: [{ text: 'Wizard', shots: ['1', '2', '3', '4', '2'].map((n) => shot(`w${n}.png`)) }, { text: 'B', shots: [shot('b.png'), shot('b.png')] }, { text: 'C', run: { cmd: 'npm test', out: 'ok', exit: 0 } }] } });
+  assert.deepEqual(shotsOf(four.ready.proof[0]).map((s) => s.file), ['w1.png', 'w2.png', 'w3.png', 'w4.png']);
+  assert.deepEqual(filmFiles(four, 9), ['w1.png', 'w2.png', 'w3.png', 'w4.png', 'b.png']);
+  const html = proofViewerHtml(job, four, { i: 0, j: 2 }, cache);
+  assert.equal((html.match(/data-proof-shot=/g) || []).length, 4, 'four real shots');
+  assert.equal((html.match(/data-proof-go=/g) || []).length, 3, 'three checks');
+  assert.equal((html.match(/class="job-proof-pick/g) || []).length, 7, 'shots + checks, nothing more');
+  assert.match(html, /<small>Shots in this check · 3 of 4<\/small><div class="job-proof-shots">.*<small>All checks · 3<\/small><div class="job-proof-strip">/s);
+  assert.match(html, /aria-label="Shot 3 of 4"/);
+  assert.match(proofGridHtml(job, four), /title="4 shots">4</);
+  const single = proofViewerHtml(job, four, { i: 1 }, cache);
+  assert.doesNotMatch(single, /job-proof-shots|job-proof-row|All checks/, 'a file named twice is not a second shot, so no row of its own');
+  assert.equal((single.match(/class="job-proof-pick/g) || []).length, 3);
 });
 
 test('the viewer shows the thumbnail soft until the full file arrives, a clip as a video, and the cache fills from frames', () => {

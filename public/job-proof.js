@@ -35,10 +35,12 @@ export const alsoChecked = (sub) => {
   const proven = new Set(proofItems(sub).map((p) => p.text));
   return (sub?.ready?.checks || []).filter((t) => !proven.has(t));
 };
-export const shotsOf = (p) => (Array.isArray(p?.shots) ? p.shots : []);
+// One file named twice in a check is one shot: the schema does not stop an agent
+// listing it again, and the server keeps both names.
+export const shotsOf = (p) => (Array.isArray(p?.shots) ? p.shots.filter((s, k, all) => all.findIndex((t) => t.file === s.file) === k) : []);
 // The files of a sub-job's current round, in grid order: what the board asks the
 // server to thumbnail, and what the plate's filmstrip draws first.
-export const filmFiles = (sub, n = MAX_FILM) => proofItems(sub).flatMap((p) => shotsOf(p).map((s) => s.file)).slice(0, n);
+export const filmFiles = (sub, n = MAX_FILM) => proofItems(sub).flatMap((p) => shotsOf(p).map((s) => s.file)).filter((f, k, all) => all.indexOf(f) === k).slice(0, n);
 
 export class EvidenceCache {
   constructor() { this.thumbs = new Map(); this.full = new Map(); this.asked = new Set(); }
@@ -90,6 +92,8 @@ export const alsoCheckedHtml = (sub) => {
 
 // The shot viewer: one item full size with where and how it was captured, the
 // other items as a strip, and the way back to the box with the question started.
+// An item with several shots gets a row of its own above the strip; both rows are
+// then labelled, since the strip's thumbnail for this item repeats its first shot.
 // `view` is { i, j }: the item, and which of its shots.
 export function proofViewerHtml(job, sub, view, cache, { branch = '', ask = true } = {}) {
   const items = proofItems(sub), i = Math.min(Math.max(view.i || 0, 0), items.length - 1), p = items[i];
@@ -109,12 +113,14 @@ export function proofViewerHtml(job, sub, view, cache, { branch = '', ask = true
     ? `<dl class="job-proof-meta">${row('URL', shot.url)}${row('Viewport', shot.viewport)}${row('How', shot.tool || 'Screenshot')}${row('At', shot.at ? new Date(shot.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '')}</dl>`
     : `<dl class="job-proof-meta">${row('In', sub.worktree?.path || '')}${row('How', 'Command output')}${row('Exit', String(p.run?.exit))}</dl>`;
   const strip = items.map((x, k) => `<button type="button" class="job-proof-pick ${k === i ? 'sel' : ''}" data-proof-go="${k}" aria-label="${esc(x.text)}" title="${esc(x.text)}">${mediaHtml(job, sub, x)}</button>`).join('');
-  const shotStrip = shots.length > 1 ? `<div class="job-proof-shots">${shots.map((s, k) => `<button type="button" class="job-proof-pick ${k === j ? 'sel' : ''}" data-proof-shot="${k}" aria-label="Shot ${k + 1}">${thumbHtml(job, sub, s.file)}</button>`).join('')}</div>` : '';
+  const many = shots.length > 1;
+  const shotStrip = many ? `<div class="job-proof-row"><small>Shots in this check · ${j + 1} of ${shots.length}</small><div class="job-proof-shots">${shots.map((s, k) => `<button type="button" class="job-proof-pick ${k === j ? 'sel' : ''}" data-proof-shot="${k}" aria-label="Shot ${k + 1} of ${shots.length}">${thumbHtml(job, sub, s.file)}</button>`).join('')}</div></div>` : '';
+  const itemStrip = `<div class="job-proof-strip">${strip}</div>`;
   return `<header class="job-appbar"><button class="job-back" data-proof-back title="Back to the sub-job">${ICONS.back}<span>${esc(sub.title)}</span></button><h2>Shown working · ${i + 1} of ${items.length}</h2>
     <div class="job-chips job-detail-meta"><span class="job-chip">${ICONS.eye}<span>Round ${round}</span></span>${branch ? `<span class="job-chip job-plan-branch">${ICONS.branch}<span>${esc(branch)}</span></span>` : ''}</div></header>
     <div class="job-proof-viewer">${stage}<div class="job-proof-side"><h3 class="${p.couldNot ? 'gap' : ''}"><span aria-hidden="true">${p.couldNot ? '!' : '✓'}</span><span>${esc(p.text)}</span></h3>
       ${p.note ? `<p>${esc(p.note)}</p>` : ''}${p.couldNot ? '<p>The plan asked for this to be shown. You decide whether what covers it instead is enough, or ask for another way.</p>' : ''}${meta}
-      ${ask ? `<div class="job-actions"><button type="button" data-proof-ask="${i}">${ICONS.edit}${p.couldNot ? 'Ask it to try another way' : 'Ask about this'}</button></div>` : ''}${shotStrip}<div class="job-proof-strip">${strip}</div></div></div>`;
+      ${ask ? `<div class="job-actions"><button type="button" data-proof-ask="${i}">${ICONS.edit}${p.couldNot ? 'Ask it to try another way' : 'Ask about this'}</button></div>` : ''}${shotStrip}${many ? `<div class="job-proof-row"><small>All checks · ${items.length}</small>${itemStrip}</div>` : itemStrip}</div></div>`;
 }
 
 // The board plate's filmstrip: the first shots of what is waiting to be verified.

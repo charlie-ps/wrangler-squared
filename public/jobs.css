@@ -1174,6 +1174,9 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .job-proof-meta dt { color:var(--fg-subtle); }
 .job-proof-meta dd { margin:0; color:var(--fg); overflow-wrap:anywhere; }
 .job-proof-strip,.job-proof-shots { display:flex; flex-wrap:wrap; gap:6px; }
+.job-proof-row { display:grid; gap:6px; }
+.job-proof-row>small { font-size:11px; color:var(--fg-subtle); }
+.job-proof-row:has(.job-proof-shots) { padding-bottom:10px; border-bottom:1px solid var(--border-muted); }
 .job-proof-pick { all:unset; box-sizing:border-box; width:64px; border-radius:8px; cursor:pointer; border:2px solid transparent; }
 .job-proof-pick .job-proof-thumb { border-radius:6px; }
 .job-proof-pick.sel { border-color:var(--blue); }
