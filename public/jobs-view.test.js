@@ -1103,9 +1103,30 @@ test('the detail dialog shows a sub-job price with the job total behind it, and 
   assert.deepEqual([...document.querySelectorAll('#job-dialog .job-detail-cost')].map((e) => e.textContent), ['$12.50']);
 });
 
+// Each column's tiles in order, read from the grid's stacks (`data-col`).
+const graphColumns = (document) => [...document.querySelectorAll('.job-stack[data-col]')].reduce((cols, el) => {
+  (cols[+el.dataset.col] ||= []).push(...[...el.querySelectorAll('.job-node')].map((n) => n.dataset.node)); return cols;
+}, []);
+// Points along a connector's `d` (M, H and C only), for clearance checks.
+const pathPoints = (d) => {
+  const pts = [];
+  let x = 0, y = 0;
+  for (const [, op, args] of d.matchAll(/([MHC])([^MHC]*)/g)) {
+    const n = args.split(/[ ,]+/).filter(Boolean).map(Number);
+    if (op === 'M') [x, y] = n;
+    else if (op === 'H') { for (let i = 0; i <= 20; i++) pts.push([x + (n[0] - x) * i / 20, y]); x = n[0]; }
+    else {
+      const [x1, y1, x2, y2, x3, y3] = n;
+      for (let i = 0; i <= 40; i++) { const t = i / 40, u = 1 - t; pts.push([u ** 3 * x + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t ** 3 * x3, u ** 3 * y + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t ** 3 * y3]); }
+      [x, y] = [x3, y3];
+    }
+  }
+  return pts;
+};
+
 test('the plan is a dependency graph: a box per sub-job in its wave, an arrow per prerequisite, and a dependency edit moves the box', (t) => {
   const f = fixture(t); f.q('.job-plate-open[data-job=\"job1\"]').click();
-  const waves = () => [...document.querySelectorAll('.job-graph-col')].map((c) => [...c.querySelectorAll('.job-node')].map((n) => n.dataset.node));
+  const waves = () => graphColumns(document);
   const arrows = () => [...document.querySelectorAll('.job-graph-edges path[data-from]')].map((p) => `${p.dataset.from}→${p.dataset.to}`);
   assert.deepEqual(waves(), [['api'], ['web']]); assert.deepEqual(arrows(), ['api→web']);
   assert.deepEqual([...document.querySelectorAll('.job-node-tile .job-kind')].map((k) => k.getAttribute('aria-label')), ['PR', 'PR']);
@@ -1152,20 +1173,47 @@ test('a PR node names its repo under the title in every graph mode; session, hum
   }
 });
 
-test('a connector that skips a wave reserves a pass in the column between and is drawn through it, never over a tile', () => {
+test('every column shares one row grid, and a connector that skips a wave takes a lane under the tile it passes', () => {
   const plan = { stories: [], subJobs: [sub('api'), sub('web', ['api']), sub('docs', ['api', 'web'])] };
   const { document } = new Window();
   document.body.innerHTML = planGraphHtml(plan, {});
-  assert.deepEqual([...document.querySelectorAll('.job-graph-col')].map((c) => [...c.children].map((e) => e.querySelector('[data-node]')?.dataset.node || e.dataset.pass)), [['api'], ['web', 'api>docs'], ['docs']]);
+  assert.deepEqual([...document.querySelectorAll('.job-stack[data-col]')].map((el) => [el.querySelector('[data-node]').dataset.node, el.style.gridColumn, el.style.gridRow]),
+    [['api', '1', '1'], ['web', '3', '1'], ['docs', '5', '1']], 'tiles on one row line up across columns; gutters are the even tracks');
+  assert.deepEqual([...document.querySelectorAll('.job-graph-pass')].map((el) => [el.dataset.pass, el.style.gridColumn, el.style.gridRow]), [['api>docs', '3', '2']],
+    'web holds row 1 of its column, so the lane takes the channel just under it');
+});
+
+test('connectors run level between rows and change row in one smooth curve that never enters a tile or a title', () => {
+  const plan = { stories: [], subJobs: [sub('api'), sub('web', ['api']), sub('docs', ['api', 'web'])] };
+  const { document } = new Window();
+  document.body.innerHTML = planGraphHtml(plan, {});
   const rect = (left, top, width, height) => () => ({ left, top, width, height, right: left + width, bottom: top + height });
   const at = (el, r) => { el.getBoundingClientRect = r; };
   at(document.querySelector('.job-graph-canvas'), rect(0, 0, 540, 240));
-  ['api', 'web', 'docs'].forEach((id, i) => at(document.querySelector(`[data-node="${id}"] .job-node-tile`), rect(i * 196 + 44, 0, 60, 60)));
-  at(document.querySelector('.job-graph-pass'), rect(196, 218, 148, 20));
+  const obstacles = [];
+  ['api', 'web', 'docs'].forEach((id, i) => {
+    const tile = [i * 196 + 44, 0, 60, 60], title = [i * 196 + 14, 64, 120, 18];
+    at(document.querySelector(`[data-node="${id}"]`).closest('[data-col]'), rect(i * 196, 0, 148, 110));
+    at(document.querySelector(`[data-node="${id}"] .job-node-tile`), rect(...tile));
+    at(document.querySelector(`[data-node="${id}"] .job-node-title`), rect(...title));
+    obstacles.push(tile, title);
+  });
+  at(document.querySelector('.job-graph-pass'), rect(196, 120, 148, 2));
   layoutGraphEdges(document.querySelector('.job-graph'));
   const d = (from, to) => document.querySelector(`path[data-from="${from}"][data-to="${to}"]`).getAttribute('d');
-  assert.equal(d('api', 'web'), 'M110 30 C172 30, 172 30, 234 30', 'a next-wave connector is still one curve between the tiles');
-  assert.equal(d('api', 'docs'), 'M110 30 C153 30, 153 228, 196 228 H344 C387 228, 387 30, 430 30', 'it curves into the pass under web, straight across it, and curves up to docs');
+  assert.equal(d('api', 'web'), 'M110 30 H234', 'tiles on one row are joined by one straight line');
+  const skip = d('api', 'docs');
+  assert.match(skip, /^M110 30 H[\d.]+ C[^C]+ H344 H[\d.]+ C[^C]+ H430$/, 'level runs, and one curve into the lane and one out of it');
+  for (const curve of skip.matchAll(/C([\d.]+) ([\d.]+), ([\d.]+) ([\d.]+), [\d.]+ ([\d.]+)/g)) {
+    const [, , y1, , y2, y3] = curve.map(Number);
+    assert.ok(y1 !== y3 && y2 === y3, 'each curve leaves and arrives level, so the line has no corner');
+  }
+  for (const id of ['api>web', 'api>docs', 'web>docs']) {
+    const [from, to] = id.split('>');
+    for (const [x, y] of pathPoints(d(from, to)).slice(1, -1)) {
+      assert.ok(!obstacles.some(([l, t, w, h]) => x > l && x < l + w && y > t && y < t + h), `${id} passes (${x}, ${y}) through a tile or title`);
+    }
+  }
   assert.deepEqual([...document.querySelectorAll('.job-edge-glyph')].map((g) => [g.dataset.glyph, g.getAttribute('transform')]), [['api', 'translate(124 30)'], ['web', 'translate(320 30)']],
     'a PR has one rocket, beside its tile, however many connectors wait for it to deploy');
 });
@@ -1174,7 +1222,7 @@ test('each column after the first is ordered by where its predecessors sit, so c
   const plan = { stories: [], subJobs: [sub('a'), sub('b'), sub('late', ['b']), sub('early', ['a'])] };
   const { document } = new Window();
   document.body.innerHTML = planGraphHtml(plan, {});
-  assert.deepEqual([...document.querySelectorAll('.job-graph-col')].map((c) => [...c.querySelectorAll('[data-node]')].map((n) => n.dataset.node)), [['a', 'b'], ['early', 'late']]);
+  assert.deepEqual(graphColumns(document), [['a', 'b'], ['early', 'late']]);
 });
 
 test('a merge that deploys nothing says so in the detail', (t) => {

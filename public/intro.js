@@ -52,7 +52,7 @@ function graph(phase) {
   const edges = SUBS.flatMap((s) => (s.after || []).map((from) => `<path class="deploy${sc[from][0] === 'done' ? ' landed' : ''}" data-from="${from}" data-to="${s.id}"/>`)).join('') + SUBS.filter((s) => SUBS.some((t) => t.after?.includes(s.id))).map((s) => rocketHtml(s.id)).join('');
   const [tone, line] = sc.goal;
   return `<div class="intro-goal tone-${tone}"><span class="job-avatar">${ICONS[GOAL_GLYPH[tone]]}</span><strong>Split full name into first and last name</strong><span class="job-status">${line}</span></div>
-    <div class="job-graph intro-graph" role="img" aria-label="One job: a pull request each in the desktop app and the API running in parallel, then a backfill session once both deploy"><div class="job-graph-canvas" style="--waves:2"><div class="job-graph-columns"><div class="job-graph-col">${tile(SUBS[0])}${tile(SUBS[1])}</div><div class="job-graph-col">${tile(SUBS[2])}</div></div><svg class="job-graph-edges" aria-hidden="true">${edges}</svg></div></div>`;
+    <div class="job-graph intro-graph" role="img" aria-label="One job: a pull request each in the desktop app and the API running in parallel, then a backfill session once both deploy"><div class="job-graph-canvas" style="--waves:2"><div class="job-graph-columns"><div class="job-graph-col" data-col="0">${tile(SUBS[0])}${tile(SUBS[1])}</div><div class="job-graph-col" data-col="1">${tile(SUBS[2])}</div></div><svg class="job-graph-edges" aria-hidden="true">${edges}</svg></div></div>`;
 }
 
 // The Jobs figure: a mini board whose rail badge and Needs me chip count its
