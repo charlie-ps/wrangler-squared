@@ -1025,13 +1025,38 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .wn-slot .job-change { margin:0; }
 .wn-slot-ghost { display:flex; gap:8px; align-items:center; padding:12px 14px; border:1px dashed var(--border); border-radius:14px; color:var(--fg-subtle); font-size:13px; }
 .wn-change-text { flex:1; min-width:0; padding:6px 2px; color:var(--fg); font:13.5px/1.5 var(--font); white-space:normal; overflow-wrap:anywhere; }
-@media(prefers-reduced-motion:reduce) { .wn-fade { animation:none; } .wn-edge,.wn-art,.wn-note { transition:none; } }
+/* The new planner: a red step going up to it, a decision with ranked options, an
+   idea routed back to the step that made it. */
+.wn-row2s { display:grid; grid-template-columns:minmax(0,1fr) 56px minmax(0,1fr); align-items:start; }
+.wn-edge.hot { background:var(--st-bad); }
+.wn-edge.ask { background:var(--st-warn); }
+.wn-solo { min-height:150px; }
+.wn-solo .wn-note blockquote b { font-weight:600; }
+.wn-ask { display:grid; gap:10px; min-height:300px; align-content:start; }
+.wn-ask .job-replan-ask { margin:0; font-size:14px; line-height:1.5; }
+.wn-ask .job-options { display:grid; gap:8px; margin:0; padding:0; border:0; }
+.wn-ask .job-option { padding:10px 12px; gap:10px; cursor:default; transition:border-color .3s, background .3s, opacity .3s; background:var(--surface); }
+.wn-ask .job-option.wn-pending { border-style:dashed; background:transparent; }
+.wn-rank { display:grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--surface-2); font-size:12px; font-weight:600; color:var(--fg-muted); }
+.job-option.sel .wn-rank { background:var(--blue); color:var(--accent-fg); }
+.wn-skel { display:block; height:8px; width:60%; border-radius:4px; background:var(--surface-2); margin-top:6px; }
+.wn-ask footer { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:34px; }
+.wn-btn { display:inline-flex; align-items:center; gap:6px; padding:7px 14px; border-radius:12px; border:1px solid var(--border-muted); font-size:13px; font-weight:500; color:var(--fg-muted); transition:background .3s, color .3s; }
+.wn-btn.go { background:var(--st-run); border-color:transparent; color:var(--accent-fg); }
+.wn-btn.ok { background:color-mix(in srgb, var(--st-ok) 15%, var(--surface)); border-color:transparent; color:var(--st-ok-fg); }
+.wn-idea { display:grid; gap:12px; min-height:150px; align-content:start; }
+.intro-figure .job-change-go.on { background:var(--accent); color:var(--accent-fg); }
+.wn-route { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--fg-muted); }
+.wn-route b { color:var(--fg); font-weight:500; }
+.wn-route .icon { color:var(--wf); }
+@media(prefers-reduced-motion:reduce) { .wn-fade { animation:none; } .wn-edge,.wn-art,.wn-note,.wn-ask .job-option,.wn-btn { transition:none; } }
 @media(max-width:700px) {
   .jobs-update { padding:22px 20px; border-radius:20px; }
   .jobs-update h2 { font-size:24px; }
   .update-body p { font-size:14px; }
   .wn-row3 { grid-template-columns:minmax(0,1fr) 14px minmax(0,1fr) 14px minmax(0,1fr); }
   .wn-row2 { grid-template-columns:minmax(0,1fr) 14px minmax(0,1.4fr); }
+  .wn-row2s { grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr); }
   .wn-under,.wn-writes { grid-template-columns:1fr; }
 }
 

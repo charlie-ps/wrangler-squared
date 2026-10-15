@@ -25,11 +25,11 @@ const SAMPLE = [
   { id: 'c', date: '2026-11-01', title: 'Third release', body: '<p>Third body</p>' },
 ];
 
-test('the shipped registry is the two Writes pages, review defaults and See it working, and every frame of their figures draws', (t) => {
+test('the shipped registry is the two Writes pages, review defaults, See it working and the three planner pages, and every frame of their figures draws', (t) => {
   const p = page(t);
-  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places', 'review-defaults', 'see-it-working']);
+  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places', 'review-defaults', 'see-it-working', 'planner-red-steps', 'planner-options', 'planner-add-idea']);
   for (const u of UPDATES.filter((u) => u.anim)) {
-    for (let i = 0; i < u.anim.frames; i++) assert.match(u.figure(i), /job-node/, `${u.id} frame ${i}`);
+    for (let i = 0; i < u.anim.frames; i++) assert.match(u.figure(i), /job-node|job-option/, `${u.id} frame ${i}`);
     assert.ok(u.anim.still < u.anim.frames, u.id);
   }
   const see = UPDATES.find((u) => u.id === 'see-it-working');
@@ -39,7 +39,7 @@ test('the shipped registry is the two Writes pages, review defaults and See it w
   const storage = memoryStorage();
   assert.equal(createUpdates({ storage }).maybeShow(), true);
   assert.equal(p.title(), 'See the design before anything is built');
-  assert.equal(p.q('.intro-count').textContent, '1 of 4');
+  assert.equal(p.q('.intro-count').textContent, '1 of 7');
   assert.ok(p.q('.update-panel .wn-row3'));
   p.click('[data-update="next"]');
   assert.match(p.title(), /^Jira, Slack and Confluence/);
@@ -49,9 +49,18 @@ test('the shipped registry is the two Writes pages, review defaults and See it w
   p.click('[data-update="next"]');
   assert.equal(p.title(), 'See each PR working before you read its diff');
   assert.ok(p.q('.update-panel .job-proof-list'));
+  p.click('[data-update="next"]');
+  assert.equal(p.title(), 'A failing step goes to the planner first');
+  assert.ok(p.q('.update-panel .wn-row3 .job-node.tone-idle'));
+  p.click('[data-update="next"]');
+  assert.equal(p.title(), 'Pick from up to three ranked options');
+  assert.equal(p.q('.update-panel .wn-ask').querySelectorAll('.job-option').length, 3);
+  p.click('[data-update="next"]');
+  assert.equal(p.title(), 'Say what to change, on any step');
+  assert.ok(p.q('.update-panel .wn-idea .job-change'));
   assert.equal(p.q('[data-update="next"]').textContent, 'Got it');
   p.click('[data-update="next"]');
-  assert.deepEqual(seenIds(storage), ['review-defaults', 'see-it-working', 'writes-designs', 'writes-places']);
+  assert.deepEqual(seenIds(storage), ['planner-add-idea', 'planner-options', 'planner-red-steps', 'review-defaults', 'see-it-working', 'writes-designs', 'writes-places']);
 });
 
 test('a reader behind on several releases steps through each unseen one, oldest first, with Next and Back', (t) => {
@@ -170,7 +179,7 @@ test('the client never opens an update on top of the first-run intro', (t) => {
   assert.equal(p.q('#jobs-update'), null);
   p.click('.jobs-intro .job-dialog-close');
   assert.equal(storage.get(SEEN_KEY), '1');
-  assert.deepEqual(seenIds(storage), ['review-defaults', 'see-it-working', 'writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
+  assert.deepEqual(seenIds(storage), ['planner-add-idea', 'planner-options', 'planner-red-steps', 'review-defaults', 'see-it-working', 'writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
 });
 
 test('the client holds unseen updates until the reader opens the Jobs view', (t) => {
