@@ -31,13 +31,20 @@ import { STATES, stateIconHtml, stateSolid } from './job-state.js';
 // write stops for review: a sibling of the row's button, since a button cannot
 // hold another. `reviewWrites` is the job's default for a write that does not say.
 //
-// A PR's tile names a branch only where it lands somewhere other than the job
-// (`base`, the job's own): its repo line gains → <branch>. Under review every PR
-// has a branch pill beside its dependencies, blank until it overrides the job's.
-// Where it lands, and its worktree's branch once cut, are in the tooltip.
+// Every PR tile has a branch line under its repo: its worktree branch once cut,
+// then → where it lands (muted `default branch` when no base). Under review every
+// PR also has a branch pill beside its dependencies, blank until it overrides the
+// job's, with the branch it would land on as its placeholder.
 export const dependencyEditorHtml = (s, others, depKey) => others.filter((d) => !isWriteSub(d)).map((d) => `<label><input type="checkbox" data-dep="${esc(depKey)}" value="${esc(d.id)}" ${s.after.includes(d.id) ? 'checked' : ''}>${kindChipHtml(d)}<span>${esc(d.title)}</span></label>`).join('') || '<span>No other sub-jobs</span>';
 // Blank lands where the job does; the summary names the branch only once it differs.
-const branchEditorHtml = (s, i, base, open) => `<details class="job-node-deps job-node-branch ${s.base ? 'set' : ''}" data-base-of="${esc(s.id)}" ${open ? 'open' : ''}><summary title="Lands on ${esc(targetOf({ base }, s) || 'the default branch')} · change">${ICONS.branch}${s.base ? `<span>${esc(s.base)}</span>` : ''}</summary>
+// A PR tile's branch line: its worktree branch once cut, then where it lands. The
+// target is muted when it is the repository's default, and the override is marked.
+const landingHtml = (s, base) => {
+  const target = targetOf({ base }, s), branch = s.worktree?.branch;
+  const tip = [branch ? `Branch ${branch}` : '', `Lands on ${target || 'the default branch'}`].join('\n');
+  return `<span class="job-node-landing" title="${esc(tip)}">${branch ? `<span class="job-node-wt">${esc(branch)}</span>` : ''}<span class="job-node-arrow" aria-hidden="true">→</span><span class="job-node-base ${target ? '' : 'default'} ${offBase({ base }, s) ? 'own' : ''}">${esc(target || 'default branch')}</span></span>`;
+};
+const branchEditorHtml = (s, i, base, open) => `<details class="job-node-deps job-node-branch ${s.base ? 'set' : ''}" data-base-of="${esc(s.id)}" ${open ? 'open' : ''}><summary title="Lands on ${esc(targetOf({ base }, s) || 'the default branch')} · change">${ICONS.branch}<span>${esc(s.base || base || 'default branch')}</span></summary>
   <input data-base="${i}" value="${esc(s.base || '')}" placeholder="${esc(base || 'Default branch')}" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Land on branch"><span>Blank lands where the job does. The worktree is cut from origin/&lt;branch&gt; and the PR opens against it.</span></details>`;
 // A place pill's parts: the glyph, a short mono label, a dot per write in its
 // state, and ↗ once the place exists.
@@ -221,7 +228,7 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     const tip = [KIND_TITLE[kindClass(s)], story(s), isPrSub(s) ? tildify(s.repo) : '', lands, isPrSub(s) && s.worktree?.branch ? `Branch ${s.worktree.branch}` : '', deps, stateOf ? STATES[state].label : ''].filter(Boolean).join('\n');
     const tile = `<span class="job-node-tile ${stateSolid(state) ? 'on' : ''}">${kindChipHtml(s)}<span class="job-node-state">${stateIconHtml(state)}</span></span>`;
     const cls = `job-node tone-${STATES[state].tone} ${kindClass(s)}`;
-    const repo = isPrSub(s) && s.kind !== 'jira' && s.repo ? `<span class="job-node-repo">${esc(tildify(s.repo).split('/').pop())}${offBase({ base }, s) ? ` <span class="job-node-base">→ ${esc(s.base)}</span>` : ''}</span>`
+    const repo = isPrSub(s) && s.kind !== 'jira' && s.repo ? `<span class="job-node-repo">${esc(tildify(s.repo).split('/').pop())}</span>${landingHtml(s, base)}`
       : triggerLine(plan, s) ? `<span class="job-node-repo job-node-on" title="Starts at this milestone">${esc(triggerLine(plan, s))}</span>` : '';
     if (editable) {
       const others = subs.filter((d) => d.id !== s.id && !isWriteSub(d));

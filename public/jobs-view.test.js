@@ -420,15 +420,17 @@ test('the plan under review shows the shared context, each brief and each check 
   assert.match(approve.title, /Approve starts work in dedicated worktrees/, 'what approval does is one hover away');
 });
 
-test('the plan review names no worktree branch; a sub-job\'s detail shows the branch its worktree is actually on', (t) => {
+test('the plan review names no worktree branch, and a cut PR tile shows it; a sub-job\'s detail shows the branch its worktree is actually on', (t) => {
   const f = fixture(t); f.q('.job-plate-open[data-job=\"job1\"]').click();
   assert.equal(f.q('[data-branch]'), null); assert.equal(f.q('.job-plan-branch'), null);
   f.q('#job-dialog').close();
   const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', worktree: { path: '/wt/api', branch: 'fix/AUTH-1-api', repoRoot: '/repo' } }, { ...sub('web', ['api']), stage: 'implementation' }]; f.view.update(f.data);
   f.q('.job-plate-open[data-job=\"job1\"]').click();
-  assert.equal(f.q('.job-plan-branch'), null, 'the graph never shows a worktree branch');
-  assert.equal(f.q('.job-node-base'), null, 'nor a target, while every PR lands where the job does');
+  assert.equal(f.q('[data-node="api"] .job-node-wt').textContent, 'fix/AUTH-1-api', 'a cut PR shows its worktree branch on its tile');
+  assert.equal(f.q('[data-node="api"] .job-node-landing').textContent, 'fix/AUTH-1-api→default branch');
+  assert.equal(f.q('[data-node="web"] .job-node-wt'), null, 'not cut yet: only where it lands');
+  assert.ok(f.q('[data-node="web"] .job-node-base.default'), 'muted when it is the default branch');
   assert.match(f.q('[data-open-sub="api"]').title, /Lands on the default branch\nBranch fix\/AUTH-1-api/, 'both are a hover away');
   f.q('[data-open-sub="api"]').click();
   assert.equal(f.q('.job-detail-meta .job-plan-branch').textContent, 'fix/AUTH-1-api');
@@ -2164,13 +2166,16 @@ test('a refused cleanup on a dropped sub-job shows what would be lost, and Disca
   assert.equal(f.q('#job-discard'), null, 'a discard already chosen is not offered twice');
 });
 
-test('a PR landing off the job\'s base shows → branch on its tile only; the rest stay as they were', (t) => {
+test('every PR tile shows its worktree branch → where it lands, the override marked and long names truncated', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active'; job.base = 'next';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', base: 'release/2.x', worktree: { path: '/wt/api', branch: 'fix/api-2x', repoRoot: '/repo' } },
     { ...sub('web', ['api']), stage: 'implementation' }, { ...sub('same', ['api']), stage: 'implementation', base: 'next' }];
   f.view.update(f.data); f.q('.job-plate-open[data-job=\"job1\"]').click();
-  assert.deepEqual([...document.querySelectorAll('.job-node-base')].map((e) => [e.closest('[data-node]').dataset.node, e.textContent]), [['api', '→ release/2.x']], 'one token, only where it differs from the job');
-  assert.equal(f.q('.job-plan-branch'), null);
+  assert.deepEqual([...document.querySelectorAll('.job-node-landing')].map((e) => [e.closest('[data-node]').dataset.node, e.textContent]), [['api', 'fix/api-2x→release/2.x'], ['web', '→next'], ['same', '→next']], 'every PR names where it lands');
+  assert.deepEqual([...document.querySelectorAll('.job-node-base.own')].map((e) => e.closest('[data-node]').dataset.node), ['api'], 'only the override is marked');
+  const long = 'feature/' + 'a'.repeat(80); job.subJobs[2].worktree = { path: '/wt/s', branch: long }; f.view.update(f.data);
+  assert.equal(f.q('[data-node="same"] .job-node-wt').textContent, long, 'the whole name is in the markup, CSS truncates it');
+  assert.match(f.q('[data-node="same"] .job-node-landing').title, new RegExp(`Branch ${long}\\nLands on next`), 'and whole in the tooltip');
   assert.match(f.q('[data-open-sub="api"]').title, /Lands on release\/2\.x, not the job's next/);
   assert.match(f.q('[data-open-sub="web"]').title, /Lands on next/);
   assert.match(f.q('#job-dialog .job-chips').textContent, /→ next/, 'the job\'s own base heads the job');
@@ -2184,15 +2189,16 @@ test('plan review sets a PR\'s own base from its branch pill, and blank lands wh
   const f = fixture(t); f.q('.job-plate-open[data-job=\"job1\"]').click();
   const pills = document.querySelectorAll('details[data-base-of]');
   assert.equal(pills.length, f.data.jobs[0].plan.subJobs.filter((s) => (s.kind || 'pr') === 'pr').length, 'one per PR');
-  assert.equal(f.q('.job-node-base'), null);
+  assert.equal(f.q('.job-node-base.own'), null);
+  assert.equal(f.q('details[data-base-of] summary').textContent, 'default branch', 'blank shows where it would land');
   const input = f.q('[data-base="0"]'); assert.equal(input.placeholder, 'Default branch');
   input.value = ' release/2.x '; input.dispatchEvent(f.event('change'));
-  assert.equal(f.q('.job-node-base').textContent, '→ release/2.x');
+  assert.equal(f.q('.job-node-base.own').textContent, 'release/2.x');
   assert.equal(f.q('details[data-base-of] summary').textContent, 'release/2.x');
   f.q('[data-action="approve-plan"]').click();
   assert.equal(f.sent.at(-1).plan.subJobs[0].base, 'release/2.x');
   const again = f.q('[data-base="0"]'); again.value = ''; again.dispatchEvent(f.event('change'));
-  assert.equal(f.q('.job-node-base'), null);
+  assert.equal(f.q('.job-node-base.own'), null);
   f.q('[data-action="approve-plan"]').click();
   assert.equal('base' in f.sent.at(-1).plan.subJobs[0], false, 'cleared, it is gone rather than empty');
 });
