@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -42,5 +43,21 @@ export async function removeWorktree({ worktreePath, repoRoot = '' }) {
     return { ok: true };
   } catch (e) {
     throw new WorktreeError(`git worktree remove failed: ${(e.stderr || e.message || '').toString().trim()}`);
+  }
+}
+
+// The tree the working directory would commit, as one hash: everything tracked or
+// untracked and not ignored, taken through a throwaway index so the worktree's
+// real index (and whatever the human staged) is never touched. Approving a review
+// is pinned to this, so a tree that moved since the agent reported ready is refused.
+export async function workingTreeHash(cwd) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jobs-tree-'));
+  const env = { ...process.env, GIT_INDEX_FILE: path.join(dir, 'index') };
+  try {
+    await exec('git', ['-C', cwd, 'add', '-A'], { env, maxBuffer: 16 * 1024 * 1024 });
+    const { stdout } = await exec('git', ['-C', cwd, 'write-tree'], { env });
+    return stdout.trim();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 }

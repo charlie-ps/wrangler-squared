@@ -27,7 +27,9 @@ const fixedOf = (s, k) => (k === 'place.type' ? s.place?.type : s[k]);
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const norm = (s) => ({ ...s, kind: s.kind || 'pr', after: s.after || [], check: s.check || undefined, show: s.show?.length ? s.show : undefined });
 const quoted = (title) => `“${title}”`;
-const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.subJobId === subId);
+// A session parked on its ready receipt is only waiting for the human (job-parked.js);
+// a plan change that reworks its sub-job simply ends it.
+const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.parkedFor !== 'ready' && r.subJobId === subId);
 // Code written to the old brief, or cut from a base without the new
 // prerequisites, must not merge as if it met the new plan.
 const REWORKS = ['brief', 'after'];

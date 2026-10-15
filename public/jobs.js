@@ -175,7 +175,7 @@ export const writeWaiting = (job, sub) => isWriteSub(sub) && sub.stage === 'writ
 export const writeAwaitingReview = (sub) => isWriteSub(sub) && sub.stage === 'review' && !sub.error;
 // A session parked on drafts it sent, until every one is decided and it is told
 // which to make (server/job-writes.js).
-export const parkedRun = (job, sub) => { const run = liveRun(job, sub); return run?.parkedAt && !run.mailedAt ? run : null; };
+export const parkedRun = (job, sub) => { const run = liveRun(job, sub); return run?.parkedAt && !run.mailedAt && run.parkedFor !== 'ready' ? run : null; };
 export const draftsWaiting = (job, sub) => (parkedRun(job, sub)?.drafts || []).map((id) => job.subJobs.find((s) => s.id === id)).filter((w) => writeAwaitingReview(w));
 // "→ In Review", "Comment", "Post", "Make": a write in a few words, beside the
 // place's glyph that already says where.
@@ -254,7 +254,14 @@ export const cancelledDependencies = (job, sub) => [...(triggerDropped(job, sub)
 // session or human task once it reached done.
 export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : dep.stage === 'done' && !dep.cancelledAt;
 export const pendingDependencies = (job, sub) => sub.after.map((id) => job.subJobs.find((s) => s.id === id)).filter((d) => !dependencySatisfied(d));
-const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null));
+// A session parked on its ready receipt (server/job-parked.js) is only waiting on
+// the human, so it is not a running step until a message to it is in flight.
+const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null) && !(r.parkedFor === 'ready' && !sub?.answering));
+// The open session behind a Code review step: parked, or answering what was sent.
+export const readyRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === sub?.id && r.parkedFor === 'ready') || null;
+// What the card says while that session works on a message. A question is
+// answered; a change is the next round; a tree that moved is checked again.
+export const answeringLabel = (sub) => ({ ask: 'Answering you', retell: 'Rechecking the tree' }[sub?.answering?.kind] || `Reworking · round ${(sub?.ready?.round || 1) + 1}`);
 // The live run's own card status, enriched onto the run server-side each graph
 // tick (server/index.js withRunStatus). 'needs-you' is the one the board acts on:
 // an automated step stuck on a prompt is nobody's but the human's.
@@ -350,7 +357,7 @@ export function quickChips(job, sub) {
 // that holds the work when there is one, else the planner.
 const CHANGE_HINT = {
   plan: 'Goes to the planner, which redraws the plan for you to review.',
-  code: 'Goes back to the session that wrote this working tree. You review the new diff.',
+  code: 'Ask about it or say what should change. It goes to the session that wrote this working tree: a question gets an answer, a change gets a new round.',
   session: 'Goes back to the session that made this result, which reports again.',
   pr: 'Goes to a repair session on this PR.',
 };
@@ -421,7 +428,8 @@ export function jobNeedsReview(job, sub) {
   if (isWriteSub(sub)) return writeAwaitingReview(sub);
   if (isHumanSub(sub)) return humanTaskWaiting(job, sub);
   if (isSessionSub(sub)) return sub.stage === 'review';
-  if (codeAwaitingReview(sub)) return true;
+  // Not yours again until it reports back: the answer or the new round is its turn.
+  if (codeAwaitingReview(sub)) return !sub.answering;
   if (deploymentStalled(sub)) return true;
   return sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && job.reviewMerge && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 }
@@ -438,6 +446,7 @@ export function jobStatus(job, sub) {
   if (run) {
     if (run.status === 'needs-you') return { tone: 'needs', text: 'Waiting on a prompt' };
     // Its drafts are each the human's to decide (the writes carry the needs-you).
+    if (run.parkedFor === 'ready') return { tone: 'working', text: answeringLabel(sub) };
     if (parkedRun(job, sub)) { const n = draftsWaiting(job, sub).length; return n ? { tone: 'muted', text: `Paused · ${n} draft${n === 1 ? '' : 's'} to review` } : { tone: 'working', text: 'Drafts decided · resuming' }; }
     if (run.mailedAt && !run.report) return { tone: 'working', text: 'Making the approved writes' };
     return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: job.stage === 'active' ? 'Re-planning' : 'Planning', implementation: reviewCode(job) ? 'Working' : 'Working on the PR', publish: 'Committing & opening the PR', repair: 'Fixing the PR', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };

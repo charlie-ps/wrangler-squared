@@ -61,6 +61,9 @@ const ctxAttrs = (job, sub, file) => `data-ev-job="${esc(job.id)}" data-ev-sub="
 
 // A thumbnail slot. Its markup is a placeholder the view fills from the cache
 // (`hydrateEvidence`), the way job images are, so a redraw never loses a picture.
+// A file of a given round, not necessarily the sub-job's current one: a thread
+// message carries the round it was sent in.
+export const roundThumbHtml = (job, sub, round, file, cls = '') => `<span class="job-proof-thumb ${cls} ${isVideo(file) ? 'video' : ''}" data-ev-job="${esc(job.id)}" data-ev-sub="${esc(sub.id)}" data-ev-round="${Number(round) || 1}" data-ev-file="${esc(file)}">${isVideo(file) ? ICONS.play : ICONS.eye}</span>`;
 export const thumbHtml = (job, sub, file, cls = '') => `<span class="job-proof-thumb ${cls} ${isVideo(file) ? 'video' : ''}" ${ctxAttrs(job, sub, file)}>${isVideo(file) ? ICONS.play : ICONS.eye}</span>`;
 const termHtml = (run, cls = '') => `<span class="job-proof-thumb term ${cls}"><span class="job-proof-term"><i>$</i> ${esc(run.cmd)}\n${esc(String(run.out || '').split('\n').slice(0, 5).join('\n'))}</span></span>`;
 function mediaHtml(job, sub, p, j = 0) {
@@ -134,9 +137,11 @@ export function hydrateEvidence(root, cache, send, { full = null } = {}) {
       img.alt = ''; img.src = dataUrl(got);
       el.textContent = ''; el.append(img);
     }
-    if (!got) wanted.set(`${job}/${sub}/${round}`, { id: job, subJobId: sub, round });
+    if (!got) { const w = wanted.get(`${job}/${sub}/${round}`) || { id: job, subJobId: sub, round, files: [] }; w.files.push(file); wanted.set(`${job}/${sub}/${round}`, w); }
   });
-  for (const [token, msg] of wanted) if (cache.first(token)) send({ type: 'job-evidence', ...msg });
+  // A round's thumbnails come in one frame, but a reply can add files to a round
+  // already fetched, so what is still missing is part of the question's identity.
+  for (const [key, { files, ...msg }] of wanted) if (cache.first(`${key}/${[...new Set(files)].sort().join(',')}`)) send({ type: 'job-evidence', ...msg });
   if (full) {
     const token = `${EvidenceCache.key(full.jobId, full.subId, full.round, full.file)}/full`;
     if (!cache.open(full.jobId, full.subId, full.round, full.file) && cache.first(token)) send({ type: 'job-evidence', id: full.jobId, subJobId: full.subId, round: full.round, file: full.file });

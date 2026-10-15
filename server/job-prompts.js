@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { ATTRIBUTION, isHumanSub, reviewCode, placeOf, isMakeWrite, checkText } from './jobs-schema.js';
-import { inboxDir } from './job-evidence.js';
+import { inboxDir, roundDir } from './job-evidence.js';
 import { checkoutsDir, displayPath } from './data-dir.js';
 import { isFrozen, replanStatus } from './job-replan.js';
 import { writeBrief, openWrites, draftingFor, WRITE_RESULT_SHAPE } from './job-writes.js';
@@ -111,6 +111,22 @@ export function draftsDecidedMail(job, run) {
     `Then ${reportCall(run, `kind:"completed", checks:["what you did and how you know"]${open.length ? `, ${WRITE_RESULT_SHAPE} for ${open.map((w) => w.id).join(', ')}` : ''}`)}`,
   );
 }
+// What a session parked on its ready receipt is mailed when the human writes to
+// it (job-runner.js deliverThread). The words are the human's (JSON, data not
+// instructions); a pasted picture is a file it reads by path, because mail carries
+// text only (job-evidence.js keepAskImages).
+export function threadMail(job, run, sub, messages) {
+  const round = sub.ready?.round || 1;
+  const said = messages.map((m) => `${m.from === 'system' ? 'Wrangler' : 'The human'}: ${JSON.stringify(m.text)}${m.images?.length ? ` (pasted images, read them: ${m.images.map((i) => JSON.stringify(path.join(roundDir(job.id, sub.id, m.round || round), i.file))).join(', ')})` : ''}`);
+  const dir = displayPath(inboxDir(job.id, sub.id));
+  return lines(
+    `${job.title}: you reported ready (round ${round}) and the human has written back. They see your proof and the working tree as you left them.`,
+    ...said,
+    `A QUESTION: answer it from what you know, changing nothing: ${reportCall(run, 'kind:"reply", text:"your answer", shots?:[...], run?:{cmd,out,exit}')} Anything you capture to answer goes in $JOB_EVIDENCE (\`export JOB_EVIDENCE=${dir}\`).`,
+    `A CHANGE: make it in this worktree, leave it UNCOMMITTED, re-verify and answer every Show me item again for this new round: ${reportCall(run, 'kind:"ready", checks:[...]')} If it needs more than this PR, say so in a reply instead.`,
+    'Then stop and wait: the session stays open for the next message.',
+  );
+}
 const contextLine = (job) => job.plan?.context ? `Context: ${job.plan.context}` : '';
 const heading = (job, sub) => `${sub?.jiraKey ? `${sub.jiraKey} · ` : ''}${job.title}`;
 // What already happened on this sub-job, one line per event, oldest first: every
@@ -128,7 +144,7 @@ const HUMAN_VERBS = { 'request-change': 'requested changes', 'fix-here': 'reques
 const modelLabel = (job, run) => [run.model, run.effort].filter(Boolean).join(' ');
 const joinChecks = (list) => (list || []).map(checkText).join(' · ');
 const outcome = (r) => {
-  const p = r.report;
+  const p = r.report || r.readyReport;
   if (!p) return r.error || 'stopped without a receipt';
   if (p.kind === 'blocked') return `blocked: ${p.summary}`;
   if (p.kind === 'published') return `published: ${p.url}`;
@@ -267,6 +283,7 @@ export function jobPrompt(job, sub, run) {
       // before anything is committed; a later publish session commits and pushes,
       // so the branch rename waits for it too.
       leavesUncommitted(job, sub) ? `Leave every change UNCOMMITTED: ${reviewCode(job) ? 'the human reviews the working tree before anything is committed, and a ' : 'a '}later step commits and pushes it${sub?.pr ? ' to the open PR' : ' and opens the PR'}. Do not commit, push or open a PR.` : branchNaming(job, sub),
+      reviewCode(job) ? 'After you report ready your session stays open, paused, so the human can write to you by mail: a question is answered with job_report kind:"reply" (text, shots?, run?) and changes nothing; a change is made, re-verified and reported ready again as a new round. Do not end the session or clean up the worktree yourself.' : '',
       '',
       leavesUncommitted(job, sub) ? report('kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]', 'When the working tree is ready to review, ') : publishLine,
     ),

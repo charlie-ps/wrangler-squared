@@ -1093,3 +1093,32 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .job-plate-film .job-proof-thumb svg { width:14px; height:14px; }
 .job-plate-film small { align-self:center; font-size:10px; color:var(--fg-muted); padding-left:2px; }
 .job-plate-film + .job-plate-stub { margin-top:0; }
+
+/* The conversation under a Code review step (job-thread.js). */
+.job-thread { display:grid; margin-top:14px; border:1px solid var(--border-muted); border-radius:14px; overflow:hidden; }
+.job-thread-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:9px 12px; background:var(--surface-2); font-size:12.5px; }
+.job-thread-head svg { width:15px; height:15px; color:var(--purple); }
+.job-thread.answering .job-thread-head svg { animation:job-spin 1s linear infinite; }
+.job-thread-head small { color:var(--fg-muted); font-size:11.5px; }
+.job-thread-head .r { margin-left:auto; }
+.job-thread-empty { padding:10px 12px; border-top:1px solid var(--border-muted); font-size:12px; color:var(--fg-muted); }
+.job-msg { display:grid; grid-template-columns:64px minmax(0,1fr); gap:10px; padding:10px 12px; border-top:1px solid var(--border-muted); font-size:12.5px; line-height:1.5; }
+.job-msg-who { font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; line-height:1.9; color:var(--blue-fg); }
+.job-msg.agent .job-msg-who { color:var(--purple); }
+.job-msg.system { background:var(--surface-2); }
+.job-msg.system .job-msg-who, .job-msg.system p { color:var(--fg-muted); }
+.job-msg p { margin:0; color:var(--fg); white-space:pre-wrap; overflow-wrap:anywhere; }
+.job-msg time { margin-left:6px; font-size:11px; color:var(--fg-subtle); }
+.job-msg-att { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+.job-msg-att .job-proof-thumb { width:120px; }
+.job-msg-run { margin:6px 0 0; padding:8px 10px; border-radius:8px; background:var(--term-bg); color:var(--term-fg); font-size:11px; overflow-x:auto; }
+.job-msg-run .ok { color:var(--green-fg); } .job-msg-run .bad { color:var(--red-fg); }
+.job-earlier { margin-top:10px; }
+.job-earlier-round h4 { margin:8px 0 4px; font-size:12px; color:var(--fg-muted); }
+.job-pinned { align-self:center; font-size:11px; color:var(--fg-subtle); }
+.job-change-tray { display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:0; list-style:none; }
+.job-change-tray .job-image { position:relative; width:84px; height:60px; border-radius:8px; overflow:hidden; border:1px solid var(--border-muted); }
+.job-change-tray .job-image img { width:100%; height:100%; object-fit:cover; }
+.job-change-tray .job-image.uploading { opacity:.55; }
+.job-change-tray .job-image-remove { position:absolute; top:2px; right:2px; width:18px; height:18px; padding:0; line-height:16px; border-radius:50%; }
+.job-change-paste { color:var(--fg-muted); font-size:11.5px; }

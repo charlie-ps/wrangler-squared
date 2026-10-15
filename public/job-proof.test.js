@@ -119,5 +119,8 @@ test('hydrating fills a slot from the cache and asks the server once per round f
   hydrateEvidence(doc.body, cache, (m) => sent.push(m), { full: { jobId: 'job1', subId: 'api', round: 1, file: 'l.png' } });
   assert.deepEqual(sent.at(-1), { type: 'job-evidence', id: 'job1', subJobId: 'api', round: 1, file: 'l.png' });
   hydrateEvidence(doc.body, cache, (m) => sent.push(m), { full: { jobId: 'job1', subId: 'api', round: 1, file: 'l.png' } });
-  assert.equal(sent.length, 2, 'the full file is asked for once too');
+  assert.equal(sent.filter((m) => m.file).length, 1, 'the full file is asked for once too');
+  const before = sent.length;
+  hydrateEvidence(doc.body, cache, (m) => sent.push(m));
+  assert.equal(sent.length, before, 'the same missing set is never asked twice');
 });

@@ -5,7 +5,8 @@ import { logWarn } from './log.js';
 import { isFrozen } from './job-replan.js';
 import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from './job-writes.js';
 import { dropSub } from './job-sub-ops.js';
-import { draftsDecidedMail } from './job-prompts.js';
+import { draftsDecidedMail, threadMail } from './job-prompts.js';
+import { waitsOnReview, unsentFor } from './job-parked.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
@@ -53,8 +54,12 @@ export class JobRunner {
       // its step: quietly, no missing-receipt error. So does a re-planning run
       // whose plan change the human discarded, and a batched writer run from
       // before session-owned writes (job-store.js failed its writes on load).
+      // A session parked on its ready receipt (job-parked.js) ends quietly too once
+      // the review has moved on (approved, reworked, retried) or its card is gone:
+      // the human can still approve the tree without it.
       const cancelled = job.cancelledAt || (run.subJobId && job.subJobs.find((s) => s.id === run.subJobId)?.cancelledAt)
-        || (run.phase === 'planning' && job.stage === 'active' && !job.replan) || run.phase === 'write';
+        || (run.phase === 'planning' && job.stage === 'active' && !job.replan) || run.phase === 'write'
+        || (run.parkedFor === 'ready' && !run.report && (!waitsOnReview(job, run) || !(await this.runtime.exists(run))));
       if (!run.report && !cancelled) {
         if (!run.sessionId) error = 'Launch was interrupted. Check for an existing session/worktree before retrying.';
         // Parked on its drafts, a session sits idle (or goes dormant) by design
@@ -84,6 +89,7 @@ export class JobRunner {
           const r = j.runs.find((r) => r.id === run.id);
           r.stopped = true; r.stoppedAt = this.now();
           const s = j.subJobs.find((s) => s.id === r.subJobId);
+          if (s?.answering) s.answering = null;
           // On the run as well as the card: retry clears the card's, and the
           // history a later session reads (job-prompts.js) needs the run's.
           if (error) { r.error = error; (s || j).error = error; }
@@ -329,6 +335,10 @@ export class JobRunner {
     }
     job = this.store.get(id);
     for (const run of job.runs.filter((r) => draftsDecided(job, r))) await this.resumeDrafted(id, run);
+    for (const run of job.runs.filter((r) => runnable(r) && r.parkedFor === 'ready')) {
+      const sub = job.subJobs.find((s) => s.id === run.subJobId);
+      if (unsentFor(sub).length) await this.deliverThread(id, run);
+    }
     job = this.store.get(id);
     if (job.subJobs.length && job.subJobs.every((s) => s.stage === 'done')) await this.finish(id);
   }
@@ -343,6 +353,23 @@ export class JobRunner {
     } catch (e) {
       const note = `Could not resume the session with the decided drafts: ${shortError(e)}`;
       if (this.store.get(id).subJobs.find((s) => s.id === run.subJobId)?.observationError !== note) this.patchSub(id, run.subJobId, (s) => { s.observationError = note; });
+    }
+  }
+  // The human wrote to the session parked on its ready receipt: mail it, waking
+  // its card first if it went dormant. Sent messages are marked so a failed send
+  // is tried again next tick; the run is the agent's to work on again from here.
+  async deliverThread(id, run) {
+    const job = this.store.get(id);
+    const sub = job.subJobs.find((s) => s.id === run.subJobId);
+    const batch = unsentFor(sub);
+    try {
+      await this.runtime.resumeWithMail(run, threadMail(job, run, sub, batch));
+      const now = this.now();
+      this.patchRun(id, run.id, (r) => { r.mailedAt = now; r.idleSince = null; });
+      this.patchSub(id, sub.id, (s) => { for (const m of s.thread) if (batch.some((b) => b.id === m.id)) m.sentAt = now; s.observationError = null; });
+    } catch (e) {
+      const note = `Could not send your message to the session: ${shortError(e)}`;
+      if (sub.observationError !== note) this.patchSub(id, sub.id, (s) => { s.observationError = note; });
     }
   }
   // Delivered or cancelled, the job ends the same way: planning sessions and

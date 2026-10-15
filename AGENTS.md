@@ -125,6 +125,21 @@ feature).
   (`job-change.js quickChange`): the same proposal built with no agent, id
   `quick_<ms>`, `instant: true`. `quickChips` in `public/jobs.js` mirrors the
   gates; an action is drawn as a mark on its graph node (`actionMark`).
+- **A session parks after `ready`, so the human can ask it things** (`server/job-parked.js`).
+  With Code on You review the `ready` receipt does NOT set `run.report` (that ends a run):
+  it sets `run.readyReport`, `parkedFor: 'ready'`, `parkedAt` and clears `mailedAt`, like a
+  drafts park (no slot, `settle()` holds it only to its card existing) but never matched by
+  `draftsDecided`. The run waits on `waitsOnReview`; approve, a rework, drop or a retry end
+  it quietly and the publish run then claims the sub-job. `request-change` on `code` with a
+  parked run writes a `sub.thread` message (`askAgent`, `sentAt: null`) and the runner mails
+  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again). The
+  agent answers with `reply {text, shots?, run?}` (parks again; tree and round unchanged) or
+  a fresh `ready`: round n+1, `receiptId` `<run>#n`, the old round kept in `sub.earlier`.
+  Pasted images are copied into the round's folder and mailed as paths
+  (`TODO(host-api mail:images)`). `ready.treeHash` (`git.js workingTreeHash`: `add -A` into a
+  temp index, `write-tree`) is read by the tool handler at the receipt; `approve-code` is
+  refused unless the `job-action` handler's fresh read matches (`TREE_MOVED` also queues a
+  `retell` message). Code on Auto never parks.
 - **A PR's `show` list is answered with proof, not claims** (`server/job-evidence.js`).
   The implementer saves files into one inbox per sub-job (`$JOB_EVIDENCE`, given in
   its prompt and granted as `addDirs`); the `ready` receipt names them per check

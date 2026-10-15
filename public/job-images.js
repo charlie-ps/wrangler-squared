@@ -2,7 +2,7 @@ import { imageSources, sourceToFrame, imageMimeOf } from './clipboard-images.js'
 
 export const MAX_JOB_IMAGES = 8;
 
-const blobOf = ({ mime, dataBase64 }) => {
+export const blobOf = ({ mime, dataBase64 }) => {
   const bin = atob(dataBase64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);

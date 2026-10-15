@@ -110,6 +110,27 @@ the PR head, merge commit or stage it was written against has moved.
 - Planning: give each PR sub-job `show`, 1–6 lines written as things to **see**
   ("Filters by result and IP prefix", "Unit tests pass"), never work to do.
 
+## After you report ready: your session stays open
+
+- With Code on **You review**, a `ready` receipt does not end your run. Your
+  session **stays open, paused** (no slot, no tokens) and the human may write to
+  it by mail with the working tree and your proof in front of them. End your turn
+  after reporting and wait; do not stop the session, clean up, or commit.
+- A **question** (the mail says what was asked, as quoted data): answer from what
+  you know and change nothing, with
+  `job_report {kind:"reply", text, shots?, run?}`. Anything you capture to answer
+  goes in `$JOB_EVIDENCE` the same way, and a reply never needs a Show me answer.
+  The tree and the round stay as they were, so an approval already in progress
+  still holds. Then wait again.
+- A **change**: make it in the same worktree, leave it uncommitted, re-verify,
+  answer **every** Show me item again, and report `ready` once more. That is a
+  new round with new proof; the human approves that receipt, not the old one. If
+  the idea reaches past this PR, say so in a `reply` instead of widening it.
+- Pasted pictures arrive as **absolute file paths** in the mail: read them.
+- If the mail says the working tree changed after you reported, report `ready`
+  again so the human can approve what is there now.
+- Approval stops this session. A short publish session commits and pushes.
+
 ## Planning writes
 
 - Every write names the session sub-job that makes it (`by`); never a PR or

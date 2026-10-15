@@ -254,7 +254,7 @@ test('reports require the assigned caller and the phase they were launched for',
   const w = f.last();
   assert.equal(w.run.phase, 'implementation');
   assert.throws(() => f.store.report('someone-else', w.run.id, { kind: 'published', url: PR_URL }), /assigned/);
-  assert.throws(() => f.report({ kind: 'deployed', checks: ['Works'] }), /must submit ready or published/);
+  assert.throws(() => f.report({ kind: 'deployed', checks: ['Works'] }), /must submit ready or reply or published/);
   assert.throws(() => f.report({ kind: 'published', url: 'https://example.com/pull/1' }));
   assert.throws(() => f.report({ kind: 'blocked', summary: 'x', amendment: { reason: 'r', ops: [] } }), /amendment/, 'the plan is the human\'s: no receipt may carry a change to it');
   assert.throws(() => f.report({ kind: 'blocked', summary: 'x', move: 'fix-here' }), /move/, 'a blocked receipt no longer names a move');
@@ -273,12 +273,13 @@ test('with code review on the implementation leaves the tree uncommitted and rep
   assert.equal(sub.stage, 'review'); assert.equal(sub.state, 'verified');
   assert.deepEqual([sub.ready.checks, sub.ready.receiptId], [['Tests pass', 'Lint clean'], f.last().run.id]);
   assert.equal(f.launched.length, 2, 'nothing runs while the human reads the diff');
-  assert.deepEqual(f.stopped, [f.launched[0].run.id, f.last().run.id], 'the implementation session is released like any finished step');
+  assert.deepEqual(f.stopped, [f.launched[0].run.id], 'only the planner is released: the implementation session waits, parked, for the human (job-parked.js)');
   assert.throws(() => f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: 'run_stale' }), /not ready to approve/);
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: sub.ready.receiptId });
   assert.equal(f.sub().state, 'approved'); assert.ok(f.sub().ready.approvedAt);
   assert.throws(() => f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: sub.ready.receiptId }), /not ready/, 'approval is once');
   await f.tick();
+  assert.ok(f.stopped.includes(f.launched[1].run.id), 'approving stops the parked session');
   assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'publish']);
   assert.equal(f.last().sub.worktree.path, '/worktree/api', 'the publish session adopts the reviewed worktree');
   assert.throws(() => f.report({ kind: 'ready', checks: ['x'] }), /must submit published/);
@@ -309,16 +310,16 @@ test('Retry after a blocked publish keeps the approval: the tree the human appro
   assert.equal(f.sub().stage, 'pr');
 });
 
-test('Request changes on code under review: back to work in the same worktree with the note, receipt withdrawn', async (t) => {
+test('Request changes on code under review with its session gone: back to work in the same worktree with the note, receipt withdrawn', async (t) => {
   const f = fixture(t); await f.approve();
-  f.report({ kind: 'ready', checks: ['Tests pass'] }); await f.tick();
+  f.report({ kind: 'ready', checks: ['Tests pass'] }); f.alive.delete(f.last().sid); await f.tick();
   change(f, 'api', 'Use the existing retry helper');
   const sub = f.sub();
   assert.deepEqual([sub.stage, sub.state, sub.ready, sub.note], ['implementation', 'queued', null, 'Use the existing retry helper']);
   assert.match(f.store.get(f.job.id).moves.at(-1).detail, /back to work/);
   await f.tick();
   assert.deepEqual([f.last().run.phase, f.last().sub.note, f.last().sub.worktree.path], ['implementation', 'Use the existing retry helper', '/worktree/api']);
-  f.report({ kind: 'ready', checks: ['Helper reused'] }); await f.tick();
+  f.report({ kind: 'ready', checks: ['Helper reused'] }); f.alive.delete(f.last().sid); await f.tick();
   assert.equal(f.sub().stage, 'review'); assert.equal(f.sub().note, null);
   // Approved but not yet launched: Request changes still withdraws it.
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId });
@@ -1861,7 +1862,7 @@ test('an invalid job-settings patch is refused and leaves the settings alone', a
 });
 
 test('a request-change arrives as a job-action with its own fields and reaches the store whole', async (t) => {
-  const f = fixture(t); await f.approve(); f.report({ kind: 'ready', checks: ['Tests pass'] }); await f.tick();
+  const f = fixture(t); await f.approve(); f.report({ kind: 'ready', checks: ['Tests pass'] }); f.alive.delete(f.last().sid); await f.tick();
   const host = fakeHost(f);
   stubRunner(t, host);
   await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: 'code', ref: f.sub().ready.receiptId, text: 'Use the retry helper' }, host);

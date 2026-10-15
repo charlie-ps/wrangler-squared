@@ -17,7 +17,7 @@ function fixture(t) {
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
   const staging = { stage: async () => ({ name: 'paste-1700000000000-aaaa1111.png' }) };
   const sent = [], usualSaves = [], sessions = [], diffs = [], diffContexts = [], onBoard = new Set();
-  const view = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
+  const view = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; await window.happyDOM.close(); });
   const job = { id: 'job1', title: 'Sign-in', intent: 'Reliable sign-in', repos: ['/repo'], stage: 'planning', plan, subJobs: [], runs: [], moves: [], revision: 2, reviewMerge: true };
   const data = { jobs: [structuredClone(job)], settings: { concurrency: 2, maxRepairs: 2 } };
@@ -2142,4 +2142,102 @@ test('the board plate says Ready to verify with a filmstrip, only for a sub-job 
   f.view.update(f.data);
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Review code');
   assert.equal(f.q('[data-board="job1"] .job-plate-film'), null);
+});
+
+// --- Design B step 2: the session stays open after ready ---
+
+const parkedJob = (f, extra = {}, subExtra = {}) => {
+  const job = f.data.jobs[0]; job.stage = 'active';
+  job.runs = [{ id: 'run_1', subJobId: 'api', phase: 'implementation', stopped: false, parkedFor: 'ready', parkedAt: 1700000000000, mailedAt: null, sessionId: 's1', status: 'idle', ...extra }];
+  job.subJobs = [proofSub({ thread: [], ...subExtra })];
+  f.view.update(f.data);
+  return job;
+};
+
+test('a Code review step with its session parked says so, and Open session goes to that card', (t) => {
+  const f = fixture(t); const job = parkedJob(f);
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'needs', text: 'Ready to review' }, 'a paused session is not a running step');
+  assert.equal(jobNeedsReview(job, job.subJobs[0]), true);
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const thread = f.q('#job-dialog .job-thread');
+  assert.match(thread.querySelector('.job-thread-head').textContent, /Its session is waiting on your review.*Paused · no slot · keeps its context.*Open session/);
+  assert.match(thread.textContent, /Ask about how it works/);
+  f.q('[data-fab-session="s1"]').click();
+  assert.deepEqual(f.sessions, ['s1']);
+});
+
+test('while the session works on a message the card says what it is doing and is not yours until it reports back', (t) => {
+  const f = fixture(t);
+  const job = parkedJob(f, { mailedAt: 1700000001000, status: 'working' }, { answering: { id: 'm1', kind: 'ask', round: 1 } });
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Answering you' });
+  assert.equal(jobNeedsReview(job, job.subJobs[0]), false);
+  job.subJobs[0].answering.kind = 'change'; f.view.update(f.data);
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Reworking · round 2' });
+  job.subJobs[0].answering.kind = 'retell'; f.view.update(f.data);
+  assert.equal(jobStatus(job, job.subJobs[0]).text, 'Rechecking the tree');
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Rechecking the tree');
+});
+
+test('the thread shows both sides, the round markers and pictures, and escapes every word', (t) => {
+  const f = fixture(t);
+  const thread = [
+    { id: 'm1', at: 1700000000000, from: 'human', to: 'agent', text: 'What if <i>nobody</i> signed in?', round: 1, images: [{ file: 'ask-1.png' }] },
+    { id: 'm2', at: 1700000060000, from: 'agent', text: 'The empty state <b>shows</b>.', round: 1, shots: [{ file: 'm2-empty.png' }], run: { cmd: 'npm test', out: '1 passed <x>', exit: 0 } },
+    { id: 'm3', at: 1700000120000, from: 'system', text: 'Ready again with new proof.', round: 2 },
+  ];
+  parkedJob(f, {}, { thread });
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const msgs = [...f.q('#job-dialog').querySelectorAll('.job-msg')];
+  assert.deepEqual(msgs.map((m) => m.querySelector('.job-msg-who').textContent), ['You', 'Session', 'Round 2']);
+  assert.equal(f.q('#job-dialog .job-msg p i'), null); assert.equal(f.q('#job-dialog .job-msg p b'), null);
+  assert.equal(f.q('#job-dialog .job-msg-run x'), null);
+  assert.deepEqual([...f.q('#job-dialog').querySelectorAll('.job-msg [data-ev-file]')].map((e) => e.dataset.evFile), ['ask-1.png', 'm2-empty.png']);
+});
+
+test('with the session gone the thread stays as the record, and an approved round says which', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active'; job.runs = [];
+  job.subJobs = [proofSub({ state: 'approved', thread: [{ id: 'm1', at: 1, from: 'human', to: 'agent', text: 'Hi', round: 1 }] })];
+  f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  assert.match(f.q('#job-dialog .job-thread-head').textContent, /Session stopped.*Approved round 1/);
+  assert.equal(f.q('#job-dialog [data-fab-session]'), null);
+  job.subJobs = [proofSub({ thread: [] })]; f.view.update(f.data);
+  assert.equal(f.q('#job-dialog .job-thread'), null, 'no session and nothing said: nothing to draw');
+});
+
+test('approval says which round and tree it is pinned to, and earlier rounds stay one click away', (t) => {
+  const f = fixture(t);
+  parkedJob(f, {}, { ready: { ...proofSub().ready, round: 2, treeHash: 'a71d0e4ffff', receiptId: 'run_1#2' }, earlier: [{ round: 1, checks: ['Lint clean'], proof: [{ text: 'Lists sign-ins', shots: [{ file: 'l.png' }] }] }] });
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('#job-dialog .job-pinned').textContent, 'round 2 · a71d0e4');
+  assert.equal(f.q('#job-dialog [data-change-ref]').dataset.changeRef, 'run_1#2');
+  assert.match(f.q('#job-dialog .job-earlier summary').textContent, /Round 1/);
+  assert.equal(f.q('#job-dialog .job-earlier [data-ev-round="1"]').dataset.evFile, 'l.png');
+  f.q('[data-action="approve-code"]').click();
+  assert.equal(f.sent.at(-1).readyReceiptId, 'run_1#2');
+});
+
+test('a screenshot pasted into the Code review box is staged, held back from Send until it lands, and goes with the message', async (t) => {
+  const f = fixture(t); parkedJob(f);
+  let release; f.staging.stage = () => new Promise((r) => { release = () => r({ name: 'paste-1700000000000-bbbb2222.png' }); });
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const box = f.q('#job-dialog .job-change'), text = box.querySelector('textarea');
+  text.value = 'Make this a dropdown'; text.dispatchEvent(f.event('input'));
+  const e = f.event('paste'); e.clipboardData = { files: [new f.window.File(['x'], 'Screenshot.png', { type: 'image/png' })], items: [], types: ['Files'], getData: () => '' };
+  text.dispatchEvent(e);
+  assert.equal(e.defaultPrevented, true);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(box.querySelectorAll('.job-change-tray li').length, 1);
+  assert.equal(box.querySelector('[data-change-send]').disabled, true, 'not while it is still travelling');
+  release(); await new Promise((r) => setTimeout(r, 0));
+  assert.equal(box.querySelector('[data-change-send]').disabled, false);
+  box.querySelector('[data-change-send]').click();
+  const sent = f.sent.at(-1);
+  assert.deepEqual([sent.action, sent.at, sent.ref, sent.text, sent.images], ['request-change', 'code', 'run_1', 'Make this a dropdown', ['paste-1700000000000-bbbb2222.png']]);
+  assert.equal(f.q('#job-dialog .job-change-tray').hidden, true, 'the tray empties once sent');
+});
+
+test('the review box on any other view takes no pictures', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'planning';
+  f.q('.job-plate-open[data-job="job1"]').click();
+  assert.equal(f.q('#job-dialog .job-change-tray'), null);
 });

@@ -40,7 +40,7 @@ export function sniffKind(bytes) {
 // the proof with each shot resolved to what the board needs. Throws, naming the
 // file, so the agent can fix it and report again; nothing is half-kept because
 // the caller persists only if this returns.
-export function adoptEvidence({ jobId, subId, round, proof }) {
+export function adoptEvidence({ jobId, subId, round, proof, prefix = '' }) {
   const inbox = inboxDir(jobId, subId);
   const dest = roundDir(jobId, subId, round);
   const copied = new Map();
@@ -55,7 +55,7 @@ export function adoptEvidence({ jobId, subId, round, proof }) {
     const kind = sniffKind(bytes);
     if (!kind || !kind.exts.includes(path.extname(file).toLowerCase())) throw new Error(`${file} is not a PNG, JPEG, GIF or WebM file`);
     fs.mkdirSync(dest, { recursive: true });
-    fs.writeFileSync(path.join(dest, file), bytes);
+    fs.writeFileSync(path.join(dest, `${prefix}${file}`), bytes);
     const got = { mime: kind.mime, at: Math.round(st.mtimeMs) };
     copied.set(file, got);
     return got;
@@ -65,8 +65,27 @@ export function adoptEvidence({ jobId, subId, round, proof }) {
     ...(p.note ? { note: p.note } : {}),
     ...(p.run ? { run: p.run } : {}),
     ...(p.couldNot ? { couldNot: p.couldNot } : {}),
-    ...(p.shots ? { shots: p.shots.map((s) => { const o = typeof s === 'string' ? { file: s } : s; return { ...o, ...take(o.file) }; }) } : {}),
+    ...(p.shots ? { shots: p.shots.map((s) => { const o = typeof s === 'string' ? { file: s } : s; return { ...o, ...take(o.file), file: `${prefix}${o.file}` }; }) } : {}),
   }));
+}
+
+// A picture the human pasted into the Request changes box, kept beside the round
+// it was sent in so the parked session can be told its path. The host's staged
+// copy is the source (`images:keep` read); the bytes are sniffed like any proof.
+// TODO(host-api mail:images): mail carries text only, so the session is mailed the
+// file's path and reads it itself, where spawn({ images }) would attach it.
+export function keepAskImages({ jobId, subId, round, messageId, images }) {
+  const dest = roundDir(jobId, subId, round);
+  const kept = [];
+  for (const { bytes } of images) {
+    const kind = sniffKind(bytes);
+    if (!kind || bytes.length > EVIDENCE_MAX_BYTES) continue;
+    fs.mkdirSync(dest, { recursive: true });
+    const file = `ask-${messageId}-${kept.length + 1}${kind.exts[0]}`;
+    fs.writeFileSync(path.join(dest, file), bytes);
+    kept.push({ file, mime: kind.mime, path: path.join(dest, file) });
+  }
+  return kept;
 }
 
 // A thumbnail for the board's grid: macOS `sips` (the wrangler runs on the

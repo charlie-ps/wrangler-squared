@@ -3,7 +3,9 @@ import { access as defaultAccess } from 'node:fs/promises';
 import { kick, makeCreateJob } from './job-create.js';
 import { settingsSchema } from './jobs-schema.js';
 import { runFile } from './job-github.js';
-import { thumbnailOf, readEvidence } from './job-evidence.js';
+import { thumbnailOf, readEvidence, keepAskImages } from './job-evidence.js';
+import { workingTreeHash } from './git.js';
+import { TREE_MOVED } from './job-store.js';
 
 // Control-WS handlers in the EXTENSION signature: `handler(msg, host)` — no
 // `ctx`, and therefore no `ctx.reply`. Core's control/handlers/jobs.js replied
@@ -35,13 +37,39 @@ export function makeJobCreateHandler(deps) {
 }
 export const jobCreateHandler = makeJobCreateHandler();
 
+// The two actions that need something only an async read can give: the tree as
+// it is NOW (approve-code is pinned to the one the agent reported) and the
+// pictures pasted into the Request changes box, kept beside the round they were
+// sent in. Whatever the client sent under these names is discarded.
+export const ASK_IMAGES_MAX = 4;
+async function prepare(msg, host) {
+  const { treeHash: _t, attachments: _a, ...clean } = msg;
+  const job = host.stores.jobs.get(msg.id);
+  const sub = job?.subJobs.find((s) => s.id === msg.subJobId);
+  if (msg.action === 'approve-code' && sub?.ready?.treeHash && sub.worktree?.path) {
+    return { ...clean, treeHash: await workingTreeHash(sub.worktree.path).catch(() => null) };
+  }
+  if (msg.action === 'request-change' && Array.isArray(msg.images) && msg.images.length && sub?.ready) {
+    const names = msg.images.filter((n) => typeof n === 'string').slice(0, ASK_IMAGES_MAX);
+    const got = names.map((n) => host.images.read(n)).filter(Boolean);
+    const kept = keepAskImages({ jobId: job.id, subId: sub.id, round: sub.ready.round, messageId: Date.now().toString(36), images: got });
+    for (const n of names) host.images.remove(n);
+    return { ...clean, attachments: kept.map(({ file, mime }) => ({ file, mime })) };
+  }
+  return clean;
+}
+
 export const jobActionHandler = {
   type: 'job-action',
-  async handler(msg, host) {
+  async handler(raw, host) {
+    const msg = await prepare(raw, host);
     const ids = { jobId: msg.id, action: msg.action, ...(msg.subJobId ? { subJobId: msg.subJobId } : {}) };
     // A refusal goes out as a frame rather than a throw, which never reaches the
     // board: the footer's checkpoint buttons snap back and say why.
     try { host.stores.jobs.action(msg.id, msg.action, msg); } catch (e) {
+      // The tree moved under the approval: the parked session is asked to report
+      // ready again (job-parked.js), and the human is told why nothing happened.
+      if (e?.code === TREE_MOVED) { try { host.stores.jobs.action(msg.id, 'tree-moved', msg); await host.rebuild(); kick(host).catch(() => {}); } catch { /* the refusal below still says it */ } }
       host.broadcast({ event: 'job-action-failed', ...ids, ...(msg.field ? { field: msg.field } : {}), error: e?.message || String(e) });
       return;
     }
@@ -127,7 +155,8 @@ export function makeEvidenceHandler({ run = runFile } = {}) {
         const got = readEvidence({ jobId: job.id, subId: sub.id, round, file: msg.file });
         return host.broadcast({ ...base, file: msg.file, ...(got ? { mime: got.mime, dataBase64: Buffer.from(got.bytes).toString('base64') } : {}) });
       }
-      const files = [...new Set((sub.ready?.round === round ? sub.ready.proof || [] : []).flatMap((p) => (p.shots || []).map((s) => s.file)))];
+      const inThread = (sub.thread || []).filter((m) => m.round === round).flatMap((m) => [...(m.shots || []), ...(m.images || [])].map((s) => s.file));
+      const files = [...new Set([...((sub.ready?.round === round ? sub.ready : sub.earlier?.find((e) => e.round === round))?.proof || []).flatMap((p) => (p.shots || []).map((s) => s.file)), ...inThread])];
       const thumbs = (await Promise.all(files.map(async (file) => {
         const t = await thumbnailOf({ jobId: job.id, subId: sub.id, round, file, run });
         return t ? { file, mime: t.mime, dataBase64: Buffer.from(t.bytes).toString('base64') } : null;

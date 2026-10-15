@@ -4,6 +4,7 @@ import { DATA_DIR } from './data-dir.js';
 import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
 import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode, checkText, unansweredShow } from './jobs-schema.js';
 import { adoptEvidence } from './job-evidence.js';
+import { parkedReadyRun, askAgent } from './job-parked.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
@@ -23,6 +24,7 @@ const quoted = (title) => `“${title}”`;
 // history) and the detail view's History panel both read, so an approve or retry recorded
 // anywhere else would be invisible to the agent it most concerns.
 const record = (j, s, move, note, detail) => (j.moves ||= []).push({ id: uid('mv'), at: Date.now(), subJobId: s?.id || null, move, note: note || null, detail });
+export const TREE_MOVED = 'TREE_MOVED';
 export const runnable = (run) => run && !run.stopped;
 // A run parked on its drafts is idle until the human decides them: still live
 // for its own sub-job (never launched twice), but no agent is working, so it
@@ -353,8 +355,20 @@ export class JobStore {
       // is a tick behind cannot approve a working tree a later run has changed.
       // The runner's claim refuses a launch while the reporting run is still
       // stopping, so no live-run check is needed here.
+      // The tree moved under an approval (handlers.js): the parked session is told
+      // to report ready again. With no parked session there is nobody to ask.
+      if (action === 'tree-moved') {
+        const run = parkedReadyRun(j, s);
+        if (!run || !s.ready || s.ready.receiptId !== readyReceiptId) return;
+        askAgent(s, { from: 'system', text: `The working tree changed after you reported ready (round ${s.ready.round}). Report ready again so the human can approve what is there now.`, kind: 'retell' }, Date.now());
+        return;
+      }
       if (action === 'approve-code') {
         if (!s || !isPrSub(s) || s.stage !== 'review' || s.state !== 'verified' || !s.ready || s.ready.receiptId !== readyReceiptId || s.error) throw new Error('The code is not ready to approve');
+        // The tree the agent reported ready, as the handler read it just now
+        // (handlers.js): approval belongs to those exact bytes, not to whatever
+        // the worktree holds after someone typed into the session.
+        if (s.ready.treeHash && payload.treeHash !== s.ready.treeHash) throw Object.assign(new Error(payload.treeHash ? 'The working tree changed since the agent reported ready. It has been asked to report ready again; approve once it does.' : 'Could not read the working tree to check it is what the agent reported. Try again.'), { code: payload.treeHash ? TREE_MOVED : undefined });
         s.ready = { ...s.ready, approvedAt: Date.now() }; s.state = 'approved';
         record(j, s, 'approve-code', null, `Approved the working tree of ${quoted(s.title)}`); return;
       }
@@ -415,7 +429,9 @@ export class JobStore {
     this.update(job.id, (j) => { const s = j.subJobs.find((x) => x.id === sub.id); s.worktree = { ...s.worktree, branch }; });
     return true;
   }
-  report(caller, runId, input) {
+  // `meta.treeHash` is the working tree as the tool handler read it when a ready
+  // receipt arrived (tools.js): the store is synchronous and takes no git.
+  report(caller, runId, input, meta = {}) {
     const report = reportSchema.parse(input);
     const job = this.data.jobs.find((j) => j.runs.some((r) => r.id === runId));
     if (!job) throw new Error('Unknown run');
@@ -433,7 +449,7 @@ export class JobStore {
       // (or one that pushed anyway) must still be able to land what it did — a
       // PR that exists is a PR, whatever the board expected. A `write` run is
       // the batched writer's, which no longer exists: nothing it says is taken.
-      const expected = { planning: ['plan'], write: [], implementation: ['ready', 'published'], publish: ['published'], repair: ['repaired'], verify: ['deployed'], session: ['completed', 'drafts'] }[r.phase];
+      const expected = { planning: ['plan'], write: [], implementation: ['ready', 'reply', 'published'], publish: ['published'], repair: ['repaired'], verify: ['deployed'], session: ['completed', 'drafts'] }[r.phase];
       if (!expected.length) throw new Error('This run predates session-owned writes; stop now');
       if (!expected.includes(report.kind) && report.kind !== 'blocked') throw new Error(`This run must submit ${expected.join(' or ')}`);
       const s = j.subJobs.find((s) => s.id === r.subJobId);
@@ -450,15 +466,48 @@ export class JobStore {
         return;
       }
       if (report.kind === 'completed' && r.parkedAt && !r.mailedAt) throw new Error('Your drafts are with the human: wait for mail saying which writes to make, then complete');
+      // A session parked on its ready receipt is answering the human. A reply
+      // keeps it parked; a fresh ready is a new round of the same run.
+      if (report.kind === 'reply') return this._reply(j, r, s, report);
+      const parked = r.parkedFor === 'ready' && r.parkedAt && !r.mailedAt;
+      if (parked && report.kind === 'ready' && JSON.stringify(r.readyReport) === JSON.stringify(report)) return;
+      if (parked && report.kind !== 'blocked') throw new Error('You already reported ready; wait for mail from the human');
       // The proof is checked and kept BEFORE anything is recorded, so a refused
       // receipt leaves no trace and the agent simply fixes it and reports again.
-      const proof = report.kind === 'ready' && s && !j.cancelledAt && !s.cancelledAt ? this._proofOf(j, r, s, report) : null;
-      r.report = report; r.reportedAt = Date.now();
+      const live = s && !j.cancelledAt && !s.cancelledAt;
+      const proof = report.kind === 'ready' && live ? this._proofOf(j, r, s, report) : null;
+      const park = report.kind === 'ready' && live && isPrSub(s) && r.phase === 'implementation' && reviewCode(j);
+      r.reportedAt = Date.now();
+      if (park) {
+        // Not `report`: that ends a run. With the human reviewing, the session
+        // waits for them instead (job-parked.js).
+        Object.assign(r, { readyReport: report, readyCount: (r.readyCount || 0) + 1, parkedFor: 'ready', parkedAt: Date.now(), mailedAt: null, idleSince: null });
+      } else {
+        r.report = report;
+        if (r.parkedFor === 'ready') r.parkedAt = null;
+      }
       // A receipt racing a cancel is kept on the run for the record but never
       // moves the sub-job: a late `published` must not pull it back out of cleanup,
       // and a late `plan` must not activate a job that was cancelled while planning.
-      if (!j.cancelledAt && !s?.cancelledAt) this._applyReceipt(j, r, s, report, proof);
+      if (!j.cancelledAt && !s?.cancelledAt) this._applyReceipt(j, r, s, report, proof, meta);
     });
+  }
+  // A reply answers the human without moving the tree or the round, so an
+  // approval already in progress still holds. Its proof is kept under the
+  // current round, in files of its own, so it cannot overwrite what was read.
+  _reply(j, r, s, report) {
+    if (r.parkedFor !== 'ready' || !s?.ready) throw new Error('A reply answers the human after you reported ready; there is nothing to answer');
+    if (r.parkedAt && !r.mailedAt) {
+      if (JSON.stringify(r.lastReply) === JSON.stringify(report)) return;
+      throw new Error('You already answered; wait for mail from the human');
+    }
+    const now = Date.now();
+    const id = `msg_${now.toString(36)}${(s.thread?.length || 0).toString(36)}`;
+    const round = s.ready.round;
+    const [kept] = report.shots || report.run ? adoptEvidence({ jobId: j.id, subId: s.id, round, prefix: `${id}-`, proof: [{ text: report.text, shots: report.shots, run: report.run }] }) : [null];
+    (s.thread ||= []).push({ id, at: now, from: 'agent', text: report.text, round, ...(kept?.shots ? { shots: kept.shots } : {}), ...(report.run ? { run: report.run } : {}) });
+    s.answering = null;
+    Object.assign(r, { lastReply: report, parkedAt: now, mailedAt: null, idleSince: null });
   }
   // The Show me list is answered item by item, each by a check carrying shots, a
   // run or couldNot; the files named are copied into this round's folder. A round
@@ -467,11 +516,11 @@ export class JobStore {
   _proofOf(j, r, s, report) {
     const missing = unansweredShow(s.show, report.checks);
     if (missing.length) throw new Error(`Show me: answer ${missing.map((m) => `"${m}"`).join(', ')} with a check of that exact text carrying shots, run or couldNot`);
-    const round = j.runs.filter((x) => x.subJobId === s.id && x.id !== r.id && x.report?.kind === 'ready').length + 1;
+    const round = Math.max(s.rounds || 0, j.runs.filter((x) => x.subJobId === s.id && x.id !== r.id && x.report?.kind === 'ready').length) + 1;
     const proofs = report.checks.filter((c) => typeof c !== 'string');
     return { round, proof: adoptEvidence({ jobId: j.id, subId: s.id, round, proof: proofs }) };
   }
-  _applyReceipt(j, r, s, report, proof = null) {
+  _applyReceipt(j, r, s, report, proof = null, meta = {}) {
     if (report.kind === 'plan' && j.stage === 'active') {
       // Discarded while the planner worked: kept on the run, applied nowhere.
       if (j.replan) proposeReplan(j, r, report, Date.now());
@@ -493,7 +542,14 @@ export class JobStore {
     // Code review switched off while the session worked: its prompt still said
     // leave it uncommitted, so the receipt is approved as it lands.
     if (report.kind === 'ready') {
-      s.ready = { checks: report.checks.map(checkText), ...(proof?.proof.length ? { proof: proof.proof } : {}), ...(proof ? { round: proof.round } : {}), receiptId: r.id, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
+      // One run can report ready several times (each a round), so a later
+      // receipt carries its count: approval is pinned to exactly one of them.
+      const receiptId = (r.readyCount || 1) > 1 ? `${r.id}#${r.readyCount}` : r.id;
+      if (s.ready?.round && proof && r.parkedFor === 'ready') (s.earlier ||= []).push({ round: s.ready.round, checks: s.ready.checks, ...(s.ready.proof ? { proof: s.ready.proof } : {}), at: s.ready.at });
+      s.ready = { checks: report.checks.map(checkText), ...(proof?.proof.length ? { proof: proof.proof } : {}), ...(proof ? { round: proof.round } : {}), ...(meta.treeHash ? { treeHash: meta.treeHash } : {}), receiptId, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
+      if (proof) s.rounds = proof.round;
+      s.answering = null;
+      if (r.parkedFor === 'ready' && proof?.round > 1) (s.thread ||= []).push({ id: `msg_${Date.now().toString(36)}r`, at: Date.now(), from: 'system', text: `Ready again with new proof.`, round: proof.round });
       if (!reviewCode(j)) { s.ready.approvedAt = s.ready.at; s.state = 'approved'; }
     }
     if (report.kind === 'published') { s.pr = { url: report.url, checkStatus: 'pending' }; s.stage = 'pr'; s.state = 'watching'; s.mergeApprovedHead = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }

@@ -451,6 +451,9 @@ export const reportSchema = z.discriminatedUnion('kind', [
   receipt({ kind: z.literal('plan'), plan: planSchema, ...optionShape, label: line.optional(), diagnosis: diagnosisSchema.optional(),
     alternatives: z.array(alternativeSchema).max(MAX_OPTIONS - 1).optional() }),
   receipt({ kind: z.literal('ready'), checks: readyChecksSchema }),
+  // Answers a human who wrote to a session parked on its ready receipt (job-store.js):
+  // the run stays parked, the tree and the round unchanged.
+  receipt({ kind: z.literal('reply'), text: z.string().trim().min(1).max(4000), shots: z.array(shotSchema).min(1).max(4).optional(), run: runProofSchema.optional() }),
   receipt({ kind: z.literal('published'), url: prUrlSchema }),
   receipt({ kind: z.literal('repaired'), changes: checksSchema, checks: checksSchema }),
   receipt({ kind: z.literal('deployed'), checks: checksSchema }),

@@ -233,7 +233,7 @@ export function applyDrafts(job, run, session, report, now) {
   return asked.filter((w) => !writeReviewed(job, w)).map((w) => [w, approveWrite(job, w, now)]);
 }
 // Every draft the parked run is waiting on has been approved, skipped or dropped.
-export const draftsDecided = (job, run) => !!run.parkedAt && !run.mailedAt && !run.stopped
+export const draftsDecided = (job, run) => !!run.parkedAt && !run.mailedAt && !run.stopped && run.parkedFor !== 'ready'
   && (run.drafts || []).every((id) => { const w = job.subJobs.find((s) => s.id === id); return !w || w.cancelledAt || w.stage !== 'review'; });
 
 // Write: approval of the write on display, with the human's edits applied in
