@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PAL, paletteOf, capFor, skyHtml } from './job-skylines.js';
+import { PAL, paletteOf, capFor, skyHtml, noteAnims, carryAnims } from './job-skylines.js';
 
 test('the cap stays 14 units under the plan at every level, and grows as the job lands', () => {
   for (let floor = 20; floor <= 140; floor += 5) for (let lvl = 1; lvl <= 5; lvl++) {
@@ -26,4 +26,14 @@ test('the placeholder carries what the painter needs, and the same job paints th
   assert.match(a, /^<div class="gx" data-seed="\w+" data-tone="run" data-lvl="3" data-floor="88" data-dim><\/div>$/);
   assert.doesNotMatch(skyHtml('job1', 'run', 3, 88), /data-dim/);
   assert.notEqual(skyHtml('job1', 'run', 3, 88).match(/data-seed="(\w+)"/)[1], skyHtml('job2', 'run', 3, 88).match(/data-seed="(\w+)"/)[1]);
+});
+
+test('a re-render carries each animation\'s phase and rate over: a sky\'s by element, a plate\'s sweep by job', () => {
+  const spin = {}, plate = (board) => ({ dataset: { board } });
+  const anim = (target, t, rate, pseudoElement) => ({ effect: { target, pseudoElement }, currentTime: t, playbackRate: rate });
+  const held = noteAnims([anim(spin, 5000, 18.5), anim(plate('j1'), 900, 1, '::before'), anim({}, null, 1)]);
+  assert.equal(held.size, 2, 'an animation with no time yet is not noted');
+  const fresh = [anim(spin, 0, 1), anim(plate('j1'), 0, 1, '::before'), anim(plate('j2'), 0, 1, '::before')];
+  carryAnims(fresh, held);
+  assert.deepEqual(fresh.map((a) => [a.currentTime, a.playbackRate]), [[5000, 18.5], [900, 1], [0, 1]]);
 });

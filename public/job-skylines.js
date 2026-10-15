@@ -165,20 +165,43 @@ function paint(art) {
   return true;
 }
 
-// Hover: the hole spins up (playbackRate ramps, so nothing jumps) and settles back on leave.
+// Hover: the hole spins up (playbackRate ramps, so nothing jumps) and settles back on leave. The ramp is
+// keyed to the sky, which outlives a re-render, and re-reads its animations each frame, since a re-render replaces them.
 const ramps = new WeakMap();
 function spinTo(plate, target) {
-  const anims = [...plate.querySelectorAll('.spin,.flow')].flatMap((e) => e.getAnimations());
-  if (!anims.length) return;
-  const from = anims[0].playbackRate, t0 = performance.now(), id = {};
-  ramps.set(plate, id);
+  const sky = plate.querySelector('.gx'), anims = () => [...sky.querySelectorAll('.spin,.flow')].flatMap((e) => e.getAnimations());
+  if (!sky || !anims().length) return;
+  const from = anims()[0].playbackRate, t0 = performance.now(), id = {};
+  ramps.set(sky, id);
   const step = (t) => {
-    if (ramps.get(plate) !== id) return;
+    if (ramps.get(sky) !== id) return;
     const k = Math.min(1, (t - t0) / 900), e = k < .5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
-    for (const a of anims) a.playbackRate = from + (target - from) * e;
+    for (const a of anims()) a.playbackRate = from + (target - from) * e;
     if (k < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
+}
+
+// Re-attaching an element restarts its CSS animations at rest (phase 0, rate 1), and the board rebuilds its
+// plates (and their border sweeps) on every graph tick: note where each stands before, and carry it over after.
+const held = new Map();
+const sweepOf = (plate) => plate.getAnimations({ subtree: true }).find((a) => a.animationName === 'gx-sweep');
+export function noteAnims(anims, into = new Map()) {
+  for (const a of anims) if (a.currentTime != null) into.set(a.effect.pseudoElement ? a.effect.target.dataset.board : a.effect.target, { t: a.currentTime, rate: a.playbackRate });
+  return into;
+}
+export function carryAnims(anims, from) {
+  for (const a of anims) {
+    const h = from.get(a.effect.pseudoElement ? a.effect.target.dataset.board : a.effect.target);
+    if (h) { a.currentTime = h.t; a.playbackRate = h.rate; }
+  }
+}
+// Call just before a board render replaces the plates mountSkies will be handed.
+export function holdSkies(host) {
+  held.clear();
+  if (typeof IntersectionObserver === 'undefined') return;
+  noteAnims([...host.querySelectorAll('.job-plate')].map(sweepOf).filter(Boolean), held);
+  for (const sky of kept.values()) if (sky.isConnected) noteAnims(sky.getAnimations({ subtree: true }), held);
 }
 
 // Painted skies outlive a board re-render: the board rebuilds its plates' markup on every graph tick, so a
@@ -204,12 +227,17 @@ function setup() {
   });
   resize.observe(document.body);
 }
+// `.hot` stands in for :hover on a freshly rendered plate, which the browser only marks hovered a frame later.
+let hot = null;
 function hover(host) {
   if (hosts.has(host) || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   hosts.add(host);
   const edge = (e, target) => {
     const plate = e.target.closest?.('.job-plate');
-    if (plate && !plate.contains(e.relatedTarget)) spinTo(plate, target);
+    if (!plate || plate.contains(e.relatedTarget)) return;
+    hot = target > 1 ? plate.dataset.board : null;
+    plate.classList.toggle('hot', target > 1);
+    spinTo(plate, target);
   };
   host.addEventListener('pointerover', (e) => edge(e, 24));
   host.addEventListener('pointerout', (e) => edge(e, 1));
@@ -220,6 +248,12 @@ export function mountSkies(host) {
   if (typeof IntersectionObserver === 'undefined') return;
   if (!near) setup();
   hover(host);
+  const lit = hot && host.querySelector(`.job-plate[data-board="${CSS.escape(hot)}"]`);
+  if (lit) {
+    lit.classList.add('hot');
+    // The pointer may have left while the plate was being replaced, so no pointerout will ever reach it.
+    requestAnimationFrame(() => { if (lit.isConnected && !lit.matches(':hover')) { if (hot === lit.dataset.board) hot = null; lit.classList.remove('hot'); spinTo(lit, 1); } });
+  }
   const live = new Set();
   for (const slot of host.querySelectorAll('.gx')) {
     const key = keyOf(slot), old = kept.get(key);
@@ -227,11 +261,14 @@ export function mountSkies(host) {
     if (old && !old.isConnected && old.firstChild) {
       slot.replaceWith(old);
       if (old.clientWidth !== widths.get(old) && paint(old)) widths.set(old, old.clientWidth);
+      else carryAnims(old.getAnimations({ subtree: true }), held);
       continue;
     }
     if (old === slot) continue;
     kept.set(key, slot);
     near.observe(slot); seen.observe(slot);
   }
+  carryAnims([...host.querySelectorAll('.job-plate')].map(sweepOf).filter(Boolean), held);
+  held.clear();
   for (const [key, a] of kept) if (!live.has(key)) { near.unobserve(a); seen.unobserve(a); widths.delete(a); kept.delete(key); }
 }

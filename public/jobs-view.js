@@ -3,7 +3,7 @@ import { ICONS } from './icons.js';
 import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, movesFor, moveById, moveCopy, markOptions, prNumber, runStatus, replanPending, replanProposed, heldByReplan, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges, dependencyEditorHtml } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
-import { mountSkies } from './job-skylines.js';
+import { holdSkies, mountSkies } from './job-skylines.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 
 // The board's filter rail: what each shows, and the one an empty view explains.
@@ -370,6 +370,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     // Settings saved before `plateArt` existed lack it until the next save.
     const art = PLATE_ART.includes(data.settings.plateArt) ? data.settings.plateArt : 'quiet';
     root.dataset.plateArt = art;
+    holdSkies(q('#jobs-boards'));
     q('#jobs-boards').innerHTML = jobs.map((j) => plateHtml(j, scenes.get(j.id), art)).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
     mountSkies(q('#jobs-boards'));
     // Keep a human's plan edits and review snapshot intact across live graph ticks;
