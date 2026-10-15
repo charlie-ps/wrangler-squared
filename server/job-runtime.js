@@ -444,13 +444,18 @@ export class JobRuntime {
   // points at the merged head.
   async deleteRemoteBranch(wt, mergedHead) {
     const ref = `refs/heads/${wt.branch}`;
-    const remote = await this.run('git', ['ls-remote', '--exit-code', 'origin', ref], wt.repoRoot).catch((e) => {
+    const lookup = () => this.run('git', ['ls-remote', '--exit-code', 'origin', ref], wt.repoRoot).catch((e) => {
       if (e.code === 2) return '';
       throw e;
     });
+    const remote = await lookup();
     if (!remote) return;
     if (remote.split(/\s+/)[0] !== mergedHead) throw new Error('Remote branch has commits beyond the merged PR; preserve it for review');
-    await this.run('git', ['push', 'origin', `--force-with-lease=${ref}:${mergedHead}`, '--delete', ref], wt.repoRoot);
+    // GitHub's own delete-on-merge can land between the look and the push, which
+    // the lease then refuses as stale: a branch gone by now is the same success.
+    await this.run('git', ['push', 'origin', `--force-with-lease=${ref}:${mergedHead}`, '--delete', ref], wt.repoRoot).catch(async (e) => {
+      if (await lookup()) throw e;
+    });
   }
 
   // A `write` run is the batched writer's from before session-owned writes.
