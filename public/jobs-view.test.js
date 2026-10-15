@@ -103,6 +103,9 @@ test('each job is its own card, and a delivered job only returns with Finished',
   assert.deepEqual(boards(), ['job3'], 'Finished shows only the finished');
   assert.ok(f.q('[data-board="job3"]').classList.contains('tone-ok'));
   assert.deepEqual([...document.querySelectorAll('.jobs-rail-n')].map((n) => n.textContent), ['2', '', '0', '0', '1'], 'each filter counts its jobs; Needs you stays blank at none');
+  const sky = f.q('.jobs-top > canvas.jobs-mast-sky');
+  assert.equal(sky?.getAttribute('aria-hidden'), 'true', 'the masthead sits on its own painted sky, hidden from assistive tech');
+  assert.equal(f.q('.jobs-top').firstElementChild, sky, 'the sky comes first, under the title and tools');
   f.q('[data-filter="all"]').click();
   f.q('.job-plate-open').click(); assert.equal(f.q('#job-dialog h2').textContent, 'Checkout');
   f.q('[data-sub="cart"]').dispatchEvent(f.event('click'));
