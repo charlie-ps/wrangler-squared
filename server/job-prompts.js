@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { ATTRIBUTION, isHumanSub, reviewCode, placeOf, isMakeWrite } from './jobs-schema.js';
+import { ATTRIBUTION, isHumanSub, reviewCode, placeOf, isMakeWrite, checkText } from './jobs-schema.js';
+import { inboxDir } from './job-evidence.js';
 import { checkoutsDir, displayPath } from './data-dir.js';
 import { isFrozen, replanStatus } from './job-replan.js';
 import { writeBrief, openWrites, draftingFor, WRITE_RESULT_SHAPE } from './job-writes.js';
@@ -125,7 +126,7 @@ const HUMAN_VERBS = { 'request-change': 'requested changes', 'fix-here': 'reques
 // agent adapter's `models` table; the browser half reads that list (api.agents,
 // 1.25) but the server half still cannot, so the raw values stand in.
 const modelLabel = (job, run) => [run.model, run.effort].filter(Boolean).join(' ');
-const joinChecks = (list) => (list || []).join(' · ');
+const joinChecks = (list) => (list || []).map(checkText).join(' · ');
 const outcome = (r) => {
   const p = r.report;
   if (!p) return r.error || 'stopped without a receipt';
@@ -170,6 +171,27 @@ const postMergeLine = (sub) => sub?.acceptedRed && sub.acceptedRed.ref === sub.p
   ? `post-merge runs FAILED (${workflowsWith(sub, 'failing') || 'unknown workflow'}) and the human accepted that${sub.acceptedRed.note ? ` — "${sub.acceptedRed.note}"` : ''}`
   : `post-merge runs passed${passingWorkflows(sub) ? ` (${passingWorkflows(sub)})` : ''}`;
 const thisPr = (sub, job) => `This PR (${sub?.repo ? path.basename(sub.repo) : 'this repository'}${job?.base ? `, landing on ${job.base}` : ''}): ${sub?.brief}`;
+// Show me: what the human reads at the Code checkpoint besides the diff. The
+// agent saves proof into the sub-job's evidence inbox and answers every item in
+// its `ready` receipt (job-store.js refuses one that leaves an item out).
+// TODO(host-api spawn env): $JOB_EVIDENCE cannot be set on the session, so the
+// prompt tells the agent to export it.
+// Proof is required whatever Code is set to: with it on the human reads it; on
+// Auto a sub-job with Show me items still reports ready (the receipt approves
+// itself, job-store.js) so the proof is kept and a short step publishes.
+export const leavesUncommitted = (job, sub) => reviewCode(job) || !!sub?.show?.length;
+const SHOT_SHAPE = '{file:"name.png", url?:"where it was taken", viewport?:"1280x800", tool?:"Playwright"}';
+const proofBlock = (job, sub) => {
+  if (!sub) return '';
+  const dir = displayPath(inboxDir(job.id, sub.id));
+  const items = sub.show || [];
+  return lines(
+    `Show your work. Proof goes in $JOB_EVIDENCE: run \`export JOB_EVIDENCE=${dir}\` and save every file there as a bare name (PNG, JPEG, GIF or WebM, at most 5 MB each).`,
+    items.length ? `Show me before review (each is a thing the human will look at, so show it WORKING, not described):\n${items.map((t) => `- ${JSON.stringify(t)}`).join('\n')}` : 'This sub-job lists nothing it must show, but a screenshot or command output for what you changed helps the human; attach it the same way.',
+    'For a UI change start whatever it needs (dev server, database, worker) on free ports and capture a screenshot of the RUNNING build, never a mock-up: Playwright by default (it needs nobody watching), or Claude in Chrome if you have it. For a change with no UI show the command, what it printed and its exit code. Stop everything you started before you report.',
+    `Answer each Show me item in the receipt with a check whose text is EXACTLY the item and one of: shots:[${SHOT_SHAPE}], run:{cmd, out (the relevant output, at most 4000 characters), exit}, or couldNot:"why you could not, and what covers it instead" (honest, never faked; the human sees it in amber). A receipt that leaves an item out is refused. Anything else you verified stays a plain string check.`,
+  );
+};
 // Fix here on an open PR under code review: the worktree IS that PR's branch, so
 // the work is a change to it, and the push goes to the PR that already exists.
 const openPrLine = (sub) => sub?.pr?.url ? `PR ${sub.pr.url} is already open from this worktree's branch; this is a fix to it, requested by the human (see the history below).` : '';
@@ -181,7 +203,7 @@ const replanBlock = (job) => lines(
   'This job is ALREADY RUNNING and the human wants its plan changed. Where each sub-job stands now:',
   ...job.subJobs.map((s) => replanStatus(job, s)),
   `Frozen (delivered or past the point of no return; keep each exactly as it is): ${job.subJobs.filter(isFrozen).map((s) => s.id).join(', ') || 'none'}.`,
-  'Return the WHOLE plan. Keep an id to keep or edit that sub-job: only its title, brief, check and after may change, a session\'s on, and a write\'s action, by, review, why and place.ref (its kind, repo, story and place type are fixed, so new work in another place is a new id). A write goes with the session that makes it, and a session you cancel takes its writes with it. Leave an unfrozen sub-job out to cancel it: it stays on the board as cancelled and any open PR stays open on GitHub. Give new work a new id. Do not make anything wait on a sub-job you cancel. Do not repeat work a frozen sub-job already delivered. Your plan is a proposal: nothing changes until the human approves it, and new steps are held meanwhile.',
+  'Return the WHOLE plan. Keep an id to keep or edit that sub-job: only its title, brief, check, show and after may change, a session\'s on, and a write\'s action, by, review, why and place.ref (its kind, repo, story and place type are fixed, so new work in another place is a new id). A write goes with the session that makes it, and a session you cancel takes its writes with it. Leave an unfrozen sub-job out to cancel it: it stays on the board as cancelled and any open PR stays open on GitHub. Give new work a new id. Do not make anything wait on a sub-job you cancel. Do not repeat work a frozen sub-job already delivered. Your plan is a proposal: nothing changes until the human approves it, and new steps are held meanwhile.',
   'Besides editing the plan, a proposal can carry ACTIONS on a live sub-job, each applied only when the human approves and refused if its head, merge commit or stage has moved by then (the board pins it): {type:"accept-red",sub,note?} waves through the failing checks of an open PR (or the failing post-merge run of a merged one) that you have shown are unrelated; {type:"mark",sub,position:"merged"|"done",evidence} says the work is merged or done elsewhere, and `evidence` (one line citing the PR or ticket that shows it) is REQUIRED or the receipt is refused; {type:"rework",sub,note} sends its code or result back to its own agent with the note; {type:"recover",sub,fix} is for a MERGED sub-job whose post-merge run failed: add a new PR sub-job that fixes it, name its id as `fix`, and the merged one counts as landed when the fix does. One action per sub-job. Never use accept-red or mark to hide a real failure.',
   'Say what you found: `diagnosis:{summary, evidence?:[{label,detail}]}` (the cause, with up to six pieces of evidence: a run, a file, a PR). If more than one answer is reasonable, rank them: your plan and actions are option 1 (the recommended one) with `label` and `why`, and `alternatives:[{label,why?,plan,actions?}]` hold at most two more. Each option is a whole plan.',
   `Current plan: ${JSON.stringify(job.plan)}`,
@@ -223,10 +245,11 @@ export function jobPrompt(job, sub, run) {
       `Discover the repositories from task memory, Jira references and local checkouts. Reuse a matching checkout; if one is missing, verify the GitHub owner and origin and clone it ${cloneInto(checkouts)}, never into this workspace or over an existing directory. Leave every checkout unchanged (no reset, clean or branch switch) and report its absolute path so implementation can cut a worktree beside it.`,
       'Write `context` ONCE for the whole job (≤2000 chars), the way a human writes a dispatch: the shared background, conventions and constraints every worker needs. Each `brief` (≤500 chars) is a dispatch intent that refers to the context rather than repeating it.',
       'Never describe deployments or verification steps: Wrangler reads the repository\'s workflows to know whether a merge deploys and watches whatever GitHub starts. Give `check` (one line) ONLY when the pipeline cannot prove the change works where it lands, e.g. "helm shows the release in dev and prod". A session or human sub-job has no check: a session\'s receipt is its check.',
+      'Give each PR sub-job `show`: 1–6 lines, written as THINGS TO SEE before its code is committed ("Filters by result and IP prefix", "Unit tests pass"), never work to do. Name a page or state for a UI change, a command\'s output otherwise; omit it only when nothing can be seen. Other kinds have none.',
       '`after` means START AFTER: a sub-job waits until every PR it is after has deployed and every session or human sub-job it is after is done (its output is an input). Each edge serialises the work, so add one only when the dependent needs the prerequisite live or its output. Minimise dependencies and PRs while keeping each piece independently deliverable. Do not propose branch names: the implementing session names its own.',
       job.replan ? replanBlock(job) : job.plan || job.previousPlan || job.feedback ? `Previous plan / feedback: ${JSON.stringify({ plan: job.plan || job.previousPlan, feedback: job.feedback })}` : '',
       '',
-      report(`kind:"plan", ${job.replan ? 'label?, why?, actions?:[{type,sub,note?,position?,evidence?,fix?}], diagnosis?:{summary,evidence?:[{label,detail}]}, alternatives?:[{label,why?,plan,actions?}], ' : ''}plan:{context, stories:[{id,key?,project?,title,fields?:[{name,value}]}], workflows:{PROJECT:[status]}, jiraSite?, subJobs:[{id,title,kind:"pr"|"session"|"human"|"write",repo,storyId?,jiraKey?,after:[],brief,check?,on?:{sub,at},place?:{type,ref?,name?},action?,by?,review?,why?}]}`),
+      report(`kind:"plan", ${job.replan ? 'label?, why?, actions?:[{type,sub,note?,position?,evidence?,fix?}], diagnosis?:{summary,evidence?:[{label,detail}]}, alternatives?:[{label,why?,plan,actions?}], ' : ''}plan:{context, stories:[{id,key?,project?,title,fields?:[{name,value}]}], workflows:{PROJECT:[status]}, jiraSite?, subJobs:[{id,title,kind:"pr"|"session"|"human"|"write",repo,storyId?,jiraKey?,after:[],brief,check?,show?:["a thing to see"],on?:{sub,at},place?:{type,ref?,name?},action?,by?,review?,why?}]}`),
     ),
     implementation: lines(
       heading(job, sub),
@@ -239,12 +262,13 @@ export function jobPrompt(job, sub, run) {
       afterLine(job, sub),
       humanOutputBlock(job, sub),
       historyBlock(job, sub, run),
+      proofBlock(job, sub),
       // With code review on, the human reads the working tree on the board
       // before anything is committed; a later publish session commits and pushes,
       // so the branch rename waits for it too.
-      reviewCode(job) ? `Leave every change UNCOMMITTED: the human reviews the working tree before anything is committed, and a later step commits and pushes it${sub?.pr ? ' to the open PR' : ' and opens the PR'}. Do not commit, push or open a PR.` : branchNaming(job, sub),
+      leavesUncommitted(job, sub) ? `Leave every change UNCOMMITTED: ${reviewCode(job) ? 'the human reviews the working tree before anything is committed, and a ' : 'a '}later step commits and pushes it${sub?.pr ? ' to the open PR' : ' and opens the PR'}. Do not commit, push or open a PR.` : branchNaming(job, sub),
       '',
-      reviewCode(job) ? report('kind:"ready", checks:["what you verified"]', 'When the working tree is ready to review, ') : publishLine,
+      leavesUncommitted(job, sub) ? report('kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]', 'When the working tree is ready to review, ') : publishLine,
     ),
     publish: lines(
       heading(job, sub),

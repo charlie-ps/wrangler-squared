@@ -31,6 +31,9 @@ import { STATES, stateIconHtml, stateSolid } from './job-state.js';
 // write stops for review: a sibling of the row's button, since a button cannot
 // hold another. `reviewWrites` is the job's default for a write that does not say.
 export const dependencyEditorHtml = (s, others, depKey) => others.filter((d) => !isWriteSub(d)).map((d) => `<label><input type="checkbox" data-dep="${esc(depKey)}" value="${esc(d.id)}" ${s.after.includes(d.id) ? 'checked' : ''}>${kindChipHtml(d)}<span>${esc(d.title)}</span></label>`).join('') || '<span>No other sub-jobs</span>';
+// "Show me before review", edited like the title: one input per item, redrawn
+// from the draft on add and remove so the stepper never holds a stale list.
+export const showEditorHtml = (s, key) => `<div class="job-show-ed"><small>Show me before review: things the agent must show working, one each</small>${(s.show || []).map((t, k) => `<div class="job-show-row"><input data-show="${esc(key)}" data-show-k="${k}" maxlength="180" value="${esc(t)}" aria-label="Show me item ${k + 1}"><button type="button" class="ghost" data-show-rm="${esc(key)}:${k}" aria-label="Remove item ${k + 1}">${ICONS.x}</button></div>`).join('')}<button type="button" class="job-show-add" data-show-add="${esc(key)}">${ICONS.plus}Add an item</button></div>`;
 // A place pill's parts: the glyph, a short mono label, a dot per write in its
 // state, and ↗ once the place exists.
 const urgentOf = (states) => ['failing', 'needs'].find((st) => states.includes(st));
@@ -58,7 +61,7 @@ function placeHeadHtml(p) {
 // node in its live state and labelled with what approval would do to it.
 const MARKS = { frozen: 'Locked · already landed', removed: 'Will be cancelled', added: 'New', edited: 'Edited', kept: 'Unchanged',
   'accept-red': 'Accept red', recover: 'Waits for its fix', rework: 'Rework', 'mark-done': 'Marked done', 'mark-merged': 'Marked merged' };
-export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, openDeps = new Set(), openTickets = new Set(), editing = null, reviewWrites = false } = {}) {
+export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, openDeps = new Set(), openTickets = new Set(), openShow = new Set(), editing = null, reviewWrites = false } = {}) {
   const subs = plan.subJobs;
   if (!subs.length) return '';
   const levels = dependencyLevels(plan);
@@ -117,7 +120,7 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     if (editable) {
       const others = subs.filter((d) => d.id !== s.id && !isWriteSub(d));
       return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<textarea class="job-node-title" aria-label="${kindLabel(s)} title ${i + 1}" data-title="${i}" maxlength="180" rows="3">${esc(s.title)}</textarea>${repo}
-        <details class="job-node-deps" data-deps="${esc(s.id)}" ${openDeps.has(s.id) ? 'open' : ''}><summary title="${esc(deps || 'Independent')} · change">${ICONS.link}<span>${s.after.length || 'None'}</span></summary>${dependencyEditorHtml(s, others, String(i))}</details></div>`;
+        <details class="job-node-deps" data-deps="${esc(s.id)}" ${openDeps.has(s.id) ? 'open' : ''}><summary title="${esc(deps || 'Independent')} · change">${ICONS.link}<span>${s.after.length || 'None'}</span></summary>${dependencyEditorHtml(s, others, String(i))}</details>${isPrSub(s) ? `<details class="job-node-show" data-show-d="${esc(s.id)}" ${openShow.has(s.id) ? 'open' : ''}><summary title="Show me before review · change">${ICONS.eye}<span>${(s.show || []).length || 'None'}</span></summary>${showEditorHtml(s, String(i))}</details>` : ''}</div>`;
     }
     if (markOf) { const mark = markOf(s); return `<div class="${cls} job-mark-${mark}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}<span class="job-mark">${mark === 'frozen' ? ICONS.lock : ''}${esc(MARKS[mark])}</span></div>`; }
     if (!stateOf) return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}</div>`;

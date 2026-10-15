@@ -4,6 +4,7 @@ import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml } from './job-skylines.js';
 import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, runStatus, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub } from './job-state.js';
+import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 
 // The board as a wall of night skies: each job's plan is drawn into a quiet sky
 // over its own Gargantua sky (job-skylines.js), lit in the colour of the job's state,
@@ -196,6 +197,9 @@ export function plateAsk(job) {
   }
   if (runStatus(job, lead) === 'needs-you' && lead.sessions.length) return ask(subLabel(job, lead), 'Answer', ICONS.terminal, 'session');
   if (mergeApprovable(job, lead)) return { ...ask(`Merge${n ? ` #${n}` : ''}`, 'Merge', ICONS.merge, 'merge'), detail: `Checks green · ${detail}` };
+  // Proof turns Review code into Ready to verify: what was shown, and a filmstrip
+  // of the first shots above the stub (plateHtml) so the board says whether it looks right.
+  if (codeAwaitingReview(lead) && hasProof(lead)) return { ...ask('Ready to verify', 'Verify', ICONS.eye), detail: `${detail} · ${summaryText(proofSummary(lead))}`, film: lead };
   if (codeAwaitingReview(lead)) return ask('Review code', 'Review', ICONS.code);
   if (isSessionSub(lead)) return ask(subLabel(job, lead), 'Review', ICONS.doc);
   if (isHumanSub(lead)) return ask(subLabel(job, lead), 'Open task', ICONS.hand);
@@ -217,7 +221,7 @@ export function plateHtml(job, scene, art = 'quiet') {
   const empty = job.stage === 'planning' && !job.plan && !job.cancelledAt ? 'Planning' : 'Not planned yet';
   const tip = [subs.length ? kindCountLabel(subs) : '', reviewFlagsLabel(job)].filter(Boolean).join(' · ');
   const foot = ask
-    ? `<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span>${ask.alt ? `<button type="button" class="job-plate-alt" data-ask="${esc(ask.alt.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.alt.label)}</button>` : ''}<button type="button" class="job-plate-go" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.button)}</button></div>`
+    ? `${ask.film ? filmHtml(job, ask.film) : ''}<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span>${ask.alt ? `<button type="button" class="job-plate-alt" data-ask="${esc(ask.alt.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.alt.label)}</button>` : ''}<button type="button" class="job-plate-go" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.button)}</button></div>`
     : `<div class="job-plate-foot"><span class="job-plate-glyph">${stateIconHtml(state)}</span><span class="job-status">${esc(jobLabel(job))}</span>${when ? `<span class="job-plate-when">${esc(when)}</span>` : ''}</div>`;
   const repo = repoLine(job), graph = work.length ? skyGraphHtml(job, scene, lvl, full) : null;
   const dim = !stateSolid(state);

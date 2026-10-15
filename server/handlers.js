@@ -3,6 +3,7 @@ import { access as defaultAccess } from 'node:fs/promises';
 import { kick, makeCreateJob } from './job-create.js';
 import { settingsSchema } from './jobs-schema.js';
 import { runFile } from './job-github.js';
+import { thumbnailOf, readEvidence } from './job-evidence.js';
 
 // Control-WS handlers in the EXTENSION signature: `handler(msg, host)` — no
 // `ctx`, and therefore no `ctx.reply`. Core's control/handlers/jobs.js replied
@@ -106,6 +107,37 @@ export const jobImagesHandler = {
   },
 };
 
+// The proof a Code review step shows (job-evidence.js). Nothing serves the
+// extension's files to a browser (TODO(host-api files:serve)), so they ride the
+// one outbound channel there is, like the job's images: the round's THUMBNAILS
+// when the dialog or board asks, one full file when a shot is opened. `round`
+// defaults to the sub-job's current one. A missing or unreadable file is simply
+// absent; the grid draws a placeholder.
+export function makeEvidenceHandler({ run = runFile } = {}) {
+  return {
+    type: 'job-evidence',
+    async handler(msg, host) {
+      const job = host.stores.jobs.get(msg.id);
+      const sub = job?.subJobs.find((s) => s.id === msg.subJobId);
+      if (!sub) return;
+      const round = Number.isInteger(msg.round) ? msg.round : sub.ready?.round;
+      const base = { event: 'job-evidence', jobId: msg.id, subJobId: sub.id, round };
+      if (!round) return host.broadcast({ ...base, thumbs: [] });
+      if (msg.file) {
+        const got = readEvidence({ jobId: job.id, subId: sub.id, round, file: msg.file });
+        return host.broadcast({ ...base, file: msg.file, ...(got ? { mime: got.mime, dataBase64: Buffer.from(got.bytes).toString('base64') } : {}) });
+      }
+      const files = [...new Set((sub.ready?.round === round ? sub.ready.proof || [] : []).flatMap((p) => (p.shots || []).map((s) => s.file)))];
+      const thumbs = (await Promise.all(files.map(async (file) => {
+        const t = await thumbnailOf({ jobId: job.id, subId: sub.id, round, file, run });
+        return t ? { file, mime: t.mime, dataBase64: Buffer.from(t.bytes).toString('base64') } : null;
+      }))).filter(Boolean);
+      host.broadcast({ ...base, thumbs });
+    },
+  };
+}
+export const jobEvidenceHandler = makeEvidenceHandler();
+
 // The board's "Have an idea?" corner: a request becomes a PUBLIC issue on this
 // repo, filed by the reader's own `gh` login so it is theirs to follow. Title and
 // body travel as argv items through execFile, never a shell. `rid` is echoed so
@@ -155,4 +187,4 @@ export function makeFeatureRequestHandlers({ run = runFile } = {}) {
   }];
 }
 
-export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler, ...makeFeatureRequestHandlers()];
+export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler, jobEvidenceHandler, ...makeFeatureRequestHandlers()];

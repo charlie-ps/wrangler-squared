@@ -125,6 +125,16 @@ feature).
   (`job-change.js quickChange`): the same proposal built with no agent, id
   `quick_<ms>`, `instant: true`. `quickChips` in `public/jobs.js` mirrors the
   gates; an action is drawn as a mark on its graph node (`actionMark`).
+- **A PR's `show` list is answered with proof, not claims** (`server/job-evidence.js`).
+  The implementer saves files into one inbox per sub-job (`$JOB_EVIDENCE`, given in
+  its prompt and granted as `addDirs`); the `ready` receipt names them per check
+  (`shots`, `run` or `couldNot`), `job-store.js _proofOf` refuses a receipt that
+  leaves a `show` item out and copies exactly the named files, sniffed by magic
+  bytes and capped at 5 MB, into `round-<n>`. `ready.checks` stays plain strings
+  (history and the old list read it); the proof lives beside it as `ready.proof`.
+  The board gets bytes only as `job-evidence` frames (thumbnails via `sips`), cached
+  in `public/job-proof.js`. A sub-job with `show` items reports `ready` even with
+  Code on Auto (`leavesUncommitted`), so the proof is kept.
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one

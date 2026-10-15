@@ -85,6 +85,31 @@ the PR head, merge commit or stage it was written against has moved.
 - **Look for an existing PR for the branch before creating one**, so a retried
   step doesn't open a duplicate.
 
+## Showing your work (PR steps with a Show me list)
+
+- A PR sub-job may carry **Show me** items: things the human will look at before
+  your code is committed. Your prompt lists them and names the proof folder:
+  `export JOB_EVIDENCE=<that path>`, then save every file there as a bare name
+  (PNG, JPEG, GIF or WebM, at most 5 MB). Only files your receipt names are kept.
+- Show each item **working**, never described. For a UI change start what it
+  needs (dev server, database, worker) on free ports and capture the RUNNING
+  build, not a mock-up: Playwright by default (it needs nobody watching), or
+  Claude in Chrome when you have it. For an API, CLI or migration show the
+  command, what it printed and its exit code. Stop everything you started before
+  you report.
+- Answer **every** item in the `ready` receipt with a check whose `text` is
+  exactly the item and one of: `shots:[{file, url?, viewport?, tool?}]` (a bare
+  name works too), `run:{cmd, out, exit}` (`out` at most 4000 characters, the
+  relevant part), or `couldNot:"why, and what covers it instead"`. `couldNot` is
+  honest and allowed, and the human sees it in amber; never fake a shot. A
+  receipt that leaves an item out, or names a file that is missing, too big or
+  not an image, is refused and says which: fix it and report again.
+- Anything else you verified stays a plain string check ("Lint clean"), listed
+  under Also checked. With no Show me list nothing is required, though a shot or
+  output for what you changed helps.
+- Planning: give each PR sub-job `show`, 1–6 lines written as things to **see**
+  ("Filters by result and IP prefix", "Unit tests pass"), never work to do.
+
 ## Planning writes
 
 - Every write names the session sub-job that makes it (`by`); never a PR or

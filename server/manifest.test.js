@@ -1,3 +1,4 @@
+import { inboxDir } from './job-evidence.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import manifest from './manifest.js';
@@ -319,7 +320,7 @@ test('a PR launch has the wrangler cut the worktree and keeps core off the job P
   const opts = spawned[0];
   assert.equal(opts.cwd, '/repos/thing', 'the wrangler branches from the main checkout');
   assert.deepEqual(opts.worktree, { branch: placeholderBranch(job, sub), base: 'refs/remotes/origin/main', auto: true });
-  assert.equal(opts.addDirs, undefined, 'only planning gets the repos parent');
+  assert.deepEqual(opts.addDirs, [inboxDir(job.id, sub.id)], 'only planning gets the repos parent; an implementation run gets its proof inbox');
   assert.equal(opts.taskId, 'task_7');
   assert.deepEqual([opts.model, opts.effort], ['opus', 'high']);
   assert.deepEqual([opts.autoMergeOnPass, opts.autoFixPrChecks], [false, false], 'the runner drives this PR');

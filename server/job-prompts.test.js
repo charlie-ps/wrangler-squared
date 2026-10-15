@@ -54,7 +54,7 @@ test('the implementation prompt is one bounded step: context once, the brief, wh
   assert.match(text, /History of this sub-job, oldest first:\n- \d\d:\d\d human requested changes: "Call the flag sign_in_v2"/);
   assert.doesNotMatch(text, /worktree already holds the work/, 'a note with no earlier run promises nothing about the tree');
   assert.match(text, /Leave every change UNCOMMITTED/);
-  assert.match(text, /When the working tree is ready to review, job_report \{runId:"run1", kind:"ready", checks:\["what you verified"\]\}/);
+  assert.match(text, /When the working tree is ready to review, job_report \{runId:"run1", kind:"ready", checks:\["what you verified", \{text:"<a Show me item, verbatim>"/);
   assert.doesNotMatch(text, /kind:"published"|Commit, push/, 'under code review nothing reaches origin from this session');
   const unreviewed = jobPrompt({ ...planned, reviewCode: false }, { ...briefed, check: 'Sign-in works in dev' }, run);
   assert.match(unreviewed, /Commit, push, open the PR, then job_report \{runId:"run1", kind:"published", url:"<PR url>"\}/);
@@ -176,7 +176,7 @@ test('human dependency output is bounded in the prompt with explicit truncation 
   const deps = Array.from({ length: 5 }, (_, i) => ({ id: `key${i}`, kind: 'human', title: `Get key ${i}`, stage: 'done', result: { output: `${i}${'x'.repeat(7999)}` } }));
   const text = jobPrompt({ ...planned, subJobs: deps }, { ...briefed, after: deps.map((d) => d.id) }, run);
   assert.match(text, /Human dependency output/);
-  const block = text.split('Human dependency output')[1].split('Leave every change')[0];
+  const block = text.split('Human dependency output')[1].split('Show your work')[0];
   assert.ok(block.length <= 24000, `output block grew to ${block.length} characters`);
   assert.match(block, /truncated/);
   assert.match(block, /omitted/);
@@ -194,7 +194,7 @@ test('the planner is told to write the context once and never to describe a depl
   assert.match(text, /kind:"pr"\|"session"\|"human"/);
   assert.match(text, /kind:"plan", plan:\{context, stories:\[\{id,key\?,project\?,title,fields\?:\[\{name,value\}\]\}\]/);
   assert.doesNotMatch(text, /deployment:\{|pendingChecks|value[?:]|business value/);
-  assert.ok(text.split(/\s+/).length < 900, 'the protocol lives in the job-worker skill, not in every prompt');
+  assert.ok(text.split(/\s+/).length < 1000, 'the protocol lives in the job-worker skill, not in every prompt');
 });
 
 test('the planner is told stories are optional, and a ticketless sub-job is told to name its branch without a key', () => {

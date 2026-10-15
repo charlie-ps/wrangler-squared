@@ -472,7 +472,7 @@ test('the footer checkpoints are buttons: a switch counts from the next gate, ke
   footerButton(f, 'reviewPlan').click();
   assert.equal(f.sent.length, before, 'a locked checkpoint sends nothing');
   code().dispatchEvent(new f.window.Event('pointerenter'));
-  assert.match(footerHint(f), /Code: You review You read each PR’s diff before it’s committed\. Click for Auto\./);
+  assert.match(footerHint(f), /Code: You review You see each PR working and read its diff before it’s committed\. Click for Auto\./);
   code().click();
   assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: false });
   assert.deepEqual([code().className, code().getAttribute('aria-pressed'), code().getAttribute('aria-busy')], ['job-flag auto', 'false', 'true'], 'shown at once, busy until the job confirms it');
@@ -641,7 +641,7 @@ test('new job is a brief beside a property sidebar, and the brief is the descrip
   for (const name of ['reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites']) assert.ok(brief.contains(form.querySelector(`[name="${name}"]`)), `${name} is a tile under the brief`);
   assert.ok(props.querySelector('#job-pick').querySelector('.pick-ticket') && props.querySelector('#job-pick .pick-meter'), 'the picker is a ticket with an effort meter in the sidebar');
   assert.deepEqual([...brief.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].checked, r.querySelector('small').textContent]),
-    [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts'], ['reviewCode', 'Code', true, 'You read each PR’s diff before it’s committed'], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass'], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done'], ['reviewWrites', 'Writes', false, 'Each write is made by its session, with a receipt']]);
+    [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts'], ['reviewCode', 'Code', true, 'You see each PR working and read its diff before it’s committed'], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass'], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done'], ['reviewWrites', 'Writes', false, 'Each write is made by its session, with a receipt']]);
   assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('small')?.textContent]),
     [['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, undefined]]);
   assert.match(form.querySelector('.job-create-foot').textContent, /nothing touches Jira until you approve/);
@@ -2002,4 +2002,144 @@ test('a recover is a mark on the merged node that waits for its fix, and a propo
   assert.equal(f.q('.job-options'), null, 'one option needs no chooser');
   f.q('[data-action="approve-replan"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_q' });
+});
+
+// --- Show me and proof (design B step 1) ---
+
+const proofSub = (extra = {}) => ({ ...sub('api'), stage: 'review', state: 'verified', worktree: { path: '/wt', branch: 'sec-412' }, sessions: ['s1'], show: ['Lists sign-ins', 'SSO appears'],
+  ready: { round: 1, receiptId: 'run_1', checks: ['Lint clean', 'Lists sign-ins', 'SSO appears'], proof: [
+    { text: 'Lists sign-ins', shots: [{ file: 'l.png', mime: 'image/png', url: 'http://localhost:5174/audit', viewport: '1280x800', tool: 'Playwright', at: 1700000000000 }] },
+    { text: 'SSO appears', couldNot: 'No SSO key in this worktree' }] }, ...extra });
+const evidenceFrame = (file = 'l.png') => ({ event: 'job-evidence', jobId: 'job1', subJobId: 'api', round: 1, thumbs: [{ file, mime: 'image/jpeg', dataBase64: 'dGg=' }] });
+
+test('the plan editor lists each PR\'s Show me items, edits them like the title, and approval sends the cleaned list', (t) => {
+  const f = fixture(t);
+  f.data.jobs[0].plan = { ...plan, subJobs: [{ ...sub('api'), show: ['Lists sign-ins', 'Unit tests pass'] }, sub('web', ['api'])] };
+  f.view.update(f.data);
+  f.q('.job-plate-open[data-job="job1"]').click();
+  assert.equal(f.q('.job-node-show summary span').textContent, '2', 'the count on the node');
+  assert.deepEqual([...f.q('[data-show-d="api"]').querySelectorAll('input')].map((i) => i.value), ['Lists sign-ins', 'Unit tests pass']);
+  assert.equal(f.q('[data-show-d="web"] summary span').textContent, 'None');
+  const first = f.q('input[data-show="0"][data-show-k="0"]'); first.value = 'Filters by result'; first.dispatchEvent(f.event('input'));
+  f.q('[data-show-add="1"]').click();
+  assert.equal(f.q('[data-show-d="web"]').open, true, 'adding opens the editor and it survives the redraw');
+  assert.equal(document.activeElement, f.q('input[data-show="1"][data-show-k="0"]'), 'the new row takes focus');
+  const added = f.q('input[data-show="1"][data-show-k="0"]'); added.value = '  Web renders  '; added.dispatchEvent(f.event('input'));
+  f.q('[data-show-add="1"]').click(); f.q('[data-show-add="1"]').click();
+  f.q('[data-show-rm="0:1"]').click();
+  assert.deepEqual([...f.q('[data-show-d="api"]').querySelectorAll('input')].map((i) => i.value), ['Filters by result'], 'a redraw keeps what was typed');
+  assert.equal(f.q('input[data-show="0"]').value, 'Filters by result');
+  f.q('[data-action="approve-plan"]').click();
+  const [api, web] = f.sent[0].plan.subJobs;
+  assert.deepEqual(api.show, ['Filters by result']);
+  assert.deepEqual(web.show, ['Web renders'], 'trimmed, and the blank rows are gone');
+  assert.equal('show' in sub('x'), false);
+  assert.equal(f.data.jobs[0].plan.subJobs[1].show, undefined, 'the live plan is not touched until the server answers');
+});
+
+test('a sub-job with no Show me list sends none, and a session or write node has no editor', (t) => {
+  const f = fixture(t);
+  f.q('.job-plate-open[data-job="job1"]').click();
+  f.q('[data-action="approve-plan"]').click();
+  assert.equal(f.sent[0].plan.subJobs.every((s) => !('show' in s)), true);
+  const g = fixture(t);
+  g.data.jobs[0].plan = { ...plan, subJobs: [{ id: 'spike', kind: 'session', title: 'Spike', after: [], brief: 'Look' }] };
+  g.view.update(g.data); g.q('.job-plate-open[data-job="job1"]').click();
+  assert.equal(document.querySelectorAll('.job-node-show').length, 0);
+});
+
+test('the sub-job and the plan\'s reading section say what must be shown, escaped', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [proofSub({ show: ['Lists <b>sign-ins</b>', 'SSO appears'] })];
+  f.view.update(f.data);
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  assert.deepEqual([...f.q('#job-dialog .job-show-list').querySelectorAll('li')].map((li) => li.textContent), ['Lists <b>sign-ins</b>', 'SSO appears']);
+  assert.equal(f.q('#job-dialog .job-show-list b'), null);
+});
+
+test('a ready receipt with proof is the Shown working grid, with the plain checks under Also checked, and no old list', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [proofSub()];
+  f.view.update(f.data);
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const dialog = f.q('#job-dialog');
+  assert.match(dialog.querySelector('.job-proof-head').textContent, /Shown working.*1 of 2 shown · 1 couldn’t.*Round 1/);
+  assert.deepEqual([...dialog.querySelectorAll('.job-proof-card')].map((c) => [c.classList.contains('gap'), c.querySelector('.job-proof-ck').textContent.trim()]), [[false, '✓Lists sign-ins'], [true, '!SSO appears']]);
+  assert.equal([...dialog.querySelectorAll('h3')].some((h) => h.textContent === 'Ready for review'), false);
+  assert.deepEqual([...dialog.querySelectorAll('.job-receipt li')].map((li) => li.textContent.trim()), ['✓ Lint clean']);
+  assert.equal(f.sent.at(-1).type, 'job-evidence', 'the dialog asks for the round\'s thumbnails');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-evidence', id: 'job1', subJobId: 'api', round: 1 });
+  const asked = f.sent.length; f.view.update(f.data);
+  assert.equal(f.sent.filter((m) => m.type === 'job-evidence').length, 1, `a tick does not ask again (${asked})`);
+  f.view.evidence(evidenceFrame());
+  assert.equal(dialog.querySelector('[data-ev-file="l.png"] img').getAttribute('src'), 'data:image/jpeg;base64,dGg=', 'the thumbnail fills in place');
+  assert.match(f.q('#job-diff').textContent, /Review code in Wrangler/, 'the diff is still the other half of the review');
+});
+
+test('a receipt with no proof keeps the Ready for review list exactly as before', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [proofSub({ show: undefined, ready: { checks: ['Tests pass'], receiptId: 'run_1' } })];
+  f.view.update(f.data);
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  assert.match(f.q('#job-dialog').textContent, /Ready for review/);
+  assert.equal(f.q('#job-dialog .job-proof'), null);
+  assert.equal(f.sent.some((m) => m.type === 'job-evidence'), false);
+});
+
+test('a card opens the shot viewer: where it was taken, a reason in full, a way back, and Ask about this starts the box', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [proofSub()];
+  f.view.update(f.data);
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  f.q('[data-proof="0"]').click();
+  const dialog = f.q('#job-dialog');
+  assert.equal(dialog.querySelector('h2').textContent, 'Shown working · 1 of 2');
+  assert.match(dialog.querySelector('.job-proof-meta').textContent, /URLhttp:\/\/localhost:5174\/audit.*Viewport1280x800.*HowPlaywright/);
+  assert.deepEqual(f.sent.at(-1), { type: 'job-evidence', id: 'job1', subJobId: 'api', round: 1, file: 'l.png' }, 'the full file is asked for once it is open');
+  f.view.evidence({ event: 'job-evidence', jobId: 'job1', subJobId: 'api', round: 1, file: 'l.png', mime: 'image/png', dataBase64: 'ZnVsbA==' });
+  assert.equal(dialog.querySelector('img.job-proof-full').getAttribute('src'), 'data:image/png;base64,ZnVsbA==');
+  f.view.update(f.data);
+  assert.equal(dialog.querySelector('h2').textContent, 'Shown working · 1 of 2', 'a tick leaves the open shot where it was');
+  f.q('[data-proof-go="1"]').click();
+  assert.match(dialog.querySelector('.job-proof-stage.gap').textContent, /No SSO key in this worktree/);
+  assert.match(dialog.querySelector('[data-proof-ask]').textContent, /Ask it to try another way/);
+  f.q('[data-proof-back]').click();
+  assert.ok(dialog.querySelector('.job-proof-grid'), 'back is the step');
+  f.q('[data-proof="0"]').click();
+  f.q('[data-proof-ask]').click();
+  const box = dialog.querySelector('.job-change textarea');
+  assert.equal(box.value, 'About “Lists sign-ins”: ', 'the question is started, about this picture');
+  assert.equal(dialog.querySelector('[data-change-send]').disabled, false);
+  assert.equal(dialog.querySelector('.job-proof-grid') != null, true);
+  f.view.update(f.data);
+  assert.equal(dialog.querySelector('.job-change textarea').value, 'About “Lists sign-ins”: ', 'typed text survives the tick');
+  box.value = `${box.value}is the order right?`; box.dispatchEvent(f.event('input'));
+  dialog.querySelector('[data-change-send]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', at: 'code', ref: 'run_1', text: 'About “Lists sign-ins”: is the order right?' });
+});
+
+test('asking about a gap asks the agent to try another way', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [proofSub()];
+  f.view.update(f.data);
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  f.q('[data-proof="1"]').click(); f.q('[data-proof-ask]').click();
+  assert.equal(f.q('#job-dialog .job-change textarea').value, 'You couldn’t show “SSO appears”. Please try another way: ');
+});
+
+test('the board plate says Ready to verify with a filmstrip, only for a sub-job that showed something', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [proofSub()];
+  f.view.update(f.data);
+  const plate = f.q('[data-board="job1"]');
+  assert.equal(plate.querySelector('.job-status').textContent, 'Ready to verify');
+  assert.match(plate.querySelector('.job-plate-detail').textContent, /1 of 2 shown · 1 couldn’t/);
+  assert.equal(plate.querySelectorAll('.job-plate-film .job-proof-thumb').length, 1);
+  assert.equal(f.sent.filter((m) => m.type === 'job-evidence').length, 1, 'the board asks for the thumbnails it draws');
+  f.view.evidence(evidenceFrame());
+  assert.equal(plate.querySelector('.job-plate-film img') !== null || f.q('[data-board="job1"] .job-plate-film img') !== null, true);
+  job.subJobs = [proofSub({ show: undefined, ready: { checks: ['Tests pass'], receiptId: 'run_1' } })];
+  f.view.update(f.data);
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Review code');
+  assert.equal(f.q('[data-board="job1"] .job-plate-film'), null);
 });

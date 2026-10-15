@@ -103,6 +103,8 @@ export default {
         else toast(msg.error);
       } else if (msg.event === 'job-images') {
         view?.images(msg);
+      } else if (msg.event === 'job-evidence') {
+        view?.evidence(msg);
       } else if (msg.event === 'job-ide-opened') {
         toast(`Opened in ${msg.app}`);
       } else if (msg.event === 'job-ide-failed') {

@@ -21,6 +21,33 @@ export const branchName = z.string().trim().min(1).max(200).refine(
 );
 export const checksSchema = z.array(line).min(1).max(8);
 export const briefSchema = z.string().trim().min(1).max(500);
+// "Show me before review": things the agent must show working at the Code
+// checkpoint, written as things to see. Only a PR has a review step to show at.
+export const MAX_SHOW = 8;
+export const showSchema = z.array(line).max(MAX_SHOW);
+export const showKey = (s) => String(s).trim().replace(/\s+/g, ' ').toLowerCase();
+// Proof for one check of a `ready` receipt. A shot is a file the agent saved in
+// $JOB_EVIDENCE (a bare name; job-evidence.js checks the bytes) with, where the
+// agent knows it, where it was taken; a run is a command and what it printed;
+// couldNot is why an item could not be shown, drawn amber on the step.
+const evidenceFile = z.string().max(100).refine((n) => /^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:png|jpe?g|gif|webm)$/i.test(n), 'Name a PNG, JPEG, GIF or WebM file saved in $JOB_EVIDENCE (a file name, not a path)');
+const shotSchema = z.union([evidenceFile, z.object({ file: evidenceFile, url: z.string().trim().max(300).optional(), viewport: z.string().trim().max(40).optional(),
+  tool: z.string().trim().max(60).optional(), note: line.optional() }).strict()]);
+const runProofSchema = z.object({ cmd: z.string().trim().min(1).max(300), out: z.string().max(4000), exit: z.number().int() }).strict();
+export const proofSchema = z.object({ text: line, note: line.optional(), shots: z.array(shotSchema).min(1).max(4).optional(), run: runProofSchema.optional(),
+  couldNot: z.string().trim().min(1).max(400).refine((s) => !/[\r\n]/.test(s), 'Use one short line').optional() }).strict().superRefine((p, ctx) => {
+  const proofs = [p.shots, p.run, p.couldNot].filter(Boolean).length;
+  if (!proofs) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `"${p.text}": give shots, run or couldNot, or list it as a plain check` });
+  else if (p.couldNot && proofs > 1) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `"${p.text}": couldNot is the whole answer; it takes no shots or run` });
+});
+export const readyChecksSchema = z.array(z.union([line, proofSchema])).min(1).max(16);
+export const checkText = (c) => typeof c === 'string' ? c : c.text;
+// Every Show me item must be answered by a proof check whose text is the item
+// (compared loosely: case and spacing). Returns the items left unanswered.
+export const unansweredShow = (show, checks) => {
+  const answered = new Set(checks.filter((c) => typeof c !== 'string').map((c) => showKey(c.text)));
+  return (show || []).filter((item) => !answered.has(showKey(item)));
+};
 // A sub-job is one of four kinds. A PR changes a repository. An agent session
 // runs on this machine in a scratch workspace and is finished when its receipt
 // is accepted. A human task is the rare step no agent can take at all (a click
@@ -79,7 +106,7 @@ export const triggerSchema = z.object({ sub: id, at: z.enum(MILESTONES) });
 export const subJobSchema = z.object({
   id, title: line, kind: z.enum(['pr', 'session', 'human', 'write']).default('pr'), repo: repoPath.optional(),
   storyId: id.optional(), jiraKey: jira.optional(), after: z.array(id).max(30).default([]),
-  brief: briefSchema.optional(), check: line.optional(),
+  brief: briefSchema.optional(), check: line.optional(), show: showSchema.optional(),
   // `on` is a session's: it starts once that sub-job reaches the milestone (and
   // its `after`s are satisfied). The rest is a write's own. `review` is
   // tri-state (`writeReviewed`): true or false is this write's own say, absent
@@ -192,6 +219,7 @@ export const planSchema = z.object({
     if (isSessionSub(s) && s.check) issue(`${s.id}: a session sub-job's receipt is its own check`);
     if (isHumanSub(s) && s.repo) issue(`${s.id}: a human sub-job has no repo`);
     if (isHumanSub(s) && s.check) issue(`${s.id}: a human sub-job has nothing to check after it lands`);
+    if (!isPrSub(s) && s.show?.length) issue(`${s.id}: only a PR sub-job has a review step to show things at (show)`);
     if (isPrSub(s) && !s.repo) issue(`${s.id}: a PR sub-job needs repo`);
     if (!isWriteSub(s) && !s.brief) issue(`${s.id}: brief is required`);
     if (!isWriteSub(s) && (s.action || s.by || s.place)) issue(`${s.id}: only a write has a place, an action or a session that makes it (by)`);
@@ -422,7 +450,7 @@ export const alternativeSchema = z.object({ ...optionShape, plan: planSchema }).
 export const reportSchema = z.discriminatedUnion('kind', [
   receipt({ kind: z.literal('plan'), plan: planSchema, ...optionShape, label: line.optional(), diagnosis: diagnosisSchema.optional(),
     alternatives: z.array(alternativeSchema).max(MAX_OPTIONS - 1).optional() }),
-  receipt({ kind: z.literal('ready'), checks: checksSchema }),
+  receipt({ kind: z.literal('ready'), checks: readyChecksSchema }),
   receipt({ kind: z.literal('published'), url: prUrlSchema }),
   receipt({ kind: z.literal('repaired'), changes: checksSchema, checks: checksSchema }),
   receipt({ kind: z.literal('deployed'), checks: checksSchema }),

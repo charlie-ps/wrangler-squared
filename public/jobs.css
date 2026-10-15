@@ -1023,3 +1023,73 @@ body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#
 .job-change label small { color:var(--fg-muted); font-size:12px; }
 .job-change textarea { width:100%; resize:vertical; }
 .job-change-send { display:flex; gap:8px; }
+
+/* Show me and proof (job-proof.js). Colour only through the board's variables; a gap is --warn, never red. */
+.job-node-show { font-size:11px; color:var(--fg-muted); max-width:100%; }
+.job-node-show summary { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:8px; list-style:none; cursor:pointer; }
+.job-node-show summary::-webkit-details-marker { display:none; }
+.job-node-show summary svg { width:12px; height:12px; }
+.job-node-show summary:hover,.job-node-show[open] summary { background:var(--surface-2); color:var(--fg); }
+.job-show-ed { display:grid; gap:6px; margin-top:6px; text-align:left; min-width:200px; }
+.job-show-ed small { color:var(--fg-muted); line-height:1.3; }
+.job-show-row { display:flex; gap:4px; align-items:center; }
+.job-show-row input { flex:1; min-width:0; }
+.job-show-row button { padding:3px 6px; }
+.job-show-add { justify-self:start; display:inline-flex; align-items:center; gap:4px; }
+.job-show-add svg { width:12px; height:12px; }
+.job-show-list { margin:4px 0 8px; padding-left:18px; font-size:13px; line-height:1.5; }
+.job-proof { margin:6px 0 4px; }
+.job-proof-head { display:flex; align-items:center; gap:8px; font-weight:600; font-size:14px; margin-bottom:10px; }
+.job-proof-head svg { width:16px; height:16px; color:var(--fg-muted); }
+.job-proof-head small { font-weight:400; font-size:12px; color:var(--fg-muted); }
+.job-proof-round { margin-left:auto; font-size:11px; font-weight:500; color:var(--fg-muted); padding:2px 8px; border-radius:999px; background:var(--surface-2); }
+.job-proof-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:12px; }
+.job-proof-card { all:unset; box-sizing:border-box; display:grid; gap:6px; align-content:start; padding:8px; border:1px solid var(--border-muted); border-radius:12px; background:var(--surface-2); cursor:pointer; min-width:0; }
+.job-proof-card:hover { border-color:var(--border); }
+.job-proof-card:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.job-proof-card.gap { border-color:color-mix(in srgb, var(--warn) 55%, transparent); background:color-mix(in srgb, var(--warn) 10%, var(--surface-2)); }
+.job-proof-media { position:relative; display:block; }
+.job-proof-thumb { display:flex; align-items:center; justify-content:center; width:100%; aspect-ratio:16/10; overflow:hidden; border-radius:8px; border:1px solid var(--border-muted); background:var(--bg); color:var(--fg-subtle); box-sizing:border-box; }
+.job-proof-thumb svg { width:22px; height:22px; }
+.job-proof-thumb img { width:100%; height:100%; object-fit:cover; object-position:top left; display:block; }
+.job-proof-thumb.gap { color:var(--warn-fg); background:color-mix(in srgb, var(--warn) 14%, var(--bg)); border-style:dashed; border-color:color-mix(in srgb, var(--warn) 55%, transparent); }
+.job-proof-thumb.term { align-items:flex-start; justify-content:flex-start; padding:6px 8px; }
+.job-proof-term { display:block; font:10.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg-muted); white-space:pre; overflow:hidden; }
+.job-proof-term i { color:var(--green-fg); font-style:normal; }
+.job-proof-count { position:absolute; right:6px; bottom:6px; padding:0 6px; border-radius:999px; font:600 10px/16px var(--font); font-style:normal; background:var(--overlay); color:var(--fg); }
+.job-proof-ck { display:flex; gap:6px; font-size:13px; font-weight:600; line-height:1.3; color:var(--fg); }
+.job-proof-ck>span:first-child { color:var(--green-fg); }
+.job-proof-card.gap .job-proof-ck>span:first-child { color:var(--warn-fg); }
+.job-proof-card small { font-size:11.5px; line-height:1.4; color:var(--fg-muted); overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.job-proof-card.gap small { color:var(--warn-fg); }
+.job-proof-viewer { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:20px; align-items:start; }
+@media(max-width:900px) { .job-proof-viewer { grid-template-columns:1fr; } }
+.job-proof-stage { display:flex; align-items:center; justify-content:center; min-height:240px; border-radius:12px; border:1px solid var(--border-muted); background:var(--bg); overflow:auto; }
+.job-proof-stage.gap { flex-direction:column; gap:8px; padding:28px; text-align:center; color:var(--warn-fg); border-style:dashed; border-color:color-mix(in srgb, var(--warn) 55%, transparent); background:color-mix(in srgb, var(--warn) 10%, var(--bg)); }
+.job-proof-stage.gap svg { width:28px; height:28px; }
+.job-proof-stage.gap span { color:var(--fg); font-size:14px; max-width:60ch; }
+.job-proof-full { display:block; max-width:100%; max-height:70vh; }
+.job-proof-full.soft { filter:blur(1.5px); opacity:.85; }
+.job-proof-thumb.big { width:60%; }
+.job-proof-run { margin:0; padding:18px 20px; align-self:stretch; width:100%; box-sizing:border-box; font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg-muted); white-space:pre-wrap; overflow-wrap:anywhere; }
+.job-proof-run i { color:var(--green-fg); font-style:normal; }
+.job-proof-run .ok { color:var(--green-fg); }
+.job-proof-run .bad { color:var(--red-fg); }
+.job-proof-side { display:grid; gap:10px; min-width:0; }
+.job-proof-side h3 { display:flex; gap:6px; margin:0; font-size:15px; line-height:1.3; }
+.job-proof-side h3>span:first-child { color:var(--green-fg); }
+.job-proof-side h3.gap>span:first-child { color:var(--warn-fg); }
+.job-proof-side p { margin:0; font-size:13px; color:var(--fg-muted); line-height:1.5; }
+.job-proof-meta { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0; font-size:12px; }
+.job-proof-meta dt { color:var(--fg-subtle); }
+.job-proof-meta dd { margin:0; color:var(--fg); overflow-wrap:anywhere; }
+.job-proof-strip,.job-proof-shots { display:flex; flex-wrap:wrap; gap:6px; }
+.job-proof-pick { all:unset; box-sizing:border-box; width:64px; border-radius:8px; cursor:pointer; border:2px solid transparent; }
+.job-proof-pick .job-proof-thumb { border-radius:6px; }
+.job-proof-pick.sel { border-color:var(--blue); }
+.job-proof-pick:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.job-plate-film { position:relative; z-index:1; display:flex; gap:4px; padding:0 10px 6px; align-items:stretch; margin-top:auto; }
+.job-plate-film .job-proof-thumb { flex:1; min-width:0; aspect-ratio:16/10; border-radius:5px; background:color-mix(in srgb, var(--bg) 80%, transparent); }
+.job-plate-film .job-proof-thumb svg { width:14px; height:14px; }
+.job-plate-film small { align-self:center; font-size:10px; color:var(--fg-muted); padding-left:2px; }
+.job-plate-film + .job-plate-stub { margin-top:0; }

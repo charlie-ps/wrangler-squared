@@ -19,6 +19,9 @@ import { mountModelPicker } from './model-picker.js';
 import { mountSandbox } from './job-sandbox.js';
 import { whatsNewHtml } from './updates.js';
 import { createIdeaCorner } from './idea-corner.js';
+import { EvidenceCache, hasProof, proofGridHtml, alsoCheckedHtml, proofViewerHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
+// Mirrors server/jobs-schema.js MAX_SHOW.
+const MAX_SHOW = 8;
 const checkTone = (state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED', 'passing'].includes(state) ? 'passed' : ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'failing'].includes(state) ? 'failed' : '';
 const checkMark = (state) => checkTone(state) === 'passed' ? '✓' : checkTone(state) === 'failed' ? '×' : '○';
 const link = (url, title) => /^https:\/\/github\.com\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(title)} ↗</a>` : esc(title);
@@ -286,6 +289,12 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   let picker = null;
   // Kept images by name, filled by `job-images` frames; asked once per job.
   const imageCache = new Map();
+  // The proof a Code review step shows (job-proof.js): thumbnails and opened files by
+  // `job-evidence` frames, and which item the shot viewer has open.
+  const evidence = new EvidenceCache();
+  let proofView = null;
+  // What "Ask about this" starts the Request changes box with, once.
+  let askDraft = null;
   const askedImages = new Set();
   // Which folded sections the human has opened: the detail is rebuilt on every
   // graph tick, so the open state has to outlive the markup.
@@ -296,6 +305,8 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
   // dependency change redraws the whole stepper (the node moves wave), so the
   // open state has to outlive the markup or the editor snaps shut under the pointer.
   const openDeps = new Set();
+  // The same for each PR node's Show me editor.
+  const openShow = new Set();
   // The detail footer's checkpoint buttons. Their hint, a pending switch, an Undo
   // and an open confirm all outlive the markup, which every graph tick rebuilds.
   let flags = null;
@@ -355,6 +366,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     root.dataset.plateArt = art;
     q('#jobs-boards').innerHTML = jobs.map((j) => plateHtml(j, scenes.get(j.id), art)).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
     mountSkies(q('#jobs-boards'));
+    hydrateEvidence(q('#jobs-boards'), evidence, send);
     // Keep a human's plan edits and review snapshot intact across live graph ticks;
     // any open form, or a change being typed, is a human mid-edit and is left alone.
     // A run stopping or going idle bumps the job's revision without touching the
@@ -369,7 +381,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     const typing = [...dialog.querySelectorAll('.job-change textarea')].some((t) => t.value);
     const humanForm = dialog.querySelector('#job-human-form');
     const currentSub = humanForm && data.jobs.find((j) => j.id === selected?.jobId)?.subJobs.find((s) => s.id === selected?.subId);
-    if (dialog.open && selected && !planDraft && !typing && (!dialog.querySelector('form') && !dialog.contains(document.activeElement?.closest('input, textarea, select'))
+    if (dialog.open && selected && !planDraft && !typing && !proofView && (!dialog.querySelector('form') && !dialog.contains(document.activeElement?.closest('input, textarea, select'))
       || humanForm && currentSub && (currentSub.stage !== 'human' || humanForm.dataset.state !== currentSub.state))) {
       const output = humanForm?.elements.output.value;
       renderDetail();
@@ -390,7 +402,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     send({ type: 'job-action', id: selected.jobId, subJobId: subId || undefined, action: name, ...extra });
   }
   function openDetail(jobId, subId) {
-    selected = { jobId, subId }; planDraft = null; revision = null; writeEdit = null; storyDraft = null; commentsShown.clear(); openDeps.clear(); openTickets.clear(); openMore.clear(); resetFlags(jobId);
+    selected = { jobId, subId }; planDraft = null; proofView = null; askDraft = null; revision = null; writeEdit = null; storyDraft = null; commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(jobId);
     const job = data.jobs.find((j) => j.id === jobId);
     if (!subId && job?.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
     const sub = job?.subJobs.find((s) => s.id === subId);
@@ -433,9 +445,28 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     graph.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
     graph.querySelectorAll('[data-dep]').forEach((e) => e.onchange = () => {
       const s = planDraft.subJobs[+e.dataset.dep]; s.after = e.checked ? [...s.after, e.value] : s.after.filter((d) => d !== e.value);
-      graph.outerHTML = planGraphHtml(planDraft, { editable: true, openDeps, openTickets, editing: writeEdit, reviewWrites: reviewDefault() });
+      graph.outerHTML = planGraphHtml(planDraft, { editable: true, openDeps, openTickets, openShow, editing: writeEdit, reviewWrites: reviewDefault() });
       wireGraph();
       [...dialog.querySelectorAll(`[data-dep="${e.dataset.dep}"]`)].find((c) => c.value === e.value)?.focus();
+    });
+    // Show me: a typed item lands in the draft as it is typed; add and remove redraw.
+    const redrawGraph = () => { dialog.querySelector('.job-graph').outerHTML = planGraphHtml(planDraft, { editable: true, openDeps, openTickets, openShow, editing: writeEdit, reviewWrites: reviewDefault() }); wireGraph(); };
+    graph.querySelectorAll('details[data-show-d]').forEach((d) => d.ontoggle = () => { if (d.open) openShow.add(d.dataset.showD); else openShow.delete(d.dataset.showD); layoutGraphEdges(graph); });
+    graph.querySelectorAll('input[data-show]').forEach((e) => {
+      e.oninput = () => { planDraft.subJobs[+e.dataset.show].show[+e.dataset.showK] = e.value.replace(/\s*\n\s*/g, ' '); };
+      e.onkeydown = (k) => { if (k.key === 'Enter' && !isPrimaryActionKey(k)) k.preventDefault(); };
+    });
+    graph.querySelectorAll('[data-show-rm]').forEach((b) => b.onclick = () => {
+      const [i, k] = b.dataset.showRm.split(':').map(Number);
+      planDraft.subJobs[i].show.splice(k, 1);
+      redrawGraph();
+    });
+    graph.querySelectorAll('[data-show-add]').forEach((b) => b.onclick = () => {
+      const s = planDraft.subJobs[+b.dataset.showAdd];
+      if ((s.show ||= []).length >= MAX_SHOW) return;
+      s.show.push(''); openShow.add(s.id);
+      redrawGraph();
+      [...dialog.querySelectorAll(`input[data-show="${b.dataset.showAdd}"]`)].at(-1)?.focus();
     });
     observer?.observe(graph.querySelector('.job-graph-canvas'));
     layoutGraphEdges(graph);
@@ -562,7 +593,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     if (!view || (replanPending(job) && (!sub ? !job.replan.proposal : ['code', 'session', 'pr'].includes(view.at)))) return '';
     const chips = quickChips(job, sub);
     const quick = chips.length ? `<div class="job-quick"><div class="job-quick-chips">${chips.map((c, i) => `<button type="button" ${c.instant ? `data-quick="${c.kind}"` : `data-fill="${i}"`} title="${esc(c.hint || 'Pre-fills the box below. An agent works out the change.')}"><i class="${c.instant ? '' : 'agent'}">${c.instant ? 'Instant' : 'Claude'}</i>${esc(c.label)}</button>`).join('')}</div></div>` : '';
-    const box = `<div class="job-change" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}">${quick}<label>What should change?<small>${esc(changeHint(view.at))}</small><textarea rows="3" maxlength="8000" aria-label="Request changes"></textarea></label><div class="job-change-send"><button type="button" class="primary" data-change-send disabled>${ICONS.edit}Send</button></div></div>`;
+    const box = `<div class="job-change" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}">${quick}<label>What should change?<small>${esc(changeHint(view.at))}</small><textarea rows="3" maxlength="8000" aria-label="Request changes">${esc(askDraft && askDraft.subId === sub?.id ? askDraft.text : '')}</textarea></label><div class="job-change-send"><button type="button" class="primary" data-change-send ${askDraft && askDraft.subId === sub?.id ? '' : 'disabled'}>${ICONS.edit}Send</button></div></div>`;
     return fold ? more('change', `${ICONS.edit}${sub ? 'Request changes' : 'Change plan'}`, box) : `<h3>Request changes</h3>${box}`;
   }
   const appbar = (title, chips, kicker = '') => `<header class="job-appbar">${kicker}<h2>${esc(title)}</h2><div class="job-chips job-detail-meta">${chips}</div></header>`;
@@ -612,8 +643,10 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       if (missing.length && !askedImages.has(strip.dataset.strip)) { askedImages.add(strip.dataset.strip); send({ type: 'job-images', id: strip.dataset.strip }); }
     });
   }
+  // What the agent must show before the code is committed (server/jobs-schema.js show).
+  const showMeHtml = (s) => showOf(s).length ? `<p>Show me before review:</p><ul class="job-show-list">${showOf(s).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
   function planMoreHtml(job, plan) {
-    const briefs = (plan?.subJobs || []).map((s) => `<h5>${kindChipHtml(s)} ${esc(s.title)}</h5><p>${esc(s.brief)}</p>${s.check ? `<p>Check after it lands: ${esc(s.check)}</p>` : ''}`).join('');
+    const briefs = (plan?.subJobs || []).map((s) => `<h5>${kindChipHtml(s)} ${esc(s.title)}</h5><p>${esc(s.brief)}</p>${s.check ? `<p>Check after it lands: ${esc(s.check)}</p>` : ''}${showMeHtml(s)}`).join('');
     const fresh = (plan?.stories || []).filter((s) => !s.key).length;
     return more('plan', `${ICONS.doc}Plan details`, `${plan?.stories?.length ? `<h4>Stories <small>${fresh ? `${fresh} new · created only after you approve` : 'existing'}</small></h4>${storiesHtml(plan.stories)}` : ''}
       ${plan?.context ? `<h4>Context <small>every session on this job gets it</small></h4><p class="job-context">${esc(plan.context)}</p>` : ''}
@@ -774,7 +807,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       const reviewed = reviewedOf(writes);
       const bad = planDraft.subJobs.filter(writeProblem);
       if (writeEdit != null && !isWriteSub(planDraft.subJobs[writeEdit])) writeEdit = null;
-      body = `${writes.length ? `<div class="job-chips job-write-count">${chip(ICONS.link, `${writes.length} write${writes.length === 1 ? '' : 's'}${reviewed ? ` · ${reviewed} reviewed` : ''}`, { cls: 'job-chip-quiet', title: 'Open a place under its step to change its writes; its eye says whether it stops for your review' })}</div>` : ''}${planGraphHtml(planDraft, { editable: true, openDeps, openTickets, editing: writeEdit, reviewWrites: reviewDefault() })}${writeEdit != null ? writeEditorHtml(job, planDraft, writeEdit) : ''}${planMoreHtml(job, planDraft)}`;
+      body = `${writes.length ? `<div class="job-chips job-write-count">${chip(ICONS.link, `${writes.length} write${writes.length === 1 ? '' : 's'}${reviewed ? ` · ${reviewed} reviewed` : ''}`, { cls: 'job-chip-quiet', title: 'Open a place under its step to change its writes; its eye says whether it stops for your review' })}</div>` : ''}${planGraphHtml(planDraft, { editable: true, openDeps, openTickets, openShow, editing: writeEdit, reviewWrites: reviewDefault() })}${writeEdit != null ? writeEditorHtml(job, planDraft, writeEdit) : ''}${planMoreHtml(job, planDraft)}`;
       const authority = authorityText(job, planDraft);
       fab = `<button class="primary" data-action="approve-plan" title="${esc(bad.length ? `Finish ${bad.length === 1 ? 'the write' : `${bad.length} writes`} first: ${writeProblem(bad[0])}` : authority)}" ${running || bad.length ? 'disabled' : ''}>${ICONS.check}Approve ${planDraft.subJobs.filter((s) => !isWriteSub(s)).length}</button>`;
     } else if (replanProposed(job)) body = proposalHtml(job);
@@ -931,7 +964,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
         ${yours ? `<form id="job-human-form" data-state="${esc(sub.state)}"><label>Result for dependent work <small title="Up to 8,000 characters, passed to dependent agents">optional</small><textarea name="output" maxlength="8000" rows="4"></textarea></label><div class="job-actions tone-${STATES[state].tone}"><button class="primary" type="submit" title="${esc(hints.find((h) => h.startsWith('No agent')) || '')}">${ICONS.check}Mark done</button>${sub.state === 'doing' ? '' : '<button type="button" data-action="start-human">Mark in progress</button>'}</div></form>` : ''}`;
       actions = retry;
     } else {
-      body = `${sub.stage === 'review' && sub.ready ? `<h3>Ready for review</h3>${receiptHtml(sub.ready.checks)}` : ''}
+      body = `${sub.stage === 'review' && sub.ready ? (hasProof(sub) ? `${proofGridHtml(job, sub)}${alsoCheckedHtml(sub)}` : `<h3>Ready for review</h3>${receiptHtml(sub.ready.checks)}`) : ''}
         ${sub.pr?.checks?.length ? `<h3>Checks</h3><ul class="job-checks">${sub.pr.checks.map((c) => `<li class="${checkTone(c.state)}">${checkMark(c.state)} ${esc(c.name)} <small>${esc(c.state.toLowerCase())}</small></li>`).join('')}</ul>` : ''}
         ${sub.pr ? commentsHtml(sub, commentsShown) : ''}
         ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
@@ -940,7 +973,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
         ${sub.worktree && sub.stage !== 'done' ? `<button id="job-diff">${ICONS.code}Review code in Wrangler</button>` : ''}${sub.worktree?.path && sub.stage !== 'done' ? `<button id="job-ide">Review code in ${esc(ideApp())}</button>` : ''}${session}${retry}
         ${sub.recoveredBy ? `<button data-open-sub="${esc(sub.recoveredBy)}" title="${esc(hints.at(-1))}">${ICONS.wrench}Open fix sub-job</button>` : ''}`;
     }
-    const details = `${pr ? `<code>${esc(sub.worktree?.path || 'Worktree created on dispatch')}</code>` : ''}${isHumanSub(sub) || isWriteSub(sub) ? '' : `<p>${esc(sub.brief)}</p>`}${sub.why ? `<p>Why: ${esc(sub.why)}</p>` : ''}${sub.check ? `<p>Check after it lands: ${esc(sub.check)}</p>` : ''}
+    const details = `${pr ? `<code>${esc(sub.worktree?.path || 'Worktree created on dispatch')}</code>` : ''}${isHumanSub(sub) || isWriteSub(sub) ? '' : `<p>${esc(sub.brief)}</p>`}${sub.why ? `<p>Why: ${esc(sub.why)}</p>` : ''}${sub.check ? `<p>Check after it lands: ${esc(sub.check)}</p>` : ''}${showMeHtml(sub)}
       ${workflows.length ? `<h4>What runs on merge <small>${workflows.filter((w) => w.triggers).length} of ${workflows.length}</small></h4><ul class="job-checks">${workflows.map((w) => `<li class="${w.triggers ? 'passed' : ''}">${w.triggers ? '✓' : '○'} ${esc(w.name)} <small>${esc(w.reason)}</small></li>`).join('')}</ul>` : ''}
       ${sub.repairs.length ? `<h4>Changes after failed checks</h4>${sub.repairs.map((r, i) => `<div class="job-repair"><b>Repair ${i + 1}</b>${receiptHtml(r.changes)}<details><summary>Re-verified</summary>${receiptHtml(r.checks)}</details></div>`).join('')}` : ''}`;
     return `${appbar(sub.title, chips, kicker)}${depsHtml(job, sub)}
@@ -949,21 +982,48 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       ${reviewing ? changeBoxHtml(job, sub) : ''}${actions.trim() ? `<div class="job-actions tone-${STATES[state].tone}">${actions}</div>` : ''}${reviewing ? '' : changeBoxHtml(job, sub, { fold: true })}
       ${isWriteSub(sub) ? '' : more('details', `${ICONS.doc}${isHumanSub(sub) ? 'Details' : pr ? 'Worktree &amp; brief' : 'Brief'}`, details)}`;
   }
+  // The shot viewer's own controls. Back and Ask both leave it; Ask lands in the
+  // Request changes box with the question started, about this item.
+  // Blank Show me rows are dropped on the way out, and a list left empty is no list.
+  const cleanedPlan = (plan) => ({ ...plan, subJobs: plan.subJobs.map((s) => {
+    const { show, ...rest } = s;
+    const items = [...new Set((show || []).map((t) => String(t).trim()).filter(Boolean))].slice(0, MAX_SHOW);
+    return items.length ? { ...rest, show: items } : rest;
+  }) });
+  function wireProofViewer(job, sub) {
+    const item = proofItems(sub)[proofView.i], shot = shotsOf(item)[proofView.j || 0];
+    dialog.querySelector('[data-proof-back]').onclick = () => { proofView = null; renderDetail(); };
+    dialog.querySelectorAll('[data-proof-go]').forEach((b) => b.onclick = () => { proofView = { i: +b.dataset.proofGo, j: 0 }; renderDetail(); });
+    dialog.querySelectorAll('[data-proof-shot]').forEach((b) => b.onclick = () => { proofView = { ...proofView, j: +b.dataset.proofShot }; renderDetail(); });
+    dialog.querySelector('[data-proof-ask]').onclick = () => {
+      askDraft = { subId: sub.id, text: item.couldNot ? `You couldn’t show “${item.text}”. Please try another way: ` : `About “${item.text}”: ` };
+      proofView = null; openMore.add('change');
+      renderDetail();
+      askDraft = null;
+      const box = dialog.querySelector('.job-change textarea');
+      if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+    };
+    hydrateEvidence(dialog, evidence, send, shot ? { full: { jobId: job.id, subId: sub.id, round: proofRound(sub), file: shot.file } } : {});
+  }
   function renderDetail() {
     const job = data.jobs.find((j) => j.id === selected?.jobId);
     if (!job) return;
     const sub = job.subJobs.find((s) => s.id === selected.subId);
     if (!sub && !planDraft && job.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
     const focus = document.activeElement?.closest?.('.job-detail-footer [data-review]')?.dataset.review;
+    // An open shot is drawn instead of the step, and a tick redraws it where it was.
+    const viewing = sub && proofView && proofItems(sub).length > proofView.i && !isWriteSub(sub);
+    if (!viewing) proofView = null;
     flags.painting = true;
-    show(sub ? subDetail(job, sub) : jobDetail(job));
+    show(viewing ? proofViewerHtml(job, sub, proofView, evidence, { branch: sub.worktree?.branch }) : sub ? subDetail(job, sub) : jobDetail(job));
     flags.painting = false;
+    if (viewing) { wireProofViewer(job, sub); return; }
     wireFooter();
     if (focus) dialog.querySelector(`.job-detail-footer [data-review="${focus}"]`)?.focus();
     dialog.querySelectorAll('[data-action]').forEach((b) => b.onclick = () => {
       const name = b.dataset.action;
       const target = b.dataset.sub ? job.subJobs.find((s) => s.id === b.dataset.sub) : sub;
-      action(name, name === 'approve-plan' ? { plan: planDraft, revision } : name === 'approve-replan' ? { proposalId: job.replan.proposal.id, ...(job.replan.proposal.alternatives?.length ? { option: pickedOption(job) } : {}) }
+      action(name, name === 'approve-plan' ? { plan: cleanedPlan(planDraft), revision } : name === 'approve-replan' ? { proposalId: job.replan.proposal.id, ...(job.replan.proposal.alternatives?.length ? { option: pickedOption(job) } : {}) }
         : { head: target?.pr?.head, sessionReceiptId: target?.result?.receiptId, ...(target?.ready ? { readyReceiptId: target.ready.receiptId } : {}) }, target?.id);
     });
     const humanForm = dialog.querySelector('#job-human-form');
@@ -978,6 +1038,8 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
       renderDetail();
     });
     wireWriteReview(job, sub);
+    dialog.querySelectorAll('[data-proof]').forEach((b) => b.onclick = () => { proofView = { i: +b.dataset.proof, j: 0 }; renderDetail(); });
+    hydrateEvidence(dialog, evidence, send);
     dialog.querySelectorAll('[data-open-sub]').forEach((b) => b.onclick = () => openDetail(job.id, b.dataset.openSub));
     dialog.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
     dialog.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
@@ -1158,7 +1220,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     e.preventDefault();
     run();
   });
-  dialog.addEventListener('close', () => { selected = null; planDraft = null; commentsShown.clear(); openDeps.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
+  dialog.addEventListener('close', () => { selected = null; planDraft = null; proofView = null; askDraft = null; commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
   // the same dialog a board card's click does, from a job/sub id pair index.js kept.
@@ -1172,7 +1234,7 @@ export function initJobsView({ send, stageImage, getAgents, getTasks = () => [],
     flags.note = { field: cp.field, head: job ? checkpointLabel(cp, youReview(job, cp.field)) : cp.name, body: msg.error, undo: false };
     paintFooter();
   }
-  return { update, newJob: createJob, reviewFailed, idea: idea.message, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
+  return { update, newJob: createJob, reviewFailed, idea: idea.message, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
     // A checkpoint switch keeps the dialog: the footer is where it was made.
     if (msg?.action === 'set-review') {
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }

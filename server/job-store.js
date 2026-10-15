@@ -2,7 +2,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR } from './data-dir.js';
 import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
-import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode } from './jobs-schema.js';
+import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode, checkText, unansweredShow } from './jobs-schema.js';
+import { adoptEvidence } from './job-evidence.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
@@ -449,14 +450,28 @@ export class JobStore {
         return;
       }
       if (report.kind === 'completed' && r.parkedAt && !r.mailedAt) throw new Error('Your drafts are with the human: wait for mail saying which writes to make, then complete');
+      // The proof is checked and kept BEFORE anything is recorded, so a refused
+      // receipt leaves no trace and the agent simply fixes it and reports again.
+      const proof = report.kind === 'ready' && s && !j.cancelledAt && !s.cancelledAt ? this._proofOf(j, r, s, report) : null;
       r.report = report; r.reportedAt = Date.now();
       // A receipt racing a cancel is kept on the run for the record but never
       // moves the sub-job: a late `published` must not pull it back out of cleanup,
       // and a late `plan` must not activate a job that was cancelled while planning.
-      if (!j.cancelledAt && !s?.cancelledAt) this._applyReceipt(j, r, s, report);
+      if (!j.cancelledAt && !s?.cancelledAt) this._applyReceipt(j, r, s, report, proof);
     });
   }
-  _applyReceipt(j, r, s, report) {
+  // The Show me list is answered item by item, each by a check carrying shots, a
+  // run or couldNot; the files named are copied into this round's folder. A round
+  // is the count of ready receipts this sub-job has had, so a rework never
+  // overwrites what the human already read.
+  _proofOf(j, r, s, report) {
+    const missing = unansweredShow(s.show, report.checks);
+    if (missing.length) throw new Error(`Show me: answer ${missing.map((m) => `"${m}"`).join(', ')} with a check of that exact text carrying shots, run or couldNot`);
+    const round = j.runs.filter((x) => x.subJobId === s.id && x.id !== r.id && x.report?.kind === 'ready').length + 1;
+    const proofs = report.checks.filter((c) => typeof c !== 'string');
+    return { round, proof: adoptEvidence({ jobId: j.id, subId: s.id, round, proof: proofs }) };
+  }
+  _applyReceipt(j, r, s, report, proof = null) {
     if (report.kind === 'plan' && j.stage === 'active') {
       // Discarded while the planner worked: kept on the run, applied nowhere.
       if (j.replan) proposeReplan(j, r, report, Date.now());
@@ -478,7 +493,7 @@ export class JobStore {
     // Code review switched off while the session worked: its prompt still said
     // leave it uncommitted, so the receipt is approved as it lands.
     if (report.kind === 'ready') {
-      s.ready = { checks: report.checks, receiptId: r.id, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
+      s.ready = { checks: report.checks.map(checkText), ...(proof?.proof.length ? { proof: proof.proof } : {}), ...(proof ? { round: proof.round } : {}), receiptId: r.id, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
       if (!reviewCode(j)) { s.ready.approvedAt = s.ready.at; s.state = 'approved'; }
     }
     if (report.kind === 'published') { s.pr = { url: report.url, checkStatus: 'pending' }; s.stage = 'pr'; s.state = 'watching'; s.mergeApprovedHead = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
