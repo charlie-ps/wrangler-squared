@@ -687,7 +687,7 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-mark-removed .job-node-title { text-decoration:line-through; color:var(--fg-muted); }
 .job-mark-frozen { opacity:.7; }
 .job-mark-accept-red .job-mark,.job-mark-recover .job-mark,.job-mark-mark-done .job-mark,.job-mark-mark-merged .job-mark { color:var(--wf); background:color-mix(in srgb, var(--wf) 16%, var(--surface)); font-weight:600; }
-.job-mark-rework .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
+.job-mark-rework .job-mark,.job-mark-forward .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
 li.job-mark-act { color:var(--wf); }
 li small.pinned { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg-subtle); margin-left:6px; }
 .job-triage { background:var(--surface-2); border-radius:12px; padding:12px 14px; display:grid; gap:8px; margin:0 0 14px; font-size:13px; }
@@ -1345,6 +1345,7 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-msg.system { background:var(--surface-2); }
 .job-msg.system .job-msg-who, .job-msg.system p { color:var(--fg-muted); }
 .job-msg p { margin:0; color:var(--fg); white-space:pre-wrap; overflow-wrap:anywhere; }
+.job-msg-via { display:inline-block; margin-top:4px; font-size:11px; color:var(--fg-muted); border:1px dashed var(--border-muted); border-radius:4px; padding:0 6px; }
 .job-msg time { display:inline-flex; align-items:center; gap:3px; margin-left:6px; font-size:11px; color:var(--fg-subtle); }
 .job-msg-tick { display:inline-flex; color:var(--green-fg); }
 .job-msg-tick svg { width:11px; height:11px; }

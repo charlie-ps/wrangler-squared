@@ -16,7 +16,8 @@ function messageHtml(job, sub, m) {
   const files = [...(m.shots || []), ...(m.images || [])].map((x) => x.file);
   const attach = files.length ? `<div class="job-msg-att">${files.map((f) => roundThumbHtml(job, sub, m.round, f)).join('')}</div>` : '';
   const run = m.run ? `<pre class="job-msg-run"><i>$</i> ${esc(m.run.cmd)}\n${esc(m.run.out)}\n<b class="${m.run.exit === 0 ? 'ok' : 'bad'}">exit ${esc(m.run.exit)}</b></pre>` : '';
-  return `<div class="job-msg ${esc(m.from)}"><span class="job-msg-who">${m.from === 'system' ? `Round ${esc(m.round)}` : WHO[m.from] || esc(m.from)}</span><div><p>${esc(m.text)}<time>${m.from === 'human' && m.sentAt ? `<i class="job-msg-tick" title="Delivered to the session">${ICONS.check}</i>` : ''}${esc(clock(m.at))}</time></p>${run}${attach}</div></div>`;
+  const via = m.via === 'planner' ? '<span class="job-msg-via">via the planner · approved</span>' : '';
+  return `<div class="job-msg ${esc(m.from)}"><span class="job-msg-who">${m.from === 'system' ? `Round ${esc(m.round)}` : WHO[m.from] || esc(m.from)}</span><div><p>${esc(m.text)}<time>${m.from === 'human' && m.sentAt ? `<i class="job-msg-tick" title="Delivered to the session">${ICONS.check}</i>` : ''}${esc(clock(m.at))}</time></p>${run}${attach}${via}</div></div>`;
 }
 
 // Where the session stands: answering, waiting on your review, or gone.
@@ -34,7 +35,7 @@ const STATE_NOTE = { answering: 'working on what you sent', stopped: 'session st
 export function threadHtml(job, sub) {
   const st = threadState(job, sub);
   if (!st) return '';
-  const body = hasThread(sub) ? sub.thread.map((m) => messageHtml(job, sub, m)).join('') : '<div class="job-thread-empty">Ask about how it works or anything you saw. It answers from the session that wrote the code.</div>';
+  const body = hasThread(sub) ? sub.thread.map((m) => messageHtml(job, sub, m)).join('') : '<div class="job-thread-empty">Ideas reach it through the planner: ask about how it works or anything you saw, and once you approve, the session that wrote the code answers.</div>';
   return `<section class="job-thread ${st}" aria-label="Conversation with the session">${body}</section>`;
 }
 

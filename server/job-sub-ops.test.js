@@ -39,14 +39,26 @@ test('reworkSub follows the code-review flag: back to work under review, a repai
   assert.deepEqual([direct.subJobs[0].stage, direct.subJobs[0].fixRequested.note, direct.subJobs[0].repairAllowance], ['pr', 'Rename it', 1]);
 });
 
-test('an idea routes to the agent that holds the work, else the planner, and clears the event it answers', () => {
+test('every idea goes to the planner, pinned to the step and view it was typed on', () => {
   const at = (stage, extra = {}) => { const j = job(); Object.assign(j.subJobs[0], { stage, ...extra }); return j; };
-  const code = at('review', { state: 'verified', ready: { checks: ['x'], receiptId: 'run_1' }, error: 'Worker blocked', blocked: { summary: 'Worker blocked' } });
-  assert.equal(ask(code, 'api').route, 'step');
-  assert.deepEqual([code.subJobs[0].stage, code.subJobs[0].error, code.subJobs[0].blocked], ['implementation', null, null]);
+  const code = at('review', { state: 'verified', ready: { checks: ['x'], receiptId: 'run_1', round: 2 } });
+  code.runs.push({ id: 'run_1', subJobId: 'api', stopped: false, parkedFor: 'ready' });
+  assert.equal(requestChange(code, code.subJobs[0], { ...changeView(code, code.subJobs[0]), text: 'Tighten the spacing', attachments: [{ file: 'ask-1.png', mime: 'image/png', path: '/rounds/2/ask-1.png' }] }, { now: 1000 }).route, 'planner');
+  assert.deepEqual([code.subJobs[0].stage, code.subJobs[0].thread], ['review', undefined], 'nothing reaches the open session before the human approves');
+  assert.deepEqual(code.replan.source, { sub: 'api', at: 'code', ref: 'run_1' });
+  assert.deepEqual(code.replan.images, [{ sub: 'api', round: 2, file: 'ask-1.png', mime: 'image/png', path: '/rounds/2/ask-1.png' }]);
+  assert.match(code.replan.feedback, /^About “Deliver api” \(api, review\/verified\): Tighten the spacing\n\(Pasted images, read them: "\/rounds\/2\/ask-1.png"\)$/);
   const open = at('pr', { state: 'watching', pr: { url: PR, head: 'h1' } });
   assert.equal(changeView(open, open.subJobs[0]).ref, 'h1');
-  assert.equal(ask(open, 'api').route, 'step');
+  assert.equal(ask(open, 'api').route, 'planner');
+  assert.deepEqual([open.subJobs[0].stage, open.replan.source], ['pr', { sub: 'api', at: 'pr', ref: 'h1' }]);
+  const result = job({ subs: [session('spike')] });
+  Object.assign(result.subJobs[0], { stage: 'review', state: 'verified', result: { checks: ['x'], receiptId: 'run_2' } });
+  assert.equal(ask(result, 'spike').route, 'planner');
+  assert.deepEqual([result.subJobs[0].stage, result.subJobs[0].feedback, result.replan.source.at], ['review', undefined, 'session']);
+  const whole = job();
+  assert.equal(ask(whole, null).route, 'planner');
+  assert.deepEqual([whole.replan.feedback, whole.replan.source, whole.replan.images], ['Rename it', undefined, undefined]);
   const merged = at('deployment', { state: 'watching' });
   assert.equal(ask(merged, 'api').route, 'planner');
   assert.match(merged.replan.feedback, /^About “Deliver api” \(api, deployment\/watching\): Rename it$/);
@@ -54,9 +66,20 @@ test('an idea routes to the agent that holds the work, else the planner, and cle
   assert.throws(() => ask(at('pr', { cancelledAt: 5 }), 'api'), /Nothing is left to change/);
   assert.throws(() => requestChange(open, open.subJobs[0], { at: 'pr', ref: 'h0', text: 'x' }, { now: 1 }), /changed since you looked/);
   assert.throws(() => requestChange(open, open.subJobs[0], { at: 'pr', ref: 'h1', text: '  ' }, { now: 1 }), /Explain/);
-  const live = at('review', { state: 'verified', ready: { checks: ['x'], receiptId: 'run_1' } });
-  live.runs.push({ id: 'run_9', subJobId: 'api', stopped: false });
-  assert.throws(() => ask(live, 'api'), /Wait for the session to stop/);
+  const busy = job(); busy.runs.push({ id: 'run_p', subJobId: null, stopped: false });
+  assert.throws(() => ask(busy, 'api'), /Wait for the planning step/);
+});
+
+test('a second idea adds to the waiting proposal: earlier words, plan and actions all carry over', () => {
+  const j = job({ subs: [planSub('api'), planSub('web')] });
+  ask(j, null, 'Add CSV export');
+  j.replan.proposal = { id: 'run_p', plan: j.plan, actions: [{ type: 'rework', sub: 'web', note: 'Return 204', pin: { at: 'stage', ref: 'implementation' } }] };
+  ask(j, 'api', 'And make it smaller');
+  assert.equal(j.replan.proposal, null);
+  assert.match(j.replan.feedback, /^Earlier: Add CSV export\n\nNow: About “Deliver api”.*And make it smaller$/s);
+  assert.deepEqual(j.replan.previous, j.plan);
+  assert.deepEqual(j.replan.previousActions, [{ type: 'rework', sub: 'web', note: 'Return 204' }], 'pins are stamped afresh on the new proposal');
+  assert.equal(j.replan.source.sub, 'api');
 });
 
 const session = (id, extra = {}) => ({ id, title: `Run ${id}`, kind: 'session', after: [], brief: `Do ${id}`, ...extra });

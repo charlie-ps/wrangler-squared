@@ -30,6 +30,16 @@ const change = (f, subId, text = 'Take another pass') => {
   const view = changeView(job, subId ? job.subJobs.find((s) => s.id === subId) : null);
   return f.store.action(f.job.id, 'request-change', { subJobId: subId, at: view?.at, ref: view?.ref, text });
 };
+// The planner's half of an idea: it proposes `actions` on the plan as it stands,
+// and the human approves that proposal.
+const plannerOf = (f) => f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub);
+async function viaPlanner(f, subId, text, actions) {
+  change(f, subId, text); await f.tick();
+  const planner = plannerOf(f);
+  f.report({ kind: 'plan', plan: f.store.get(f.job.id).plan, actions }, planner);
+  f.store.action(f.job.id, 'approve-replan', { proposalId: planner.run.id });
+}
+const reworkVia = (f, subId, note = 'Take another pass') => viaPlanner(f, subId, note, [{ type: 'rework', sub: subId, note }]);
 const dropIt = (f, subId) => f.store.update(f.job.id, (j) => dropSub(j.subJobs.find((s) => s.id === subId), Date.now(), j));
 // Stand-ins for what a human did by hand, until proposals carry actions (design A2):
 // the runner still honours these states, so its tests set them directly.
@@ -324,10 +334,10 @@ test('Retry after a blocked publish keeps the approval: the tree the human appro
   assert.equal(f.sub().stage, 'pr');
 });
 
-test('Request changes on code under review with its session gone: back to work in the same worktree with the note, receipt withdrawn', async (t) => {
+test('an idea on code under review with its session gone: the planner reworks it in the same worktree with the note, receipt withdrawn', async (t) => {
   const f = fixture(t); await f.approve();
   f.report({ kind: 'ready', checks: ['Tests pass'] }); f.alive.delete(f.last().sid); await f.tick();
-  change(f, 'api', 'Use the existing retry helper');
+  await reworkVia(f, 'api', 'Use the existing retry helper');
   const sub = f.sub();
   assert.deepEqual([sub.stage, sub.state, sub.ready, sub.note], ['implementation', 'queued', null, 'Use the existing retry helper']);
   assert.match(f.store.get(f.job.id).moves.at(-1).detail, /back to work/);
@@ -337,12 +347,15 @@ test('Request changes on code under review with its session gone: back to work i
   assert.equal(f.sub().stage, 'review'); assert.equal(f.sub().note, null);
   // Approved but not yet launched: Request changes still withdraws it.
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId });
-  change(f, 'api');
+  await reworkVia(f, 'api');
   assert.equal(f.sub().stage, 'implementation');
   await f.tick(); f.report({ kind: 'ready', checks: ['Again'] }); await f.tick();
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await f.tick();
   assert.equal(f.last().run.phase, 'publish');
-  assert.throws(() => change(f, 'api'), /Wait for the session to stop/, 'not under the live publish session');
+  const publish = f.last();
+  change(f, 'api'); await f.tick();
+  assert.throws(() => f.report({ kind: 'plan', plan: f.store.get(f.job.id).plan, actions: [{ type: 'rework', sub: 'api', note: 'x' }] }, plannerOf(f)), /Wait for the step on “Deliver api” to stop/, 'not under the live publish session');
+  assert.equal(f.store.get(f.job.id).runs.find((r) => r.id === publish.run.id).stopped, false);
 });
 
 test('an implementation session that published anyway lands its PR whatever the review flag says, and with review off one session does it all', async (t) => {
@@ -684,7 +697,7 @@ test('Request changes on an open PR under code review goes back to work in the P
   f.setPr({ checkStatus: 'passing' }); await f.tick();
   f.store.action(f.job.id, 'approve-merge', { subJobId: 'api', head: 'head1' });
   assert.equal(f.sub().mergeApprovedHead, 'head1');
-  change(f, 'api', 'Rename the flag to sign_in_v2');
+  await reworkVia(f, 'api', 'Rename the flag to sign_in_v2');
   const sent = f.sub();
   assert.deepEqual([sent.stage, sent.state, sent.fixRequested, sent.note, sent.pr.url], ['implementation', 'queued', null, 'Rename the flag to sign_in_v2', PR_URL], 'the PR stays on the card; nothing is committed to it yet');
   assert.match(movesOf(f).at(-1).detail, /back to work on its PR/);
@@ -711,7 +724,7 @@ test('Request changes on an open PR with code review off launches a repair whate
   f.report({ kind: 'published', url: PR_URL }); await f.tick();
   f.setPr({ checkStatus: 'passing' }); await f.tick();
   assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 0, 'green checks start nothing on their own');
-  change(f, 'api', 'Rename the flag to sign_in_v2');
+  await reworkVia(f, 'api', 'Rename the flag to sign_in_v2');
   const requested = f.sub();
   assert.equal(requested.fixRequested.note, 'Rename the flag to sign_in_v2');
   assert.equal(requested.state, 'watching'); assert.equal(requested.nextPollAt, 0);
@@ -720,8 +733,8 @@ test('Request changes on an open PR with code review off launches a repair whate
   assert.equal(f.last().sub.fixRequested.note, 'Rename the flag to sign_in_v2', 'the prompt carries the note');
   f.report({ kind: 'repaired', changes: ['Renamed the flag'], checks: ['Tests pass'] });
   assert.equal(f.sub().fixRequested, null); assert.equal(f.sub().note, null);
-  assert.deepEqual(movesOf(f).map((m) => [m.subJobId, m.move, m.note]), [['api', 'request-change', 'Rename the flag to sign_in_v2']]);
-  assert.match(movesOf(f)[0].detail, /new commit on “Deliver api”/);
+  assert.deepEqual(movesOf(f).map((m) => [m.subJobId, m.move, m.note]), [['api', 'request-change', 'Rename the flag to sign_in_v2'], [null, 'approve-replan', 'About “Deliver api” (api, pr/watching): Rename the flag to sign_in_v2'], ['api', 'replan', null]]);
+  assert.match(movesOf(f)[2].detail, /new commit on “Deliver api”/);
   assert.match(movesOf(f)[0].id, /^mv_/);
 });
 
@@ -759,12 +772,16 @@ test('a request is pinned to what was viewed: a moved head, receipt, revision or
   assert.equal(movesOf(f).length, 1);
 });
 
-test('a session result goes back to its own session; the first plan and a running job go to the planner, and a pending change refuses a step\'s own agent', async (t) => {
+test('an idea on a session result reaches its own session through the planner; the first plan is still redrawn', async (t) => {
   const g = fixture(t); await g.approve(plan([sessionSpec('spike')]));
   g.report({ kind: 'completed', checks: ['Answered'] }); await g.tick();
   assert.deepEqual(changeView(g.store.get(g.job.id), g.sub()), { at: 'session', ref: g.sub().result.receiptId });
   assert.throws(() => g.store.action(g.job.id, 'request-change', { subJobId: 'spike', at: 'session', ref: 'run_stale', text: 'Also check staging' }), /changed since you looked/);
   change(g, 'spike', 'Also check staging');
+  assert.deepEqual([g.sub().stage, !!g.sub().result, g.store.get(g.job.id).replan.source], ['review', true, { sub: 'spike', at: 'session', ref: g.sub().result.receiptId }], 'nothing moves before the human approves');
+  await g.tick();
+  g.report({ kind: 'plan', plan: g.store.get(g.job.id).plan, actions: [{ type: 'rework', sub: 'spike', note: 'Also check staging' }] }, plannerOf(g));
+  g.store.action(g.job.id, 'approve-replan', { proposalId: plannerOf(g).run.id });
   assert.deepEqual([g.sub().stage, g.sub().state, g.sub().result, g.sub().feedback], ['session', 'queued', null, 'Also check staging']);
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web')]) }); await f.tick();
@@ -774,18 +791,21 @@ test('a session result goes back to its own session; the first plan and a runnin
   assert.equal(f.store.get(f.job.id).feedback, 'Just the API'); assert.equal(f.store.get(f.job.id).plan, null);
 });
 
-test('every step\'s idea has one way in: a pending plan change holds the step agents but a proposal takes more ideas', async (t) => {
+test('every idea has one way in: the planner, which takes a step\'s idea into the proposal it is asked to change', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api')); await f.tick();
   change(f, null, 'Also cover SSO'); await f.tick();
   assert.equal(f.store.get(f.job.id).replan.feedback, 'Also cover SSO');
-  assert.throws(() => change(f, 'api', 'Rename it'), /plan change is pending/, 'the planner holds the job still');
+  assert.throws(() => change(f, 'api', 'Rename it'), /Wait for the planning step/, 'one planner at a time');
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub)); await f.tick();
   const proposal = f.store.get(f.job.id).replan.proposal;
   assert.deepEqual(changeView(f.store.get(f.job.id), null), { at: 'proposal', ref: proposal.id });
   assert.throws(() => f.store.action(f.job.id, 'request-change', { at: 'proposal', ref: 'run_other', text: 'x' }), /changed since you looked/);
-  change(f, null, 'SSO goes first');
-  assert.equal(f.store.get(f.job.id).replan.previous.subJobs.length, 3, 'the planner reads the proposal it is asked to change');
+  change(f, 'api', 'Rename it');
+  const replan = f.store.get(f.job.id).replan;
+  assert.equal(replan.previous.subJobs.length, 3, 'the planner reads the proposal it is asked to change');
+  assert.match(replan.feedback, /^Earlier: Also cover SSO\n\nNow: About “Deliver api” \(api, review\/verified\): Rename it$/);
+  assert.equal(replan.source.at, 'code');
 });
 
 test('a PR sub-job that never opened a PR and was finished by hand still completes cleanup', async (t) => {
@@ -1755,7 +1775,7 @@ test('with session review off a completed session goes straight to done; request
   await g.approve(plan([sessionSpec('spike')]));
   g.report({ kind: 'completed', checks: ['Done'] }); await g.tick();
   assert.throws(() => change(g, 'spike', ' '), /Explain/);
-  change(g, 'spike', 'Also check staging');
+  await reworkVia(g, 'spike', 'Also check staging');
   assert.equal(g.sub().stage, 'session'); assert.equal(g.sub().result, null);
   await g.tick();
   assert.equal(g.last().run.phase, 'session'); assert.equal(g.last().sub.feedback, 'Also check staging');
@@ -1763,7 +1783,7 @@ test('with session review off a completed session goes straight to done; request
   assert.equal(g.sub().stage, 'review'); assert.equal(g.sub().feedback, null);
   g.store.action(g.job.id, 'approve-session', { subJobId: 'spike', sessionReceiptId: g.sub().result.receiptId });
   assert.deepEqual(g.store.get(g.job.id).moves.map((m) => [m.subJobId, m.move, m.note]),
-    [['spike', 'request-change', 'Also check staging'], ['spike', 'approve-session', null]], 'approvals and requests are on the same timeline');
+    [['spike', 'request-change', 'Also check staging'], [null, 'approve-replan', 'About “Run spike” (spike, review/verified): Also check staging'], ['spike', 'replan', null], ['spike', 'approve-session', null]], 'approvals and requests are on the same timeline');
 });
 
 test('with plan review off the plan receipt approves itself; a keyless story is still created by its own session first and a replan still waits', async (t) => {
@@ -1927,7 +1947,8 @@ test('a request-change arrives as a job-action with its own fields and reaches t
   stubRunner(t, host);
   await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: 'code', ref: f.sub().ready.receiptId, text: 'Use the retry helper' }, host);
   assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id, action: 'request-change', subJobId: 'api' }]);
-  assert.deepEqual([f.sub().stage, f.sub().note], ['implementation', 'Use the retry helper']);
+  assert.match(f.store.get(f.job.id).replan.feedback, /Use the retry helper$/);
+  assert.equal(f.sub().stage, 'review', 'the planner has it; the step waits for the proposal');
 });
 
 test('a refused job-action is broadcast with its reason instead of thrown, so the footer can snap back', async (t) => {
@@ -2228,7 +2249,7 @@ test('a running job takes a plan change as a proposal: frozen work is locked, re
   const prompt = jobPrompt(f.store.get(f.job.id), null, planner.run);
   assert.match(prompt, /ALREADY RUNNING/); assert.match(prompt, /- api \(pr\) "Deliver api": done\/done · FROZEN/);
   assert.match(prompt, /Frozen \(.*\): api\./); assert.match(prompt, /- web .*a step is running/); assert.match(prompt, /Requested change: Drop docs/);
-  assert.match(prompt, /Feedback on what a live sub-job already produced.*`rework` action on THAT sub-job.*never write it into a later sub-job/);
+  assert.match(prompt, /Feedback on, or a question about, what a live sub-job already produced.*`forward` when its session is open on review, else `rework`.*never write it into a later sub-job/i);
   assert.throws(() => change(f, null, 'again'), /Wait for the planning/);
 
   const proposal = (subs) => plan(subs);

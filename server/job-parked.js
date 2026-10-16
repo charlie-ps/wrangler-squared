@@ -19,10 +19,12 @@ export const looksLikeQuestion = (text) => QUESTION.test(String(text).trim());
 
 // A message for the parked session. It is delivered on the runner's next tick
 // (`sentAt` stays null until then); `answering` is what the board shows meanwhile.
-export function askAgent(sub, { from, text, kind, images }, now) {
+// `via: 'planner'` marks the human's words forwarded by an approved proposal
+// (job-actions.js), the only road an idea takes to a parked session.
+export function askAgent(sub, { from, text, kind, images, via }, now) {
   const round = sub.ready?.round || 1;
   const id = `msg_${now.toString(36)}${(sub.thread?.length || 0).toString(36)}`;
-  (sub.thread ||= []).push({ id, at: now, from, to: 'agent', text, round, ...(images?.length ? { images } : {}), sentAt: null });
+  (sub.thread ||= []).push({ id, at: now, from, ...(via ? { via } : {}), to: 'agent', text, round, ...(images?.length ? { images } : {}), sentAt: null });
   sub.answering = { id, at: now, kind: kind || (looksLikeQuestion(text) ? 'ask' : 'change'), round };
   return id;
 }

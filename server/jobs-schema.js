@@ -468,11 +468,13 @@ export const draftSchema = z.object({ id, text: commentSchema.optional(), title:
   where: z.string().trim().min(1).max(500).refine((s) => !/[\r\n]/.test(s), 'Use one line').optional(), fields: z.array(storyFieldSchema).max(25).optional() }).strict();
 // What approving a plan change can DO beyond editing the plan (job-actions.js):
 // each acts on a live sub-job and is pinned by the server to the head, merge
-// commit or stage it was written against. `evidence` is mandatory on a mark: the
+// commit, stage or review round it was written against. `evidence` is mandatory on a mark: the
 // PR or ticket that shows it is true. `fix` is the sub-job whose landing a
 // recover waits for.
-export const ACTION_TYPES = ['rework', 'accept-red', 'mark', 'recover'];
-export const actionSchema = z.object({ type: z.enum(ACTION_TYPES), sub: id, note: line.optional(), position: z.enum(['merged', 'done']).optional(),
+export const ACTION_TYPES = ['forward', 'rework', 'accept-red', 'mark', 'recover'];
+// A forward or rework note carries the human's own words, which run past one line.
+export const actionNoteSchema = z.string().trim().min(1).max(2000);
+export const actionSchema = z.object({ type: z.enum(ACTION_TYPES), sub: id, note: actionNoteSchema.optional(), position: z.enum(['merged', 'done']).optional(),
   evidence: line.optional(), fix: id.optional() }).strict();
 export const MAX_OPTIONS = 3;
 export const diagnosisSchema = z.object({ summary: z.string().trim().min(1).max(1200),

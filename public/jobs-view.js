@@ -706,9 +706,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // At rest it is one line naming who hears it; focus, words or a picture open it.
   function changeBoxHtml(job, sub) {
     const view = changeView(job, sub), sent = askSentHtml(sub);
-    // A step's own agent can only take an idea while no plan change is pending; one
-    // Wrangler is fixing is the planner's for now, and a declared red is the planner's to take.
-    if (!view || (sub && redFixing(job, sub)) || (replanPending(job) && !(sub && redDeclared(job, sub)) && (!sub ? !job.replan.proposal : ['code', 'session', 'pr'].includes(view.at)))) return sent;
+    // Every idea goes to the planner: while it is drawing a proposal it takes no
+    // other, and once one waits any box adds to it. A step Wrangler is fixing is
+    // the planner's for now.
+    if (!view || (sub && redFixing(job, sub)) || (replanPending(job) && !job.replan.proposal)) return sent;
     const route = changeRoute(view.at, job, sub), draft = askDraft && askDraft.subId === sub?.id ? askDraft.text : '';
     // Something went wrong: what to say is the decision, so the box starts open.
     const open = sub && subState(job, sub) === 'failing';

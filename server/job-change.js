@@ -1,47 +1,22 @@
-import { isPrSub, isSessionSub, isWriteSub } from './jobs-schema.js';
-import { reworkSub } from './job-sub-ops.js';
 import { requestReplan } from './job-replan.js';
-import { parkedReadyRun, askAgent } from './job-parked.js';
+import { changeView } from './job-actions.js';
 import { isDeclared } from './job-red.js';
+
+export { changeView };
 
 // request-change: the one way a human's idea enters a job, from the plan, a code
 // review, a session's result, an open PR, a write, or a pending proposal. The
 // idea is pinned to what was on screen (`at` names the view, `ref` the exact
-// thing in it) and routes to the agent nearest the work: the step's own
-// resumable agent when it has one, else the planner. Pure over the job draft
-// job-store.js is about to persist, like job-replan.js.
+// thing in it) and goes to one recipient, the planner, which sorts it into
+// actions on live steps (forward to an open session, rework) and plan edits: one
+// proposal the human approves (job-replan.js, job-actions.js). Pure over the job
+// draft job-store.js is about to persist, like job-replan.js.
 
-const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.subJobId === subId);
 const quoted = (title) => `“${title}”`;
 export const CHANGE_TEXT_MAX = 8000;
-// The agents that can take a step's idea straight back: the session that wrote
-// the working tree or the result, and the repair session of an open PR. Every
-// other view goes up to the planner.
-const STEP_AGENT = new Set(['code', 'session', 'pr']);
 
-// What a human looking at this job (or sub-job) is looking at, and the exact
-// thing in it. The client mirrors this (public/jobs.js changeView): a request
-// whose pin no longer matches is refused rather than applied to a different
-// head, receipt, revision or proposal than the one that was read.
-export function changeView(job, sub) {
-  if (job.cancelledAt) return null;
-  if (!sub) {
-    if (job.stage === 'planning' && job.plan) return { at: 'plan', ref: String(job.revision) };
-    if (job.stage !== 'active') return null;
-    return job.replan?.proposal ? { at: 'proposal', ref: job.replan.proposal.id } : { at: 'job', ref: 'job' };
-  }
-  if (sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage)) return null;
-  const step = { at: 'step', ref: `${sub.stage}/${sub.state}` };
-  if (isWriteSub(sub)) return { at: 'write', ref: step.ref };
-  if (isSessionSub(sub)) return sub.stage === 'review' && sub.result ? { at: 'session', ref: String(sub.result.receiptId) } : step;
-  if (!isPrSub(sub)) return step;
-  if (sub.stage === 'review' && ['verified', 'approved'].includes(sub.state) && sub.ready) return { at: 'code', ref: String(sub.ready.receiptId) };
-  if (sub.stage === 'pr' && sub.pr?.head) return { at: 'pr', ref: sub.pr.head };
-  return step;
-}
-
-// An idea's pictures outside a parked review ride in its words, as paths the
-// agent reads (server/handlers.js prepare kept them on disk).
+// An idea's pictures ride in its words, as paths the planner reads
+// (server/handlers.js prepare kept them on disk).
 const withImages = (idea, attachments) => attachments?.length ? `${idea}\n(Pasted images, read them: ${attachments.map((a) => JSON.stringify(a.path)).join(', ')})` : idea;
 
 export function requestChange(job, sub, { at, ref, text, attachments }, { now }) {
@@ -52,29 +27,6 @@ export function requestChange(job, sub, { at, ref, text, attachments }, { now })
   const view = changeView(job, sub);
   if (!view) throw new Error(sub ? 'Nothing is left to change here' : 'The job has nothing to change right now');
   if (view.at !== at || view.ref !== String(ref)) throw new Error('This changed since you looked. Review the latest version and ask again.');
-  // A declared red is the planner's: it has already tried, so the idea goes to it
-  // with everything it found, and still holds only that step.
-  if (sub && isDeclared(job, sub)) {
-    const d = sub.red.declared;
-    requestReplan(job, `About ${quoted(sub.title)} (${sub.id}), which was declared red: ${d.summary}${d.tried?.length ? `\nTried: ${d.tried.join(' | ')}` : ''}${d.ask ? `\nThe decision asked of the human: ${d.ask}` : ''}\nThe human says: ${idea}`, now, { sub: sub.id, auto: false, human: true });
-    return { detail: `Sent the declared red on ${quoted(sub.title)} back to the planner`, route: 'planner' };
-  }
-  if (STEP_AGENT.has(view.at)) {
-    if (job.replan) throw new Error('A plan change is pending. Approve or discard it first.');
-    // The session that wrote this tree is still open (job-parked.js): the idea is
-    // written to it, and it answers or reworks and reports ready again.
-    const parked = view.at === 'code' && sub.state === 'verified' && parkedReadyRun(job, sub);
-    if (parked) {
-      const id = askAgent(sub, { from: 'human', text: typed, images: attachments?.map(({ file, mime }) => ({ file, mime })) }, now);
-      return { detail: `${sub.answering.kind === 'ask' ? 'Asked' : 'Asked for a change to'} ${quoted(sub.title)}`, route: 'parked', messageId: id };
-    }
-    if (liveRun(job, sub.id)) throw new Error('Wait for the session to stop');
-    if (view.at === 'session') {
-      sub.feedback = idea; sub.result = null; sub.error = null; sub.blocked = null; sub.stage = 'session'; sub.state = 'queued';
-      return { detail: `Requested changes on ${quoted(sub.title)}`, route: 'step' };
-    }
-    return { detail: reworkSub(job, sub, idea, now), route: 'step' };
-  }
   // The first plan is still the planner's own to redraw.
   if (view.at === 'plan') {
     if (job.runs.some((r) => !r.stopped)) throw new Error('Wait for planning to finish');
@@ -82,9 +34,20 @@ export function requestChange(job, sub, { at, ref, text, attachments }, { now })
     job.previousPlan = job.plan || job.previousPlan; job.plan = null; job.error = null;
     return { detail: 'Asked the planner to change the plan', route: 'planner' };
   }
-  // Anything else is a change of plan on a running job: a proposal the human
-  // approves (job-replan.js). A step's idea carries where it came from.
-  requestReplan(job, sub ? `About ${quoted(sub.title)} (${sub.id}, ${sub.stage}${sub.state ? `/${sub.state}` : ''}): ${idea}` : idea, now);
-  return { detail: sub ? `Asked the planner to change the plan around ${quoted(sub.title)}` : 'Asked the planner to change the plan', route: 'planner' };
+  // Kept beside the round they were typed on (a code review), a step's pictures can
+  // go on into its session's thread when the planner forwards the idea there.
+  const source = sub ? { sub: sub.id, at: view.at, ref: view.ref } : null;
+  const images = files.map(({ file, mime, path }) => ({ sub: sub?.id || null, round: view.at === 'code' ? sub.ready.round || 1 : null, file, mime, path }));
+  // A declared red is the planner's: it has already tried, so the idea goes to it
+  // with everything it found, and still holds only that step.
+  if (sub && isDeclared(job, sub)) {
+    const d = sub.red.declared;
+    requestReplan(job, `About ${quoted(sub.title)} (${sub.id}), which was declared red: ${d.summary}${d.tried?.length ? `\nTried: ${d.tried.join(' | ')}` : ''}${d.ask ? `\nThe decision asked of the human: ${d.ask}` : ''}\nThe human says: ${idea}`, now, { sub: sub.id, auto: false, human: true }, { source, images });
+    return { detail: `Sent the declared red on ${quoted(sub.title)} back to the planner`, route: 'planner' };
+  }
+  // Anything else is a change of plan on a running job, even a word for one
+  // step's open session: the planner proposes, the human approves. A step's idea
+  // says where it came from.
+  requestReplan(job, sub ? `About ${quoted(sub.title)} (${sub.id}, ${sub.stage}${sub.state ? `/${sub.state}` : ''}): ${idea}` : idea, now, null, { source, images });
+  return { detail: sub ? `Sent the planner an idea about ${quoted(sub.title)}` : 'Asked the planner to change the plan', route: 'planner' };
 }
-
