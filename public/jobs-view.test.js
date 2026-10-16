@@ -2022,6 +2022,13 @@ test('a plate’s stub decides a write draft in place: its verb approves it as d
   assert.equal(f.q('#job-dialog').open, false, 'deciding from the board opens nothing');
 });
 
+test('the masthead is titled Wrangler² over a kicker that is just the date', (t) => {
+  const f = fixture(t);
+  assert.equal(f.q('.jobs-mast h1').textContent, 'Wrangler²');
+  assert.equal(f.q('#jobs-date').textContent, new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }));
+  assert.equal(f.q('.jobs-mast').textContent.split('Wrangler²').length, 2, 'the name appears once, in the title');
+});
+
 test('the masthead counts agents in bays and says when automation is paused', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active'; job.usd = 3.5;
   job.subJobs = [{ ...sub('api'), stage: 'implementation' }];

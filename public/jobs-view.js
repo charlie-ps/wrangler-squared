@@ -361,7 +361,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const resetFlags = (jobId = null) => { flags = { jobId, hover: null, note: null, pending: null, confirm: null, inside: false, painting: false }; };
   resetFlags();
   const openTickets = new Set();
-  root.innerHTML = `<header class="jobs-mast"><div class="jobs-top"><canvas class="jobs-mast-sky" aria-hidden="true"></canvas><div><div class="jobs-kicker" id="jobs-date">Wrangler² · Jobs</div><h1>Jobs</h1></div>
+  root.innerHTML = `<header class="jobs-mast"><div class="jobs-top"><canvas class="jobs-mast-sky" aria-hidden="true"></canvas><div><div class="jobs-kicker" id="jobs-date"></div><h1>Wrangler²</h1></div>
       <div class="jobs-telemetry"><span class="jobs-beacon" id="jobs-active-count" aria-live="polite"></span><span class="jobs-bays" id="jobs-bays" aria-hidden="true"></span><span id="jobs-spend"></span><span id="jobs-delivered"></span></div>
       <div class="jobs-tools"><label class="jobs-ghost" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="8" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-ghost"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="jobs-newjob" id="job-new">${ICONS.plus}New job</button></div></div>
       <nav class="jobs-rail" aria-label="Show jobs">${FILTERS.map(([key, label]) => `<button type="button" data-filter="${key}" aria-pressed="${key === filter}">${label}<span class="jobs-rail-n" ${key === 'needs' ? 'id="jobs-review-count"' : ''}></span></button>`).join('')}</nav></header>
@@ -388,7 +388,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const paused = !!data.settings.paused;
     const { concurrency } = data.settings;
     root.classList.toggle('jobs-paused', paused);
-    q('#jobs-date').textContent = `Wrangler² · ${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}`;
+    q('#jobs-date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
     q('#jobs-active-count').innerHTML = `<b>${active}</b> of ${concurrency} agents ${paused ? 'paused' : 'working'}`;
     q('#jobs-bays').innerHTML = Array.from({ length: Math.max(concurrency, active) }, (_, i) => `<i class="${i < active ? 'on' : ''}"></i>`).join('');
     const spend = data.jobs.filter((j) => j.stage !== 'done').reduce((a, j) => a + (j.usd || 0), 0);
