@@ -278,7 +278,8 @@ export class JobRunner {
           let pr = await this.github.pr(sub);
           // A failed update-branch (conflicts) on this head reads as DIRTY, so the
           // repair path that already handles conflicts takes it from here.
-          if (pr.behind && sub.branchUpdate?.failedHead === pr.head) pr = { ...pr, behind: false, dirty: true, checkStatus: 'failing' };
+          const redBehind = sub.acceptedRed?.ref === pr.head && pr.state === 'OPEN' && pr.mergeState === 'BEHIND' && !pr.dirty;
+          if ((pr.behind || redBehind) && sub.branchUpdate?.failedHead === pr.head) pr = { ...pr, behind: false, dirty: true, checkStatus: 'failing' };
           const comments = await this.github.comments(sub);
           // Whether this diff deploys is a property of the head, so it is read
           // once per head and again after every repair push.
@@ -308,9 +309,12 @@ export class JobRunner {
             const limit = this.store.snapshot().settings.maxRepairs + (sub.repairAllowance || 0);
             if (attempts >= limit) this.patchSub(id, sub.id, (s) => { s.error = 'Automatic repair limit reached. Review changes, then retry if needed.'; });
             else await this.launch(job, sub, 'repair');
-          } else if (pr.behind && sub.acceptedRed?.ref !== pr.head) {
+          } else if (pr.behind && sub.acceptedRed?.ref !== pr.head || redBehind) {
             // Green but behind a base that requires up-to-date branches: bring it
             // up to date and keep watching, since the new head re-runs the checks.
+            // An accepted-red head is behind too (`behind` excludes red ones); an
+            // --admin merge cannot be relied on for it, so it is updated and
+            // carryApproval moves the acceptance to the new head.
             if (!heldBy(job, sub) && dependenciesSatisfied(job, sub)) await this.updateBranch(id, sub, pr);
           } else if (!heldBy(job, sub) && (pr.checkStatus === 'passing' || sub.acceptedRed?.ref === pr.head) && dependenciesSatisfied(job, sub) && (sub.mergeApprovedHead === pr.head || (!job.reviewMerge && !commentsBlockMerge(sub)))) {
             // An accepted-red head merges whatever its checks say — the move
@@ -372,6 +376,7 @@ export class JobRunner {
           // A refusal keeps what would be lost for the board; a Discard is spent
           // either way, so a changed tree has to be looked at and chosen again.
           if (s.stage === 'cleanup') { s.error = shortError(e); s.cleanupRefusal = e.refusal || null; s.discard = null; }
+          else if (e.needsAdmin) s.error = shortError(e);
           else { s.observationError = shortError(e); s.nextPollAt = this.now() + 60000; }
         });
       }

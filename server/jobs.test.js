@@ -1989,7 +1989,7 @@ function reviewGithub(raw = reviewRequiredPr, { classic = { contexts: ['tests'] 
   const calls = [];
   const gh = new JobGithub(async (_bin, args) => {
     calls.push(args);
-    if (args[0] === 'repo') return JSON.stringify({ nameWithOwner: 'org/repo' });
+    if (args[0] === 'repo') return JSON.stringify({ nameWithOwner: 'org/repo', viewerPermission: 'ADMIN' });
     if (args[0] === 'pr') return JSON.stringify(raw);
     if (args[1].includes('/rules/branches/')) return JSON.stringify([rules]);
     if (args[1].includes('/check-runs?')) return JSON.stringify([{ check_runs: runs }]);
@@ -2394,6 +2394,52 @@ test('a conflicting update is treated as DIRTY and sent to repair; transient fai
   g.github.updateBranch = async () => { throw new Error('network down'); };
   g.setPr({ checkStatus: 'pending', behind: true }); await g.tick(); await g.tick();
   assert.notEqual(g.last().run.phase, 'repair'); assert.equal(g.sub().branchUpdate.failedHead, undefined);
+});
+
+test('a BEHIND accepted-red head is updated, not --admin merged, and the acceptance follows the new head', async (t) => {
+  const f = fixture(t); f.store.settings({ maxRepairs: 0 }); await atPr(f);
+  const updated = []; f.github.updateBranch = async (s) => { updated.push(s.pr.head); };
+  f.setPr({ checkStatus: 'failing', checks: [{ name: 'e2e', state: 'FAILURE' }] }); await f.tick();
+  acceptRed(f, 'api', 'flaky');
+  f.setPr({ mergeState: 'BEHIND', behind: false, dirty: false }); await f.tick();
+  assert.deepEqual(updated, ['head1']); assert.deepEqual(f.merged, []);
+  f.setPr({ head: 'head2', mergeState: 'BLOCKED' }); await f.tick();
+  assert.equal(f.sub().acceptedRed.ref, 'head2'); assert.equal(f.sub().mergeApprovedHead, 'head2');
+  assert.deepEqual(f.merged, ['head2']);
+  const g = fixture(t); g.store.settings({ maxRepairs: 0 }); await atPr(g);
+  g.github.updateBranch = async () => { throw new Error('should not update'); };
+  g.setPr({ checkStatus: 'failing' }); await g.tick(); acceptRed(g, 'api');
+  g.setPr({ mergeState: 'BEHIND', dirty: true }); await g.tick();
+  assert.equal(g.sub().branchUpdate, undefined, 'a conflicted head is not updated');
+});
+
+test('a merge that needs admin rights the viewer lacks sets a sub-job error; a transient failure still retries', async (t) => {
+  const f = fixture(t); await atPr(f);
+  f.github.merge = async () => { throw Object.assign(new Error('Merging this PR needs admin rights on the repository.'), { needsAdmin: true }); };
+  f.setPr({ checkStatus: 'passing' }); await f.tick();
+  assert.match(f.sub().error, /needs admin rights/); assert.equal(f.sub().observationError ?? null, null);
+  const g = fixture(t); await atPr(g);
+  g.github.merge = async () => { throw new Error('network down'); };
+  g.setPr({ checkStatus: 'passing' }); await g.tick();
+  assert.match(g.sub().observationError, /network down/); assert.ok(!g.sub().error);
+});
+
+test('merge refuses --admin for a viewer without admin permission, or when GitHub refuses the bypass', async () => {
+  const redPr = { ...rawPr, mergeStateStatus: 'BLOCKED', statusCheckRollup: [{ name: 'e2e', conclusion: 'FAILURE' }] };
+  const { gh, sub, calls } = reviewGithub(redPr);
+  sub.pr.mergeWithAdmin = false; sub.acceptedRed = { ref: 'head1', note: null, at: 1 };
+  const run = gh.run;
+  gh.run = async (bin, args, cwd) => (args[0] === 'repo' && args.includes('viewerPermission') ? JSON.stringify({ viewerPermission: 'WRITE' }) : run(bin, args, cwd));
+  await assert.rejects(gh.merge(sub), (e) => e.needsAdmin && /needs admin rights/.test(e.message));
+  assert.ok(!calls.some((a) => a[1] === 'merge'));
+  const h = reviewGithub(redPr); h.sub.pr.mergeWithAdmin = false; h.sub.acceptedRed = { ref: 'head1', note: null, at: 1 };
+  const run2 = h.gh.run;
+  h.gh.run = async (bin, args, cwd) => { if (args[1] === 'merge') throw Object.assign(new Error('x'), { stderr: 'the base branch policy prohibits the merge; --admin is not permitted' }); return run2(bin, args, cwd); };
+  await assert.rejects(h.gh.merge(h.sub), (e) => e.needsAdmin);
+  const k = reviewGithub(redPr); k.sub.pr.mergeWithAdmin = false; k.sub.acceptedRed = { ref: 'head1', note: null, at: 1 };
+  const run3 = k.gh.run;
+  k.gh.run = async (bin, args, cwd) => { if (args[1] === 'merge') throw new Error('network down'); return run3(bin, args, cwd); };
+  await assert.rejects(k.gh.merge(k.sub), (e) => !e.needsAdmin && /network down/.test(e.message));
 });
 
 test('a PR that stays behind gives up after repeated updates', async (t) => {

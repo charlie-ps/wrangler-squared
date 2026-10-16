@@ -13,6 +13,8 @@ export async function runFile(bin, args, cwd) {
 }
 const bad = new Set(['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
 const good = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
+const ADMIN_REFUSED = /admin|bypass|not authorized|permission/i;
+const needsAdmin = (message) => Object.assign(new Error(message), { needsAdmin: true });
 const MERGEABLE_AS_IS = new Set(['CLEAN', 'UNSTABLE']);
 export function prSummary(pr) {
   const checks = (pr.statusCheckRollup || []).map((c) => ({ name: c.name || c.context || 'Check',
@@ -137,7 +139,16 @@ export class JobGithub {
     const description = (JSON.parse(await this.run('gh', ['pr', 'view', sub.pr.url, '--json', 'body'], sub.repo)).body || '').trim();
     const body = description.endsWith(ATTRIBUTION) ? description : [description, ATTRIBUTION].filter(Boolean).join('\n\n');
     if (!canMerge()) throw new Error('Job paused before merge');
-    await this.run('gh', ['pr', 'merge', sub.pr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', sub.pr.head, '--body', body], sub.repo);
+    if (admin) {
+      const { viewerPermission } = JSON.parse(await this.run('gh', ['repo', 'view', '--json', 'viewerPermission'], sub.repo));
+      if (viewerPermission !== 'ADMIN') throw needsAdmin(`Merging this PR needs admin rights on the repository (you have ${String(viewerPermission || 'unknown').toLowerCase()} access). Merge it yourself, or have someone with admin rights do it.`);
+    }
+    try {
+      await this.run('gh', ['pr', 'merge', sub.pr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', sub.pr.head, '--body', body], sub.repo);
+    } catch (e) {
+      if (admin && ADMIN_REFUSED.test(String(e.stderr || e.message))) throw needsAdmin('Merging this PR needs admin rights on the repository, and GitHub refused the bypass. Merge it yourself, or have someone with admin rights do it.');
+      throw e;
+    }
   }
   // Watch whatever GitHub actually started for this merge, rather than a list of
   // workflow names chosen before the merge existed: the plan cannot reliably
