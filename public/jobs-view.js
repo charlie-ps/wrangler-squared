@@ -962,18 +962,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // An idea still being talked through is its conversation (job-idea.js); once its
   // suggestion is accepted the plan review below takes over, the thread folded under it.
   function ideaDetail(job) {
-    const state = jobState(job);
-    const said = ideaThread(job).length + 1;
-    const model = [job.model, job.effort].filter(Boolean).join(' · ');
-    const chips = stateChip(state, jobLabel(job), [ideaStage(job) === 'thinking' ? 'The planner is working in its own session. Reply any time: it reads your answer when it is done.' : 'The planner is waiting for you. Its session is paused and uses no agent slot.'])
-      + chip('<span class="job-idea-orb small" aria-hidden="true"></span>', `Planner${model ? ` · ${model}` : ''}`, { title: 'Follow-ups resume this same planner session' })
-      + chip('', `${said} message${said === 1 ? '' : 's'}`, { cls: 'job-chip-quiet' })
-      + costChip(job.usd, job.usdEstimated, JOB_COST_TITLE);
+    const cost = costChip(job.usd, job.usdEstimated, JOB_COST_TITLE);
     const error = job.error ? `<p class="job-error">${esc(job.error)}</p>` : job.idea?.error ? `<p class="job-error">${esc(job.idea.error)} · Retrying automatically</p>` : '';
     const actions = `${job.error ? `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>` : ''}<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel idea</button>`;
     // What was on screen when the dialog opened is not new; only what arrives after fades in.
     if (ideaSeen?.jobId !== job.id) for (const m of ideaThread(job)) ideaDrawn.add(m.id);
-    return ideaViewHtml(job, { chips, actions, error, pending: ideaSent?.jobId === job.id ? ideaSent : null, firing: ideaFiring?.jobId === job.id ? ideaFiring : null, fresh: freshMessage });
+    return ideaViewHtml(job, { cost, actions, error, pending: ideaSent?.jobId === job.id ? ideaSent : null, firing: ideaFiring?.jobId === job.id ? ideaFiring : null, fresh: freshMessage });
   }
   const conversationHtml = (job) => ideaThread(job).length ? more('idea', `${ICONS.note}Conversation <small>${ideaThread(job).length + 1}</small>`, ideaThreadHtml(job), 'job-idea-past') : '';
   function jobDetail(job) {
