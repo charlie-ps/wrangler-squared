@@ -7,6 +7,17 @@ complete on host API 1.31.0, and that file is the map (what came from where, wha
 stands in for what, and which of the eight open host-API gaps block which
 feature).
 
+## This repository is public open source
+
+> **Everything here is public: code, commits, branch names, PR titles and
+> bodies, review comments, docs and test fixtures.** Never put anything specific
+> to an employer or its customers in any of them: internal repo or service
+> names, hostnames, internal or customer URLs, ticket keys, chat channels,
+> colleague names, credentials or tokens, or internal process. Keep examples
+> generic (`example.com`, `acme/widgets`, `PROJ-123`). If a change only makes
+> sense with such a detail, leave the detail out and say so to the human
+> instead.
+
 ## What this is
 
 - An **external extension** for agent-wrangler's extensions API, which is on
