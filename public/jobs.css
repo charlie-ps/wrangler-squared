@@ -1475,5 +1475,16 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-launch.done .job-launch-dot { background:#7fe0b0; box-shadow:0 0 20px rgba(127,224,176,.5); }
 .job-idea-past .job-idea-thread { padding:4px 0 0; }
 .job-idea-past .job-launch-refine { display:none; }
+/* An idea on the board (job-plates.js ideaPlateHtml): a job's plate under a sky still
+   forming, tagged IDEA where a job names its repos. Once it has a plan the cloud folds
+   into its point and the job's own sky rises from under it. */
+.job-plate.idea .job-plate-art::after { opacity:1; animation:none; background:linear-gradient(180deg, rgba(2,3,6,.35), transparent 30%); }
+.job-plate-where .job-plate-idea { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.job-plate-where .job-plate-idea::before { content:""; width:6px; height:6px; border-radius:50%; background:radial-gradient(circle, #ffd8e4, #c0508f 60%, transparent 70%); }
+.job-plate-art.collapsing > .gx.nb { z-index:1; transform-origin:var(--ox,50%) var(--oy,50%); transition:transform 1.3s cubic-bezier(.6,0,.4,1), opacity .9s .5s ease, filter 1.3s ease; }
+.job-plate-art.collapsing > :not(.nb) { opacity:0; transform:scale(1.12); transition:opacity 1.1s .55s ease, transform 1.6s .45s cubic-bezier(.2,.8,.2,1); }
+.job-plate-art.collapsing > :is(svg,.job-plate-tag,.job-plate-unplanned) { z-index:2; }
+.job-plate-art.collapsing.collapsed > .gx.nb { transform:scale(.12); opacity:0; filter:brightness(2.4) saturate(1.4); }
+.job-plate-art.collapsing.collapsed > :not(.nb) { opacity:1; transform:none; }
 @media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-chips,.job-idea-dock { padding-left:16px; padding-right:16px; } }
-@media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } }
+@media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-plate-art.collapsing > * { transition:opacity .3s !important; } .job-plate-art.collapsing.collapsed > .gx.nb { transform:none; } }

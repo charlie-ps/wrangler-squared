@@ -29,6 +29,8 @@ export const hasHumanSubs = (job) => job.subJobs.some(isHumanSub);
 // or a job it suggests.
 export const ideaThread = (job) => job?.idea?.thread || [];
 export const inConversation = (job) => !!job?.idea && job.stage === 'planning' && !job.plan && !job.replan && !job.cancelledAt;
+// An idea's plate on the board: talked through, or parked in the backlog, until it has a plan.
+export const ideaOpen = (job) => !!job?.idea && ['planning', 'backlog'].includes(job.stage) && !job.plan && !job.replan && !job.cancelledAt;
 export function liveSuggestion(job) {
   const last = ideaThread(job).at(-1);
   return last?.from === 'planner' && last.suggest && !last.acceptedAt ? last : null;

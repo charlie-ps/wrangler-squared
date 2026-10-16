@@ -1,16 +1,20 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaStage } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaStage, ideaOpen } from './jobs.js';
 import { ideaViewHtml, ideaThreadHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
 import { holdSkies, mountSkies, mountMastSky, releaseSkies, spinTo } from './job-skylines.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 
+// How long an accepted idea's plate takes to fold into its job's (jobs.css .collapsing).
+const COLLAPSE_MS = 2200;
+const frame = (fn) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(fn) : setTimeout(fn, 16));
 // The board's filter rail: what each shows, and the one an empty view explains.
 const FILTERS = [
   ['all', 'In flight', (job) => job.stage !== 'done'],
   ['needs', 'Needs you', (job, needs) => needs.has(job)],
+  ['ideas', 'Ideas', (job) => ideaOpen(job)],
   ['running', 'Running', (job) => jobState(job) === 'running'],
   ['backlog', 'Backlog', (job) => job.stage === 'backlog'],
   ['done', 'Finished', (job) => job.stage === 'done'],
@@ -314,6 +318,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, maxReplans: 2, deploymentStaleMinutes: 30 } };
+  // Ideas on the board at the last render, and those folding into a job since (id → when).
+  let ideasShown = new Set();
+  const collapsing = new Map();
   let filter = 'all', selected = null, planDraft = null, revision = null, basePlan = null, writeEdit = null;
   // A story create in review: its summary and fields as the panel holds them,
   // so adding or removing a field (which redraws) keeps what was typed.
@@ -411,14 +418,26 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     assignScenes(data.jobs, scenes);
     const test = FILTERS.find(([key]) => key === filter)[2];
     const jobs = sortJobs(data.jobs.filter((j) => test(j, needs)));
-    const empty = !data.jobs.length ? 'Start with an outcome.<br>Wrangler will shape the work.' : filter === 'needs' ? 'Nothing needs you right now.' : 'No jobs here.';
+    const empty = !data.jobs.length ? 'Start with an outcome.<br>Wrangler will shape the work.' : filter === 'needs' ? 'Nothing needs you right now.' : filter === 'ideas' ? 'No ideas being talked through.' : 'No jobs here.';
     // Settings saved before `plateArt` existed lack it until the next save.
     const art = PLATE_ART.includes(data.settings.plateArt) ? data.settings.plateArt : 'quiet';
     root.dataset.plateArt = art;
     root.dataset.backdrop = backdropOf(data.settings);
+    // An idea that gained a plan since the last render collapses into the job it became.
+    const now = Date.now(), ideas = new Set(data.jobs.filter(ideaOpen).map((j) => j.id)), starting = [];
+    for (const j of data.jobs) if (ideasShown.has(j.id) && !ideas.has(j.id) && j.plan && !j.cancelledAt) { collapsing.set(j.id, now); starting.push(j.id); }
+    for (const [id, at] of collapsing) if (now - at > COLLAPSE_MS) collapsing.delete(id);
+    ideasShown = ideas;
     holdSkies(q('#jobs-boards'));
-    q('#jobs-boards').innerHTML = jobs.map((j) => plateHtml(j, scenes.get(j.id), art)).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
+    q('#jobs-boards').innerHTML = jobs.map((j) => plateHtml(j, scenes.get(j.id), art, { collapse: collapsing.has(j.id) })).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
     mountSkies(q('#jobs-boards'));
+    // A redraw mid-collapse picks it up where it would be by now (at its end); a new one
+    // waits two frames so the transition has a start, and a render after it drops the cloud.
+    for (const art of q('#jobs-boards').querySelectorAll('.job-plate-art.collapsing')) {
+      if (!starting.includes(art.closest('[data-board]').dataset.board)) art.classList.add('collapsed');
+      else frame(() => frame(() => art.classList.add('collapsed')));
+    }
+    if (starting.length) setTimeout(() => { if (root.isConnected) render(); }, COLLAPSE_MS + 50);
     hydrateEvidence(q('#jobs-boards'), evidence, send);
     // Keep a human's plan edits and review snapshot intact across live graph ticks;
     // any open form, or a change being typed, is a human mid-edit and is left alone.
