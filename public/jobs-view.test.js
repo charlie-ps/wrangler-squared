@@ -2352,6 +2352,51 @@ test('the thread shows both sides, the round markers and pictures, and escapes e
   assert.deepEqual([...f.q('#job-dialog').querySelectorAll('.job-msg [data-ev-file]')].map((e) => e.dataset.evFile), ['ask-1.png', 'm2-empty.png']);
 });
 
+test('a thread or earlier-round shot opens full size in its own modal, steps through its group, and closes back to its thumbnail', (t) => {
+  const f = fixture(t);
+  const thread = [
+    { id: 'm1', at: 1, from: 'human', to: 'agent', text: 'Look', round: 1, images: [{ file: 'ask-1.png' }] },
+    { id: 'm2', at: 2, from: 'agent', text: 'Here', round: 1, shots: [{ file: 'a.png' }, { file: 'b.png' }, { file: 'c.webm' }] },
+  ];
+  parkedJob(f, {}, { thread, earlier: [{ round: 1, checks: [], proof: [{ text: 'Old', shots: [{ file: 'old.png' }] }] }] });
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  let opens = [...f.q('#job-dialog').querySelectorAll('.job-msg .job-shot-open')];
+  assert.deepEqual(opens.map((b) => [b.tagName, b.dataset.shotAt]), [['BUTTON', '0'], ['BUTTON', '0'], ['BUTTON', '1'], ['BUTTON', '2']], 'every thumbnail is a focusable button');
+  opens[3].focus(); f.view.update(f.data);
+  assert.equal(document.activeElement.querySelector('[data-ev-file]').dataset.evFile, 'c.webm', 'a tick redrawing the step keeps the focused shot focused');
+  opens = [...f.q('#job-dialog').querySelectorAll('.job-msg .job-shot-open')];
+  f.sent.length = 0;
+  opens[2].click();
+  const box = () => document.querySelector('.job-shotbox');
+  assert.equal(box().tagName, 'DIALOG');
+  assert.equal(box().parentElement, document.body, 'its own modal, so Esc closes it and not the step');
+  assert.equal(box().querySelector('.job-proof-stage').dataset.evFile, 'b.png');
+  assert.match(box().querySelector('.job-shotbox-bar b').textContent, /^2 of 3$/, 'the message\'s own shots, not the question\'s picture');
+  assert.deepEqual(f.sent.find((m) => m.file), { type: 'job-evidence', id: 'job1', subJobId: 'api', round: 1, file: 'b.png' }, 'the full file comes the way the proof viewer\'s does');
+  box().dispatchEvent(new document.defaultView.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  assert.equal(box().querySelector('.job-proof-stage').dataset.evFile, 'c.webm');
+  box().dispatchEvent(new document.defaultView.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  assert.equal(box().querySelector('.job-proof-stage').dataset.evFile, 'c.webm', 'the last stays the last');
+  f.view.evidence({ event: 'job-evidence', jobId: 'job1', subJobId: 'api', round: 1, file: 'c.webm', mime: 'video/webm', dataBase64: 'dmlk' });
+  assert.ok(box().querySelector('video.job-proof-full[controls]'), 'a clip plays in the box');
+  box().querySelector('[data-shotbox-go="-1"]').click();
+  assert.equal(box().querySelector('.job-proof-stage').dataset.evFile, 'b.png');
+  f.view.update(f.data);
+  assert.ok(box(), 'a tick redrawing the step leaves the box open');
+  box().querySelector('[data-shotbox-close]').click();
+  assert.equal(box(), null);
+  assert.equal(document.activeElement.querySelector('[data-ev-file]').dataset.evFile, 'b.png', 'focus goes back to the shot it was on');
+  assert.ok(f.q('#job-dialog').open, 'the step stays open');
+  f.q('#job-dialog .job-earlier .job-shot-open').click();
+  assert.equal(box().querySelector('.job-proof-stage').dataset.evFile, 'old.png', 'earlier rounds open the same viewer');
+  assert.equal(box().querySelector('[data-shotbox-go]'), null);
+  box().dispatchEvent(f.event('click'));
+  assert.equal(box(), null, 'a click on the backdrop closes it');
+  f.q('#job-dialog .job-msg .job-shot-open').click();
+  f.q('#job-dialog').close();
+  assert.equal(box(), null, 'closing the step closes its shot');
+});
+
 test('a met prerequisite is history in Details; one still holding the step keeps its chip', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'done', state: 'done', deployed: { checks: [] } }, { ...sub('web', ['api']), stage: 'implementation', worktree: { path: '/wt/web' } }];

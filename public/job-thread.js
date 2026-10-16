@@ -1,6 +1,6 @@
 import { esc } from './util.js';
 import { ICONS } from './icons.js';
-import { roundThumbHtml } from './job-proof.js';
+import { shotButtonHtml } from './job-proof.js';
 import { readyRun } from './jobs.js';
 
 // The conversation under a Code review step (server/job-parked.js): what the
@@ -14,7 +14,7 @@ const WHO = { human: 'You', agent: 'Session', system: 'Wrangler' };
 
 function messageHtml(job, sub, m) {
   const files = [...(m.shots || []), ...(m.images || [])].map((x) => x.file);
-  const attach = files.length ? `<div class="job-msg-att">${files.map((f) => roundThumbHtml(job, sub, m.round, f)).join('')}</div>` : '';
+  const attach = files.length ? `<div class="job-msg-att">${files.map((f, k) => shotButtonHtml(job, sub, m.round, f, k)).join('')}</div>` : '';
   const run = m.run ? `<pre class="job-msg-run"><i>$</i> ${esc(m.run.cmd)}\n${esc(m.run.out)}\n<b class="${m.run.exit === 0 ? 'ok' : 'bad'}">exit ${esc(m.run.exit)}</b></pre>` : '';
   return `<div class="job-msg ${esc(m.from)}"><span class="job-msg-who">${m.from === 'system' ? `Round ${esc(m.round)}` : WHO[m.from] || esc(m.from)}</span><div><p>${esc(m.text)}<time>${m.from === 'human' && m.sentAt ? `<i class="job-msg-tick" title="Delivered to the session">${ICONS.check}</i>` : ''}${esc(clock(m.at))}</time></p>${run}${attach}</div></div>`;
 }
@@ -39,7 +39,7 @@ export function threadHtml(job, sub) {
 }
 
 // Earlier rounds' proof, kept in case the human wants to see what changed.
-const earlierBody = (job, sub, rounds) => rounds.map((r) => `<div class="job-earlier-round"><h4>Round ${esc(r.round)}</h4><div class="job-msg-att">${(r.proof || []).flatMap((p) => (p.shots || []).map((s) => roundThumbHtml(job, sub, r.round, s.file))).join('')}</div><ul class="job-receipt">${(r.checks || []).map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul></div>`).join('');
+const earlierBody = (job, sub, rounds) => rounds.map((r) => `<div class="job-earlier-round"><h4>Round ${esc(r.round)}</h4><div class="job-msg-att">${(r.proof || []).flatMap((p) => (p.shots || []).map((s) => s.file)).map((f, k) => shotButtonHtml(job, sub, r.round, f, k)).join('')}</div><ul class="job-receipt">${(r.checks || []).map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul></div>`).join('');
 export function earlierRoundsHtml(job, sub) {
   const rounds = Array.isArray(sub?.earlier) ? sub.earlier : [];
   if (!rounds.length) return '';

@@ -23,7 +23,7 @@ import { whatsNewHtml } from './updates.js';
 import { createIdeaCorner } from './idea-corner.js';
 import { historyHtml } from './job-thread.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
-import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
+import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, shotBoxHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
 // Mirrors server/jobs-schema.js MAX_SHOW.
 const MAX_SHOW = 8;
 // What #jobs is drawn over (settings `backdrop`); settings saved before it existed read as the sky.
@@ -1152,12 +1152,51 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     wireProofAsk(sub);
     hydrateEvidence(dialog, evidence, send, shot ? { full: { jobId: job.id, subId: sub.id, round: proofRound(sub), file: shot.file } } : {});
   }
+  // A thread or earlier-round shot opened full size: a modal of its own on <body>
+  // (like job-images.js's zoom), so Esc closes it and leaves the step open, and a
+  // tick redrawing the step underneath never touches it.
+  let shotBox = null, shotZoom = null;
+  function paintShotBox() {
+    const job = data.jobs.find((j) => j.id === shotBox?.jobId), sub = job?.subJobs.find((s) => s.id === shotBox.subId);
+    if (!sub || !shotZoom) return shotZoom?.close();
+    const was = document.activeElement?.closest?.('.job-shotbox [data-shotbox-go], .job-shotbox [data-shotbox-close]');
+    shotZoom.innerHTML = shotBoxHtml(job, sub, shotBox, evidence);
+    shotZoom.setAttribute('aria-label', `Shot ${shotBox.at + 1} of ${shotBox.files.length}`);
+    shotZoom.querySelector('[data-shotbox-close]').onclick = () => shotZoom.close();
+    shotZoom.querySelectorAll('[data-shotbox-go]').forEach((b) => b.onclick = () => stepShot(+b.dataset.shotboxGo));
+    const again = was && shotZoom.querySelector(was.dataset.shotboxGo ? `[data-shotbox-go="${was.dataset.shotboxGo}"]:not(:disabled)` : '[data-shotbox-close]');
+    (again || shotZoom.querySelector('[data-shotbox-close]')).focus();
+    hydrateEvidence(shotZoom, evidence, send, { full: { jobId: job.id, subId: sub.id, round: shotBox.round, file: shotBox.files[shotBox.at] } });
+  }
+  function stepShot(d) {
+    const at = shotBox && shotBox.at + d;
+    if (at == null || at < 0 || at >= shotBox.files.length) return;
+    shotBox = { ...shotBox, at };
+    paintShotBox();
+  }
+  function openShot(b) {
+    const slots = [...b.closest('.job-msg-att').querySelectorAll('[data-shot-at] [data-ev-file]')];
+    shotBox = { jobId: selected.jobId, subId: selected.subId, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
+    shotZoom = document.createElement('dialog');
+    shotZoom.className = 'job-shotbox';
+    shotZoom.onkeydown = (e) => { const d = { ArrowLeft: -1, ArrowRight: 1 }[e.key]; if (d) { e.preventDefault(); stepShot(d); } };
+    shotZoom.onclick = (e) => { if (e.target === shotZoom || e.target.classList.contains('job-shotbox-body')) shotZoom.close(); };
+    shotZoom.addEventListener('close', () => {
+      const { round, files, at } = shotBox || {};
+      shotZoom.remove(); shotZoom = null; shotBox = null;
+      [...dialog.querySelectorAll('[data-shot-at] [data-ev-file]')].find((e) => Number(e.dataset.evRound) === round && e.dataset.evFile === files?.[at])?.closest('button').focus();
+    });
+    document.body.append(shotZoom);
+    shotZoom.showModal();
+    paintShotBox();
+  }
   function renderDetail() {
     const job = data.jobs.find((j) => j.id === selected?.jobId);
     if (!job) return;
     const sub = job.subJobs.find((s) => s.id === selected.subId);
     if (!sub && !planDraft && job.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
     const focus = document.activeElement?.closest?.('.job-detail-footer [data-review]')?.dataset.review;
+    const shotFocus = [...dialog.querySelectorAll('.job-shot-open')].indexOf(document.activeElement);
     // An open shot is drawn instead of the step, and a tick redraws it where it was.
     const viewing = sub && proofView && proofItems(sub).length > proofView.i && !isWriteSub(sub);
     if (!viewing) proofView = null;
@@ -1167,6 +1206,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (viewing) { wireProofViewer(job, sub); return; }
     wireFooter();
     if (focus) dialog.querySelector(`.job-detail-footer [data-review="${focus}"]`)?.focus();
+    if (shotFocus >= 0) dialog.querySelectorAll('.job-shot-open')[shotFocus]?.focus();
     dialog.querySelectorAll('[data-action]').forEach((b) => b.onclick = () => {
       const name = b.dataset.action;
       const target = b.dataset.sub ? job.subJobs.find((s) => s.id === b.dataset.sub) : sub;
@@ -1186,6 +1226,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
     wireWriteReview(job, sub);
     dialog.querySelectorAll('[data-proof]').forEach((b) => b.onclick = () => { proofView = { i: +b.dataset.proof, j: +b.dataset.proofAt || 0 }; renderDetail(); });
+    dialog.querySelectorAll('[data-shot-at]').forEach((b) => b.onclick = () => openShot(b));
     if (sub) wireProofAsk(sub);
     hydrateEvidence(dialog, evidence, send);
     // The popover hangs from its chip, so near the dialog's right edge it slides left to stay inside.
@@ -1428,7 +1469,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     e.preventDefault();
     run();
   });
-  dialog.addEventListener('close', () => { selected = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
+  dialog.addEventListener('close', () => { shotZoom?.close(); selected = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
   // the same dialog a board card's click does, from a job/sub id pair index.js kept.
@@ -1450,7 +1491,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     askDraft = null;
     return true;
   }
-  return { update, newJob: createJob, reviewFailed, changeFailed, idea: idea.message, runningLog: (msg) => { if (msg.subJobId && msg.name) { runLogs.set(msg.subJobId, { name: msg.name, text: msg.text, truncated: msg.truncated, error: msg.error }); if (dialog.open && selected?.subId === msg.subJobId) renderDetail(); } }, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
+  return { update, newJob: createJob, reviewFailed, changeFailed, idea: idea.message, runningLog: (msg) => { if (msg.subJobId && msg.name) { runLogs.set(msg.subJobId, { name: msg.name, text: msg.text, truncated: msg.truncated, error: msg.error }); if (dialog.open && selected?.subId === msg.subJobId) renderDetail(); } }, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); if (shotZoom && !shotZoom.querySelector('.job-proof-full:not(.soft)')) paintShotBox(); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
     // A checkpoint switch keeps the dialog: the footer is where it was made.
     if (msg?.action === 'set-review') {
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }

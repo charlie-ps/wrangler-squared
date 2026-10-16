@@ -51,7 +51,7 @@
 #jobs:not([data-backdrop="wrangler"]) .jobs-empty { color:rgba(244,237,226,.62); }
 /* White chrome on a night sky glares, so under the sky Jobs (and its dialogs, which live on <body>) wear the
    board's DARK palette even on a light host: a copy of core's :root values for every token body.light remaps. */
-body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job-image-zoom) {
+body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job-image-zoom,.job-shotbox) {
   color-scheme:dark; color:var(--fg);
   --bg:#0d1117; --surface:#151b23; --surface-2:#1c2128;
   --fg:#f0f6fc; --fg-muted:#9198a1; --fg-subtle:#656c76;
@@ -1350,6 +1350,21 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-msg-tick svg { width:11px; height:11px; }
 .job-msg-att { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
 .job-msg-att .job-proof-thumb { width:120px; }
+.job-shot-open { all:unset; display:block; border-radius:8px; cursor:zoom-in; }
+.job-shot-open:hover .job-proof-thumb { border-color:var(--border); }
+.job-shot-open:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.job-shotbox { width:min(1600px,96vw); max-width:96vw; max-height:96vh; padding:0; border:0; background:transparent; color:var(--fg); overflow:visible; font-family:var(--font); }
+.job-shotbox::backdrop { background:var(--overlay); backdrop-filter:blur(3px); }
+.job-shotbox-body { display:grid; gap:10px; justify-items:center; }
+.job-shotbox .job-proof-stage { max-width:100%; min-height:200px; min-width:min(480px,100%); background:var(--surface); }
+.job-shotbox .job-proof-full { max-height:84vh; }
+.job-shotbox-bar { display:flex; align-items:center; gap:10px; padding:4px 6px 4px 14px; border-radius:999px; background:var(--surface); box-shadow:0 8px 30px var(--shadow); font-size:12px; }
+.job-shotbox-bar>span { color:var(--fg-muted); overflow-wrap:anywhere; }
+.job-shotbox-btn { display:grid; place-items:center; width:32px; height:32px; padding:0; border:0; border-radius:50%; background:transparent; color:var(--fg); cursor:pointer; }
+.job-shotbox-btn:hover:not(:disabled) { background:var(--surface-2); }
+.job-shotbox-btn:disabled { color:var(--fg-subtle); cursor:default; }
+.job-shotbox-btn:focus-visible { outline:2px solid var(--blue); outline-offset:1px; }
+.job-shotbox-btn svg { width:16px; height:16px; }
 .job-msg-run { margin:6px 0 0; padding:8px 10px; border-radius:8px; background:var(--term-bg); color:var(--term-fg); font-size:11px; overflow-x:auto; }
 .job-msg-run .ok { color:var(--green-fg); } .job-msg-run .bad { color:var(--red-fg); }
 .job-earlier { margin-top:10px; }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { showOf, shotsOf, proofItems, hasProof, proofSummary, summaryText, alsoChecked, verdictOf, verdictText, filmFiles, proofListHtml, proofViewerHtml, filmHtml, hydrateEvidence, EvidenceCache } from './job-proof.js';
+import { showOf, shotsOf, proofItems, hasProof, proofSummary, summaryText, alsoChecked, verdictOf, verdictText, filmFiles, proofListHtml, proofViewerHtml, shotBoxHtml, shotButtonHtml, filmHtml, hydrateEvidence, EvidenceCache } from './job-proof.js';
 
 const job = { id: 'job1' };
 const shot = (file, extra = {}) => ({ file, mime: 'image/png', at: 1700000000000, url: 'http://localhost:5174/audit', viewport: '1280x800', tool: 'Playwright', ...extra });
@@ -129,6 +129,25 @@ test('the viewer shows the thumbnail soft until the full file arrives, a clip as
   assert.match(proofViewerHtml(job, clip, { i: 0 }, cache), /<video class="job-proof-full" controls src="data:video\/webm;base64,dmlk">/);
   assert.match(proofListHtml(job, clip), /job-proof-thumb mini video/);
   cache.note(null); cache.note({});
+});
+
+test('a thread shot is a button around its slot, and the lightbox shows one shot of its group with the way to its neighbours', () => {
+  const cache = new EvidenceCache();
+  assert.match(shotButtonHtml(job, sub(), 2, 'a<b>.png', 1), /^<button type="button" class="job-shot-open" data-shot-at="1" title="Open full size" aria-label="Open shot 2 full size"><span class="job-proof-thumb[^"]*" data-ev-job="job1" data-ev-sub="api" data-ev-round="2" data-ev-file="a&lt;b&gt;.png">/);
+  const box = { round: 2, files: ['a.png', 'b.webm', 'c.png'], at: 0 };
+  const first = shotBoxHtml(job, sub(), box, cache);
+  assert.match(first, /data-ev-round="2" data-ev-file="a.png"/);
+  assert.match(first, /<b>1 of 3<\/b>/);
+  assert.match(first, /data-shotbox-go="-1"[^>]*disabled/, 'nothing before the first');
+  assert.doesNotMatch(first, /data-shotbox-go="1"[^>]*disabled/);
+  assert.match(first, /job-proof-thumb big/, 'a placeholder until a frame comes');
+  cache.note({ jobId: 'job1', subJobId: 'api', round: 2, file: 'b.webm', mime: 'video/webm', dataBase64: 'dmlk' });
+  const clip = shotBoxHtml(job, sub(), { ...box, at: 1 }, cache);
+  assert.match(clip, /<video class="job-proof-full" controls src="data:video\/webm;base64,dmlk">/, 'a clip plays there');
+  assert.match(shotBoxHtml(job, sub(), { ...box, at: 9 }, cache), /3 of 3.*data-shotbox-go="1"[^>]*disabled/s, 'past the end lands on the last');
+  assert.doesNotMatch(shotBoxHtml(job, sub(), { round: 1, files: ['x.png'], at: 0 }, cache), /data-shotbox-go/, 'one shot: no stepping');
+  assert.equal(shotBoxHtml(job, sub(), { round: 1, files: [], at: 0 }, cache), '');
+  assert.match(shotBoxHtml(job, sub(), { round: 1, files: ['<i>.png'], at: 0 }, cache), /&lt;i&gt;\.png · Round 1/);
 });
 
 test('the plate filmstrip is the first three shots and how many more there are', () => {
