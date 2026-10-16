@@ -1,5 +1,8 @@
 import { ICONS } from './icons.js';
 import { SHOTS, proofFigure, runningBar } from './figs.js';
+import { plateHtml } from './job-plates.js';
+import { ideaThreadHtml } from './job-idea.js';
+import { mountSkies, releaseSkies } from './job-skylines.js';
 
 // What's new: a splash for each bigger release, shown once per browser, and the
 // list Automation settings reads to show any of them again. Seen ids live in the
@@ -196,6 +199,47 @@ function ideaFigure(phase) {
     <div class="wn-idea">${box}${route}</div>`;
 }
 
+// New idea, as the board draws it: an example idea job fed to the real plate
+// (job-plates.js) and thread (job-idea.js), so the plate's forming sky brightens
+// as the planner asks and then suggests, and the suggestion becomes the job.
+// Its clock is the reader's, read when the frame is drawn: the idea started six minutes ago.
+const ideaTalk = (now) => {
+  const clock = (m) => now - (6 - m) * 60000;
+  const asked = { id: 'm1', at: clock(3), from: 'planner', text: 'Happy to. Where should it go, and what should it say about each job?' };
+  const answer = { id: 'm2', at: clock(4), from: 'human', text: 'Slack, #team-web. Just the title and its PR.', sentAt: clock(4) };
+  const suggest = { id: 'm3', at: clock(5), from: 'planner', text: 'That’s enough to plan. Here’s the job I’d make:',
+    suggest: { title: 'Post a Friday digest of finished jobs', plan: { subJobs: [
+      { id: 'build', kind: 'pr', title: 'Build the Friday digest', repo: '~/code/wrangler-squared', base: 'next', after: [] },
+      { id: 'post', kind: 'session', title: 'Post the first digest', after: ['build'] },
+      { id: 'slack', kind: 'write', title: 'Post the digest in #team-web', by: 'post', place: { type: 'slack', channel: '#team-web' }, after: [] },
+    ] } } };
+  return { clock, suggest, threads: [[], [asked], [asked, { ...answer, sentAt: null }], [asked, answer, suggest], [asked, answer, { ...suggest, acceptedAt: clock(6) }]] };
+};
+const IDEAS = scenes([
+  { thread: 0, parked: false, fresh: null, press: null, made: false },
+  { thread: 1, parked: true, fresh: 'm1' },
+  { thread: 2, parked: false, fresh: null },
+  { thread: 3, parked: true, fresh: 'm3' },
+  { fresh: null },
+  { press: 'firing' },
+  { press: 'sent' },
+  { thread: 4, made: true },
+  {},
+]);
+// Figure buttons stay out of the tab order, and its thread is not announced every frame.
+const inert = (html) => html.replaceAll('<button ', '<button tabindex="-1" ').replaceAll(' aria-live="polite"', '');
+function ideasFigure(phase) {
+  const f = IDEAS[phase], { clock, suggest, threads } = ideaTalk(Date.now());
+  const job = { id: 'wn-idea', title: 'Friday digest of finished jobs', intent: 'Could the board tell the team what finished each week?', repos: [], stage: 'planning', subJobs: [], moves: [], revision: 1,
+    createdAt: clock(0), reviewPlan: true, idea: { thread: threads[f.thread] }, plan: f.made ? suggest.suggest.plan : null,
+    runs: [{ id: 'wn-run', subJobId: null, phase: 'planning', stopped: f.made, parkedFor: 'idea', parkedAt: f.parked ? clock(5) : null, mailedAt: null }] };
+  const thread = ideaThreadHtml(job, { fresh: (id) => id === f.fresh, firing: f.press && { id: 'm3', state: f.press } });
+  return `<div class="wn-ideas" role="img" aria-label="An idea sits on the board as a forming sky while its planner asks one question, then suggests a job you create with one press">
+      <div class="wn-ideas-plate">${inert(plateHtml(job, 'opus'))}</div>
+      <div class="wn-ideas-chat">${inert(thread)}</div>
+    </div>`;
+}
+
 // Redraws a figure in place, so surviving nodes keep their identity: tones
 // transition, spinners keep turning and fade-ins play only for what is new.
 // Replacing innerHTML every tick made the whole figure flash.
@@ -212,6 +256,9 @@ function morph(a, b) {
     if (!an) return a.appendChild(bn);
     if (an.nodeType !== bn.nodeType || an.nodeName !== bn.nodeName) return a.replaceChild(bn, an);
     if (an.nodeType !== 1) { if (an.nodeValue !== bn.nodeValue) an.nodeValue = bn.nodeValue; return; }
+    // A sky is painted on the client (job-skylines.js mountSkies): keep it while its
+    // parameters hold, and swap in a fresh placeholder to repaint when they change.
+    if (an.classList.contains('gx')) { if (JSON.stringify({ ...an.dataset }) !== JSON.stringify({ ...bn.dataset })) a.replaceChild(bn, an); return; }
     [...an.attributes].forEach((at) => { if (!bn.hasAttribute(at.name)) an.removeAttribute(at.name); });
     [...bn.attributes].forEach((at) => { if (an.getAttribute(at.name) !== at.value) an.setAttribute(at.name, at.value); });
     morph(an, bn);
@@ -278,6 +325,14 @@ export const UPDATES = [
       '<b>Paste a screenshot</b> to show what you mean.',
     ])}`,
     anim: { frames: 6, ms: 1600, still: 4 }, figure: (phase) => ideaFigure(phase) },
+  { id: 'new-idea', date: '2026-10-16', icon: 'idea', tone: 'warn',
+    title: 'Start with an idea, not a plan',
+    body: `<p><b>New job</b> is now <b>New idea</b>. Write what you’re after in your own words. If it’s clear, the planner plans it. If not, it asks what it needs to know, then suggests a job you create with one press.</p>${done([
+      '<b>Ideas sit on the board</b> as forming skies, beside your jobs, until they become one. The <b>Ideas</b> filter shows just them.',
+      '<b>Keep refining</b> as long as you like: a reply after a suggestion gets a fresh one.',
+      '<b>Your checkpoints still apply.</b> With Plan on You review, you approve the plan before anything runs.',
+    ])}`,
+    anim: { frames: 9, ms: 1700, still: 3 }, figure: (phase) => ideasFigure(phase) },
 ];
 
 const dateLabel = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -325,7 +380,7 @@ export function createUpdates({ storage, updates = UPDATES }) {
     });
     // Every way out, from any update in the run, is the reader having seen the
     // whole run; a reload while it is still open is not.
-    dialog.addEventListener('close', () => { stop(); markSeen(queue.map((u) => u.id)); });
+    dialog.addEventListener('close', () => { stop(); releaseSkies(dialog.querySelector('.update-panel')); markSeen(queue.map((u) => u.id)); });
   }
 
   function render() {
@@ -340,6 +395,7 @@ export function createUpdates({ storage, updates = UPDATES }) {
     next.className = `primary tone-${last ? 'ok' : 'run'}`;
     next.innerHTML = last ? 'Got it' : `Next${ICONS.next}`;
     dialog.querySelector('[data-update="back"]').hidden = at === 0;
+    mountSkies(dialog.querySelector('.update-panel'));
     play();
   }
 
@@ -350,7 +406,7 @@ export function createUpdates({ storage, updates = UPDATES }) {
     timer = win().setInterval(() => {
       phase = (phase + 1) % u.anim.frames;
       const fig = dialog.querySelector('.update-panel .intro-figure');
-      if (fig) patch(fig, u.figure(phase));
+      if (fig) { patch(fig, u.figure(phase)); mountSkies(dialog.querySelector('.update-panel')); }
     }, u.anim.ms);
   }
   function stop() { if (timer) win()?.clearInterval(timer); timer = null; }
