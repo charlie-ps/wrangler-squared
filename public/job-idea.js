@@ -106,13 +106,12 @@ export function ideaComposerHtml(draft = '') {
     <div class="job-change-foot"><span>Resumes the same planner session. A reply after a suggestion replaces it.</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 }
 
-// The whole dialog body for an idea still being talked through. `chips` and `actions`
-// are the job dialog's own (state, cost, Cancel), passed in.
-export function ideaViewHtml(job, { chips = '', actions = '', error = '', pending = null, firing = null, fresh, draft = '' } = {}) {
+// The whole dialog body for an idea still being talked through. `cost` and `actions`
+// are the job dialog's own (price chip, Cancel), passed in.
+export function ideaViewHtml(job, { cost = '', actions = '', error = '', pending = null, firing = null, fresh, draft = '' } = {}) {
   const stage = ideaStage(job) || 'thinking';
   return `<div class="job-idea">
-    <header class="job-idea-band" data-spin="24">${inflowHtml(job.id, STAGE_SKY[stage] ?? 0)}<div><div class="job-idea-kicker"><span class="job-idea-mark">Idea · talking with the planner</span></div><h2>${esc(job.title)}</h2></div></header>
-    <div class="job-chips job-idea-chips">${chips}</div>${error}
+    <header class="job-idea-band" data-spin="24">${inflowHtml(job.id, STAGE_SKY[stage] ?? 0)}<div><div class="job-idea-kicker"><span class="job-idea-mark">Idea · talking with the planner</span></div><h2>${esc(job.title)}</h2></div>${cost}</header>${error}
     ${ideaThreadHtml(job, { pending, firing, fresh })}
     <div class="job-idea-dock">${ideaComposerHtml(draft)}${actions ? `<div class="job-actions">${actions}</div>` : ''}</div></div>`;
 }

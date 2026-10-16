@@ -1489,7 +1489,8 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .gx.nb .jets { mix-blend-mode:screen; animation:gx-glare calc(14s * var(--k)) ease-in-out infinite alternate; }
 .gx.nb .drift { animation:nb-drift calc(40s * var(--k)) ease-in-out infinite alternate; }
 @keyframes nb-drift { to { transform:scale(.9); opacity:.75; } }
-.job-idea-chips { margin:0; padding:14px 26px 0; }
+.job-idea-band > div { flex:1; min-width:0; }
+.job-idea-band .job-detail-cost { flex:none; margin-left:12px; border-color:rgba(244,237,226,.22); background:rgba(2,3,6,.45); color:#f4ede2; }
 .job-idea > .job-error { margin:12px 26px 0; }
 .job-idea-orb { position:relative; flex:none; display:inline-block; width:30px; height:30px; border-radius:50%; overflow:hidden; background:radial-gradient(circle at 50% 50%, #fff 0 6%, #ffd2c0 12%, #c0508f 34%, #2a0f4d 62%, #08031a 100%); box-shadow:0 0 0 1px color-mix(in srgb, var(--fg) 10%, transparent), 0 0 18px -4px #c0508f; }
 .job-idea-orb::after { content:""; position:absolute; inset:-30%; border-radius:50%; background:conic-gradient(from 0deg, transparent 0 30%, rgba(255,210,192,.45) 42%, transparent 55% 80%, rgba(47,196,192,.35) 90%, transparent); animation:gx-spin 9s linear infinite; mix-blend-mode:screen; }
@@ -1568,5 +1569,5 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-plate-art.collapsing > :is(svg,.job-plate-tag,.job-plate-unplanned) { z-index:2; }
 .job-plate-art.collapsing.collapsed > .gx.nb { transform:scale(.12); opacity:0; filter:brightness(2.4) saturate(1.4); }
 .job-plate-art.collapsing.collapsed > :not(.nb) { opacity:1; transform:none; }
-@media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-chips,.job-idea-dock { padding-left:16px; padding-right:16px; } }
+@media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-dock { padding-left:16px; padding-right:16px; } }
 @media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-plate-art.collapsing > * { transition:opacity .3s !important; } .job-plate-art.collapsing.collapsed > .gx.nb { transform:none; } }

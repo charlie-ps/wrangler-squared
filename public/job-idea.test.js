@@ -52,8 +52,15 @@ test('New idea replaces New job: the button, the form, and a create that asks th
   assert.match(f.q('.job-idea-thinking').textContent, /reading the idea/);
 });
 
+test('an idea whose planner failed still says so, under the band', (t) => {
+  const f = fixture(t, [{ ...ideaJob([], [parked({ parkedAt: null, stopped: true })]), error: 'Planner session exited before reporting' }]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  assert.equal(f.q('#job-dialog .job-idea > .job-error').textContent, 'Planner session exited before reporting');
+  assert.equal(f.q('#job-dialog .job-idea-band .job-detail-cost'), null, 'nothing spent, no price');
+});
+
 test('a vague idea is its conversation: the planner\'s reply, escaped, and Enter sends a follow-up to the same planner', (t) => {
-  const f = fixture(t, [ideaJob([{ ...asked, text: `${asked.text}\n\n<img src=x onerror=alert(1)>` }])]);
+  const f = fixture(t, [{ ...ideaJob([{ ...asked, text: `${asked.text}\n\n<img src=x onerror=alert(1)>` }]), usd: 0.39 }]);
   f.q('[data-board="idea1"] .job-plate-open').click();
   const view = f.q('#job-dialog .job-idea');
   assert.ok(view.querySelector('.job-idea-band .gx.nb[data-inflow]'), 'the formation sky across the top');
@@ -63,7 +70,8 @@ test('a vague idea is its conversation: the planner\'s reply, escaped, and Enter
   assert.deepEqual([...body.querySelectorAll('ol li')].map((l) => l.textContent), ['Which wait counts?', 'Where should the nudge land?']);
   assert.equal(body.querySelector('img'), null, 'agent text is never markup');
   assert.match(body.textContent, /<img src=x/);
-  assert.equal(f.q('#job-dialog .job-chip-state').textContent, 'Your reply');
+  assert.equal(f.q('#job-dialog .job-idea-band > .job-detail-cost').textContent, '$0.39', 'the price sits in the band');
+  assert.equal(f.q('#job-dialog .job-idea .job-chips'), null, 'no chip row under it');
   assert.equal(f.q('.job-idea-thinking'), null, 'the planner is waiting, not thinking');
   const box = f.q('[data-idea-composer] textarea');
   box.value = 'Green and unmerged for a day.'; box.dispatchEvent(new f.window.Event('input'));
@@ -90,7 +98,6 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   assert.ok(panel.querySelector('.job-launch-go .gx[data-arc][data-tone="warn"]'), 'the event horizon is the button');
   assert.equal(panel.querySelector('.job-launch-label b').textContent, 'Create job');
   assert.match(panel.querySelector('.job-launch-fine').textContent, /Plan on You review/);
-  assert.equal(f.q('#job-dialog .job-chip-state').textContent, 'Job suggested');
   panel.querySelector('[data-accept-idea]').click();
   assert.ok(f.q('.job-launch').classList.contains('firing'), 'the hole flares first');
   assert.equal(f.sent.filter((m) => m.action === 'accept-idea').length, 0);
