@@ -18,7 +18,9 @@
 /* The board: a masthead, a filter rail and a wall of launch plates (job-plates.js).
    Chrome is the board's semantic variables over its own wallpaper (frosted
    --tile-bg/--card-bg); the plate art and the ink drawn into it are fixed colours. */
-#jobs { --jobs-serif:"Newsreader","Iowan Old Style",Georgia,serif; --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; flex:1; min-width:0; overflow:auto; padding:22px 24px 84px; background:transparent; display:flex; flex-direction:column; gap:20px; }
+/* Core's .ext-view host is the scroller and our mount wrapper (.ext-slot) is display:contents, so #jobs is a
+   plain block there: min-height:100% makes it, and the sky painted on it, reach the bottom of the view. */
+#jobs { --jobs-serif:"Newsreader","Iowan Old Style",Georgia,serif; --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; flex:1; min-width:0; min-height:100%; box-sizing:border-box; overflow:auto; padding:22px 24px 84px; background:transparent; display:flex; flex-direction:column; gap:20px; }
 #jobs.hidden { display:none; }
 /* Wrangler² sky, the default backdrop (settings `backdrop`): one static night in every host theme, so the
    masthead and plates read as cut from it. Stars are one radial-gradient each, tiled at co-prime sizes so the
