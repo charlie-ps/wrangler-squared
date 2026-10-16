@@ -27,12 +27,12 @@ export function makeJobCreateHandler(deps) {
     async handler(msg, host) {
       let job;
       try {
-        job = await createJob(host, msg);
+        job = await createJob(host, { ...msg, idea: msg.idea === true });
       } catch (e) {
         host.broadcast({ event: 'job-create-failed', error: e?.issues?.[0]?.message || e?.message || String(e) });
         return;
       }
-      host.broadcast({ event: 'job-created', jobId: job.id, started: Boolean(msg.start) });
+      host.broadcast({ event: 'job-created', jobId: job.id, started: Boolean(msg.start), ...(job.idea ? { idea: true } : {}) });
     },
   };
 }

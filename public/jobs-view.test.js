@@ -662,10 +662,10 @@ test('the new-job primary action starts planning and the plain button parks it i
   assert.equal(f.sent[2].start, false);
 });
 
-test('new job is a brief beside a property sidebar, and the brief is the description, images and checkpoint tiles', (t) => {
+test('new idea is a brief beside a property sidebar, and the brief is the description, images and checkpoint tiles', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   const brief = form.querySelector('.job-create-brief'); const props = form.querySelector('.job-create-props');
-  assert.equal(brief.querySelector('h2').textContent, 'New job');
+  assert.equal(brief.querySelector('h2').textContent, 'New idea');
   assert.ok(brief.contains(form.elements.intent));
   assert.equal(brief.querySelector('details'), null, 'no folded planning guidance or repository hints');
   assert.deepEqual([...brief.querySelectorAll('textarea')].map((e) => e.name), ['intent']);
@@ -682,7 +682,7 @@ test('new job is a brief beside a property sidebar, and the brief is the descrip
   assert.match(form.querySelector('.job-create-foot').textContent, /nothing touches Jira until you approve/);
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent[0], { type: 'job-create', start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true, sandbox: 'auto', writableDirs: [], updateMain: false, images: [], shareImages: true, taskId: null } });
+  assert.deepEqual(f.sent[0], { type: 'job-create', idea: true, start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true, sandbox: 'auto', writableDirs: [], updateMain: false, images: [], shareImages: true, taskId: null } });
 });
 
 test('new jobs need only an outcome and leave repositories to planning', (t) => {

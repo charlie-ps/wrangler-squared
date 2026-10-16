@@ -481,13 +481,18 @@ export const diagnosisSchema = z.object({ summary: z.string().trim().min(1).max(
 // `alternatives` are the rest. Each is a whole plan plus the actions it carries.
 const optionShape = { label: line, why: z.string().trim().max(400).optional(), actions: z.array(actionSchema).max(6).optional() };
 export const alternativeSchema = z.object({ ...optionShape, plan: planSchema }).strict();
+// A job the idea's planner offers: what the human creates with one press, and
+// exactly the plan receipt it would otherwise have sent (job-idea.js acceptIdea).
+export const suggestionSchema = z.object({ title: line, plan: planSchema }).strict();
 export const reportSchema = z.discriminatedUnion('kind', [
   receipt({ kind: z.literal('plan'), plan: planSchema, ...optionShape, label: line.optional(), diagnosis: diagnosisSchema.optional(),
     alternatives: z.array(alternativeSchema).max(MAX_OPTIONS - 1).optional() }),
   receipt({ kind: z.literal('ready'), checks: readyChecksSchema, running: runningSchema.optional() }),
   // Answers a human who wrote to a session parked on its ready receipt (job-store.js):
-  // the run stays parked, the tree and the round unchanged.
-  receipt({ kind: z.literal('reply'), text: z.string().trim().min(1).max(4000), shots: z.array(shotSchema).min(1).max(4).optional(), run: runProofSchema.optional(), running: runningSchema.optional() }),
+  // the run stays parked, the tree and the round unchanged. From a new idea's planner
+  // it is a turn in the conversation instead (job-idea.js), and may suggest a job.
+  receipt({ kind: z.literal('reply'), text: z.string().trim().min(1).max(4000), shots: z.array(shotSchema).min(1).max(4).optional(), run: runProofSchema.optional(), running: runningSchema.optional(),
+    suggest: suggestionSchema.optional() }),
   receipt({ kind: z.literal('published'), url: prUrlSchema }),
   receipt({ kind: z.literal('repaired'), changes: checksSchema, checks: checksSchema }),
   receipt({ kind: z.literal('deployed'), checks: checksSchema }),
