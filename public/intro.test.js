@@ -111,6 +111,11 @@ test('the Jobs step plays a mini board whose rail badge counts the amber rows', 
     assert.equal(el.querySelector('.intro-rail-badge').classList.contains('zero'), amber === 0);
   }
   assert.ok(frames(1).some((el) => el.querySelectorAll('.intro-mini-job.tone-warn').length === 2));
+  const idea = frames(1).map((el) => el.querySelector('.intro-mini-job'));
+  assert.deepEqual(idea.map((r) => r.querySelector('.gx.nb[data-inflow]')?.dataset.stage ?? null), ['0', '0', '1', '0', '2', null, null], 'an idea under its forming sky, brighter as the planner asks and suggests, then the job it became');
+  assert.deepEqual(idea.slice(0, 5).map((r) => r.querySelector('small').textContent), ['Idea · Planner is reading it', 'Idea · Planner is reading it', 'Idea · The planner asked you', 'Idea · Planner is reading it', 'Idea · Job suggested · review']);
+  assert.ok(idea[2].classList.contains('tone-warn'), 'a question waiting on you counts');
+  assert.equal(idea[5].querySelector('small').textContent, 'Plan ready for review');
   const before = fig().querySelector('.intro-figure').innerHTML;
   await new Promise((r) => p.window.setTimeout(r, 1650));
   assert.notEqual(fig().querySelector('.intro-figure').innerHTML, before, 'it advances by itself');
@@ -122,7 +127,8 @@ test('with reduced motion each live figure holds a finished frame and nothing ti
   createIntro({ storage: memoryStorage() }).open();
   const html = p.q('.intro-body').innerHTML;
   assert.match(p.q('.intro-goal').textContent, /Delivered/);
-  assert.equal(document.querySelectorAll('.intro-panel')[1].querySelector('.intro-rail-badge').textContent, '2');
+  assert.equal(document.querySelectorAll('.intro-panel')[1].querySelector('.intro-rail-badge').textContent, '3');
+  assert.ok(document.querySelectorAll('.intro-panel')[2].querySelector('.intro-chat-plan'), 'New idea holds on the plan to approve');
   await new Promise((r) => p.window.setTimeout(r, 1450));
   assert.equal(p.q('.intro-body').innerHTML, html);
 });
@@ -157,13 +163,31 @@ test('the arrow keys step through, and the review checkpoints are a picture that
 const step = (tab) => INTRO_STEPS.findIndex((s) => s.tab === tab);
 const still = (tab) => { const s = INTRO_STEPS[step(tab)]; const el = document.createElement('div'); el.innerHTML = s.figure({}, s.anim?.still ?? 0); return el; };
 
-test('New idea shows the planner’s branch and an Add idea example drawn in full, never in a scrolling field', (t) => {
+test('New idea plays an idea, the planner’s question, the job it suggests, then the plan to approve, in the planner’s own markup', (t) => {
   page(t);
-  const el = still('New idea');
-  assert.equal(el.querySelector('.job-plan-branch').textContent, 'next');
-  assert.equal(el.querySelector('.job-change textarea'), null, 'a one-row textarea would scroll the example');
-  assert.equal(el.querySelector('.job-change-text').textContent, 'Design the export button first, and land it on next');
-  assert.equal(el.querySelectorAll('button, input, textarea, [tabindex]').length, 0, 'nothing in the picture takes focus');
+  const els = frames(step('New idea'));
+  const said = (el) => [...el.querySelectorAll('.job-sent-bubble, .job-idea-body, .job-idea-thinking, .job-launch-title')].map((n) => n.textContent.trim());
+  assert.deepEqual(said(els[0]), ['Add a dark mode to the reports dashboard', 'Planner is reading the idea…']);
+  assert.match(said(els[1]).at(-1), /follow the system setting/, 'then it asks');
+  assert.deepEqual(said(els[2]).slice(-2), ['Follow the system, with a switch to override it. Land it on next.', 'Planner is thinking…']);
+  assert.equal(els[3].querySelector('.job-launch.live .job-launch-title').textContent, 'Dark mode for the reports dashboard', 'and suggests a job');
+  assert.ok(els[4].querySelector('.job-launch.done'), 'Create job pressed');
+  assert.equal(els[3].querySelector('.intro-chat-plan'), null);
+  const plan = els.at(-1);
+  assert.equal(plan.querySelector('.job-idea-thinking'), null, 'the planner is done once the job is made');
+  assert.equal(plan.querySelector('.job-plan-branch').textContent, 'next');
+  assert.equal(plan.querySelector('.job-change textarea'), null, 'a one-row textarea would scroll the example');
+  assert.equal(plan.querySelector('.job-change-text').textContent, 'Design the switch first');
+  assert.deepEqual(els.map((el) => el.querySelector('.intro-flow .job-node:last-child .job-status').textContent), ['Next', 'Next', 'Next', 'Next', 'Working', 'Needs you', 'Needs you'], 'Approve waits on you at the end');
+  for (const el of els) assert.ok(el.querySelector('.intro-chat').hasAttribute('inert'), 'its buttons do nothing here, so nobody can reach them');
+  assert.equal(INTRO_STEPS[step('New idea')].anim.still, els.length - 2, 'reduced motion holds on the plan');
+});
+
+test('the last step’s checklist says an idea is talked through before its plan', (t) => {
+  const p = page(t);
+  createIntro({ storage: memoryStorage() }).open(INTRO_STEPS.length - 1);
+  const items = [...p.q('.intro-panel:not([inert]) .intro-done').querySelectorAll('li')].map((li) => li.textContent);
+  assert.ok(items.includes('New idea: talk it through with the planner, then approve the plan'));
 });
 
 test('Sub-jobs draws three kinds and the places a session writes to; Jira is a place, not a kind', (t) => {
