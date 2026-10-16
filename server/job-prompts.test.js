@@ -214,6 +214,9 @@ test('the planner proposes writes to the places the outcome produces, each owned
   assert.match(text, /workflows:\{PROJECT:\[statuses in order\]\}/); assert.match(text, /jiraSite/);
   assert.match(text, /write NOTHING/); assert.match(text, /each with a short `why`/); assert.match(text, /sessions make every write/);
   assert.match(text, /slack \(ref "#channel"\): \{type:"post", text\}/); assert.match(text, /confluence .*\{type:"create", title, text\?\}/);
+  assert.match(text, /A session whose deliverable is something it makes \(artifact, doc, page, file, diagram, writeup\) owns a make write for each/);
+  assert.match(text, /its link returns in `outputs` as a link, never as a URL in receipt text/);
+  assert.doesNotMatch(text, /design writeup \(a make write\)/, 'the mock-up line is one case of the general rule, not the only one');
   assert.match(text, /\{type:"make", what:"one line"\}/); assert.match(text, /\{<write id>\.url\} of a write made first by the same session or one it is after/);
   assert.match(text, /Writes are unreviewed unless review:true, which you set only where risky \(public, hard to undo\), overriding the job default; its session drafts it for the human first/);
   assert.match(jobPrompt({ ...planned, plan: null, reviewWrites: true }, null, { ...run, phase: 'planning' }), /Writes are reviewed unless review:false; set review:true only where risky/);
