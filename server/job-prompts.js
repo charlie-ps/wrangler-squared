@@ -122,7 +122,7 @@ export function draftsDecidedMail(job, run) {
 // text only (job-evidence.js keepAskImages).
 export function threadMail(job, run, sub, messages) {
   const round = sub.ready?.round || 1;
-  const said = messages.map((m) => `${m.from === 'system' ? 'Wrangler' : 'The human'}: ${JSON.stringify(m.text)}${m.images?.length ? ` (pasted images, read them: ${m.images.map((i) => JSON.stringify(path.join(roundDir(job.id, sub.id, m.round || round), i.file))).join(', ')})` : ''}`);
+  const said = messages.map((m) => `${m.from === 'system' ? 'Wrangler' : m.via === 'planner' ? 'The human (through the planner, approved)' : 'The human'}: ${JSON.stringify(m.text)}${m.images?.length ? ` (pasted images, read them: ${m.images.map((i) => JSON.stringify(path.join(roundDir(job.id, sub.id, m.round || round), i.file))).join(', ')})` : ''}`);
   const dir = displayPath(inboxDir(job.id, sub.id));
   return lines(
     `${job.title}: you reported ready (round ${round}) and the human has written back. They see your proof and the working tree as you left them.`,
@@ -247,6 +247,14 @@ const proofBlock = (job, sub) => {
 // the work is a change to it, and the push goes to the PR that already exists.
 const openPrLine = (sub) => sub?.pr?.url ? `PR ${sub.pr.url} is already open from this worktree's branch; this is a fix to it, requested by the human (see the history below).` : '';
 
+// The view the latest idea was typed on: an action on that step is refused if it
+// has moved by approval (job-actions.js).
+const SOURCE_VIEW = { code: 'its code review', session: 'its result in review', pr: 'its open PR', write: 'the write', step: 'the step' };
+const sourceLine = (job) => {
+  const src = job.replan.source, sub = src && job.subJobs.find((s) => s.id === src.sub);
+  return sub ? `The latest idea was typed on ${SOURCE_VIEW[src.at] || src.at} of ${sub.id} ${JSON.stringify(sub.title)} (pinned to ${src.ref}).` : '';
+};
+
 // A running job's plan change (job-replan.js): the planner sees where every
 // sub-job stands, which ones it may no longer touch, and returns the WHOLE plan
 // as a proposal the human approves.
@@ -255,11 +263,13 @@ const replanBlock = (job) => lines(
   ...job.subJobs.map((s) => replanStatus(job, s)),
   `Frozen (delivered or past the point of no return; keep each exactly as it is): ${job.subJobs.filter(isFrozen).map((s) => s.id).join(', ') || 'none'}.`,
   'Return the WHOLE plan. Keep an id to keep or edit that sub-job: only its title, brief, check, show and after may change, a PR\'s base while it has no worktree or PR yet (once its branch is cut or its PR is open the base is fixed: say so rather than writing it into the brief; a branch change for work already under way is a new id), a session\'s on, and a write\'s action, by, review, why and place.ref (its kind, repo, story and place type are fixed, so new work in another place is a new id). A write goes with the session that makes it, and a session you cancel takes its writes with it. Leave an unfrozen sub-job out to cancel it: it stays on the board as cancelled and any open PR stays open on GitHub. Give new work a new id. Do not make anything wait on a sub-job you cancel. Do not repeat work a frozen sub-job already delivered. Your plan is a proposal: nothing changes until the human approves it, and new steps are held meanwhile.',
-  'Besides editing the plan, a proposal can carry ACTIONS on a live sub-job, each applied only when the human approves and refused if its head, merge commit or stage has moved by then (the board pins it): {type:"accept-red",sub,note?} waves through the failing checks of an open PR (or the failing post-merge run of a merged one) that you have shown are unrelated; {type:"mark",sub,position:"merged"|"done",evidence} says the work is merged or done elsewhere, and `evidence` (one line citing the PR or ticket that shows it) is REQUIRED or the receipt is refused; {type:"rework",sub,note} sends its code or result back to its own agent with the note; {type:"recover",sub,fix} is for a MERGED sub-job whose post-merge run failed: add a new PR sub-job that fixes it, name its id as `fix`, and the merged one counts as landed when the fix does. One action per sub-job. Never use accept-red or mark to hide a real failure.',
-  'Sort the human\'s idea sentence by sentence. Feedback on what a live sub-job already produced (a mock-up, a PR\'s code or result) is a `rework` action on THAT sub-job, in the human\'s own words: never write it into a later sub-job\'s brief, which cannot fix it. New work, reordering and dropping are plan edits. One idea can need both in the same proposal (see "An idea from the human" in the job-worker skill).',
+  'Besides editing the plan, a proposal can carry ACTIONS on a live sub-job, each applied only when the human approves and refused if its head, merge commit, stage or review round has moved by then (the board pins it): {type:"accept-red",sub,note?} waves through the failing checks of an open PR (or the failing post-merge run of a merged one) that you have shown are unrelated; {type:"mark",sub,position:"merged"|"done",evidence} says the work is merged or done elsewhere, and `evidence` (one line citing the PR or ticket that shows it) is REQUIRED or the receipt is refused; {type:"forward",sub,note} hands the human\'s words to the session still OPEN on that sub-job\'s code review (its status says so): it answers a question or makes the change as a new round, keeping its context; {type:"rework",sub,note} sends its code or result back to its own agent with the note (a step whose session is open takes forward, never rework); {type:"recover",sub,fix} is for a MERGED sub-job whose post-merge run failed: add a new PR sub-job that fixes it, name its id as `fix`, and the merged one counts as landed when the fix does. One action per sub-job. Never use accept-red or mark to hide a real failure.',
+  'Every idea the human types comes to you, from the job or from one step. Sort it sentence by sentence. Feedback on, or a question about, what a live sub-job already produced (a mock-up, a PR\'s code or result) is an action on THAT sub-job, in the human\'s own words, kept unchanged: `forward` when its session is open on review, else `rework`. Never write it into a later sub-job\'s brief, which cannot fix it. New work, reordering and dropping are plan edits. One idea can need both in the same proposal, and a step\'s feedback folds into its one action (see "An idea from the human" in the job-worker skill). If an idea reads two ways, rank both as options. A question nobody on a live step can answer is answered in `diagnosis.summary` with the plan unchanged.',
   'Say what you found: `diagnosis:{summary, evidence?:[{label,detail}]}` (the cause, with up to six pieces of evidence: a run, a file, a PR). If more than one answer is reasonable, rank them: your plan and actions are option 1 (the recommended one) with `label` and `why`, and `alternatives:[{label,why?,plan,actions?}]` hold at most two more. Each option is a whole plan.',
   `Current plan: ${JSON.stringify(job.plan)}`,
   job.replan.previous ? `Your previous proposal, which the human asked to change: ${JSON.stringify(job.replan.previous)}` : '',
+  job.replan.previousActions?.length ? `Its actions, which still stand unless the human's words change them (carry each you keep into your actions): ${JSON.stringify(job.replan.previousActions)}` : '',
+  sourceLine(job),
   `Requested change: ${job.replan.feedback}`,
 );
 

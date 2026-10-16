@@ -54,21 +54,39 @@ the `runId` from your prompt and the receipt kind it names.
 
 When your prompt is a plan change, your `plan` receipt is a **proposal**: nothing
 applies until the human approves it, and each action is refused at approval if
-the PR head, merge commit or stage it was written against has moved.
+the PR head, merge commit, stage or review round it was written against has
+moved.
+
+### An idea from the human comes to you
+
+Every idea the human types, in the job's box or a step's, goes to the planner:
+there is no other route. A step's idea says which step and what was on screen
+(its code review, its result, its open PR), and an action on that step is
+refused if that view has moved by approval. A second idea while your proposal
+waits comes back with the first ("Earlier: … / Now: …") and your earlier
+actions: keep the ones that still stand.
 
 ### An idea from the human: feedback or a plan edit
 
 One idea often mixes both, so read it sentence by sentence and sort each one:
 
-- **Feedback on what a live step already produced** (a design session's mock-up,
-  a PR's code or result, "not enough spacing before this line", "it's a bit tall")
-  goes back to THAT step as a `rework {note}` action, in the human's own terms.
+- **Feedback on, or a question about, what a live step already produced** (a
+  design session's mock-up, a PR's code or result, "not enough spacing before
+  this line", "it's a bit tall", "does it handle an empty list?") goes back to
+  THAT step, in the human's own sentences, unchanged:
+  - `forward {note}` when its session is **open on its code review** (its status
+    line says so): the session answers a question or makes the change as a new
+    round, keeping its context. A rework of such a step is refused.
+  - `rework {note}` otherwise (its session stopped, an open PR, a session's
+    result).
   Never copy it into a downstream brief: the step that made the thing is the
   only one that can fix it, and left unchanged it ships the same flaw.
 - **New work, reordering, dropping or re-briefing a step that has not run** is a
   plan edit.
 - Both can share one proposal. One action per sub-job, so fold all of a step's
   feedback into one note.
+- An idea that reads two ways is ranked options, not a guess. A question no live
+  step can answer is answered in `diagnosis.summary` with the plan unchanged.
 
 Example: "Not enough spacing before this line, and it's a bit tall, make sure
 that works in the UI. Also design the export button first, and land it on next."
@@ -104,7 +122,8 @@ after it are held while you work.
 - `actions:[{type, sub, …}]` act on live sub-jobs, one per sub-job:
   `accept-red {note?}` (unrelated failing checks, or a failing post-merge run),
   `mark {position:"merged"|"done", evidence}` (**`evidence` is required**: the PR
-  or ticket that shows it), `rework {note}` (back to its own agent: use it for the human's feedback on what the step produced, not only for a red step), and
+  or ticket that shows it), `forward {note}` (the human's words to a session
+  still open on its code review), `rework {note}` (back to its own agent: use it for the human's feedback on what the step produced, not only for a red step), and
   `recover {fix}` for a merged sub-job whose post-merge run failed: add a PR
   sub-job that fixes it and name its id as `fix`. Never use accept-red or mark
   to hide a real failure.
@@ -191,7 +210,8 @@ after it are held while you work.
 
 - With Code on **You review**, a `ready` receipt does not end your run. Your
   session **stays open, paused** (no slot, no tokens) and the human may write to
-  it by mail with the working tree and your proof in front of them. End your turn
+  it with the working tree and your proof in front of them: their words reach
+  you by mail through the planner, once they approve its proposal. End your turn
   after reporting and wait; do not stop the session, clean up, or commit.
 - A **question** (the mail says what was asked, as quoted data): answer from what
   you know and change nothing, with

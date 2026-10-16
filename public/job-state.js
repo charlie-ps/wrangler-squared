@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber, worktreeKept } from './jobs.js';
 
 // The one state vocabulary every surface draws: a tone (the colour, see the
 // .tone-* rules in jobs.css), a glyph and a short name. Every stage, run status,
@@ -24,7 +24,7 @@ export const stateSolid = (state) => !['planned', 'queued', 'waiting', 'dropped'
 // A plan's sub-jobs have no stage until approval makes them live.
 export function subState(job, sub) {
   if (!sub.stage) return 'planned';
-  if (sub.cancelledAt) return 'dropped';
+  if (sub.cancelledAt) return worktreeKept(sub) ? 'needs' : 'dropped';
   if (sub.stage === 'done') return 'done';
   // Red, but Wrangler has it (Fixing), or has a fix for you (Fix ready): neither is the failing red you act on.
   if (!job.error && redFixing(job, sub)) return 'running';
@@ -39,7 +39,7 @@ export function subState(job, sub) {
 }
 
 export function jobState(job) {
-  if (job.cancelledAt) return 'dropped';
+  if (job.cancelledAt) return job.subJobs.some((s) => s.cancelledAt && worktreeKept(s)) ? 'needs' : 'dropped';
   if (job.error) return 'failing';
   if (job.stage === 'done') return 'done';
   if (job.stage !== 'active') {
@@ -73,6 +73,7 @@ export function subLabel(job, sub) {
     return redPipeline(sub) === 'checks' ? 'Checks failing' : 'Deploy failing';
   }
   if (state === 'needs') {
+    if (sub.cancelledAt) return jobStatus(job, sub).text;
     if (redFixReady(job, sub)) return 'Fix ready';
     if (runStatus(job, sub) === 'needs-you') return 'Prompt waiting';
     if (deploymentStalled(sub)) return 'Nothing deployed';

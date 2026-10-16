@@ -1,9 +1,10 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaStage, ideaOpen } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaStage, ideaOpen, readyRun, reworkRound } from './jobs.js';
 import { ideaViewHtml, ideaThreadHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
+import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, mountMastSky, releaseSkies, spinTo } from './job-skylines.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 
@@ -27,7 +28,7 @@ import { whatsNewHtml } from './updates.js';
 import { createIdeaCorner } from './idea-corner.js';
 import { historyHtml } from './job-thread.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
-import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
+import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, shotBoxHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
 // Mirrors server/jobs-schema.js MAX_SHOW.
 const MAX_SHOW = 8;
 // What #jobs is drawn over (settings `backdrop`); settings saved before it existed read as the sky.
@@ -39,13 +40,15 @@ const link = (url, title) => /^https:\/\/github\.com\//.test(url || '') ? `<a hr
 const commentWhere = (c) => c.kind === 'review' ? `review · ${c.state.toLowerCase().replace('_', ' ')}` : c.kind === 'thread' ? `${c.path || 'thread'}${c.line != null ? `:${c.line}` : ''}${c.outdated ? ' · outdated' : ''}${c.resolved ? ' · resolved' : ''}` : 'comment';
 // An assist chip: a glyph and a few words, the sentence behind them in its tooltip.
 const chip = (icon, text, { cls = '', title = '' } = {}) => `<span class="job-chip ${cls}"${title ? ` title="${esc(title)}"` : ''}>${icon}${text ? `<span>${esc(text)}</span>` : ''}</span>`;
-// A PR's worktree branch and where it lands as one chip, `branch → target`; a
+// One part of a step's meta line: a few words, the sentence behind them in its tooltip.
+const metaPart = (text, { cls = '', title = '' } = {}) => text ? `<span class="${cls}"${title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>` : '';
+// A PR's worktree branch and where it lands as one part, `branch → target`; a
 // PR on the default branch shows only its branch, and nothing until it is cut.
-function branchChip(job, sub) {
+function branchPart(job, sub) {
   const branch = sub.worktree?.branch, target = isPrSub(sub) ? targetOf(job, sub) : null;
   if (!branch && !target) return '';
   const lands = target ? `Lands on ${target}${sub.base ? ' (this PR\'s own branch)' : ' (the job\'s branch)'}` : '';
-  return chip(ICONS.branch, [branch, target ? `→ ${target}` : ''].filter(Boolean).join(' '), { cls: `${branch ? 'job-plan-branch' : ''} ${offBase(job, sub) ? 'job-chip-base' : ''}`, title: [branch ? `Branch ${branch}` : '', lands].filter(Boolean).join('\n') });
+  return metaPart([branch, target ? `→ ${target}` : ''].filter(Boolean).join(' '), { cls: `job-plan-branch ${offBase(job, sub) ? 'job-chip-base' : ''}`, title: [branch ? `Branch ${branch}` : '', lands].filter(Boolean).join('\n') });
 }
 // The state chip carries every explanatory sentence the step has, so they cost a
 // hover rather than a paragraph; the info glyph says there is something to read.
@@ -95,15 +98,18 @@ function eventHtml(job, sub) {
       : `<div class="job-event-fix declared">${ICONS.x}<span><b>${esc(f.title)}</b>${esc(f.detail)}${f.tried.length ? `<ul>${f.tried.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}${f.ask ? `<span class="ask">Needs you: ${esc(f.ask)}</span>` : ''}<small>${f.auto ? 'Declared automatically' : 'Declared by the planner'}${f.options ? ' · options are in the job’s plan change' : ''}</small></span></div>`;
   return `<div class="job-event">${ICONS.x}<div><b>${esc(ev.title)}</b><p>${esc(ev.detail)}</p>${fix}</div></div>`;
 }
-// One sub-job's prerequisites as small chips: met, dropped, or still holding it.
+// A sub-job's prerequisites that still matter, as small chips: one dropped, or
+// still holding it, is why nothing happens. A met one is history, kept in Details.
+const depsOf = (job, sub) => sub.after.map((id) => job.subJobs.find((s) => s.id === id));
 function depsHtml(job, sub) {
-  const deps = sub.after.map((id) => job.subJobs.find((s) => s.id === id));
+  const deps = depsOf(job, sub).filter((d) => !dependencySatisfied(d));
   if (!deps.length) return '';
   return `<div class="job-dependency-list">${deps.map((d) => {
-    const [icon, tone] = dependencySatisfied(d) ? [ICONS.check, 'ok'] : d?.cancelledAt ? [ICONS.x, 'bad'] : [ICONS.lock, 'idle'];
+    const [icon, tone] = d?.cancelledAt ? [ICONS.x, 'bad'] : [ICONS.lock, 'idle'];
     return chip(icon, d?.title, { cls: `tone-${tone}`, title: `${isPrSub(sub) ? 'Start after' : 'After'} ${d?.title}${isPrSub(d) ? ' deploys' : ''}${d?.cancelledAt ? ' (dropped)' : ''}` });
   }).join('')}</div>`;
 }
+const metDepsHtml = (job, sub) => { const met = depsOf(job, sub).filter(dependencySatisfied); return met.length ? `<p class="job-deps-met">After: ${met.map((d) => esc(d.title)).join(', ')}</p>` : ''; };
 
 // The five checkpoint rows New job and Automation settings share, each starting
 // on `you[field]` (settings.reviewDefaults, so a write can still be held one by
@@ -314,7 +320,7 @@ export function primaryAction(dialog) {
 }
 
 const MAX_ASK_IMAGES = 4;
-export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, updates = null }) {
+export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, updates = null, toast = () => {} }) {
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, maxReplans: 2, deploymentStaleMinutes: 30 } };
@@ -372,7 +378,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   root.innerHTML = `<header class="jobs-mast"><div class="jobs-top"><canvas class="jobs-mast-sky" aria-hidden="true"></canvas><div><div class="jobs-kicker" id="jobs-date">Wrangler² · Jobs</div><h1>Jobs</h1></div>
       <div class="jobs-telemetry"><span class="jobs-beacon" id="jobs-active-count" aria-live="polite"></span><span class="jobs-bays" id="jobs-bays" aria-hidden="true"></span><span id="jobs-spend"></span><span id="jobs-delivered"></span></div>
       <div class="jobs-tools"><label class="jobs-ghost" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="8" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-ghost"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="jobs-newjob" id="job-new">${ICONS.plus}New idea</button></div></div>
-      <nav class="jobs-rail" aria-label="Show jobs">${FILTERS.map(([key, label]) => `<button type="button" data-filter="${key}" aria-pressed="${key === filter}">${label}<span class="jobs-rail-n" ${key === 'needs' ? 'id="jobs-review-count"' : ''}></span></button>`).join('')}<span class="jobs-rail-sort">Newest first</span></nav></header>
+      <nav class="jobs-rail" aria-label="Show jobs">${FILTERS.map(([key, label]) => `<button type="button" data-filter="${key}" aria-pressed="${key === filter}">${label}<span class="jobs-rail-n" ${key === 'needs' ? 'id="jobs-review-count"' : ''}></span></button>`).join('')}</nav></header>
     <div id="jobs-boards" class="jobs-plates" aria-live="polite"></div>`;
   // Outside #jobs-boards, so a graph tick's redraw never touches a half-typed idea.
   const idea = createIdeaCorner({ send });
@@ -412,7 +418,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     for (const [key, , test] of FILTERS) {
       const b = q(`[data-filter="${key}"]`), n = data.jobs.filter((j) => test(j, needs)).length;
       b.setAttribute('aria-pressed', String(key === filter));
-      b.querySelector('.jobs-rail-n').textContent = n || (key === 'needs' ? '' : '0');
+      b.querySelector('.jobs-rail-n').textContent = n || '';
       b.querySelector('.jobs-rail-n').classList.toggle('ask', key === 'needs' && n > 0);
     }
     assignScenes(data.jobs, scenes);
@@ -656,14 +662,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const kept = (job) => { const n = job.subJobs.filter((x) => x.cleanupRefusal && !x.discard).length; return n ? ` (${n} kept now; open ${n === 1 ? 'it' : 'each'} to Retry or Discard)` : ''; };
   // Confirmed first, like Drop, and wrapped in a form so a live graph tick does not
   // re-render the detail view over the question (render() leaves any open form alone).
-  function openCancel(job) {
+  function openCancel(job, back = renderDetail) {
     const live = job.runs.filter((r) => !r.stopped).length;
     const unfinished = job.subJobs.filter((s) => !['cleanup', 'done'].includes(s.stage)).length;
     const prs = job.subJobs.filter((s) => s.pr && s.stage === 'pr').length;
     const what = job.stage === 'active' ? `This drops the ${unfinished === 1 ? 'one unfinished sub-job' : `${unfinished} unfinished sub-jobs`}${live ? ` and stops the ${live === 1 ? 'running step' : `${live} running steps`}; their receipts are ignored` : ''}. Sub-jobs already delivered stay delivered. ` : `This stops ${live ? 'the running ' : ''}planning${live ? '' : ' before it starts'}; no tickets or PRs are created. `;
     show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Cancel this job?</h2><form id="job-cancel-form"><p>${what}${prs ? `${prs === 1 ? 'Its open pull request stays' : `${prs} open pull requests stay`} open on GitHub for you to close. ` : ''}Sessions are archived; each worktree is removed only if it has no uncommitted files and every commit is already on the branch the job lands on (or it is unchanged), and kept otherwise for you to retry or discard.</p><div class="job-actions"><button type="button" class="danger" data-cancel-job="1">Cancel job</button><button type="button" id="job-move-back">Keep working</button></div></form>`);
     dialog.querySelector('[data-cancel-job]').onclick = () => send({ type: 'job-action', id: job.id, action: 'cancel-job' });
-    dialog.querySelector('#job-move-back').onclick = () => renderDetail();
+    dialog.querySelector('#job-move-back').onclick = () => back();
   }
   // One escaped line per intervention, newest first, with when it was made — the
   // record of every human decision in a job, kept out of the way until asked for.
@@ -713,14 +719,16 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     paint();
   }
   // What was sent, above the box it came from: the words and pictures lift into a
-  // bubble, and the line under it says who has it once the server took it.
+  // bubble, and the line under it says who has it once the server took it. Once the
+  // conversation shows the message itself, its row there is the receipt instead.
   function askSentHtml(sub) {
     if (!askSent || askSent.subId !== (sub?.id ?? null)) return '';
+    if (askSent.state === 'sent' && sub?.thread?.some((m) => m.from === 'human' && m.text === askSent.text && m.at >= askSent.at - 60000)) return '';
     const s = askSent, fresh = s.drawn !== s.state; s.drawn = s.state;
     const pics = s.images.length ? `<span class="job-sent-imgs">${s.images.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
     const n = s.images.length ? ` with ${s.images.length} image${s.images.length > 1 ? 's' : ''}` : '';
     const meta = s.state === 'failed' ? `<span class="job-sent-meta failed">${ICONS.x}Not sent: ${esc(s.error || 'refused')}. Your words are back in the box.</span>`
-      : s.state === 'sent' ? `<span class="job-sent-meta"><i class="job-sent-tick">${ICONS.check}</i>Sent to ${esc(s.to.toLowerCase())}${n} · ${esc(new Date(s.at).toLocaleTimeString(undefined, { timeStyle: 'short' }))}</span><span class="job-sent-next">${esc(s.hint)}</span>`
+      : s.state === 'sent' ? `<span class="job-sent-meta"><i class="job-sent-tick">${ICONS.check}</i>Sent to ${esc(s.to.toLowerCase())}${n} · ${esc(new Date(s.at).toLocaleTimeString(undefined, { timeStyle: 'short' }))}</span>`
       : `<span class="job-sent-meta"><span class="job-sent-sending">Sending to ${esc(s.to.toLowerCase())}…</span></span>`;
     return `<div class="job-sent ${s.state}${fresh ? ' fresh' : ''}" data-sent-state="${s.state}"><div class="job-sent-bubble">${pics}<span>${esc(s.text)}</span></div>${meta}</div>`;
   }
@@ -731,9 +739,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // At rest it is one line naming who hears it; focus, words or a picture open it.
   function changeBoxHtml(job, sub) {
     const view = changeView(job, sub), sent = askSentHtml(sub);
-    // A step's own agent can only take an idea while no plan change is pending; one
-    // Wrangler is fixing is the planner's for now, and a declared red is the planner's to take.
-    if (!view || (sub && redFixing(job, sub)) || (replanPending(job) && !(sub && redDeclared(job, sub)) && (!sub ? !job.replan.proposal : ['code', 'session', 'pr'].includes(view.at)))) return sent;
+    // Every idea goes to the planner: while it is drawing a proposal it takes no
+    // other, and once one waits any box adds to it. A step Wrangler is fixing is
+    // the planner's for now.
+    if (!view || (sub && redFixing(job, sub)) || (replanPending(job) && !job.replan.proposal)) return sent;
     const route = changeRoute(view.at, job, sub), draft = askDraft && askDraft.subId === sub?.id ? askDraft.text : '';
     // Something went wrong: what to say is the decision, so the box starts open.
     const open = sub && subState(job, sub) === 'failing';
@@ -742,7 +751,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       <div class="job-change-row"><span class="job-change-to" title="Who hears it"><i>${esc(route.to[0])}</i>${esc(route.to)}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="Add idea for ${esc(route.to.toLowerCase())}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to.toLowerCase())}" title="Send (⌘↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
       <div class="job-change-foot"><span>${esc(route.hint)}</span><span>Paste or drop a screenshot</span><kbd>⌘↵ to send</kbd></div></div>`;
   }
-  const appbar = (title, chips, kicker = '') => `<header class="job-appbar">${kicker}<h2>${esc(title)}</h2><div class="job-chips job-detail-meta">${chips}</div></header>`;
+  // One control for reading the diff: Wrangler's own view, the desktop IDE in its menu.
+  const reviewCodeHtml = (sub) => `<span class="job-split"><button id="job-diff" title="Review code in Wrangler">${ICONS.code}Review code</button>${sub.worktree?.path ? `<details class="job-split-more" data-keep="review-menu" ${openMore.has('review-menu') ? 'open' : ''}><summary aria-label="More ways to review code" title="More ways to review code">${ICONS.caret}</summary><div class="job-split-menu"><button id="job-ide" title="Review code in ${esc(ideApp())}">In ${esc(ideApp())}</button></div></details>` : ''}</span>`;
+  const appbar = (title, chips, kicker = '', line = '') => `<header class="job-appbar">${kicker}<h2>${esc(title)}</h2><div class="job-chips job-detail-meta">${chips}</div>${line ? `<div class="job-detail-line">${line}</div>` : ''}</header>`;
   const costChip = (usd, estimated, title) => { const c = jobCostLabel(usd, estimated); return c ? chip('', c, { cls: 'job-detail-cost', title }) : ''; };
   function storyChips(stories) {
     if (!stories.length) return chip(ICONS.story, 'No ticket', { cls: 'job-chip-quiet', title: 'This work has no Jira ticket' });
@@ -1085,7 +1096,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       sessionDormant(job, sub) ? `${triggerLine(job, sub)}: it is dropped itself once ${trigger?.title || sub.on.sub} lands.` : '',
       ...writeHints(job, sub, held),
       yours ? `No agent will ever run this one${sub.state === 'doing' ? '; you marked it in progress' : ''}. Marking it done is what releases the work waiting on it.` : '',
-      codeAwaitingReview(sub) ? `Nothing is committed yet. Read the diff with Review code in Wrangler — comments there go straight to the session — then approve: a short session commits the working tree as it stands and ${sub.pr ? 'pushes it to the open PR' : 'pushes and opens the PR'}.` : pr && sub.stage === 'review' && !sub.error && !held ? `Approved. A session commits and ${sub.pr ? 'pushes to the open PR' : 'pushes and opens the PR'} next.` : '',
+      codeAwaitingReview(sub) ? `Nothing is committed yet. Read the diff with Review code — comments there go straight to the session — then approve: a short session commits the working tree as it stands and ${sub.pr ? 'pushes it to the open PR' : 'pushes and opens the PR'}.` : pr && sub.stage === 'review' && !sub.error && !held ? `Approved. A session commits and ${sub.pr ? 'pushes to the open PR' : 'pushes and opens the PR'} next.` : '',
       mergeHeldByComments(job, sub) ? 'Comments read as blocking, so the automatic merge is on hold. Approve merge to override for this head.' : '',
       sub.stage === 'pr' && sub.pr?.mergeWithAdmin ? 'Checks have passed. Merging will override GitHub’s required review.' : '',
       sub.fixRequested ? `Fix requested${sub.fixRequested.note ? `: ${sub.fixRequested.note}` : ''}. A repair session starts ${pendingDependencies(job, sub).length ? 'once its prerequisites deploy' : 'on the next tick'}.` : '',
@@ -1095,14 +1106,16 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const deploys = deploysLine(sub);
     const workflows = sub.deploys?.workflows || [];
     const story = job.plan?.stories?.find((s) => s.id === sub.storyId);
+    // Only what can be acted on stays a chip; what the step is and where it lives is one quiet line.
+    const cost = jobCostLabel(sub.usd, sub.usdEstimated), total = jobCostLabel(job.usd, job.usdEstimated);
+    const line = [metaPart(kindLabel(sub), { cls: 'job-kind-label', title: KIND_TITLE[kindClass(sub)] }),
+      metaPart(sub.jiraKey || (sub.storyId ? 'Ticket pending' : ''), { title: story?.title || '' }),
+      pr ? metaPart(tildify(sub.repo).split('/').pop(), { title: tildify(sub.repo) }) : '',
+      branchPart(job, sub),
+      metaPart(cost, { cls: 'job-detail-cost', title: `${SUB_COST_TITLE}${total ? ` · job total ${total}` : ''}` })].filter(Boolean).join('<i aria-hidden="true">·</i>');
     const chips = stateChip(state, status.text, hints)
-      + `<span class="job-chip" title="${esc(KIND_TITLE[kindClass(sub)])}">${kindChipHtml(sub)}<span>${kindLabel(sub)}</span></span>`
-      + chip(ICONS.story, sub.jiraKey || (sub.storyId ? 'Ticket pending' : 'No ticket'), { title: story?.title || '' })
-      + (pr ? chip(ICONS.folder, tildify(sub.repo).split('/').pop(), { title: tildify(sub.repo) }) : '')
-      + branchChip(job, sub)
       + (sub.pr ? `<a class="job-chip job-pipeline-status ${checkTone(sub.pr.checkStatus)}" ${/^https:\/\/github\.com\//.test(sub.pr.url || '') ? `href="${esc(sub.pr.url)}" target="_blank" rel="noopener noreferrer"` : ''} title="Pull request · checks ${esc(sub.pr.checkStatus)}${sub.pr.head ? ` · ${esc(sub.pr.head.slice(0, 8))}` : ''}">${ICONS.pr}<span>${n ? `#${esc(n)}` : 'PR'}</span></a>` : '')
       + (deploys ? chip(ICONS.rocket, sub.deploys.expected === false ? 'No deploy' : 'Deploys', { cls: 'job-deploys', title: deploys }) : '')
-      + costChip(sub.usd, sub.usdEstimated, `${SUB_COST_TITLE}${jobCostLabel(job.usd, job.usdEstimated) ? ` · job total ${jobCostLabel(job.usd, job.usdEstimated)}` : ''}`)
       + (sub.stage === 'review' ? runningChipHtml(job, sub, { open: openMore.has('running'), logs: runLogs.get(sub.id) }) : '');
     const kicker = `<button class="job-back" data-open-job title="Back to the job">${ICONS.back}<span>${esc(job.title)}</span></button>`;
     const session = sub.sessions.length ? `<button id="job-session" ${runStatus(job, sub) === 'needs-you' ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>` : '';
@@ -1145,23 +1158,25 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         ${yours ? `<form id="job-human-form" data-state="${esc(sub.state)}"><label>Result for dependent work <small title="Up to 8,000 characters, passed to dependent agents">optional</small><textarea name="output" maxlength="8000" rows="4"></textarea></label><div class="job-actions tone-${STATES[state].tone}"><button class="primary" type="submit" title="${esc(hints.find((h) => h.startsWith('No agent')) || '')}">${ICONS.check}Mark done</button>${sub.state === 'doing' ? '' : '<button type="button" data-action="start-human">Mark in progress</button>'}</div></form>` : ''}`;
       actions = retry;
     } else {
-      body = `${sub.ready ? (hasProof(sub) ? proofListHtml(job, sub, { isOpen: (k) => openMore.has(k), ask: sub.stage === 'review' }) : `<h3>${sub.stage === 'review' ? 'Ready for review' : 'Verified'}</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${stoppedHtml(sub)}${historyHtml(job, sub, { open: openMore.has('history') })}` : ''}
+      body = `${sub.ready ? (hasProof(sub) ? proofListHtml(job, sub, { isOpen: (k) => openMore.has(k), ask: sub.stage === 'review', stale: !!readyRun(job, sub) && !!reworkRound(sub) }) : `<h3>${sub.stage === 'review' ? 'Ready for review' : 'Verified'}</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${stoppedHtml(sub)}${historyHtml(job, sub, { open: openMore.has('history') })}` : ''}
         ${sub.pr?.checks?.length ? `<h3>Checks</h3><ul class="job-checks">${sub.pr.checks.map((c) => `<li class="${checkTone(c.state)}">${checkMark(c.state)} ${esc(c.name)} <small>${esc(c.state.toLowerCase())}</small></li>`).join('')}</ul>` : ''}
         ${sub.pr ? commentsHtml(sub, commentsShown) : ''}
         ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
         ${sub.deployed ? `<h3>Landed</h3>${receiptHtml(sub.deployed.checks)}` : ''}${noteFor(sub)}${refusalHtml(sub)}`;
       actions = `${codeAwaitingReview(sub) && !sub.error && !held ? `<button class="primary" data-action="approve-code" title="${esc([hints.find((h) => h.startsWith('Nothing is committed')) || '', sub.ready?.round ? `Approval is tied to round ${sub.ready.round}${sub.ready.treeHash ? ` and working tree ${sub.ready.treeHash.slice(0, 7)}` : ''}.` : ''].filter(Boolean).join(' '))}">${ICONS.check}Approve &amp; ${sub.pr ? 'push' : 'open PR'}</button>` : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="Merge head ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
-        ${sub.worktree && sub.stage !== 'done' ? `<button id="job-diff">${ICONS.code}Review code in Wrangler</button>` : ''}${sub.worktree?.path && sub.stage !== 'done' ? `<button id="job-ide">Review code in ${esc(ideApp())}</button>` : ''}${session}${retry}${sub.cleanupRefusal && sub.cleanupRefusal.pinned !== false && sub.stage === 'cleanup' && !sub.discard ? `<button class="danger" id="job-discard">${ICONS.x}Discard anyway</button>` : ''}
+        ${sub.worktree && sub.stage !== 'done' ? reviewCodeHtml(sub) : ''}${session}${retry}${sub.cleanupRefusal && sub.cleanupRefusal.pinned !== false && sub.stage === 'cleanup' && !sub.discard ? `<button class="danger" id="job-discard">${ICONS.x}Discard anyway</button>` : ''}
         ${sub.recoveredBy ? `<button data-open-sub="${esc(sub.recoveredBy)}" title="${esc(hints.at(-1))}">${ICONS.wrench}Open fix sub-job</button>` : ''}`;
     }
-    const details = `${pr ? `<code>${esc(sub.worktree?.path || 'Worktree created on dispatch')}</code>` : ''}${isHumanSub(sub) || isWriteSub(sub) ? '' : `<p>${esc(sub.brief)}</p>`}${sub.why ? `<p>Why: ${esc(sub.why)}</p>` : ''}${sub.check ? `<p>Check after it lands: ${esc(sub.check)}</p>` : ''}${showMeHtml(sub)}
+    const details = `${metDepsHtml(job, sub)}${pr ? `<code>${esc(sub.worktree?.path || 'Worktree created on dispatch')}</code>` : ''}${isHumanSub(sub) || isWriteSub(sub) ? '' : `<p>${esc(sub.brief)}</p>`}${sub.why ? `<p>Why: ${esc(sub.why)}</p>` : ''}${sub.check ? `<p>Check after it lands: ${esc(sub.check)}</p>` : ''}${showMeHtml(sub)}
       ${workflows.length ? `<h4>What runs on merge <small>${workflows.filter((w) => w.triggers).length} of ${workflows.length}</small></h4><ul class="job-checks">${workflows.map((w) => `<li class="${w.triggers ? 'passed' : ''}">${w.triggers ? '✓' : '○'} ${esc(w.name)} <small>${esc(w.reason)}</small></li>`).join('')}</ul>` : ''}
       ${sub.repairs.length ? `<h4>Changes after failed checks</h4>${sub.repairs.map((r, i) => `<div class="job-repair"><b>Repair ${i + 1}</b>${receiptHtml(r.changes)}<details><summary>Re-verified</summary>${receiptHtml(r.checks)}</details></div>`).join('')}` : ''}`;
-    return `${appbar(sub.title, chips, kicker)}${depsHtml(job, sub)}
+    const detailsOpen = openMore.has('details');
+    if (!isWriteSub(sub)) actions += `<button type="button" class="job-details-toggle" data-details-toggle aria-expanded="${detailsOpen}">${ICONS.doc}Details</button>`;
+    return `${appbar(sub.title, chips, kicker, line)}${depsHtml(job, sub)}
       ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub)}
       ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}
       ${reviewing ? changeBoxHtml(job, sub) : ''}${actions.trim() ? `<div class="job-actions tone-${STATES[state].tone}">${actions}</div>` : ''}${reviewing ? '' : changeBoxHtml(job, sub)}
-      ${isWriteSub(sub) ? '' : more('details', `${ICONS.doc}${isHumanSub(sub) ? 'Details' : pr ? 'Worktree &amp; brief' : 'Brief'}`, details)}`;
+      ${isWriteSub(sub) ? '' : `<div class="job-details-body" ${detailsOpen ? '' : 'hidden'}>${details}</div>`}`;
   }
   // The shot viewer's own controls. Back and Ask both leave it; Ask lands in the
   // Request changes box with the question started, about this item.
@@ -1227,12 +1242,51 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       }, calm ? 0 : 900);
     });
   }
+  // A thread or earlier-round shot opened full size: a modal of its own on <body>
+  // (like job-images.js's zoom), so Esc closes it and leaves the step open, and a
+  // tick redrawing the step underneath never touches it.
+  let shotBox = null, shotZoom = null;
+  function paintShotBox() {
+    const job = data.jobs.find((j) => j.id === shotBox?.jobId), sub = job?.subJobs.find((s) => s.id === shotBox.subId);
+    if (!sub || !shotZoom) return shotZoom?.close();
+    const was = document.activeElement?.closest?.('.job-shotbox [data-shotbox-go], .job-shotbox [data-shotbox-close]');
+    shotZoom.innerHTML = shotBoxHtml(job, sub, shotBox, evidence);
+    shotZoom.setAttribute('aria-label', `Shot ${shotBox.at + 1} of ${shotBox.files.length}`);
+    shotZoom.querySelector('[data-shotbox-close]').onclick = () => shotZoom.close();
+    shotZoom.querySelectorAll('[data-shotbox-go]').forEach((b) => b.onclick = () => stepShot(+b.dataset.shotboxGo));
+    const again = was && shotZoom.querySelector(was.dataset.shotboxGo ? `[data-shotbox-go="${was.dataset.shotboxGo}"]:not(:disabled)` : '[data-shotbox-close]');
+    (again || shotZoom.querySelector('[data-shotbox-close]')).focus();
+    hydrateEvidence(shotZoom, evidence, send, { full: { jobId: job.id, subId: sub.id, round: shotBox.round, file: shotBox.files[shotBox.at] } });
+  }
+  function stepShot(d) {
+    const at = shotBox && shotBox.at + d;
+    if (at == null || at < 0 || at >= shotBox.files.length) return;
+    shotBox = { ...shotBox, at };
+    paintShotBox();
+  }
+  function openShot(b) {
+    const slots = [...b.closest('.job-msg-att').querySelectorAll('[data-shot-at] [data-ev-file]')];
+    shotBox = { jobId: selected.jobId, subId: selected.subId, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
+    shotZoom = document.createElement('dialog');
+    shotZoom.className = 'job-shotbox';
+    shotZoom.onkeydown = (e) => { const d = { ArrowLeft: -1, ArrowRight: 1 }[e.key]; if (d) { e.preventDefault(); stepShot(d); } };
+    shotZoom.onclick = (e) => { if (e.target === shotZoom || e.target.classList.contains('job-shotbox-body')) shotZoom.close(); };
+    shotZoom.addEventListener('close', () => {
+      const { round, files, at } = shotBox || {};
+      shotZoom.remove(); shotZoom = null; shotBox = null;
+      [...dialog.querySelectorAll('[data-shot-at] [data-ev-file]')].find((e) => Number(e.dataset.evRound) === round && e.dataset.evFile === files?.[at])?.closest('button').focus();
+    });
+    document.body.append(shotZoom);
+    shotZoom.showModal();
+    paintShotBox();
+  }
   function renderDetail() {
     const job = data.jobs.find((j) => j.id === selected?.jobId);
     if (!job) return;
     const sub = job.subJobs.find((s) => s.id === selected.subId);
     if (!sub && !planDraft && job.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
     const focus = document.activeElement?.closest?.('.job-detail-footer [data-review]')?.dataset.review;
+    const shotFocus = [...dialog.querySelectorAll('.job-shot-open')].indexOf(document.activeElement);
     // An open shot is drawn instead of the step, and a tick redraws it where it was.
     const viewing = sub && proofView && proofItems(sub).length > proofView.i && !isWriteSub(sub);
     if (!viewing) proofView = null;
@@ -1247,6 +1301,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (!sub && inConversation(job)) wireIdea(job);
     wireFooter();
     if (focus) dialog.querySelector(`.job-detail-footer [data-review="${focus}"]`)?.focus();
+    if (shotFocus >= 0) dialog.querySelectorAll('.job-shot-open')[shotFocus]?.focus();
     dialog.querySelectorAll('[data-action]').forEach((b) => b.onclick = () => {
       const name = b.dataset.action;
       const target = b.dataset.sub ? job.subJobs.find((s) => s.id === b.dataset.sub) : sub;
@@ -1266,6 +1321,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
     wireWriteReview(job, sub);
     dialog.querySelectorAll('[data-proof]').forEach((b) => b.onclick = () => { proofView = { i: +b.dataset.proof, j: +b.dataset.proofAt || 0 }; renderDetail(); });
+    dialog.querySelectorAll('[data-shot-at]').forEach((b) => b.onclick = () => openShot(b));
     if (sub) wireProofAsk(sub);
     hydrateEvidence(dialog, evidence, send);
     // The popover hangs from its chip, so near the dialog's right edge it slides left to stay inside.
@@ -1349,7 +1405,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     bind('#job-diff', () => { dialog.close(); onDiff(sub.sessions.findLast(onBoard) || sub.sessions.at(-1), { jobId: job.id, subId: sub.id }); });
     // The IDE opens beside the board rather than instead of it, so the dialog
     // stays: approving is still done here once the code has been read.
-    bind('#job-ide', () => send({ type: 'job-open-ide', id: job.id, subJobId: sub.id }));
+    bind('#job-ide', () => { openMore.delete('review-menu'); const m = dialog.querySelector('.job-split-more'); if (m) m.open = false; send({ type: 'job-open-ide', id: job.id, subJobId: sub.id }); });
+    bind('[data-details-toggle]', (e) => {
+      const open = !openMore.has('details'), body = dialog.querySelector('.job-details-body');
+      if (open) openMore.add('details'); else openMore.delete('details');
+      e.currentTarget.setAttribute('aria-expanded', String(open)); if (body) body.hidden = !open;
+    });
   }
   const trimmed = (f, name) => String(f.get(name) || '').trim();
   // An empty optional field is left OUT of the payload rather than sent as '': the
@@ -1451,6 +1512,34 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // Anywhere else on a plate (the sky, the gaps between chips) opens the job, as the title does.
     const plate = e.target.closest('.job-plate'); if (plate && !e.target.closest('a,button')) openDetail(plate.dataset.board, '');
   };
+  // A plate's right-click menu (job-menu.js), mounted outside #jobs-boards so a
+  // tick's redraw leaves it be; a pick reads the job as it is now, not as it was.
+  let closeMenu = null;
+  function copyText(text, done) {
+    const p = globalThis.navigator?.clipboard?.writeText?.(text);
+    if (!p) return toast('Clipboard unavailable');
+    p.then(() => toast(done), () => toast('Could not copy to clipboard'));
+  }
+  function pickMenu(jobId, item) {
+    const job = data.jobs.find((j) => j.id === jobId);
+    if (!job) return;
+    if (item.id === 'open') return openDetail(job.id, '');
+    if (item.id === 'copy-ref') return copyText(jobReference(job), 'Copied job reference');
+    if (item.id === 'copy-id') return copyText(job.id, 'Copied job ID');
+    if (item.id === 'link') return void globalThis.open?.(item.href, '_blank', 'noopener');
+    if (['start', 'pause', 'resume'].includes(item.id)) return send({ type: 'job-action', id: job.id, action: item.id });
+    if (item.id === 'cancel') { selected = null; planDraft = null; return openCancel(job, () => dialog.close()); }
+  }
+  q('#jobs-boards').oncontextmenu = (e) => {
+    const plate = e.target.closest('.job-plate');
+    const job = plate && data.jobs.find((j) => j.id === plate.dataset.board);
+    if (!job) return;
+    e.preventDefault();
+    closeMenu?.(); closePlacePop();
+    // The keyboard's menu key fires at (0, 0): open it under the plate's title instead.
+    const at = e.clientX || e.clientY ? [e.clientX, e.clientY] : (() => { const r = plate.querySelector('.job-plate-open')?.getBoundingClientRect() || plate.getBoundingClientRect(); return [r.left, r.bottom]; })();
+    closeMenu = mountJobMenu(root, jobMenuItems(job), at[0], at[1], (item) => pickMenu(job.id, item));
+  };
   q('#jobs-boards').onkeydown = (e) => {
     const node = e.target.closest?.('g[data-job]');
     if (!node || !['Enter', ' '].includes(e.key)) return;
@@ -1475,7 +1564,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     e.preventDefault();
     run();
   });
-  dialog.addEventListener('close', () => { releaseSkies(dialog); ideaSent = null; ideaFiring = null; ideaSeen = null; selected = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
+  dialog.addEventListener('close', () => { shotZoom?.close(); releaseSkies(dialog); ideaSent = null; ideaFiring = null; ideaSeen = null; selected = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
   // the same dialog a board card's click does, from a job/sub id pair index.js kept.
@@ -1507,7 +1596,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     askDraft = null;
     return true;
   }
-  return { update, newJob: createJob, reviewFailed, changeFailed, ideaFailed, idea: idea.message, runningLog: (msg) => { if (msg.subJobId && msg.name) { runLogs.set(msg.subJobId, { name: msg.name, text: msg.text, truncated: msg.truncated, error: msg.error }); if (dialog.open && selected?.subId === msg.subJobId) renderDetail(); } }, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
+  return { update, newJob: createJob, reviewFailed, changeFailed, ideaFailed, idea: idea.message, runningLog: (msg) => { if (msg.subJobId && msg.name) { runLogs.set(msg.subJobId, { name: msg.name, text: msg.text, truncated: msg.truncated, error: msg.error }); if (dialog.open && selected?.subId === msg.subJobId) renderDetail(); } }, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); if (shotZoom && !shotZoom.querySelector('.job-proof-full:not(.soft)')) paintShotBox(); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
     // A checkpoint switch keeps the dialog: the footer is where it was made.
     if (msg?.action === 'set-review') {
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }

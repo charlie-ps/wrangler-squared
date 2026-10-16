@@ -289,7 +289,10 @@ const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === 
 export const readyRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === sub?.id && r.parkedFor === 'ready') || null;
 // What the card says while that session works on a message. A question is
 // answered; a change is the next round; a tree that moved is checked again.
-export const answeringLabel = (sub) => ({ ask: 'Answering you', retell: 'Rechecking the tree', restart: 'Starting it again' }[sub?.answering?.kind] || `Reworking · round ${(sub?.ready?.round || 1) + 1}`);
+const ANSWERING = { ask: 'Answering you', retell: 'Rechecking the tree', restart: 'Starting it again' };
+// The round a parked session is reworking toward, or null while it only answers.
+export const reworkRound = (sub) => sub?.answering && !ANSWERING[sub.answering.kind] ? (sub.ready?.round || 1) + 1 : null;
+export const answeringLabel = (sub) => ANSWERING[sub?.answering?.kind] || `Reworking · round ${reworkRound(sub)}`;
 // The live run's own card status, enriched onto the run server-side each graph
 // tick (server/index.js withRunStatus). 'needs-you' is the one the board acts on:
 // an automated step stuck on a prompt is nobody's but the human's.
@@ -357,27 +360,33 @@ export const proposalOptions = (proposal) => [proposal, ...(proposal?.alternativ
 // acts on carries `actionMark` in the graph (job-graph.js MARKS).
 export const actionMark = (a) => (a.type === 'mark' ? `mark-${a.position}` : a.type);
 const PIN_NOUN = { head: 'head', merge: 'merge', stage: 'stage' };
-export const pinLine = (pin) => pin ? `pinned to ${PIN_NOUN[pin.at] || pin.at} ${String(pin.ref ?? 'none').slice(0, 9)}` : '';
+export const pinLine = (pin) => !pin ? '' : pin.at === 'round' ? `to its open session · pinned to round ${pin.round || 1}` : `pinned to ${PIN_NOUN[pin.at] || pin.at} ${String(pin.ref ?? 'none').slice(0, 9)}`;
 export function actionLine(a, plan) {
   const title = (id) => plan.subJobs.find((s) => s.id === id)?.title || id;
   const name = title(a.sub);
   if (a.type === 'accept-red') return { text: `Accept red: ${name}`, detail: a.pin?.at === 'merge' ? 'count the merge as landed' : 'merge as it stands' };
   if (a.type === 'recover') return { text: `Recover: ${name}`, detail: `lands when “${title(a.fix)}” deploys` };
   if (a.type === 'mark') return { text: `Mark ${a.position === 'merged' ? 'merged' : 'done'}: ${name}`, detail: a.evidence || '' };
+  if (a.type === 'forward') return { text: `Forward: ${name}`, detail: `“${a.note || ''}”` };
   return { text: `Rework: ${name}`, detail: a.note || '' };
 }
-// Who an idea at each view goes to (server/job-change.js routes it): the agent
-// that holds the work when there is one, else the planner. `to` names it on the
-// box, `hint` says what it does with the idea.
-const PLANNER = { to: 'Planner', placeholder: 'Add an idea for the planner…', hint: 'Sends feedback back to a step or changes the plan. Nothing changes until you approve.' };
+// Every idea goes to one recipient, the planner (server/job-change.js): it sorts
+// the idea into feedback for a live step and changes to the plan, and the human
+// approves the proposal. `to` names it on the box, `hint` says what happens to the
+// idea from where it was typed.
+const PLANNER = { to: 'Planner', placeholder: 'Add an idea for the planner…', hint: 'Sorts it into feedback for a step or a change to the plan. Nothing changes until you approve.' };
+const STEP = { ...PLANNER, placeholder: 'Add an idea about this step…', hint: 'About this step. The planner sends feedback back to this step and anything else into the plan. You approve first.' };
 const CHANGE_ROUTE = {
   plan: { ...PLANNER, hint: 'Redraws the plan for you to review.' },
-  proposal: { to: 'Planner', placeholder: 'Add to this proposal…', hint: 'Redraws the proposal.' },
-  code: { to: 'This session', placeholder: 'Ask about it, or say what to change…', hint: 'A question gets an answer. A change gets a new round.' },
-  session: { to: 'This session', placeholder: 'What should it do again?', hint: 'It works again and reports back.' },
-  pr: { to: 'Repair session', placeholder: 'What should the repair do?', hint: 'Picks it up on this PR.' },
+  proposal: { ...PLANNER, placeholder: 'Add to this proposal…', hint: 'Redraws the proposal, keeping what it already carries.' },
 };
-export const changeRoute = (at, job = null, sub = null) => sub && job && redDeclared(job, sub) ? { ...PLANNER, hint: 'Gets everything already tried, and proposes a fix for you to approve.' } : CHANGE_ROUTE[at] || PLANNER;
+export function changeRoute(at, job = null, sub = null) {
+  if (sub && job && redDeclared(job, sub)) return { ...PLANNER, hint: 'Gets everything already tried, and proposes a fix for you to approve.' };
+  if (CHANGE_ROUTE[at]) return CHANGE_ROUTE[at];
+  if (!sub) return PLANNER;
+  if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…', hint: 'About this step. The planner forwards feedback to its open session and anything else into the plan. You approve first.' };
+  return STEP;
+}
 export const changeHint = (at, job = null, sub = null) => changeRoute(at, job, sub).hint;
 // What the human is looking at, and the exact thing in it, which Request changes
 // pins its idea to. Mirrors server/job-change.js changeView: the server refuses a
@@ -484,12 +493,16 @@ export function jobNeedsReview(job, sub) {
 }
 // One kind of prerequisite names itself; a mix is only ever "prerequisites".
 const waitingNoun = (list) => list.every(isSessionSub) ? 'session' : list.every(isHumanSub) ? 'human task' : list.every(isPrSub) ? 'deployment' : 'prerequisite';
+// Cleanup refused to lose work and waits for the human to Retry or Discard anyway.
+export const worktreeKept = (sub) => !!sub?.cleanupRefusal && !sub.discard && sub.stage === 'cleanup';
 export function jobStatus(job, sub) {
   if (!job.error && sub?.error && !sub.cancelledAt) {
     if (redFixing(job, sub)) return { tone: 'working', text: 'Fixing' };
     if (redFixReady(job, sub)) return { tone: 'needs', text: 'Fix ready' };
     if (redDeclared(job, sub)) return { tone: 'needs', text: 'Declared red' };
   }
+  if (sub?.cancelledAt && worktreeKept(sub)) return { tone: 'needs', text: 'Worktree kept' };
+  if (!sub && job.cancelledAt && job.subJobs.some(worktreeKept)) return { tone: 'needs', text: 'Cancelled · worktree kept' };
   if (job.error || sub?.error) return { tone: 'needs', text: 'Needs attention' };
   if (sub?.cancelledAt) { const word = sub.superseded ? 'Superseded' : sub.notNeeded ? 'Not needed' : 'Dropped'; return { tone: sub.stage === 'done' ? 'done' : 'muted', text: sub.stage === 'done' ? word : `${word} · cleaning up` }; }
   if (!sub && job.cancelledAt) return { tone: job.stage === 'done' ? 'done' : 'muted', text: job.stage === 'done' ? 'Cancelled' : 'Cancelled · cleaning up' };

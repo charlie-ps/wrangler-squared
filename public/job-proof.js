@@ -66,6 +66,9 @@ const ctxAttrs = (job, sub, file) => `data-ev-job="${esc(job.id)}" data-ev-sub="
 // A file of a given round, not necessarily the sub-job's current one: a thread
 // message carries the round it was sent in.
 export const roundThumbHtml = (job, sub, round, file, cls = '') => `<span class="job-proof-thumb ${cls} ${isVideo(file) ? 'video' : ''}" data-ev-job="${esc(job.id)}" data-ev-sub="${esc(sub.id)}" data-ev-round="${Number(round) || 1}" data-ev-file="${esc(file)}">${isVideo(file) ? ICONS.play : ICONS.eye}</span>`;
+// A thread or earlier-round thumbnail that opens its group full size: the group
+// is its `.job-msg-att` row, so the viewer steps through the shots of one message.
+export const shotButtonHtml = (job, sub, round, file, k) => `<button type="button" class="job-shot-open" data-shot-at="${k}" title="Open full size" aria-label="Open shot ${k + 1} full size">${roundThumbHtml(job, sub, round, file)}</button>`;
 export const thumbHtml = (job, sub, file, cls = '') => `<span class="job-proof-thumb ${cls} ${isVideo(file) ? 'video' : ''}" ${ctxAttrs(job, sub, file)}>${isVideo(file) ? ICONS.play : ICONS.eye}</span>`;
 const termHtml = (run, cls = '') => `<span class="job-proof-thumb term ${cls}"><span class="job-proof-term"><i>$</i> ${esc(run.cmd)}\n${esc(String(run.out || '').split('\n').slice(0, 5).join('\n'))}</span></span>`;
 function mediaHtml(job, sub, p, j = 0) {
@@ -75,10 +78,17 @@ function mediaHtml(job, sub, p, j = 0) {
   if (p.run) return termHtml(p.run);
   return `<span class="job-proof-thumb gap">${ICONS.info}</span>`;
 }
+// One file at full size once it has come, its thumbnail blurred until then, else a placeholder.
+function fullMedia(job, sub, round, file, alt, cache) {
+  const got = cache.open(job.id, sub.id, round, file), thumb = cache.thumb(job.id, sub.id, round, file);
+  return got ? (isVideo(file) ? `<video class="job-proof-full" controls src="${dataUrl(got)}"></video>` : `<img class="job-proof-full" alt="${esc(alt)}" src="${dataUrl(got)}">`)
+    : thumb ? `<img class="job-proof-full soft" alt="${esc(alt)}" src="${dataUrl(thumb)}">` : `<span class="job-proof-thumb big ${isVideo(file) ? 'video' : ''}">${ICONS.eye}</span>`;
+}
 // The review step's one list: a verdict that counts
 // every check, then each Show me item with its evidence at the end of its row,
 // opened in place for the full output, every shot and Ask; plain checks follow
-// as ordinary rows. `isOpen(key)` is the view's memory of which rows are open.
+// as ordinary rows. `isOpen(key)` is the view's memory of which rows are open;
+// `stale` says the header already names a newer round, so the list says which it is from.
 export function verdictOf(sub) {
   const s = proofSummary(sub), also = alsoChecked(sub).length;
   return { ...s, checked: s.shown + also, all: s.total + also };
@@ -89,7 +99,7 @@ const mark = (p) => `<span class="job-proof-mk" aria-hidden="true">${p.couldNot 
 function rowEvidence(job, sub, p) {
   if (p.couldNot) return '<span class="job-proof-pill gap">couldn’t</span>';
   const shots = shotsOf(p);
-  if (shots.length) return `${shots.slice(0, 2).map((s) => thumbHtml(job, sub, s.file, 'mini')).join('')}${shots.length > 2 ? `<small>+${shots.length - 2}</small>` : ''}`;
+  if (shots.length) return `${thumbHtml(job, sub, shots[0].file, 'mini')}${shots.length > 1 ? `<small>+${shots.length - 1}</small>` : ''}`;
   if (p.run) return `<span class="job-proof-pill ${p.run.exit === 0 ? '' : 'bad'}">exit ${esc(p.run.exit)}</span>`;
   return '';
 }
@@ -100,14 +110,14 @@ function rowDetail(job, sub, p, i, ask) {
   const button = ask ? `<button type="button" data-proof-ask="${i}">${ICONS.edit}${p.couldNot ? 'Ask it to try another way' : 'Ask about this'}</button>` : '';
   return `${why}${p.note ? `<p>${esc(p.note)}</p>` : ''}${shots ? `<div class="job-proof-shots-open">${shots}</div>` : ''}${run}${button ? `<div class="job-proof-ask">${button}</div>` : ''}`;
 }
-export function proofListHtml(job, sub, { isOpen = () => false, ask = true } = {}) {
+export function proofListHtml(job, sub, { isOpen = () => false, ask = true, stale = false } = {}) {
   const v = verdictOf(sub), round = proofRound(sub);
   const rows = proofItems(sub).map((p, i) => {
     const key = `proof-${round}-${i}`;
     return `<details class="job-proof-item ${p.couldNot ? 'gap' : ''}" data-keep="${key}" ${isOpen(key) ? 'open' : ''}><summary>${mark(p)}<span class="t">${esc(p.text)}${p.couldNot ? `<small>${esc(firstSentence(p.couldNot))}</small>` : ''}</span><span class="job-proof-ev">${rowEvidence(job, sub, p)}</span></summary><div class="job-proof-open">${rowDetail(job, sub, p, i, ask)}</div></details>`;
   }).join('');
   const plain = alsoChecked(sub).map((c) => `<div class="job-proof-item plain">${mark({})}<span class="t">${esc(c)}</span></div>`).join('');
-  return `<section class="job-proof"><div class="job-proof-verdict"><b>${v.checked} of ${v.all} checked</b>${v.gaps ? `<span class="gap">· ${v.gaps} couldn’t show</span>` : ''}<small>Round ${round}</small></div>
+  return `<section class="job-proof"><div class="job-proof-verdict"><b>${v.checked} of ${v.all} checked</b>${v.gaps ? `<span class="gap">· ${v.gaps} couldn’t show</span>` : ''}${stale ? `<small>from round ${round}</small>` : ''}</div>
     <div class="job-proof-list">${rows}${plain}</div></section>`;
 }
 
@@ -124,10 +134,7 @@ export function proofViewerHtml(job, sub, view, cache, { branch = '', ask = true
   let stage;
   if (p.couldNot) stage = `<div class="job-proof-stage gap">${ICONS.info}<b>Couldn’t show this</b><span>${esc(p.couldNot)}</span></div>`;
   else if (shot) {
-    const got = cache.open(job.id, sub.id, round, shot.file), thumb = cache.thumb(job.id, sub.id, round, shot.file);
-    const media = got ? (isVideo(shot.file) ? `<video class="job-proof-full" controls src="${dataUrl(got)}"></video>` : `<img class="job-proof-full" alt="${esc(p.text)}" src="${dataUrl(got)}">`)
-      : thumb ? `<img class="job-proof-full soft" alt="${esc(p.text)}" src="${dataUrl(thumb)}">` : `<span class="job-proof-thumb big ${isVideo(shot.file) ? 'video' : ''}">${ICONS.eye}</span>`;
-    stage = `<div class="job-proof-stage" ${ctxAttrs(job, sub, shot.file)}>${media}</div>`;
+    stage = `<div class="job-proof-stage" ${ctxAttrs(job, sub, shot.file)}>${fullMedia(job, sub, round, shot.file, p.text, cache)}</div>`;
   } else stage = `<div class="job-proof-stage term"><pre class="job-proof-run"><i>$</i> ${esc(p.run?.cmd)}\n${esc(p.run?.out)}\n<b class="${p.run?.exit === 0 ? 'ok' : 'bad'}">exit ${esc(p.run?.exit)}</b></pre></div>`;
   const row = (k, v) => v ? `<dt>${k}</dt><dd>${esc(v)}</dd>` : '';
   const meta = p.couldNot ? '' : shot
@@ -142,6 +149,16 @@ export function proofViewerHtml(job, sub, view, cache, { branch = '', ask = true
     <div class="job-proof-viewer">${stage}<div class="job-proof-side"><h3 class="${p.couldNot ? 'gap' : ''}"><span aria-hidden="true">${p.couldNot ? '!' : '✓'}</span><span>${esc(p.text)}</span></h3>
       ${p.note ? `<p>${esc(p.note)}</p>` : ''}${p.couldNot ? '<p>The plan asked for this to be shown. You decide whether what covers it instead is enough, or ask for another way.</p>' : ''}${meta}
       ${ask ? `<div class="job-actions"><button type="button" data-proof-ask="${i}">${ICONS.edit}${p.couldNot ? 'Ask it to try another way' : 'Ask about this'}</button></div>` : ''}${shotStrip}${many ? `<div class="job-proof-row"><small>All checks · ${items.length}</small>${itemStrip}</div>` : itemStrip}</div></div>`;
+}
+
+// The thread's lightbox: one shot of a message (or an earlier round) full size,
+// with the way to its neighbours. `box` is { round, files, at }.
+export function shotBoxHtml(job, sub, box, cache) {
+  const files = box.files || [], n = files.length, at = Math.min(Math.max(box.at || 0, 0), n - 1), file = files[at];
+  if (!file) return '';
+  const go = (d, icon, label) => `<button type="button" class="job-shotbox-btn" data-shotbox-go="${d}" aria-label="${label}" title="${label}" ${at + d < 0 || at + d >= n ? 'disabled' : ''}>${icon}</button>`;
+  return `<div class="job-shotbox-body"><div class="job-proof-stage" data-ev-job="${esc(job.id)}" data-ev-sub="${esc(sub.id)}" data-ev-round="${Number(box.round) || 1}" data-ev-file="${esc(file)}">${fullMedia(job, sub, Number(box.round) || 1, file, file, cache)}</div>
+    <div class="job-shotbox-bar">${n > 1 ? `${go(-1, ICONS.back, 'Previous shot')}<b>${at + 1} of ${n}</b>${go(1, ICONS.next, 'Next shot')}` : ''}<span>${esc(file)} · Round ${Number(box.round) || 1}</span><button type="button" class="job-shotbox-btn" data-shotbox-close aria-label="Close" title="Close (Esc)">${ICONS.x}</button></div></div>`;
 }
 
 // The board plate's filmstrip: the first shots of what is waiting to be verified.

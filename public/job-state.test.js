@@ -113,6 +113,23 @@ test('the short labels name the decision, with the PR number where there is one'
   assert.equal(jobLabel(job({ stage: 'done', cancelledAt: 1 })), 'Cancelled');
 });
 
+test('a cancelled job whose cleanup kept a worktree needs the human until Retry or Discard', () => {
+  const refusal = { path: '/wt', files: [{ change: 'modified', path: 'a.js' }], fileCount: 1, pinned: true };
+  const kept = sub('a', { stage: 'cleanup', cancelledAt: 1, error: 'Worktree has work that would be lost (1 uncommitted file); preserve it for review', cleanupRefusal: refusal });
+  const j = job({ cancelledAt: 1, subJobs: [kept, sub('b', { stage: 'done', cancelledAt: 1 })] });
+  assert.equal(subState(j, kept), 'needs'); assert.equal(subLabel(j, kept), 'Worktree kept');
+  assert.equal(jobState(j), 'needs'); assert.equal(jobLabel(j), 'Cancelled · worktree kept'); assert.equal(leadSub(j), kept);
+  const cleaning = job({ cancelledAt: 1, subJobs: [sub('a', { stage: 'cleanup', cancelledAt: 1 })] });
+  assert.equal(jobState(cleaning), 'dropped'); assert.equal(jobLabel(cleaning), 'Cancelled · cleaning up');
+  const discarding = { ...kept, discard: { at: 2 } };
+  assert.equal(subState(job({ cancelledAt: 1, subJobs: [discarding] }), discarding), 'dropped', 'a Discard under way is cleanup again');
+  assert.equal(jobLabel(job({ cancelledAt: 1, subJobs: [discarding] })), 'Cancelled · cleaning up');
+  const finished = job({ stage: 'done', cancelledAt: 1, subJobs: [{ ...kept, stage: 'done' }] });
+  assert.equal(jobState(finished), 'dropped'); assert.equal(jobLabel(finished), 'Cancelled');
+  const dropped = job({ subJobs: [kept, sub('b')] });
+  assert.equal(jobState(dropped), 'needs', 'a sub-job dropped from a live job surfaces the same way'); assert.equal(jobLabel(dropped), 'Worktree kept');
+});
+
 test('the board orders jobs newest first by creation, whatever their live state', () => {
   const quiet = job({ id: 'quiet', createdAt: 10, subJobs: [sub('a')] });
   const fine = job({ id: 'fine', createdAt: 30, subJobs: [sub('a', { stage: 'done' })] });

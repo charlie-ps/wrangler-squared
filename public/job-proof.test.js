@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { showOf, shotsOf, proofItems, hasProof, proofSummary, summaryText, alsoChecked, verdictOf, verdictText, filmFiles, proofListHtml, proofViewerHtml, filmHtml, hydrateEvidence, EvidenceCache } from './job-proof.js';
+import { showOf, shotsOf, proofItems, hasProof, proofSummary, summaryText, alsoChecked, verdictOf, verdictText, filmFiles, proofListHtml, proofViewerHtml, shotBoxHtml, shotButtonHtml, filmHtml, hydrateEvidence, EvidenceCache } from './job-proof.js';
 
 const job = { id: 'job1' };
 const shot = (file, extra = {}) => ({ file, mime: 'image/png', at: 1700000000000, url: 'http://localhost:5174/audit', viewport: '1280x800', tool: 'Playwright', ...extra });
@@ -34,14 +34,15 @@ test('the summary counts what was shown and what could not be, and the verdict c
 
 test('the list is the verdict, then a row per item with its evidence at the end, then the plain checks as rows', () => {
   const html = proofListHtml(job, sub());
-  assert.match(html, /<div class="job-proof-verdict"><b>4 of 5 checked<\/b><span class="gap">· 1 couldn’t show<\/span><small>Round 1<\/small><\/div>/);
+  assert.match(html, /<div class="job-proof-verdict"><b>4 of 5 checked<\/b><span class="gap">· 1 couldn’t show<\/span><\/div>/, 'the header names the round, so the list does not repeat it');
+  assert.match(proofListHtml(job, sub(), { stale: true }), /<small>from round 1<\/small><\/div>/, 'only a header already on a newer round has the list say which round it is from');
   assert.doesNotMatch(html, /Shown working|Also checked/, 'no headings repeat what the rows say');
   const rows = html.match(/<details class="job-proof-item[^"]*"/g);
   assert.deepEqual(rows, ['<details class="job-proof-item "', '<details class="job-proof-item "', '<details class="job-proof-item gap"', '<details class="job-proof-item "']);
   assert.match(html, /<div class="job-proof-item plain"><span class="job-proof-mk" aria-hidden="true">✓<\/span><span class="t">Lint clean<\/span><\/div><\/div><\/section>$/, 'plain checks close the same list');
   assert.match(html, /<span class="t">SSO appears<small>No SSO key in this worktree<\/small><\/span><span class="job-proof-ev"><span class="job-proof-pill gap">couldn’t<\/span>/);
   assert.match(html, /<span class="job-proof-pill ">exit 0<\/span>/, 'a run is its exit code at rest');
-  assert.equal((html.match(/job-proof-thumb mini/g) || []).length, 3, 'one thumbnail for Lists, two for Filters');
+  assert.equal((html.match(/job-proof-thumb mini/g) || []).length, 2, 'one thumbnail a row, however many shots it has');
   assert.match(html, /data-ev-job="job1" data-ev-sub="api" data-ev-round="1" data-ev-file="l\.png"/);
 });
 
@@ -62,7 +63,7 @@ test('an open row holds the detail: every shot with where it was taken, the full
   assert.match(lh, /data-keep="proof-2-0"/, 'a new round opens nothing the old one had open');
   assert.doesNotMatch(proofListHtml(job, sub(), { ask: false }), /data-proof-ask/, 'a delivered step has nothing to ask');
   const many = sub({ ready: { round: 1, checks: ['A'], proof: [{ text: 'A', shots: ['1', '2', '3'].map((n) => shot(`${n}.png`)) }, { text: 'B', run: { cmd: 'x', out: '', exit: 2 } }] } });
-  assert.match(proofListHtml(job, many), /<small>\+1<\/small>/);
+  assert.match(proofListHtml(job, many), /<small>\+2<\/small>/);
   assert.match(proofListHtml(job, many), /job-proof-pill bad">exit 2/);
 });
 
@@ -109,7 +110,7 @@ test('a multi-shot item labels its own shots apart from the strip of checks, and
   assert.equal((html.match(/class="job-proof-pick/g) || []).length, 7, 'shots + checks, nothing more');
   assert.match(html, /<small>Shots in this check · 3 of 4<\/small><div class="job-proof-shots">.*<small>All checks · 3<\/small><div class="job-proof-strip">/s);
   assert.match(html, /aria-label="Shot 3 of 4"/);
-  assert.match(proofListHtml(job, four), /<small>\+2<\/small>/, 'two thumbnails at rest, and how many more');
+  assert.match(proofListHtml(job, four), /<small>\+3<\/small>/, 'one thumbnail at rest, and how many more');
   const single = proofViewerHtml(job, four, { i: 1 }, cache);
   assert.doesNotMatch(single, /job-proof-shots|job-proof-row|All checks/, 'a file named twice is not a second shot, so no row of its own');
   assert.equal((single.match(/class="job-proof-pick/g) || []).length, 3);
@@ -128,6 +129,25 @@ test('the viewer shows the thumbnail soft until the full file arrives, a clip as
   assert.match(proofViewerHtml(job, clip, { i: 0 }, cache), /<video class="job-proof-full" controls src="data:video\/webm;base64,dmlk">/);
   assert.match(proofListHtml(job, clip), /job-proof-thumb mini video/);
   cache.note(null); cache.note({});
+});
+
+test('a thread shot is a button around its slot, and the lightbox shows one shot of its group with the way to its neighbours', () => {
+  const cache = new EvidenceCache();
+  assert.match(shotButtonHtml(job, sub(), 2, 'a<b>.png', 1), /^<button type="button" class="job-shot-open" data-shot-at="1" title="Open full size" aria-label="Open shot 2 full size"><span class="job-proof-thumb[^"]*" data-ev-job="job1" data-ev-sub="api" data-ev-round="2" data-ev-file="a&lt;b&gt;.png">/);
+  const box = { round: 2, files: ['a.png', 'b.webm', 'c.png'], at: 0 };
+  const first = shotBoxHtml(job, sub(), box, cache);
+  assert.match(first, /data-ev-round="2" data-ev-file="a.png"/);
+  assert.match(first, /<b>1 of 3<\/b>/);
+  assert.match(first, /data-shotbox-go="-1"[^>]*disabled/, 'nothing before the first');
+  assert.doesNotMatch(first, /data-shotbox-go="1"[^>]*disabled/);
+  assert.match(first, /job-proof-thumb big/, 'a placeholder until a frame comes');
+  cache.note({ jobId: 'job1', subJobId: 'api', round: 2, file: 'b.webm', mime: 'video/webm', dataBase64: 'dmlk' });
+  const clip = shotBoxHtml(job, sub(), { ...box, at: 1 }, cache);
+  assert.match(clip, /<video class="job-proof-full" controls src="data:video\/webm;base64,dmlk">/, 'a clip plays there');
+  assert.match(shotBoxHtml(job, sub(), { ...box, at: 9 }, cache), /3 of 3.*data-shotbox-go="1"[^>]*disabled/s, 'past the end lands on the last');
+  assert.doesNotMatch(shotBoxHtml(job, sub(), { round: 1, files: ['x.png'], at: 0 }, cache), /data-shotbox-go/, 'one shot: no stepping');
+  assert.equal(shotBoxHtml(job, sub(), { round: 1, files: [], at: 0 }, cache), '');
+  assert.match(shotBoxHtml(job, sub(), { round: 1, files: ['<i>.png'], at: 0 }, cache), /&lt;i&gt;\.png · Round 1/);
 });
 
 test('the plate filmstrip is the first three shots and how many more there are', () => {

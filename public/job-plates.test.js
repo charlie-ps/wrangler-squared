@@ -30,6 +30,9 @@ test('the stub names the one thing a job needs from you, and nothing when it nee
   assert.deepEqual(['label', 'button', 'act', 'sub', 'tone'].map((k) => plateAsk(job({ subJobs: [green] }))[k]), ['Merge #7', 'Merge', 'merge', 'api', 'warn']);
   const review = sub('api', { stage: 'review', state: 'verified' });
   assert.deepEqual(['label', 'button', 'act'].map((k) => plateAsk(job({ subJobs: [review] }))[k]), ['Review code', 'Review', 'open']);
+  const kept = sub('api', { stage: 'cleanup', cancelledAt: 1, error: 'Worktree has work that would be lost', cleanupRefusal: { path: '/wt', files: [], fileCount: 0 } });
+  assert.deepEqual(['label', 'button', 'tone', 'sub'].map((k) => plateAsk(job({ cancelledAt: 1, subJobs: [kept] }))[k]), ['Cancelled · worktree kept', 'Open', 'warn', 'api']);
+  assert.equal(plateAsk(job({ cancelledAt: 1, subJobs: [{ ...kept, error: null, cleanupRefusal: null }] })), null, 'plain cleanup asks for nothing');
   const blocked = sub('api', { stage: 'pr', error: 'Automatic repair limit reached', pr: { url: 'https://github.com/o/r/pull/9', head: 'h9', checkStatus: 'failing', checks: [] } });
   const failing = plateAsk(job({ subJobs: [blocked] }));
   assert.deepEqual([failing.tone, failing.button, failing.act, failing.detail], ['bad', 'Resolve', 'open', '#9 · Deliver api'], 'a red step opens to be resolved: the box is there');

@@ -2,6 +2,7 @@ import { isPrSub, isWriteSub, isStoryCreate, isMakeWrite, withStoryCreates } fro
 import { dropSub, reworkSub, validatePlan, notStarted } from './job-sub-ops.js';
 import { milestoneReached } from './job-writes.js';
 import { stampActions, checkActions, applyActions } from './job-actions.js';
+import { parkedReadyRun } from './job-parked.js';
 
 // Changing the plan of a job that is already running. The human asks with
 // feedback, a planning session proposes a whole plan, and nothing changes until
@@ -113,15 +114,26 @@ export function mergeReplan(job, proposal) {
   return { plan, changes };
 }
 
-// A request replaces any proposal still waiting: the planner reads that one as
-// what the human just asked it to change.
-export function requestReplan(job, feedback, now, red = null) {
+// A request replaces any proposal still waiting: the planner reads that one (its
+// plan and its actions) as what the human just asked it to change, and the ideas
+// add up, so a later one never drops an earlier one. `source` is the step and view
+// the latest idea was typed on (job-actions.js holds the step's actions to it);
+// `images` are every idea's pictures, for a forward to carry into a thread.
+export const REPLAN_FEEDBACK_MAX = 16000;
+export function requestReplan(job, feedback, now, red = null, { source = null, images = [] } = {}) {
   if (job.stage !== 'active') throw new Error('Only a running job has a plan to change');
   if (job.runs.some((r) => !r.stopped && !r.subJobId)) throw new Error('Wait for the planning step to finish');
   const text = String(feedback || '').trim().slice(0, 8000);
   if (!text) throw new Error('Explain the change you want');
   clearPlanningError(job);
-  job.replan = { feedback: text, at: now, proposal: null, previous: job.replan?.proposal?.plan || null, ...(red ? { red } : job.replan?.red ? { red: { ...job.replan.red, auto: false, human: true } } : {}) };
+  const prev = job.replan;
+  const asked = prev?.feedback ? `Earlier: ${prev.feedback}\n\nNow: ${text}`.slice(-REPLAN_FEEDBACK_MAX) : text;
+  const actions = (prev?.proposal?.actions || []).map(({ pin: _pin, ...a }) => a);
+  job.replan = { feedback: asked, at: now, proposal: null, previous: prev?.proposal?.plan || prev?.previous || null,
+    ...(actions.length ? { previousActions: actions } : prev?.proposal ? {} : prev?.previousActions ? { previousActions: prev.previousActions } : {}),
+    ...(source || prev?.source ? { source: source || prev.source } : {}),
+    ...(images.length || prev?.images?.length ? { images: [...(prev?.images || []), ...images] } : {}),
+    ...(red ? { red } : prev?.red ? { red: { ...prev.red, auto: false, human: true } } : {}) };
 }
 
 // A planning session that died or blocked set the job's error, which holds the
@@ -184,7 +196,7 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
   for (const { id, fields } of changes.edited) {
     const sub = job.subJobs.find((s) => s.id === id);
     const spec = plan.subJobs.find((s) => s.id === id);
-    for (const k of EDITABLE) { if (spec[k] === undefined) delete sub[k]; else sub[k] = spec[k]; }
+    for (const k of [...EDITABLE, 'base']) { if (spec[k] === undefined) delete sub[k]; else sub[k] = spec[k]; }
     // A changed write waits for its session afresh, and a reviewed one is drafted
     // again: an approval was of what it said before. A made output in review
     // already exists: it stays there for Accept.
@@ -207,7 +219,7 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
     job.subJobs.push(sub);
     lines.push({ sub, detail: `Plan change added ${quoted(sub.title)}` });
   }
-  for (const l of applyActions(job, chosen.actions, { now })) lines.push(l);
+  for (const l of applyActions(job, chosen.actions, { now, images: job.replan.images })) lines.push(l);
   // A session waiting on review of its result runs again for a write it now has
   // to make, as Retry on a failed write sends it (job-writes.js reopenWrite).
   const reopened = new Set();
@@ -235,7 +247,7 @@ export function replanStatus(job, sub) {
     : sub.on ? ` · on ${sub.on.sub}/${sub.on.at}` : '';
   const red = sub.pr?.checkStatus === 'failing' && sub.stage === 'pr' ? ` · checks FAILING at head ${sub.pr.head}${sub.pr.dirty ? ' (merge conflicts)' : ''}`
     : sub.stage === 'deployment' && sub.deploymentResult?.status === 'failing' ? ` · post-merge run FAILING at merge ${sub.pr?.mergeCommit}${sub.recoveredBy ? ` (recovering via ${sub.recoveredBy})` : ''}` : '';
-  const run = liveRun(job, sub.id) ? ' · a step is running' : '';
+  const run = liveRun(job, sub.id) ? ' · a step is running' : parkedReadyRun(job, sub) && sub.ready ? ` · its session is OPEN on review round ${sub.ready.round || 1}${sub.answering ? ' (answering the last message)' : ' (forward feedback to it)'}` : '';
   const state = sub.cancelledAt ? 'cancelled' : `${sub.stage}${sub.state ? `/${sub.state}` : ''}`;
   return `- ${sub.id} (${sub.kind || 'pr'}) ${JSON.stringify(sub.title)}: ${state}${pr}${red}${write}${run}${isFrozen(sub) ? ' · FROZEN' : ''}`;
 }

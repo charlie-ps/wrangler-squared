@@ -7,6 +7,17 @@ complete on host API 1.31.0, and that file is the map (what came from where, wha
 stands in for what, and which of the eight open host-API gaps block which
 feature).
 
+## This repository is public open source
+
+> **Everything here is public: code, commits, branch names, PR titles and
+> bodies, review comments, docs and test fixtures.** Never put anything specific
+> to an employer or its customers in any of them: internal repo or service
+> names, hostnames, internal or customer URLs, ticket keys, chat channels,
+> colleague names, credentials or tokens, or internal process. Keep examples
+> generic (`example.com`, `acme/widgets`, `PROJ-123`). If a change only makes
+> sense with such a detail, leave the detail out and say so to the human
+> instead.
+
 ## What this is
 
 - An **external extension** for agent-wrangler's extensions API, which is on
@@ -109,13 +120,20 @@ feature).
   plus pictures, no chips) on every step, review and proposal; it replaced `revise-session`, both `replan` forms, `fix-here`
   and the seven moves (Retry stays a button). `at`/`ref` pin it to what the
   human read (`changeView`, mirrored client-side in `public/jobs.js`): a moved
-  head, receipt, revision or proposal refuses it. It routes to the step's
-  resumable agent (the tree's or result's session, an open PR's repair session)
-  else the planner, which proposes a plan change. The box is not a `<form>`, so
+  head, receipt, revision or proposal refuses it. Every idea goes to ONE
+  recipient, the planner (`requestReplan`, with `replan.source = {sub, at, ref}`
+  and the idea's `images`), except a first plan (redrawn via `job.feedback`); a
+  declared red still goes up with what was tried. The planner sorts it into
+  actions on live steps (`forward` to a session parked on review, `rework`) and
+  plan edits, and the human approves that proposal: an action on the source step
+  is refused at stamp and approval once its view has moved (`job-actions.js
+  sourceHolds`). A second idea while a proposal waits adds to it (`Earlier: … /
+  Now: …`, `previousActions`); while the planner is drawing the box steps aside.
+  The box is not a `<form>`, so
   a tick's redraw is held back only while text is typed in it. Its pictures are
-  kept on every route (`handlers.js prepare`: the round's folder, else
-  `ideasDir`); outside a parked review they reach the agent as paths appended to
-  the idea's words. What was sent stays as a bubble (`askSent`) until the dialog
+  kept (`handlers.js prepare`: the round's folder, else `ideasDir`) and reach the
+  planner as paths in the idea's words; a `forward` to the step it was typed on
+  carries that round's pictures as thread images. What was sent stays as a bubble (`askSent`) until the dialog
   moves on, ticked by `job-action-complete`, refused back into the box.
 - **Red steps go up one level before the human** (`server/job-red.js`). A sub-job
   with an `error` is sent to the planner by the runner's `triageRed` when
@@ -146,8 +164,10 @@ feature).
   it sets `run.readyReport`, `parkedFor: 'ready'`, `parkedAt` and clears `mailedAt`, like a
   drafts park (no slot, `settle()` holds it only to its card existing) but never matched by
   `draftsDecided`. The run waits on `waitsOnReview`; approve, a rework, drop or a retry end
-  it quietly and the publish run then claims the sub-job. `request-change` on `code` with a
-  parked run writes a `sub.thread` message (`askAgent`, `sentAt: null`) and the runner mails
+  it quietly and the publish run then claims the sub-job. An approved `forward {sub, note}`
+  action (pinned to `{at:'round', ref: ready.receiptId}`, refused while `answering`; a `rework`
+  of a parked step is refused in its favour) writes a `sub.thread` message (`askAgent`,
+  `via: 'planner'`, `sentAt: null`) and the runner mails
   it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again). The
   agent answers with `reply {text, shots?, run?}` (parks again; tree and round unchanged) or
   a fresh `ready`: round n+1, `receiptId` `<run>#n`, the old round kept in `sub.earlier`.

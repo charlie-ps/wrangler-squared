@@ -55,12 +55,13 @@ function fixture(t, { reviewCode = true, deps = fakeDeps() } = {}) {
   const runner = mkRunner();
   const job = store.create({ title: 'Audit log', intent: 'Add an audit log', repos: ['/repo'], reviewCode });
   const tick = async (r = runner) => { clock += 61000; await r.tick(); };
-  const last = () => launched.at(-1);
-  const report = (payload) => store.report(last().sid, last().run.id, payload);
+  // The step's own session, not a planner that ran since (every idea goes through one).
+  const last = () => launched.filter((w) => w.run.subJobId).at(-1) || launched.at(-1);
+  const report = (payload, w = last()) => store.report(w.sid, w.run.id, payload);
   const sub = () => store.get(job.id).subJobs[0];
   async function start() {
     store.action(job.id, 'start'); await tick();
-    report({ kind: 'plan', plan: plan() }); await tick();
+    report({ kind: 'plan', plan: plan() }, launched.at(-1)); await tick();
     store.approvePlan(job.id, store.get(job.id).revision); await tick();
   }
   async function ready(running, checks = [shot]) {
@@ -131,6 +132,10 @@ test('a later round that no longer lists an entry stops it at once and keeps the
   const f = fixture(t); await f.start(); await f.ready([VITE, DB]);
   const asked = f.store.get(f.job.id); const view = changeView(asked, asked.subJobs[0]);
   f.store.action(f.job.id, 'request-change', { subJobId: 'api', at: view.at, ref: view.ref, text: 'Drop the database' });
+  await f.tick();
+  const planner = f.launched.at(-1);
+  f.report({ kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'Drop the database' }] }, planner);
+  f.store.action(f.job.id, 'approve-replan', { proposalId: planner.run.id });
   await f.tick();
   f.deps.urls.add('http://localhost:55432/');
   await f.ready([VITE], [shot]);

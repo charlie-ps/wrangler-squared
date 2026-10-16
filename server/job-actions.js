@@ -1,15 +1,17 @@
 import { isPrSub, isSessionSub, isWriteSub, isHumanSub } from './jobs-schema.js';
 import { reworkSub } from './job-sub-ops.js';
+import { parkedReadyRun, askAgent } from './job-parked.js';
 
 // The things approving a proposal can do to a sub-job that are not edits to the
-// plan: rework its code, accept its red pipeline, mark where it stands, or make a
-// fix PR the way a merged sub-job recovers. Each claims something about the
+// plan: forward the human's words to its open session, rework its code, accept
+// its red pipeline, mark where it stands, or make a fix PR the way a merged
+// sub-job recovers. Each claims something about the
 // outside world, so each is PINNED to the exact head, merge commit or stage it
 // was written against (`pinOf`), and approval is refused if that has moved
 // (`checkActions`). Pure over the job draft job-store.js is about to persist,
 // like job-replan.js.
 
-const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.subJobId === subId);
+const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.parkedFor !== 'ready' && r.subJobId === subId);
 const quoted = (title) => `“${title}”`;
 const BEFORE_MERGE = ['implementation', 'review', 'pr', 'session'];
 
@@ -23,6 +25,28 @@ function redPin(sub) {
   return null;
 }
 
+// What a human looking at this job (or sub-job) is looking at, and the exact
+// thing in it. The client mirrors this (public/jobs.js changeView): an idea is
+// pinned to it (job-change.js), and so is every action the planner writes on the
+// step the idea came from, so a head, receipt, revision or proposal that moved
+// refuses it rather than applying it to something the human never read.
+export function changeView(job, sub) {
+  if (job.cancelledAt) return null;
+  if (!sub) {
+    if (job.stage === 'planning' && job.plan) return { at: 'plan', ref: String(job.revision) };
+    if (job.stage !== 'active') return null;
+    return job.replan?.proposal ? { at: 'proposal', ref: job.replan.proposal.id } : { at: 'job', ref: 'job' };
+  }
+  if (sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage)) return null;
+  const step = { at: 'step', ref: `${sub.stage}/${sub.state}` };
+  if (isWriteSub(sub)) return { at: 'write', ref: step.ref };
+  if (isSessionSub(sub)) return sub.stage === 'review' && sub.result ? { at: 'session', ref: String(sub.result.receiptId) } : step;
+  if (!isPrSub(sub)) return step;
+  if (sub.stage === 'review' && ['verified', 'approved'].includes(sub.state) && sub.ready) return { at: 'code', ref: String(sub.ready.receiptId) };
+  if (sub.stage === 'pr' && sub.pr?.head) return { at: 'pr', ref: sub.pr.head };
+  return step;
+}
+
 // Whether the action can be made of the sub-job as it stands, and the pin that
 // says exactly which state that was. Throws what is wrong, in the words the agent
 // is told when it reports and the human reads when the job moved.
@@ -33,6 +57,16 @@ export function gateAction(job, action, plan) {
   if (sub.cancelledAt || ['cleanup', 'done'].includes(sub.stage)) throw new Error(`${name} has already finished`);
   if (liveRun(job, sub.id)) throw new Error(`Wait for the step on ${name} to stop`);
   if (isWriteSub(sub) || isHumanSub(sub)) throw new Error(`${name} is a ${sub.kind} step: edit it in the plan instead`);
+  // The session that wrote the tree is still open on its review (job-parked.js):
+  // the human's words go to it, and nothing ends a session that could answer.
+  const parked = parkedReadyRun(job, sub);
+  if (action.type === 'forward') {
+    if (!action.note) throw new Error(`forward ${name}: put the human's words for it in \`note\``);
+    if (!parked || sub.stage !== 'review' || sub.state !== 'verified' || !sub.ready) throw new Error(`${name} has no session open on its review to forward to: use rework instead`);
+    if (sub.answering) throw new Error(`${name}'s session is still answering the last message; ask again once it has`);
+    return { sub, pin: { at: 'round', ref: String(sub.ready.receiptId), round: sub.ready.round || 1 } };
+  }
+  if (parked) throw new Error(action.type === 'rework' ? `${name}'s session is still open: forward the feedback to it instead` : `Wait for the step on ${name} to stop`);
   if (action.type === 'accept-red') {
     const pin = redPin(sub);
     if (!pin) throw new Error(`${name} has no red pipeline to accept${sub.pr?.dirty ? ' (merge conflicts cannot be overridden)' : ''}`);
@@ -70,8 +104,19 @@ export function stampActions(job, actions = [], plan, changes) {
     if (seen.has(a.sub)) throw new Error(`${a.sub} has two actions; one sub-job takes one`);
     seen.add(a.sub);
     if (changes?.removed.includes(a.sub)) throw new Error(`${a.type} acts on ${a.sub}, which this plan cancels`);
-    return { ...a, pin: gateAction(job, a, plan).pin };
+    const { sub, pin } = gateAction(job, a, plan);
+    sourceHolds(job, sub);
+    return { ...a, pin };
   });
+}
+
+// The step the idea was typed on must still be what the human read there: a new
+// round, receipt or head since means the idea was about something else.
+function sourceHolds(job, sub) {
+  const source = job.replan?.source;
+  if (source?.sub !== sub.id) return;
+  const view = changeView(job, sub);
+  if (view?.at !== source.at || view?.ref !== source.ref) throw new Error(`${quoted(sub.title)} has moved since the idea about it was sent (${source.at} ${short(source.ref)} is now ${view ? `${view.at} ${short(view.ref)}` : 'finished'}). Ask again.`);
 }
 
 // Approval: every pin must still be true. Something that moved (a new push, a
@@ -79,20 +124,27 @@ export function stampActions(job, actions = [], plan, changes) {
 export function checkActions(job, actions = [], plan) {
   for (const a of actions) {
     const { sub, pin } = gateAction(job, a, plan);
+    sourceHolds(job, sub);
     if (pin.at !== a.pin?.at || pin.ref !== a.pin?.ref) throw new Error(`${quoted(sub.title)} has moved since this was proposed (${PIN_NOUN[a.pin?.at] || 'state'} ${short(a.pin?.ref)} is now ${short(pin.ref)}). Ask again.`);
   }
 }
-const PIN_NOUN = { head: 'head', merge: 'merge commit', stage: 'stage' };
+const PIN_NOUN = { head: 'head', merge: 'merge commit', stage: 'stage', round: 'review' };
 const short = (ref) => String(ref ?? 'none').slice(0, 9);
 
 // After the plan is installed (a recover's fix exists by now). Returns the
-// history lines; what runs next is the runner's: it reads these fields.
-export function applyActions(job, actions = [], { now }) {
+// history lines; what runs next is the runner's: it reads these fields. `images`
+// are the idea's pictures (job-replan.js requestReplan).
+export function applyActions(job, actions = [], { now, images = [] }) {
   const lines = [];
   for (const a of actions) {
     const sub = job.subJobs.find((s) => s.id === a.sub);
     const name = quoted(sub.title);
-    if (a.type === 'accept-red') {
+    if (a.type === 'forward') {
+      // The runner mails it on its next tick (job-runner.js deliverThread), and the
+      // thread shows it as the human's, come through the planner.
+      askAgent(sub, { from: 'human', via: 'planner', ...forwarded(sub, a.note, images) }, now);
+      lines.push({ sub, detail: `Forwarded your words to ${name}'s open session` });
+    } else if (a.type === 'accept-red') {
       // Accepting red at an open PR IS the merge approval for that head: the
       // human just said "merge it as it stands".
       const merged = sub.stage === 'deployment';
@@ -122,7 +174,18 @@ export function applyActions(job, actions = [], { now }) {
   return lines;
 }
 
-// The same road request-change takes (job-change.js), by the sub-job's own kind.
+// Pictures kept beside this round (handlers.js prepare, for an idea typed on the
+// review) ride as thread images the board draws; any other picture of the idea
+// reaches the session as a path in its words.
+function forwarded(sub, note, images) {
+  const round = sub.ready?.round || 1;
+  const own = images.filter((i) => i.sub === sub.id && i.round === round);
+  const other = images.filter((i) => !own.includes(i) && i.path);
+  const text = other.length ? `${note}\n(Pasted images, read them: ${other.map((i) => JSON.stringify(i.path)).join(', ')})` : note;
+  return { text, images: own.map(({ file, mime }) => ({ file, mime })) };
+}
+
+// A sub-job's own road back to work, by its kind.
 function rework(job, sub, note, now) {
   if (isSessionSub(sub)) {
     sub.error = null; sub.blocked = null; sub.stage = 'session'; sub.state = 'queued';

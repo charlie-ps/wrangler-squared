@@ -239,6 +239,17 @@ test('cleanup deletes the branch on origin only while it still points at the mer
   const gone = fakeRun({ head: 'head1', overrides: { 'ls-remote': () => { throw Object.assign(new Error('exit 2'), { code: 2 }); } } });
   await runtimeWith(host, { run: gone.run }).cleanup({}, sub);
   assert.ok(!gone.calls.some((c) => c[0] === 'push'));
+  // Gone between the look and the push: the lease refuses it as stale, and a
+  // second look that finds nothing makes that success too.
+  let looks = 0;
+  const raced = fakeRun({ head: 'head1', overrides: {
+    'ls-remote': () => { if (looks++) throw Object.assign(new Error('exit 2'), { code: 2 }); return 'head1\trefs/heads/job-api'; },
+    push: () => { throw new Error('(delete) -> job-api (stale info)'); } } });
+  await runtimeWith(host, { run: raced.run }).cleanup({}, sub);
+  assert.equal(looks, 2);
+  // Still there after a refused push: that failure is real and stays on the card.
+  const refused = fakeRun({ head: 'head1', remote: 'head1\trefs/heads/job-api', overrides: { push: () => { throw new Error('denied'); } } });
+  await assert.rejects(runtimeWith(host, { run: refused.run }).cleanup({}, sub), /denied/);
   const moved = fakeRun({ head: 'head1', remote: 'head2\trefs/heads/job-api' });
   await assert.rejects(runtimeWith(host, { run: moved.run }).cleanup({}, sub), /beyond the merged PR/);
   assert.ok(!moved.calls.some((c) => c[0] === 'push'));

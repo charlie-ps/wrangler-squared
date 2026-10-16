@@ -42,13 +42,24 @@ function fixture(t) {
   const runner = new JobRunner({ store, runtime, github: {}, now: () => clock });
   const job = store.create({ title: 'Audit log', intent: 'Add an audit log', repos: ['/repo'], reviewCode: true });
   const tick = async () => { clock += 61000; await runner.tick(); };
-  const last = () => launched.at(-1);
+  // The step's own session, not a planner that ran since (every idea goes through one).
+  const last = () => launched.filter((w) => w.sub).at(-1) || launched.at(-1);
   const report = (payload, w = last()) => store.report(w.sid, w.run.id, payload);
   const sub = () => store.get(job.id).subJobs[0];
   const run = () => store.get(job.id).runs.find((r) => r.id === last().run.id);
-  const ask = (text, extra = {}) => {
+  // An idea typed on the review goes to the planner, which forwards it to the open
+  // session; the human approves that proposal.
+  const propose = async (actions) => {
+    await tick();
+    const planner = launched.at(-1);
+    store.report(planner.sid, planner.run.id, { kind: 'plan', plan: plan(), actions });
+    return planner.run.id;
+  };
+  const ask = async (text, extra = {}) => {
     const j = store.get(job.id); const view = changeView(j, j.subJobs[0]);
-    return store.action(job.id, 'request-change', { subJobId: 'api', at: view.at, ref: view.ref, text, ...extra });
+    store.action(job.id, 'request-change', { subJobId: 'api', at: view.at, ref: view.ref, text, ...extra });
+    const proposalId = await propose([{ type: 'forward', sub: 'api', note: text }]);
+    store.action(job.id, 'approve-replan', { proposalId });
   };
   async function ready(checks = [shot()], meta = {}) {
     ensureInbox(job.id, 'api'); fs.writeFileSync(path.join(ensureInbox(job.id, 'api'), 'list.png'), PNG);
@@ -58,10 +69,10 @@ function fixture(t) {
   }
   async function start() {
     store.action(job.id, 'start'); await tick();
-    report({ kind: 'plan', plan: plan() }); await tick();
+    report({ kind: 'plan', plan: plan() }, launched.at(-1)); await tick();
     store.approvePlan(job.id, store.get(job.id).revision); await tick();
   }
-  return { store, job, runner, launched, mailed, stopped, alive, tick, last, report, sub, run, ask, ready, start };
+  return { store, job, runner, launched, mailed, stopped, alive, tick, last, report, sub, run, ask, propose, ready, start };
 }
 
 test('ready parks the run instead of ending it: no slot, no error, the session kept', async (t) => {
@@ -89,10 +100,10 @@ test('the card going away ends a parked run quietly: the human can still approve
 test('a question is mailed to the parked session, answered by a reply, and the run parks again with the round unchanged', async (t) => {
   const f = fixture(t); await f.start(); await f.ready();
   const receipt = f.sub().ready.receiptId;
-  f.ask('What does it show when nobody has signed in?');
+  await f.ask('What does it show when nobody has signed in?');
   assert.equal(f.sub().answering.kind, 'ask');
-  assert.deepEqual(f.sub().thread.map((m) => [m.from, m.to, m.sentAt]), [['human', 'agent', null]]);
-  assert.equal(f.launched.length, 2, 'no new session: the nearest agent already has the context');
+  assert.deepEqual(f.sub().thread.map((m) => [m.from, m.via, m.to, m.sentAt]), [['human', 'planner', 'agent', null]]);
+  assert.deepEqual(f.launched.map((w) => w.run.phase), ['planning', 'implementation', 'planning'], 'no new implementer: the open session already has the context');
   await f.tick();
   assert.equal(f.mailed.length, 1); assert.equal(f.mailed[0].sid, f.last().sid);
   assert.match(f.mailed[0].text, /What does it show when nobody has signed in\?/);
@@ -125,7 +136,7 @@ test('a reply needs a human to have written first, and a ready run to answer', a
 test('a change is reworked into a fresh ready: a new round, a new receipt, earlier proof kept', async (t) => {
   const f = fixture(t); await f.start(); await f.ready();
   const first = f.sub().ready;
-  f.ask('Make the IP filter a dropdown');
+  await f.ask('Make the IP filter a dropdown');
   assert.equal(f.sub().answering.kind, 'change');
   await f.tick();
   fs.writeFileSync(path.join(ensureInbox(f.job.id, 'api'), 'list2.png'), PNG);
@@ -219,6 +230,9 @@ test('pasted images go to the evidence folder and the session is mailed their pa
   const host = hostFor(t, f, images);
   const view = changeView(f.store.get(f.job.id), f.sub());
   await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: view.at, ref: view.ref, text: 'See attached', images: ['pasted.png'], attachments: [{ file: '../../etc/passwd' }] }, host);
+  assert.equal(f.sub().thread, undefined, 'nothing reaches the session before the human approves');
+  assert.match(f.store.get(f.job.id).replan.feedback, /See attached\n\(Pasted images, read them: /, 'the planner reads the picture');
+  f.store.action(f.job.id, 'approve-replan', { proposalId: await f.propose([{ type: 'forward', sub: 'api', note: 'See attached' }]) });
   const [m] = f.sub().thread;
   assert.equal(m.images.length, 1); assert.match(m.images[0].file, /^ask-.*-1\.png$/);
   assert.ok(fs.existsSync(path.join(roundDir(f.job.id, 'api', 1), m.images[0].file)));
@@ -257,4 +271,20 @@ test('questions are told from changes only to label the card', () => {
   assert.equal(looksLikeQuestion('What does it show?'), true);
   assert.equal(looksLikeQuestion('does it handle empty'), true);
   assert.equal(looksLikeQuestion('Make the filter a dropdown'), false);
+});
+
+test('the planner is told the step\'s session is open and where the idea was typed, and the mail says it came through the planner', async (t) => {
+  const f = fixture(t); await f.start(); await f.ready();
+  const j = f.store.get(f.job.id); const view = changeView(j, j.subJobs[0]);
+  f.store.action(f.job.id, 'request-change', { subJobId: 'api', at: view.at, ref: view.ref, text: 'Is the empty state covered?' });
+  await f.tick();
+  const planner = f.launched.at(-1);
+  const prompt = jobPrompt(f.store.get(f.job.id), null, planner.run);
+  assert.match(prompt, /- api \(pr\) "Audit page": review\/verified · its session is OPEN on review round 1 \(forward feedback to it\)/);
+  assert.match(prompt, /The latest idea was typed on its code review of api "Audit page" \(pinned to run_\w+\)\./);
+  assert.match(prompt, /\{type:"forward",sub,note\}/);
+  f.store.report(planner.sid, planner.run.id, { kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'Is the empty state covered?' }] });
+  f.store.action(f.job.id, 'approve-replan', { proposalId: planner.run.id });
+  await f.tick();
+  assert.match(f.mailed.at(-1).text, /The human \(through the planner, approved\): "Is the empty state covered\?"/);
 });

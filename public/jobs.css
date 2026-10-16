@@ -18,7 +18,9 @@
 /* The board: a masthead, a filter rail and a wall of launch plates (job-plates.js).
    Chrome is the board's semantic variables over its own wallpaper (frosted
    --tile-bg/--card-bg); the plate art and the ink drawn into it are fixed colours. */
-#jobs { --jobs-serif:"Newsreader","Iowan Old Style",Georgia,serif; --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; flex:1; min-width:0; overflow:auto; padding:22px 24px 84px; background:transparent; display:flex; flex-direction:column; gap:20px; }
+/* Core's .ext-view host is the scroller and our mount wrapper (.ext-slot) is display:contents, so #jobs is a
+   plain block there: min-height:100% makes it, and the sky painted on it, reach the bottom of the view. */
+#jobs { --jobs-serif:"Newsreader","Iowan Old Style",Georgia,serif; --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; flex:1; min-width:0; min-height:100%; box-sizing:border-box; overflow:auto; padding:22px 24px 84px; background:transparent; display:flex; flex-direction:column; gap:20px; }
 #jobs.hidden { display:none; }
 /* Wrangler² sky, the default backdrop (settings `backdrop`): one static night in every host theme, so the
    masthead and plates read as cut from it. Stars are one radial-gradient each, tiled at co-prime sizes so the
@@ -51,7 +53,7 @@
 #jobs:not([data-backdrop="wrangler"]) .jobs-empty { color:rgba(244,237,226,.62); }
 /* White chrome on a night sky glares, so under the sky Jobs (and its dialogs, which live on <body>) wear the
    board's DARK palette even on a light host: a copy of core's :root values for every token body.light remaps. */
-body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job-image-zoom) {
+body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job-image-zoom,.job-shotbox) {
   color-scheme:dark; color:var(--fg);
   --bg:#0d1117; --surface:#151b23; --surface-2:#1c2128;
   --fg:#f0f6fc; --fg-muted:#9198a1; --fg-subtle:#656c76;
@@ -112,7 +114,6 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .jobs-rail-n { font:400 11px var(--jobs-mono); opacity:.7; font-variant-numeric:tabular-nums; }
 .jobs-rail-n.ask { opacity:1; min-width:20px; padding:2px 6px; border-radius:999px; text-align:center; background:color-mix(in srgb, var(--st-warn) 24%, transparent); color:var(--st-warn-fg); font-weight:600; }
 .jobs-rail button[aria-pressed="true"] .jobs-rail-n.ask { background:var(--st-warn); color:var(--bar-on); }
-.jobs-rail-sort { margin-left:auto; font:500 10px var(--jobs-mono); letter-spacing:.18em; text-transform:uppercase; color:var(--fg-subtle); }
 
 .jobs-plates { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr)); gap:22px; }
 .job-plate { --t:var(--c-fg); position:relative; cursor:pointer; display:flex; flex-direction:column; min-width:0; border-radius:18px; overflow:hidden; background:var(--card-bg); border:1px solid var(--border-muted); backdrop-filter:blur(14px) saturate(1.2); -webkit-backdrop-filter:blur(14px) saturate(1.2); transition:border-color .25s; }
@@ -224,6 +225,14 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .job-plate-places { position:relative; z-index:1; display:flex; flex-wrap:wrap; gap:6px; margin-top:2px; }
 .job-plate-pop { position:fixed; z-index:40; width:300px; max-width:calc(100vw - 24px); box-sizing:border-box; display:grid; grid-template-columns:minmax(0,1fr); gap:2px; padding:8px; border-radius:16px; background:color-mix(in srgb, var(--surface) 94%, transparent); border:1px solid var(--border-muted); backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); box-shadow:0 18px 44px -16px var(--shadow); color:var(--fg); }
 .job-plate-pop[hidden] { display:none; }
+/* A plate's right-click menu (job-menu.js): core's card menu in this view's frosted glass. */
+.job-menu { position:fixed; z-index:45; min-width:180px; max-width:calc(100vw - 8px); box-sizing:border-box; display:flex; flex-direction:column; gap:1px; padding:4px; border-radius:10px; background:color-mix(in srgb, var(--surface) 96%, transparent); border:1px solid var(--border); backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); box-shadow:0 12px 32px -10px var(--shadow); font-family:var(--font); }
+.job-menu-item { display:flex; align-items:center; gap:9px; width:100%; padding:6px 9px; border:0; border-radius:6px; background:transparent; color:var(--fg-muted); font:inherit; font-size:13px; text-align:left; white-space:nowrap; cursor:pointer; }
+.job-menu-item:hover,.job-menu-item:focus-visible,.job-menu-item:focus { background:var(--surface-2); color:var(--fg); outline:none; }
+.job-menu-item svg { width:15px; height:15px; flex:none; }
+.job-menu-item.danger { color:var(--red-fg); }
+.job-menu-item.danger:hover,.job-menu-item.danger:focus-visible,.job-menu-item.danger:focus { background:var(--danger-bg); color:var(--red-fg); }
+.job-menu-sep { height:1px; margin:3px 2px; background:var(--border-muted); }
 .job-plate-pop header { display:flex; align-items:center; gap:8px; padding:6px 8px 8px; border-bottom:1px solid var(--border-muted); margin-bottom:4px; font-size:13px; }
 .job-plate-pop header .icon { flex:none; }
 .job-plate-pop header b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
@@ -244,7 +253,7 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .job-plate-place.urgent { background:color-mix(in srgb, var(--c) 18%, transparent); color:var(--c-fg); }
 .job-plate-place i { width:6px; height:6px; flex:none; border-radius:50%; background:var(--c); }
 .job-plate-place-out { font-size:11px; opacity:.65; }
-@media(max-width:560px) { #jobs { padding:16px 16px 84px; } .jobs-mast h1 { font-size:34px; } .jobs-top { padding:96px 16px 16px; } .jobs-top::after { background:linear-gradient(0deg, rgba(2,3,6,.85) 0%, rgba(2,3,6,.4) 55%, transparent 80%); } .jobs-tools { margin-left:0; } .jobs-rail { padding:10px 8px 12px; } .jobs-rail-sort { display:none; } }
+@media(max-width:560px) { #jobs { padding:16px 16px 84px; } .jobs-mast h1 { font-size:34px; } .jobs-top { padding:96px 16px 16px; } .jobs-top::after { background:linear-gradient(0deg, rgba(2,3,6,.85) 0%, rgba(2,3,6,.4) 55%, transparent 80%); } .jobs-tools { margin-left:0; } .jobs-rail { padding:10px 8px 12px; } }
 @media(prefers-reduced-motion:reduce) { .jobs-beacon::before,.jobs-newjob::before,.job-plate-graph .halo,.job-plate-graph .failing,.job-plate-art::after { animation:none !important; } .job-plate,.job-plate-go { transition:none; } }
 
 /* The intro's figures still draw the earlier tonal card and its progress segments. */
@@ -360,6 +369,12 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .job-back:hover { color:var(--fg); }
 .job-back:focus-visible { outline:2px solid var(--blue); outline-offset:2px; border-radius:4px; }
 .job-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+/* What a step is and where it lives: one quiet line, not a row of chips that look clickable. */
+.job-detail-line { display:flex; flex-wrap:wrap; align-items:center; gap:2px 8px; margin-top:8px; font-size:12.5px; color:var(--fg-muted); }
+.job-detail-line>span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+.job-detail-line>i { font-style:normal; color:var(--fg-subtle); }
+.job-detail-line .job-plan-branch { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; }
+.job-deps-met { color:var(--fg-muted); }
 .job-chip { display:inline-flex; align-items:center; gap:6px; max-width:100%; box-sizing:border-box; padding:5px 10px; border:1px solid var(--border-muted); border-radius:8px; font-size:12px; font-weight:500; color:var(--fg); font-variant-numeric:tabular-nums; }
 .job-chip>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .job-chip .icon { font-size:14px; color:var(--fg-muted); }
@@ -398,6 +413,12 @@ button.job-node { cursor:pointer; }
 button.job-node:hover .job-node-tile { box-shadow:inset 0 0 0 3px var(--c), 0 0 0 4px color-mix(in srgb, var(--c) 25%, transparent); }
 button.job-node:focus-visible { outline:2px solid var(--c); outline-offset:2px; }
 .job-node.done .job-node-title { color:var(--fg-muted); }
+.job-node.cancelled .job-node-tile,.job-node.cancelled .job-node-tile.on { background:transparent; box-shadow:none; outline:2px dashed color-mix(in srgb, var(--c) 55%, var(--border)); outline-offset:-3px; opacity:.55; }
+.job-node.cancelled .job-node-tile .job-kind { color:var(--fg-muted); }
+.job-node.cancelled .job-node-title { color:var(--fg-muted); text-decoration:line-through; text-decoration-color:color-mix(in srgb, var(--fg-muted) 60%, transparent); }
+.job-node.cancelled :is(.job-node-repo,.job-status) { color:var(--fg-subtle); }
+button.job-node.cancelled:hover .job-node-tile { box-shadow:none; opacity:.8; }
+.job-graph-edges path[data-cancelled] { stroke-dasharray:2 5; stroke-opacity:.5; }
 .job-node-tile { position:relative; width:52px; height:52px; flex:none; border-radius:16px; display:grid; place-items:center; background:var(--surface-2); box-shadow:inset 0 0 0 3px var(--c); transition:box-shadow .15s; }
 .job-node-tile.on { background:var(--c); box-shadow:none; }
 .job-node-tile .job-kind { font-size:26px; color:var(--fg); }
@@ -522,6 +543,19 @@ button.job-write:focus-visible { outline:2px solid var(--c); outline-offset:1px;
 .job-actions button.danger { color:var(--red-fg); }
 .job-actions button.danger:hover { background:var(--danger-bg); }
 .job-actions button:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+/* Review code and its menu of other places to read the diff, as one control. */
+.job-split { position:relative; display:inline-flex; align-items:center; }
+.job-split-more>summary { display:inline-flex; align-items:center; padding:9px 8px; border-radius:20px; color:var(--blue-fg); cursor:pointer; list-style:none; }
+.job-split-more>summary::-webkit-details-marker { display:none; }
+.job-split-more>summary:hover, .job-split-more[open]>summary { background:color-mix(in srgb, var(--blue) 12%, transparent); }
+.job-split-more>summary:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.job-split-more>summary svg { width:14px; height:14px; }
+.job-split-menu { position:absolute; z-index:5; bottom:calc(100% + 4px); left:0; display:grid; min-width:180px; padding:4px; border:1px solid var(--border); border-radius:12px; background:var(--surface); box-shadow:0 8px 24px var(--shadow); }
+.job-split-menu button { justify-content:flex-start; border-radius:8px; white-space:nowrap; }
+.job-actions .job-details-toggle { margin-left:auto; color:var(--fg-muted); }
+.job-actions .job-details-toggle[aria-expanded="true"] { color:var(--fg); background:var(--surface-2); }
+.job-details-body { margin:4px 0 8px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, var(--surface-2) 50%, transparent); font-size:12px; color:var(--fg-muted); }
+.job-details-body code { display:block; overflow-wrap:anywhere; font-size:11px; }
 .job-detail-footer { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:18px; padding-top:12px; border-top:1px solid var(--border-muted); }
 .job-flags { display:flex; gap:8px; }
 .job-flags-hint { flex:1; min-width:180px; margin:0; font-size:12px; color:var(--fg-muted); }
@@ -661,7 +695,7 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-mark-removed .job-node-title { text-decoration:line-through; color:var(--fg-muted); }
 .job-mark-frozen { opacity:.7; }
 .job-mark-accept-red .job-mark,.job-mark-recover .job-mark,.job-mark-mark-done .job-mark,.job-mark-mark-merged .job-mark { color:var(--wf); background:color-mix(in srgb, var(--wf) 16%, var(--surface)); font-weight:600; }
-.job-mark-rework .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
+.job-mark-rework .job-mark,.job-mark-forward .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
 li.job-mark-act { color:var(--wf); }
 li small.pinned { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg-subtle); margin-left:6px; }
 .job-triage { background:var(--surface-2); border-radius:12px; padding:12px 14px; display:grid; gap:8px; margin:0 0 14px; font-size:13px; }
@@ -1119,7 +1153,7 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .jobs-idea-teaser:hover { border-color:color-mix(in srgb, var(--purple) 45%, var(--border-muted)); transform:translateY(-2px); }
 .jobs-idea-teaser b { display:block; font:500 15px/1.2 var(--jobs-serif, Georgia, serif); letter-spacing:-.01em; }
 .jobs-idea-teaser small { display:block; margin-top:3px; font:500 9.5px/1 var(--jobs-mono, ui-monospace, monospace); letter-spacing:.16em; text-transform:uppercase; color:var(--fg-muted); }
-.jobs-idea-panel { width:380px; max-width:calc(100vw - 40px); box-sizing:border-box; background:var(--tile-bg); backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); border:1px solid var(--border-muted); border-radius:20px; box-shadow:0 24px 60px -20px var(--shadow); padding:20px 20px 18px; display:grid; gap:14px; margin:0; }
+.jobs-idea-panel { width:380px; max-width:calc(100vw - 40px); box-sizing:border-box; background:var(--tile-bg); backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); border:1px solid var(--border-muted); border-radius:20px; box-shadow:0 24px 60px -20px var(--shadow); padding:20px 20px 18px; display:grid; grid-template-columns:minmax(0,1fr); gap:14px; margin:0; }
 .jobs-idea-head { display:flex; align-items:flex-start; gap:12px; }
 .jobs-idea-head .jobs-idea-bulb { width:36px; height:36px; font-size:18px; }
 .jobs-idea-head h3 { margin:2px 0 4px; font:500 21px/1.2 var(--jobs-serif, Georgia, serif); letter-spacing:-.01em; text-wrap:balance; }
@@ -1145,7 +1179,7 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .jobs-idea-text:hover { background:color-mix(in srgb, var(--blue) 12%, transparent); }
 .jobs-idea-text.quiet { color:var(--fg-muted); }
 .jobs-idea-as { margin-left:auto; font:400 11px var(--jobs-mono, ui-monospace, monospace); color:var(--fg-subtle); }
-.jobs-idea-result { display:grid; justify-items:start; gap:10px; }
+.jobs-idea-result { display:grid; grid-template-columns:minmax(0,1fr); justify-items:start; gap:10px; }
 .jobs-idea-result h3 { margin:0; font:500 22px/1.2 var(--jobs-serif, Georgia, serif); letter-spacing:-.01em; text-wrap:balance; }
 .jobs-idea-result p { margin:0; font-size:12.5px; line-height:1.6; color:var(--fg-muted); }
 .jobs-idea-badge { width:47px; height:47px; border-radius:50%; display:grid; place-items:center; font-size:23px; }
@@ -1195,12 +1229,11 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-sent-meta .icon { width:12px; height:12px; }
 .job-sent-tick { width:16px; height:16px; border-radius:50%; display:grid; place-items:center; background:var(--green-fg); color:var(--surface); }
 .job-sent-tick .icon { width:10px; height:10px; stroke-width:3; }
-.job-sent-next { justify-self:end; font-size:11.5px; color:var(--fg-subtle); }
 .job-sent-sending { background:linear-gradient(90deg, var(--fg-muted) 0 40%, var(--fg) 50%, var(--fg-muted) 60% 100%); background-size:250% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; }
 @media(prefers-reduced-motion:no-preference) {
   .job-change-go:not(:disabled) { animation:job-idea-pop .25s; }
   .job-sent.fresh .job-sent-bubble { animation:job-idea-rise .5s cubic-bezier(.2,.9,.25,1.15); }
-  .job-sent.fresh .job-sent-meta, .job-sent.fresh .job-sent-next { animation:job-idea-fade .3s .25s both; }
+  .job-sent.fresh .job-sent-meta { animation:job-idea-fade .3s .25s both; }
   .job-sent.sent.fresh .job-sent-tick .icon path { stroke-dasharray:20; stroke-dashoffset:20; animation:job-idea-draw .35s .15s ease-out forwards; }
   .job-sent-sending { animation:job-idea-shine 1.6s linear infinite; }
   .job-change-tray .job-image { animation:job-idea-drop .3s cubic-bezier(.2,.9,.25,1.3); }
@@ -1251,7 +1284,7 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-proof-item[open] .t small { display:none; }
 .job-proof-mk { color:var(--green-fg); font-weight:600; text-align:center; }
 .job-proof-item.gap .job-proof-mk { color:var(--warn-fg); }
-.job-proof-ev { display:flex; gap:4px; align-items:center; }
+.job-proof-ev { display:flex; gap:4px; align-items:center; justify-content:flex-end; min-width:84px; }
 .job-proof-ev .job-proof-thumb.mini { width:52px; border-radius:5px; }
 .job-proof-ev .job-proof-thumb.mini svg { width:14px; height:14px; }
 .job-proof-ev small { font-size:11px; color:var(--fg-muted); }
@@ -1320,9 +1353,27 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-msg.system { background:var(--surface-2); }
 .job-msg.system .job-msg-who, .job-msg.system p { color:var(--fg-muted); }
 .job-msg p { margin:0; color:var(--fg); white-space:pre-wrap; overflow-wrap:anywhere; }
-.job-msg time { margin-left:6px; font-size:11px; color:var(--fg-subtle); }
+.job-msg-via { display:inline-block; margin-top:4px; font-size:11px; color:var(--fg-muted); border:1px dashed var(--border-muted); border-radius:4px; padding:0 6px; }
+.job-msg time { display:inline-flex; align-items:center; gap:3px; margin-left:6px; font-size:11px; color:var(--fg-subtle); }
+.job-msg-tick { display:inline-flex; color:var(--green-fg); }
+.job-msg-tick svg { width:11px; height:11px; }
 .job-msg-att { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
 .job-msg-att .job-proof-thumb { width:120px; }
+.job-shot-open { all:unset; display:block; border-radius:8px; cursor:zoom-in; }
+.job-shot-open:hover .job-proof-thumb { border-color:var(--border); }
+.job-shot-open:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.job-shotbox { width:min(1600px,96vw); max-width:96vw; max-height:96vh; padding:0; border:0; background:transparent; color:var(--fg); overflow:visible; font-family:var(--font); }
+.job-shotbox::backdrop { background:var(--overlay); backdrop-filter:blur(3px); }
+.job-shotbox-body { display:grid; gap:10px; justify-items:center; }
+.job-shotbox .job-proof-stage { max-width:100%; min-height:200px; min-width:min(480px,100%); background:var(--surface); }
+.job-shotbox .job-proof-full { max-height:84vh; }
+.job-shotbox-bar { display:flex; align-items:center; gap:10px; padding:4px 6px 4px 14px; border-radius:999px; background:var(--surface); box-shadow:0 8px 30px var(--shadow); font-size:12px; }
+.job-shotbox-bar>span { color:var(--fg-muted); overflow-wrap:anywhere; }
+.job-shotbox-btn { display:grid; place-items:center; width:32px; height:32px; padding:0; border:0; border-radius:50%; background:transparent; color:var(--fg); cursor:pointer; }
+.job-shotbox-btn:hover:not(:disabled) { background:var(--surface-2); }
+.job-shotbox-btn:disabled { color:var(--fg-subtle); cursor:default; }
+.job-shotbox-btn:focus-visible { outline:2px solid var(--blue); outline-offset:1px; }
+.job-shotbox-btn svg { width:16px; height:16px; }
 .job-msg-run { margin:6px 0 0; padding:8px 10px; border-radius:8px; background:var(--term-bg); color:var(--term-fg); font-size:11px; overflow-x:auto; }
 .job-msg-run .ok { color:var(--green-fg); } .job-msg-run .bad { color:var(--red-fg); }
 .job-earlier { margin-top:10px; }
@@ -1369,6 +1420,7 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-run-panel button { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; font-size:12px; }
 @media (prefers-reduced-motion: no-preference) { .job-run-chip.on .job-run-dot { animation:job-run-pulse 2.4s ease-in-out infinite; } }
 .job-history>summary svg { width:14px; height:14px; }
+.job-history.answering>summary svg { color:var(--purple); animation:job-spin 1s linear infinite; }
 .job-history .job-thread { margin-top:4px; }
 @keyframes job-run-pulse { 50% { box-shadow:0 0 0 5px color-mix(in srgb, var(--green) 10%, transparent); } }
 .job-node-edit { display:flex; flex-wrap:wrap; justify-content:center; gap:2px; max-width:100%; }

@@ -5,6 +5,7 @@ import { proposeReplan, approveReplan, optionsOf } from './job-replan.js';
 import { changeView } from './job-change.js';
 import { reportSchema } from './jobs-schema.js';
 import { buildSubJob } from './job-store.js';
+import { autoApplicable } from './job-red.js';
 
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, kind: 'pr', repo: '/repo', storyId: 'story', after, brief: `Implement ${id}`, ...extra });
 const PR = 'https://github.com/o/r/pull/1';
@@ -141,4 +142,60 @@ test('a recover and its fix are one proposal: the fix is added, then the merged 
   proposeReplan(j, { id: 'run_1' }, { plan, actions: [{ type: 'recover', sub: 'api', fix: 'fix' }] }, 1);
   approveReplan(j, 'run_1', { now: 2, buildSubJob });
   assert.deepEqual([subOf(j, 'api').recoveredBy, subOf(j, 'api').state, !!subOf(j, 'fix')], ['fix', 'awaiting-fix', true]);
+});
+
+// A PR step whose session reported ready and is parked on the review (job-parked.js).
+const parkedOf = (round = 2) => ({ stage: 'review', state: 'verified', ready: { checks: ['x'], receiptId: `run_i#${round}`, round } });
+const parkedJob = (patches = {}) => {
+  const j = job([spec('api'), spec('web')], { api: parkedOf(), ...patches });
+  j.runs.push({ id: 'run_i', subJobId: 'api', stopped: false, parkedFor: 'ready' });
+  return j;
+};
+
+test('forward pins to the open review round; a step with no open session, or one still answering, is refused', () => {
+  const j = parkedJob();
+  assert.deepEqual(gateAction(j, { type: 'forward', sub: 'api', note: 'Tighten it' }).pin, { at: 'round', ref: 'run_i#2', round: 2 });
+  assert.throws(() => gateAction(j, { type: 'forward', sub: 'api' }), /human's words for it in `note`/);
+  assert.throws(() => gateAction(j, { type: 'rework', sub: 'api', note: 'x' }), /session is still open: forward the feedback to it instead/, 'nothing ends a session that could answer');
+  assert.throws(() => gateAction(j, { type: 'forward', sub: 'web', note: 'x' }), /no session open on its review to forward to: use rework instead/);
+  subOf(j, 'api').answering = { id: 'msg_1', kind: 'ask', round: 2 };
+  assert.throws(() => gateAction(j, { type: 'forward', sub: 'api', note: 'x' }), /still answering/);
+  j.runs[0].stopped = true; subOf(j, 'api').answering = null;
+  assert.throws(() => gateAction(j, { type: 'forward', sub: 'api', note: 'x' }), /use rework instead/);
+  assert.deepEqual(gateAction(j, { type: 'rework', sub: 'api', note: 'x' }).pin, { at: 'stage', ref: 'review' });
+  assert.ok(reportSchema.safeParse({ kind: 'plan', plan: { context: '', subJobs: [{ id: 'api', title: 'x', repo: '/r', brief: 'b' }] }, actions: [{ type: 'forward', sub: 'api', note: 'Line one.\nLine two, which the human wrote at length.' }] }).success, 'a note carries the human\'s words, more than one line');
+});
+
+test('approving a forward posts the human\'s words into the open session\'s thread, with the pictures kept beside its round', () => {
+  const j = parkedJob();
+  j.replan = { feedback: 'About api: Tighten it', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#2' },
+    images: [{ sub: 'api', round: 2, file: 'ask-1.png', mime: 'image/png', path: '/r/2/ask-1.png' }, { sub: null, round: null, file: 'ask-2.png', mime: 'image/png', path: '/ideas/ask-2.png' }] };
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'Not enough spacing. Does it work narrow?' }] }, 2);
+  assert.deepEqual(j.replan.proposal.actions[0].pin, { at: 'round', ref: 'run_i#2', round: 2 });
+  assert.equal(subOf(j, 'api').thread, undefined, 'nothing is said until the human approves');
+  const { lines } = approveReplan(j, 'run_p', { now: 3, buildSubJob });
+  const [m] = subOf(j, 'api').thread;
+  assert.deepEqual([m.from, m.via, m.to, m.round, m.sentAt, m.images], ['human', 'planner', 'agent', 2, null, [{ file: 'ask-1.png', mime: 'image/png' }]]);
+  assert.equal(m.text, 'Not enough spacing. Does it work narrow?\n(Pasted images, read them: "/ideas/ask-2.png")');
+  assert.deepEqual(subOf(j, 'api').answering, { id: m.id, at: 3, kind: 'change', round: 2 });
+  assert.deepEqual([subOf(j, 'api').stage, subOf(j, 'api').state, j.runs[0].stopped], ['review', 'verified', false], 'the session stays open and answers');
+  assert.match(lines.at(-1).detail, /Forwarded your words to “Deliver api”'s open session/);
+});
+
+test('a forward or rework on the step the idea came from is refused once that view has moved: a new round is not what the human read', () => {
+  const j = parkedJob();
+  j.replan = { feedback: 'x', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#1' } };
+  assert.throws(() => proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'x' }] }, 2), /moved since the idea about it was sent \(code run_i#1 is now code run_i#2\)/);
+  j.replan.source.ref = 'run_i#2';
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'x' }] }, 2);
+  Object.assign(subOf(j, 'api'), parkedOf(3));
+  assert.throws(() => approveReplan(j, 'run_p', { now: 3, buildSubJob }), /has moved since/);
+  assert.equal(subOf(j, 'api').thread, undefined);
+});
+
+test('a red step\'s fix never applies a forward by itself', () => {
+  const j = parkedJob();
+  j.replan = { feedback: 'x', at: 1, proposal: null, previous: null };
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'x' }] }, 2);
+  assert.equal(autoApplicable({ ...j, reviewPlan: false }, j.replan.proposal), false);
 });
