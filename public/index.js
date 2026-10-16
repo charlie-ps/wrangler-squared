@@ -4,6 +4,7 @@ import { diffReturnTarget } from './diff-return.js';
 import { createIntro } from './intro.js';
 import { createUpdates } from './updates.js';
 import { ICONS } from './icons.js';
+import { closeOnBackdrop } from './dialog-backdrop.js';
 
 // The client half: one `view` slot contribution (agent-wrangler public/slots.js),
 // which the board draws a rail button, a `#view=ext:jobs:board` route and a
@@ -162,6 +163,7 @@ export default {
         dialog.className = 'job-dialog';
         dialog.setAttribute('aria-label', 'Job details');
         document.body.appendChild(dialog);
+        closeOnBackdrop(dialog);
         view = initJobsView({
           send: api.send,
           stageImage: (file) => api.images.stage(file),
