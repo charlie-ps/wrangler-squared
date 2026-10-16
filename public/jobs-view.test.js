@@ -73,10 +73,11 @@ test('code review is a stop before anything is committed: the card asks for a re
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   assert.match(f.q('#job-dialog').textContent, /Ready for review/); assert.match(hint(f), /Nothing is committed yet/);
   assert.deepEqual([...f.q('#job-dialog').querySelectorAll('.job-receipt li')].map((li) => li.textContent.trim()), ['✓ Tests pass', '✓ Lint clean']);
-  assert.ok(f.q('#job-diff'), 'the diff is the review surface');
-  assert.equal(f.q('#job-ide').textContent, 'Review code in IntelliJ IDEA', 'the desktop IDE is the other review surface, named after the setting');
-  f.q('#job-ide').click(); assert.deepEqual(f.sent.at(-1), { type: 'job-open-ide', id: 'job1', subJobId: 'api' }); assert.equal(f.q('#job-dialog').open, true, 'the dialog stays: approval happens here');
-  f.data.settings.ideApp = 'Rider'; f.view.update(f.data); assert.equal(f.q('#job-ide').textContent, 'Review code in Rider');
+  assert.equal(f.q('#job-diff').textContent, 'Review code', 'the diff is the review surface');
+  assert.equal(f.q('#job-ide').closest('.job-split-more .job-split-menu') !== null, true, 'the desktop IDE is the other review surface, in the same control\'s menu');
+  assert.equal(f.q('#job-ide').textContent, 'In IntelliJ IDEA', 'named after the setting');
+  f.q('.job-split-more').open = true; f.q('#job-ide').click(); assert.equal(f.q('.job-split-more').open, false, 'picking it closes the menu'); assert.deepEqual(f.sent.at(-1), { type: 'job-open-ide', id: 'job1', subJobId: 'api' }); assert.equal(f.q('#job-dialog').open, true, 'the dialog stays: approval happens here');
+  f.data.settings.ideApp = 'Rider'; f.view.update(f.data); assert.equal(f.q('#job-ide').textContent, 'In Rider');
   delete f.data.settings.ideApp; f.view.update(f.data);
   const box = f.q('.job-change');
   assert.deepEqual([box.dataset.changeAt, box.dataset.changeRef], ['code', 'run_1'], 'the idea box is on the review itself, pinned to the receipt that was read');
@@ -106,14 +107,15 @@ test('each job is its own card, and a delivered job only returns with Finished',
   f.q('[data-filter="done"]').click();
   assert.deepEqual(boards(), ['job3'], 'Finished shows only the finished');
   assert.ok(f.q('[data-board="job3"]').classList.contains('tone-ok'));
-  assert.deepEqual([...document.querySelectorAll('.jobs-rail-n')].map((n) => n.textContent), ['2', '', '0', '0', '1'], 'each filter counts its jobs; Needs you stays blank at none');
+  assert.deepEqual([...document.querySelectorAll('.jobs-rail-n')].map((n) => n.textContent), ['2', '', '', '', '1'], 'each filter counts its jobs, and none is blank, not a grey 0');
+  assert.equal(f.q('.jobs-rail-sort'), null, 'no fixed sort label posing as a control');
   const sky = f.q('.jobs-top > canvas.jobs-mast-sky');
   assert.equal(sky?.getAttribute('aria-hidden'), 'true', 'the masthead sits on its own painted sky, hidden from assistive tech');
   assert.equal(f.q('.jobs-top').firstElementChild, sky, 'the sky comes first, under the title and tools');
   f.q('[data-filter="all"]').click();
   f.q('.job-plate-open').click(); assert.equal(f.q('#job-dialog h2').textContent, 'Checkout');
   f.q('[data-sub="cart"]').dispatchEvent(f.event('click'));
-  assert.equal(f.q('#job-dialog .job-detail-meta').textContent.includes('SHOP-7'), true, 'the ticket rides in the chips');
+  assert.equal(f.q('#job-dialog .job-detail-line').textContent.includes('SHOP-7'), true, 'the ticket rides in the meta line');
   f.q('#job-dialog').close(); f.q('.job-plate-open').click();
   f.q('#job-dialog [data-action="pause"]').click(); assert.deepEqual([f.sent.at(-1).id, f.sent.at(-1).action, f.sent.at(-1).subJobId], ['job2', 'pause', undefined]);
   b.paused = true; f.view.update(f.data);
@@ -363,9 +365,9 @@ test('the plan review names no worktree branch, and a cut PR tile shows it; a su
   assert.equal(f.q('[data-node="web"] .job-node-landing'), null, 'a PR on the default branch with no worktree shows nothing');
   assert.match(f.q('[data-open-sub="api"]').title, /Lands on the default branch\nBranch fix\/AUTH-1-api/, 'both are a hover away');
   f.q('[data-open-sub="api"]').click();
-  assert.equal(f.q('.job-detail-meta .job-plan-branch').textContent, 'fix/AUTH-1-api');
+  assert.equal(f.q('.job-detail-line .job-plan-branch').textContent, 'fix/AUTH-1-api');
   f.q('#job-dialog').close(); f.q('.job-plate-open[data-job=\"job1\"]').click(); f.q('[data-open-sub="web"]').click();
-  assert.equal(f.q('.job-detail-meta .job-plan-branch'), null, 'no worktree yet, nothing to show');
+  assert.equal(f.q('.job-detail-line .job-plan-branch'), null, 'no worktree yet, nothing to show');
 });
 
 test('a job session archived when its step stopped is offered as a restore, not a dead open', (t) => {
@@ -993,7 +995,7 @@ test('a ticketless plan reviews with no stories, its sub-jobs carry No ticket an
   assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'muted', text: 'Queued' });
   assert.deepEqual(jobStatus(job, { ...job.subJobs[0], storyId: 'story' }), { tone: 'muted', text: 'Waiting for a Jira ticket' }, 'naming a keyless story is what waits');
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.match(f.q('.job-detail-meta').textContent, /No ticket/);
+  assert.doesNotMatch(f.q('#job-dialog .job-appbar').textContent, /No ticket/, 'an absent ticket is the normal case, so the step does not say so');
 });
 
 test('a plan whose stories all exist reads as existing and approval starts work directly', (t) => {
@@ -1095,7 +1097,7 @@ test('a live job shows the same graph with each box carrying its kind and status
   assert.deepEqual([...document.querySelectorAll('.job-graph-edges path[data-from]')].map((p) => `${p.dataset.from}→${p.dataset.to}:${p.getAttribute('class')}`), ['spike→api:start'], 'a session prerequisite gates the start: a solid line');
   assert.match(f.q('[data-node="api"]').title, /Start after Run spike/);
   f.q('[data-open-sub="api"]').click();
-  assert.equal(f.q('#job-dialog h2').textContent, 'Deliver api'); assert.equal(f.q('.job-detail-meta .job-kind').getAttribute('aria-label'), 'PR');
+  assert.equal(f.q('#job-dialog h2').textContent, 'Deliver api'); assert.equal(f.q('.job-detail-line .job-kind-label').textContent, 'PR'); assert.equal(f.q('.job-detail-line .job-kind-label').title, 'A pull request in a repository');
   assert.equal(f.q('.job-graph'), null, 'a sub-job detail is about one sub-job, not the graph');
 });
 
@@ -1322,11 +1324,13 @@ test('a folded section stays open across live ticks', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', worktree: { path: '/wt/api' } }];
   f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  const details = f.q('[data-keep="details"]');
-  assert.equal(details.open, false); assert.match(details.textContent, /\/wt\/api/);
-  details.open = true; details.dispatchEvent(f.event('toggle'));
+  const body = () => f.q('#job-dialog .job-details-body');
+  assert.equal(body().hidden, true); assert.match(body().textContent, /\/wt\/api/);
+  assert.equal(f.q('[data-details-toggle]').closest('.job-actions') !== null, true, 'Details sits in the action row, not a row of its own');
+  f.q('[data-details-toggle]').click();
+  assert.equal(body().hidden, false); assert.equal(f.q('[data-details-toggle]').getAttribute('aria-expanded'), 'true');
   f.view.update(f.data);
-  assert.equal(f.q('[data-keep="details"]').open, true);
+  assert.equal(body().hidden, false, 'still open after a live tick');
   assert.equal(f.q('.job-change').classList.contains('is-open'), false, 'nothing went wrong: the box rests as one line');
 });
 
@@ -2168,7 +2172,7 @@ test('a ready receipt with proof is one checklist: the verdict, each Show me row
   f.view.update(f.data);
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   const dialog = f.q('#job-dialog');
-  assert.match(dialog.querySelector('.job-proof-verdict').textContent, /^2 of 3 checked· 1 couldn’t showRound 1$/);
+  assert.match(dialog.querySelector('.job-proof-verdict').textContent, /^2 of 3 checked· 1 couldn’t show$/);
   assert.deepEqual([...dialog.querySelectorAll('.job-proof-item')].map((c) => [c.classList.contains('gap'), c.classList.contains('plain'), c.querySelector('.t').textContent.trim()]),
     [[false, false, 'Lists sign-ins'], [true, false, 'SSO appears' + dialog.querySelector('.job-proof-item.gap .t small').textContent], [false, true, 'Lint clean']]);
   assert.equal(dialog.querySelector('.job-proof-item.gap .job-proof-pill').textContent, 'couldn’t');
@@ -2181,7 +2185,7 @@ test('a ready receipt with proof is one checklist: the verdict, each Show me row
   assert.equal(f.sent.filter((m) => m.type === 'job-evidence').length, 1, `a tick does not ask again (${asked})`);
   f.view.evidence(evidenceFrame());
   assert.equal(dialog.querySelector('[data-ev-file="l.png"] img').getAttribute('src'), 'data:image/jpeg;base64,dGg=', 'the thumbnail fills in place');
-  assert.match(f.q('#job-diff').textContent, /Review code in Wrangler/, 'the diff is still the other half of the review');
+  assert.match(f.q('#job-diff').textContent, /^Review code$/, 'the diff is still the other half of the review');
 });
 
 test('a receipt with no proof keeps the Ready for review list exactly as before', (t) => {
@@ -2292,10 +2296,16 @@ test('a Code review step with its session parked and nothing said draws no empty
   job.subJobs[0].thread = [{ id: 'm1', at: 1, from: 'human', to: 'agent', text: 'Hi', round: 1 }]; f.view.update(f.data);
   const fold = f.q('#job-dialog .job-history');
   assert.equal(fold.open, false);
-  assert.match(fold.querySelector('summary').textContent, /Conversation 1 message/);
-  assert.match(fold.querySelector('.job-thread-head').textContent, /Its session is waiting on your review.*Open session/);
-  f.q('[data-fab-session="s1"]').click();
-  assert.deepEqual(f.sessions, ['s1']);
+  assert.equal(fold.querySelector('summary').textContent, 'Conversation 1 message', 'a session waiting on review is what the state chip already says');
+  assert.equal(fold.querySelector('.job-thread-head'), null, 'no inner header repeating the state chip');
+  assert.equal(f.q('#job-dialog [data-fab-session]'), null, 'Open session is the footer\'s alone');
+  assert.equal(document.querySelectorAll('#job-dialog #job-session').length, 1);
+  job.runs[0].mailedAt = 2; job.subJobs[0].answering = { id: 'm1', kind: 'change', round: 1 }; f.view.update(f.data);
+  assert.match(f.q('#job-dialog .job-history summary').textContent, /Conversation 1 message · working on what you sent/);
+  assert.ok(f.q('#job-dialog .job-history summary .icon-spin, #job-dialog .job-history summary svg'), 'the spinner moved up with it');
+  assert.match(f.q('#job-dialog .job-proof-verdict').textContent, /from round 1$/, 'the header says round 2, so the list says which round it is from');
+  job.subJobs[0].answering.kind = 'ask'; f.view.update(f.data);
+  assert.doesNotMatch(f.q('#job-dialog .job-proof-verdict').textContent, /round/, 'answering a question names no round, so neither does the list');
 });
 
 test('while the session works on a message the card says what it is doing and is not yours until it reports back', (t) => {
@@ -2326,12 +2336,35 @@ test('the thread shows both sides, the round markers and pictures, and escapes e
   assert.deepEqual([...f.q('#job-dialog').querySelectorAll('.job-msg [data-ev-file]')].map((e) => e.dataset.evFile), ['ask-1.png', 'm2-empty.png']);
 });
 
+test('a met prerequisite is history in Details; one still holding the step keeps its chip', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'done', state: 'done', deployed: { checks: [] } }, { ...sub('web', ['api']), stage: 'implementation', worktree: { path: '/wt/web' } }];
+  f.view.update(f.data); f.q('[data-sub="web"]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('#job-dialog .job-dependency-list'), null, 'nothing holds it, so no chip row');
+  assert.equal(f.q('#job-dialog .job-details-body .job-deps-met').textContent, 'After: Deliver api');
+  job.subJobs[0] = { ...sub('api'), stage: 'implementation' }; f.view.update(f.data);
+  assert.equal(f.q('#job-dialog .job-dependency-list .job-chip').title, 'Start after Deliver api deploys');
+  assert.equal(f.q('#job-dialog .job-deps-met'), null);
+});
+
+test('once the conversation shows what was sent, its ticked row is the receipt and the bubble goes', (t) => {
+  const f = fixture(t); const job = parkedJob(f, {}, { thread: [] });
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const text = f.q('.job-change textarea'); text.value = 'Make it blue'; text.dispatchEvent(f.event('input')); f.q('[data-change-send]').click();
+  f.view.created({ event: 'job-action-complete', jobId: 'job1', subJobId: 'api', action: 'request-change' });
+  assert.equal(f.q('#job-dialog .job-sent').dataset.sentState, 'sent', 'the server took it, the thread does not have it yet');
+  job.subJobs[0].thread = [{ id: 'm1', at: Date.now(), from: 'human', to: 'agent', text: 'Make it blue', round: 1, sentAt: null }]; f.view.update(f.data);
+  assert.equal(f.q('#job-dialog .job-sent'), null, 'your words are not drawn twice');
+  assert.equal(f.q('#job-dialog .job-msg-tick'), null, 'not delivered to the session yet');
+  job.subJobs[0].thread[0].sentAt = Date.now(); f.view.update(f.data);
+  assert.ok(f.q('#job-dialog .job-msg.human .job-msg-tick'), 'delivered: a tick by its time');
+});
+
 test('with the session gone the thread stays as the record, and an approved round says which', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active'; job.runs = [];
   job.subJobs = [proofSub({ state: 'approved', thread: [{ id: 'm1', at: 1, from: 'human', to: 'agent', text: 'Hi', round: 1 }] })];
   f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.match(f.q('#job-dialog .job-thread-head').textContent, /Session stopped.*Approved round 1/);
-  assert.equal(f.q('#job-dialog [data-fab-session]'), null);
+  assert.match(f.q('#job-dialog .job-history summary').textContent, /1 message · session stopped/);
   job.subJobs = [proofSub({ thread: [] })]; f.view.update(f.data);
   assert.equal(f.q('#job-dialog .job-thread'), null, 'no session and nothing said: nothing to draw');
 });
@@ -2404,7 +2437,8 @@ test('the sent moment: the idea lifts into a bubble that says sending, ticks to 
   f.view.created({ event: 'job-action-complete', jobId: 'job1', subJobId: 'api', action: 'request-change' });
   assert.equal(f.q('#job-dialog').open, true, 'the dialog stays: the bubble is the confirmation');
   assert.equal(sent().dataset.sentState, 'sent');
-  assert.match(sent().textContent, /Sent to repair session · .*Picks it up on this PR\./s);
+  assert.match(sent().textContent, /Sent to repair session · /);
+  assert.doesNotMatch(sent().textContent, /Picks it up on this PR/, 'the routing hint is the box\'s own footer, not repeated under the bubble');
   assert.ok(sent().querySelector('.job-sent-tick'));
   send('Also bump the lockfile');
   assert.equal(f.view.changeFailed({ event: 'job-action-failed', jobId: 'job1', subJobId: 'api', action: 'request-change', error: 'This changed since you looked' }), true);
@@ -2551,9 +2585,10 @@ test('every PR tile shows its worktree branch → where it lands, the override m
   assert.match(f.q('[data-open-sub="web"]').title, /Lands on next/);
   assert.match(f.q('#job-dialog .job-chips').textContent, /→ next/, 'the job\'s own base heads the job');
   f.q('[data-open-sub="api"]').click();
-  assert.equal(f.q('.job-detail-meta .job-plan-branch').textContent, 'fix/api-2x → release/2.x', 'worktree branch and target are one chip');
+  assert.equal(f.q('.job-detail-line .job-plan-branch').textContent, 'fix/api-2x → release/2.x', 'worktree branch and target are one part of the meta line');
+  assert.equal(f.q('.job-detail-meta .job-plan-branch'), null, 'and not a chip: it is not something to click');
   f.q('#job-dialog').close(); f.q('.job-plate-open[data-job=\"job1\"]').click(); f.q('[data-open-sub="web"]').click();
-  assert.match(f.q('.job-detail-meta').textContent, /→ next/, 'no worktree yet: just where it lands');
+  assert.match(f.q('.job-detail-line').textContent, /→ next/, 'no worktree yet: just where it lands');
 });
 
 test('plan review sets a PR\'s own base from its branch pill, and blank lands where the job does', (t) => {

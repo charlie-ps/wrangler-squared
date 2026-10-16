@@ -78,7 +78,8 @@ function mediaHtml(job, sub, p, j = 0) {
 // The review step's one list: a verdict that counts
 // every check, then each Show me item with its evidence at the end of its row,
 // opened in place for the full output, every shot and Ask; plain checks follow
-// as ordinary rows. `isOpen(key)` is the view's memory of which rows are open.
+// as ordinary rows. `isOpen(key)` is the view's memory of which rows are open;
+// `stale` says the header already names a newer round, so the list says which it is from.
 export function verdictOf(sub) {
   const s = proofSummary(sub), also = alsoChecked(sub).length;
   return { ...s, checked: s.shown + also, all: s.total + also };
@@ -89,7 +90,7 @@ const mark = (p) => `<span class="job-proof-mk" aria-hidden="true">${p.couldNot 
 function rowEvidence(job, sub, p) {
   if (p.couldNot) return '<span class="job-proof-pill gap">couldn’t</span>';
   const shots = shotsOf(p);
-  if (shots.length) return `${shots.slice(0, 2).map((s) => thumbHtml(job, sub, s.file, 'mini')).join('')}${shots.length > 2 ? `<small>+${shots.length - 2}</small>` : ''}`;
+  if (shots.length) return `${thumbHtml(job, sub, shots[0].file, 'mini')}${shots.length > 1 ? `<small>+${shots.length - 1}</small>` : ''}`;
   if (p.run) return `<span class="job-proof-pill ${p.run.exit === 0 ? '' : 'bad'}">exit ${esc(p.run.exit)}</span>`;
   return '';
 }
@@ -100,14 +101,14 @@ function rowDetail(job, sub, p, i, ask) {
   const button = ask ? `<button type="button" data-proof-ask="${i}">${ICONS.edit}${p.couldNot ? 'Ask it to try another way' : 'Ask about this'}</button>` : '';
   return `${why}${p.note ? `<p>${esc(p.note)}</p>` : ''}${shots ? `<div class="job-proof-shots-open">${shots}</div>` : ''}${run}${button ? `<div class="job-proof-ask">${button}</div>` : ''}`;
 }
-export function proofListHtml(job, sub, { isOpen = () => false, ask = true } = {}) {
+export function proofListHtml(job, sub, { isOpen = () => false, ask = true, stale = false } = {}) {
   const v = verdictOf(sub), round = proofRound(sub);
   const rows = proofItems(sub).map((p, i) => {
     const key = `proof-${round}-${i}`;
     return `<details class="job-proof-item ${p.couldNot ? 'gap' : ''}" data-keep="${key}" ${isOpen(key) ? 'open' : ''}><summary>${mark(p)}<span class="t">${esc(p.text)}${p.couldNot ? `<small>${esc(firstSentence(p.couldNot))}</small>` : ''}</span><span class="job-proof-ev">${rowEvidence(job, sub, p)}</span></summary><div class="job-proof-open">${rowDetail(job, sub, p, i, ask)}</div></details>`;
   }).join('');
   const plain = alsoChecked(sub).map((c) => `<div class="job-proof-item plain">${mark({})}<span class="t">${esc(c)}</span></div>`).join('');
-  return `<section class="job-proof"><div class="job-proof-verdict"><b>${v.checked} of ${v.all} checked</b>${v.gaps ? `<span class="gap">· ${v.gaps} couldn’t show</span>` : ''}<small>Round ${round}</small></div>
+  return `<section class="job-proof"><div class="job-proof-verdict"><b>${v.checked} of ${v.all} checked</b>${v.gaps ? `<span class="gap">· ${v.gaps} couldn’t show</span>` : ''}${stale ? `<small>from round ${round}</small>` : ''}</div>
     <div class="job-proof-list">${rows}${plain}</div></section>`;
 }
 
