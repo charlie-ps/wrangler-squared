@@ -143,9 +143,9 @@ export const INTRO_STEPS = [
     body: `<p>${W2} adds <b>automated jobs</b> to Agent Wrangler. You describe a goal; it splits the goal into sub-jobs, starts agent sessions for them, and stops for you wherever you’ve asked to review.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board.</p>`,
     cls: 'intro-board', anim: { frames: BOARD_FRAMES.length, ms: 1600, still: 2 },
     figure: (reviews, phase) => board(phase) },
-  { tab: 'New job',
-    title: 'New job, then a plan you approve before anything runs.',
-    body: `<p>Press <b>New job</b> and describe the outcome, in words or with screenshots. ${W2} drafts a <b>plan</b> of ordered sub-jobs and picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>To change the plan, write in <b>Add idea</b> under it. Nothing runs until you <b>Approve</b>: no session, ticket or PR. Ask it to “design it first” and the plan starts with a design for you to sign off. You can also save a job to the backlog and start it later.</p>`,
+  { tab: 'New idea',
+    title: 'New idea, then a plan you approve before anything runs.',
+    body: `<p>Press <b>New idea</b> and describe the outcome, in words or with screenshots. If it needs more, the planner asks you first and suggests a job; otherwise ${W2} drafts a <b>plan</b> of ordered sub-jobs and picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>To change the plan, write in <b>Add idea</b> under it. Nothing runs until you <b>Approve</b>: no session, ticket or PR. Ask it to “design it first” and the plan starts with a design for you to sign off. You can also save a job to the backlog and start it later.</p>`,
     figure: () => newJobFigure() },
   { tab: 'Sub-jobs',
     title: 'Three kinds of sub-job, and the places they write to.',
@@ -167,7 +167,7 @@ export const INTRO_STEPS = [
     figure: (reviews, phase) => seeFigure(phase) },
   { tab: 'Reviews',
     title: 'You choose where a job stops for you.',
-    body: `<p>Every job has six checkpoints: the plan, the code, the merge, session results, writes to other places, and red steps. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself, so a Plan on Auto starts as soon as it is drafted. For red steps you choose <b>You decide</b> or <b>Wrangler replans</b>.</p><p>New job starts from the defaults in <b>Automation settings</b>, where all but Writes start on You review. To stop everything at once, press <b>Pause</b> in the Jobs header.</p>`,
+    body: `<p>Every job has six checkpoints: the plan, the code, the merge, session results, writes to other places, and red steps. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself, so a Plan on Auto starts as soon as it is drafted. For red steps you choose <b>You decide</b> or <b>Wrangler replans</b>.</p><p>New idea starts from the defaults in <b>Automation settings</b>, where all but Writes start on You review. To stop everything at once, press <b>Pause</b> in the Jobs header.</p>`,
     figure: (reviews) => checkpointsFigure(reviews) },
   { tab: 'Writes',
     title: 'Tickets, designs and posts, kept up to date as the job runs.',
@@ -176,7 +176,7 @@ export const INTRO_STEPS = [
     figure: (reviews, phase) => writesFigure(phase) },
   { tab: 'Start',
     title: 'You’re ready to start a job.',
-    body: `<p>Start with something small you would normally hand to one agent, so you can watch each step once.</p><ul class="intro-done">${['Jobs in the rail, with the needs-you count', 'New job, then approve the plan', 'PR, session and human sub-jobs, and the places they write to', 'Short receipts, and each PR shown working', 'Red steps go to the planner before you', `Six checkpoints you set per job: ${YOU} or ${AUTO}`].map((t) => `<li>${ICONS.check}${t}</li>`).join('')}</ul><p>Open this again from the ${ICONS.info} button in the Jobs header, or from <b>Automation settings</b>.</p>`,
+    body: `<p>Start with something small you would normally hand to one agent, so you can watch each step once.</p><ul class="intro-done">${['Jobs in the rail, with the needs-you count', 'New idea, then approve the plan', 'PR, session and human sub-jobs, and the places they write to', 'Short receipts, and each PR shown working', 'Red steps go to the planner before you', `Six checkpoints you set per job: ${YOU} or ${AUTO}`].map((t) => `<li>${ICONS.check}${t}</li>`).join('')}</ul><p>Open this again from the ${ICONS.info} button in the Jobs header, or from <b>Automation settings</b>.</p>`,
     figure: () => `<div class="intro-flow">${node('ok', 'pr', 'Add CSV export', 'Delivered', 'check', true)}<span class="intro-flow-line"></span>${node('ok', 'robot', 'Backfill data', 'Delivered', 'check', true)}</div>` },
 ];
 
@@ -242,7 +242,7 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
     dialog.querySelector('.intro-body').innerHTML = INTRO_STEPS.map((s, i) => `<div class="intro-panel${s.stack ? ' intro-stack' : ''}"${i === at ? '' : ' inert aria-hidden="true"'}><div><h2${i === at ? ' id="jobs-intro-title"' : ''}>${s.title}</h2>${s.body}</div><div class="intro-figure ${s.cls || ''}">${s.figure(reviews, phases[i])}</div></div>`).join('');
     const next = dialog.querySelector('[data-intro="next"]');
     next.className = `primary tone-${last ? 'ok' : 'run'}`;
-    next.innerHTML = last ? `${ICONS.plus}New job` : `Next${ICONS.next}`;
+    next.innerHTML = last ? `${ICONS.plus}New idea` : `Next${ICONS.next}`;
     dialog.querySelector('[data-intro="back"]').hidden = at === 0;
     dialog.querySelector('[data-intro="skip"]').hidden = last;
     relayout();

@@ -90,16 +90,17 @@ export default {
     slots.onMessage?.((msg) => {
       if (msg.event === 'job-created') {
         view?.created(msg);
-        toast(msg.started ? 'Job started — planning' : 'Job added to backlog');
+        toast(msg.started ? (msg.idea ? 'Idea sent to the planner' : 'Job started — planning') : msg.idea ? 'Idea added to backlog' : 'Job added to backlog');
       } else if (msg.event === 'job-create-failed') {
         toast(msg.error);
       } else if (msg.event === 'job-action-complete') {
         view?.created(msg);
         // A checkpoint switch says what it did in the footer it was made from, an idea in its own bubble.
-        if (!['set-review', 'request-change'].includes(msg.action)) toast('Job updated');
+        if (msg.action === 'accept-idea') toast('Job created from the idea');
+        else if (!['set-review', 'request-change', 'idea-reply'].includes(msg.action)) toast('Job updated');
       } else if (msg.event === 'job-action-failed') {
         if (msg.action === 'set-review') view?.reviewFailed(msg);
-        else if (!(msg.action === 'request-change' && view?.changeFailed(msg))) toast(msg.error);
+        else if (!(msg.action === 'request-change' && view?.changeFailed(msg))) { view?.ideaFailed(msg); toast(msg.error); }
       } else if (msg.event === 'job-images') {
         view?.images(msg);
       } else if (msg.event === 'job-evidence') {

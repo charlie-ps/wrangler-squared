@@ -15,6 +15,12 @@ export const PAL = {
   pause: ['#0f041f', '#3c1477', '#6c38c8', '#a06af2', '#c59cff', '#ecdcff', '#ffffff'],
   idle: ['#0b0d12', '#2a2f3b', '#525a6b', '#8a90a0', '#cfd2da', '#f4f4f6', '#ffffff'],
 };
+// Before the collapse (an idea's sky): the cloud's emission, violet to H-alpha rose to a
+// peach core, and its cooler drift, OIII teal.
+export const FORM = {
+  form: ['#08031a', '#2a0f4d', '#6b2a8a', '#c0508f', '#f08a9a', '#ffd2c0', '#ffffff'],
+  drift: ['#020c10', '#06303a', '#0f6a74', '#2fb4b4', '#86e6dc', '#dcfff9', '#ffffff'],
+};
 export const paletteOf = (tone) => PAL[tone] || PAL.idle;
 
 // The cap grows as the job lands, but stays 14 units clear of the plan's lowest node or label.
@@ -25,6 +31,12 @@ export function skyHtml(seed, tone, lvl, floor = FLOOR, dim = false) {
   const t = PAL[tone] ? tone : 'idle';
   return `<div class="gx" data-seed="${hash(`${seed}${lvl}`).toString(36)}" data-tone="${t}" data-lvl="${lvl}" data-floor="${Math.round(floor)}"${dim ? ' data-dim' : ''}></div>`;
 }
+
+// An idea's formation sky (`stage` 0 thinking, 1 asking, 2 job suggested brightens its
+// point) and the horizon a suggested job launches from. Both draw every frame.
+export const INFLOW_STYLES = ['dust', 'filaments', 'clumps'];
+export const inflowHtml = (seed, stage = 0, style = 'dust') => `<div class="gx nb" data-inflow data-seed="${hash(seed).toString(36)}" data-stage="${Math.max(0, Math.min(2, +stage || 0))}" data-style="${INFLOW_STYLES.includes(style) ? style : 'dust'}"></div>`;
+export const arcHtml = (seed, tone = 'warn') => `<div class="gx" data-arc data-seed="${hash(seed).toString(36)}" data-tone="${PAL[tone] ? tone : 'warn'}"></div>`;
 
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 function ramp(stops) {
@@ -165,11 +177,168 @@ function paint(art) {
   return true;
 }
 
+// Live skies draw every frame. Each keeps a speed easing to a target, so hover speeds
+// them up through spinTo as it does the CSS-animated rings; an off-screen one (`.off`) and
+// a disconnected one (between a re-render's replace and put-back) do not draw.
+const live = new Set(), liveOf = new WeakMap();
+let looping = false, lastFrame = 0;
+const calmMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function frame(t) {
+  const dt = Math.min(.05, (t - (lastFrame || t)) / 1000); lastFrame = t;
+  for (const st of live) {
+    st.speed += (st.target - st.speed) * Math.min(1, dt * 2.5);
+    if (st.art.isConnected && !st.art.classList.contains('off') && !calmMotion()) st.step(dt * st.speed);
+  }
+  if (live.size) requestAnimationFrame(frame); else { looping = false; lastFrame = 0; }
+}
+function goLive(art, step, gain) {
+  const old = liveOf.get(art);
+  if (old) live.delete(old);
+  const st = { art, step, gain, speed: old?.speed || 1, target: old?.target || 1 };
+  liveOf.set(art, st); live.add(st);
+  if (!looping) { looping = true; requestAnimationFrame(frame); }
+}
+const dropLive = (art) => { const st = liveOf.get(art); if (st) live.delete(st); liveOf.delete(art); };
+
+// Infall: dust drifting in from the whole sky and collecting at one point, before there is
+// a hole to fall into. Each mote takes 20 to 40 seconds to arrive, curling a little as it
+// speeds up near the centre; faint clumps fall in with it and shrink, and the point
+// brightens with the idea's stage. Filaments feed it along three arms; clumps is more cloud.
+function paintInflow(art) {
+  const W = art.clientWidth, H = art.clientHeight;
+  if (!W || !H) return false;
+  const D = art.dataset, r = rng(D.seed), dpr = Math.min(1.5, devicePixelRatio || 1), stage = +D.stage || 0, mode = D.style || 'dust';
+  const warm = ramp(FORM.form), cool = ramp(FORM.drift), s = W / 320, dir = r() < .5 ? -1 : 1;
+  const cx = W * (.5 + dir * (.06 + r() * .06)), cy = H * (.5 + (r() - .5) * .08), Rx = W * .62, Ry = Math.max(H * .8, Rx * .55);
+  art.style.setProperty('--ox', `${(cx / W * 100).toFixed(1)}%`); art.style.setProperty('--oy', `${(cy / H * 100).toFixed(1)}%`);
+  art.replaceChildren();
+  const at = (rho, th) => [cx + Math.cos(th) * rho * Rx, cy + Math.sin(th) * rho * Ry];
+  const [, b] = cv(W, H, dpr, art, 'l');
+  const sky = b.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#020306'); sky.addColorStop(1, '#07070a'); b.fillStyle = sky; b.fillRect(0, 0, W, H);
+  for (let i = 0; i < 130 * W * H / (320 * 150 * s * s); i++) {
+    const sz = (.22 + r() ** 3 * 1.05) * s * .75, a = .15 + r() * .5;
+    b.fillStyle = r() < .2 ? `rgba(255,226,196,${a})` : `rgba(232,236,255,${a})`; b.beginPath(); b.arc(r() * W, r() * H, sz, 0, 7); b.fill();
+  }
+  // The cloud's haze, contracting very slowly toward the point.
+  const [hc, h] = cv(W, H, dpr, art, 'l drift'); hc.style.transformOrigin = `${cx}px ${cy}px`;
+  h.globalCompositeOperation = 'lighter';
+  const blob = (x, y, rx, ry, c, a) => { h.save(); h.translate(x, y); h.scale(1, ry / rx); const g = h.createRadialGradient(0, 0, 0, 0, 0, rx); g.addColorStop(0, c(.5, a)); g.addColorStop(1, c(.3, 0)); h.fillStyle = g; h.beginPath(); h.arc(0, 0, rx, 0, 7); h.fill(); h.restore(); };
+  for (let i = 0; i < 7; i++) { const [x, y] = at(.35 + r() * .7, r() * 6.283); blob(x, y, (.2 + r() * .25) * W, (.12 + r() * .15) * H, r() < .45 ? cool : warm, .05 + r() * .05); }
+  blob(cx, cy, Rx * .55, Ry * .5, warm, .1 + .04 * stage);
+  const fx = el('div', 'fx', art), [, L] = cv(W, H, dpr, fx, 'l infall'), [, P] = cv(W, H, dpr, fx, 'l jets');
+  const sprite = (c) => { const k = document.createElement('canvas'); k.width = k.height = 64; const x = k.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, c(.6, 1)); g.addColorStop(.4, c(.45, .45)); g.addColorStop(1, c(.3, 0)); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return k; };
+  const puffW = sprite(warm), puffC = sprite(cool);
+  const arms = mode === 'filaments' ? [0, 2.2, 4.1].map((a) => a + r() * 6.283) : null, clumpy = mode === 'clumps', curl = arms ? .022 : .01;
+  const spawn = (p, fresh) => {
+    p.r = fresh ? .08 + Math.sqrt(r()) * 1.15 : 1.05 + r() * .2;
+    p.th = arms && !p.puff ? arms[Math.floor(r() * 3)] + gauss(r) * .09 * (1 + p.r) : r() * 6.283;
+    p.life = fresh ? 1 : 0; p.k = .7 + .6 * r(); p.ph = r() * 6.283;
+    p.c = r() < .3 ? cool : warm; p.w = (.5 + 1 * r() ** 3) * s;
+    if (p.puff) { p.sz = (.12 + .2 * r()) * W; p.a = (.04 + .05 * r()) * (clumpy ? 1.5 : 1); }
+  };
+  const n = Math.round((clumpy ? 110 : 230 + 70 * stage) * Math.max(.7, s)), m = clumpy ? 26 : 12;
+  const ps = Array.from({ length: n + m }, (_, i) => { const p = { puff: i >= n }; spawn(p, true); return p; });
+  // Inflow speeds up toward the centre; the curl is slight, so it reads as a fall, not an orbit.
+  const move = (p, dt) => {
+    const q = Math.max(p.r, .03), v = .028 * p.k * (.35 + .55 / (q + .22)) * (p.puff ? .6 : 1);
+    p.r -= v * dt; p.th += dir * curl * p.k / (q + .18) * dt; p.ph += dt * .6;
+    p.life = Math.min(1, p.life + dt * .35);
+    if (p.r < (p.puff ? .1 : .025)) { spawn(p, false); return false; }
+    return v;
+  };
+  const step = (dt) => {
+    L.clearRect(0, 0, W, H); L.globalCompositeOperation = 'lighter';
+    for (const p of ps) {
+      if (!move(p, dt)) continue;
+      const wob = Math.sin(p.ph) * .012, [x, y] = at(p.r + wob, p.th), near = Math.max(0, 1 - p.r), edge = Math.min(1, (1.25 - p.r) / .3) * p.life;
+      if (p.puff) {
+        const z = p.sz * (.35 + .65 * Math.min(1, p.r)); L.globalAlpha = p.a * edge * (.6 + .8 * near);
+        L.drawImage(p.c === cool ? puffC : puffW, x - z, y - z, 2 * z, 2 * z); L.globalAlpha = 1; continue;
+      }
+      // A mote warms as it nears the point and dims as the point takes it in.
+      const sink = Math.min(1, (p.r - .025) / .12), rad = Math.max(.65, p.w * (.55 + .25 * near));
+      L.fillStyle = p.c(.4 + .5 * near ** 1.3, edge * sink * (.34 + .3 * near ** 1.5) * (.8 + .1 * stage));
+      L.beginPath(); L.arc(x, y, rad, 0, 7); L.fill();
+    }
+  };
+  // The point it all collects at, breathing like the hole's glare.
+  P.globalCompositeOperation = 'lighter';
+  let g = P.createRadialGradient(cx, cy, 0, cx, cy, .3 * Ry); g.addColorStop(0, warm(.85, .3 + .08 * stage)); g.addColorStop(.4, warm(.65, .1)); g.addColorStop(1, warm(.5, 0));
+  P.fillStyle = g; P.beginPath(); P.arc(cx, cy, .3 * Ry, 0, 7); P.fill();
+  const pr = (9 + 3 * stage) * s; g = P.createRadialGradient(cx, cy, 0, cx, cy, pr);
+  g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(.18, warm(.96, .75)); g.addColorStop(.55, warm(.8, .18)); g.addColorStop(1, warm(.6, 0));
+  P.fillStyle = g; P.beginPath(); P.arc(cx, cy, pr, 0, 7); P.fill();
+  // Settle the fall before the first frame so the dust is already spread along its paths.
+  for (let i = 0; i < 300; i++) ps.forEach((p) => move(p, .1));
+  ps.forEach((p) => { p.life = 1; });
+  step(1 / 60);
+  goLive(art, step, .065);
+  return true;
+}
+
+// The horizon a suggested job launches from, after the 100-PRs poster: a hole wider than
+// the strip, its ring streaming over the limb with the approaching side brighter. paint()'s
+// palette, photon ring and glare; the streaks are paint()'s ring streaks, drawn per frame.
+function paintArc(art) {
+  const W = art.clientWidth, H = art.clientHeight;
+  if (!W || !H) return false;
+  const D = art.dataset, pal = ramp(paletteOf(D.tone)), r = rng(D.seed), dpr = Math.min(2, devicePixelRatio || 1);
+  const apex = H * .19, fall = H - apex, ex = W * .64, R = (ex * ex + fall * fall) / (2 * fall), cx = W / 2, cy = apex + R;
+  art.replaceChildren();
+  const [, b] = cv(W, H, dpr, art, 'l');
+  b.fillStyle = '#020306'; b.fillRect(0, 0, W, H);
+  for (let i = 0, n = W * H / 240; i < n; i++) {
+    const x = r() * W, y = r() * H; if (Math.hypot(x - cx, y - cy) < R * 1.01) continue;
+    b.fillStyle = `rgba(232,236,255,${(.12 + r() * .55).toFixed(2)})`; const z = r() < .93 ? .7 : 1.3; b.fillRect(x, y, z, z);
+  }
+  b.globalCompositeOperation = 'lighter';
+  const hg = b.createRadialGradient(cx, cy, R * .985, cx, cy, R + H * 1.1);
+  hg.addColorStop(0, pal(.8, .55)); hg.addColorStop(.06, pal(.66, .26)); hg.addColorStop(.3, pal(.5, .08)); hg.addColorStop(1, pal(.3, 0));
+  b.fillStyle = hg; b.fillRect(0, 0, W, H);
+  b.globalCompositeOperation = 'source-over';
+  // The shadow, with the faintest warmth just inside the limb.
+  const dg = b.createRadialGradient(cx, cy, R - 5, cx, cy, R);
+  dg.addColorStop(0, '#010101'); dg.addColorStop(1, pal(.45, .6));
+  b.fillStyle = dg; b.beginPath(); b.arc(cx, cy, R, 0, 7); b.fill();
+  soft(b, dpr, 4, pal(.95, .95), (x) => { x.lineWidth = 1.6; x.beginPath(); x.arc(cx, cy, R * 1.0015, 0, 7); x.stroke(); });
+  b.strokeStyle = 'rgba(255,250,240,.95)'; b.lineWidth = .9; b.beginPath(); b.arc(cx, cy, R * 1.0015, 0, 7); b.stroke();
+  const fx = el('div', 'fx', art), [, L] = cv(W, H, dpr, fx, 'l');
+  const top = -Math.PI / 2, sweep = (rho) => Math.asin(Math.min(.999, (W * .5 + 40) / rho));
+  const streaks = Array.from({ length: Math.round(Math.min(1100, Math.max(420, W * 1.4))) }, () => {
+    const k = r() ** 2.1, rho = R + 1.5 + k * H * .7, half = sweep(rho), len = (6 + r() ** 2 * 120) / rho;
+    return { rho, half, len, ph: top - half + r() * (2 * half + len), w: .4 + 2.4 * r() ** 3,
+      om: (34 + 26 * r()) * (1.6 - .9 * k) / rho, t: .45 + .55 * (1 - k) ** 1.2 * (.65 + .35 * r()), a: (.1 + .75 * r() ** 2) * (1 - .78 * k) };
+  });
+  const step = (dt) => {
+    L.clearRect(0, 0, W, H); L.globalCompositeOperation = 'lighter'; L.lineCap = 'round';
+    for (const q of streaks) {
+      const lo = top - q.half - q.len, span = 2 * q.half + q.len;
+      q.ph = lo + ((q.ph + q.om * dt - lo) % span + span) % span;
+      const side = q.rho * Math.cos(q.ph + q.len / 2) / (W * .5), m = .5 + .5 * Math.max(-1, Math.min(1, side));
+      L.strokeStyle = pal(q.t, q.a * (.45 + .75 * m)); L.lineWidth = q.w;
+      L.beginPath(); L.arc(cx, cy, q.rho, q.ph, q.ph + q.len); L.stroke();
+    }
+  };
+  // Glare where the approaching side meets the limb, breathing like the plates'.
+  const [, X] = cv(W, H, dpr, fx, 'l glare'); X.globalCompositeOperation = 'lighter';
+  const ga = top + sweep(R) * .62, gx = cx + Math.cos(ga) * R, gy = cy + Math.sin(ga) * R;
+  let g = X.createRadialGradient(gx, gy, 0, gx, gy, H * .7); g.addColorStop(0, 'rgba(255,255,255,.85)'); g.addColorStop(.1, pal(.96, .55)); g.addColorStop(.45, pal(.75, .12)); g.addColorStop(1, pal(.6, 0));
+  X.fillStyle = g; X.beginPath(); X.arc(gx, gy, H * .7, 0, 7); X.fill();
+  X.save(); X.translate(gx, gy); X.rotate(ga + Math.PI / 2); X.scale(1, .03);
+  g = X.createRadialGradient(0, 0, 0, 0, 0, W * .6); g.addColorStop(0, 'rgba(255,255,255,.55)'); g.addColorStop(.15, pal(.92, .28)); g.addColorStop(1, pal(.7, 0));
+  X.fillStyle = g; X.beginPath(); X.arc(0, 0, W * .6, 0, 7); X.fill(); X.restore();
+  step(0);
+  goLive(art, step, .26);
+  return true;
+}
+const paintOf = (a) => ('inflow' in a.dataset ? paintInflow(a) : 'arc' in a.dataset ? paintArc(a) : paint(a));
+
 // Hover: the hole spins up (playbackRate ramps, so nothing jumps) and settles back on leave. The ramp is
 // keyed to the sky, which outlives a re-render, and re-reads its animations each frame, since a re-render replaces them.
 const ramps = new WeakMap();
-function spinTo(plate, target) {
-  const sky = plate.querySelector('.gx'), anims = () => [...sky.querySelectorAll('.spin,.flow')].flatMap((e) => e.getAnimations());
+export function spinTo(plate, target) {
+  for (const s of plate.querySelectorAll('.gx')) { const st = liveOf.get(s); if (st) st.target = 1 + (target - 1) * st.gain; }
+  const sky = plate.querySelector('.gx'), anims = () => [...sky.querySelectorAll('.spin,.flow,.drift')].flatMap((e) => e.getAnimations());
   if (!sky || !anims().length) return;
   const from = anims()[0].playbackRate, t0 = performance.now(), id = {};
   ramps.set(sky, id);
@@ -185,6 +354,7 @@ function spinTo(plate, target) {
 // Re-attaching an element restarts its CSS animations at rest (phase 0, rate 1), and the board rebuilds its
 // plates (and their border sweeps) on every graph tick: note where each stands before, and carry it over after.
 const held = new Map();
+// A launch strip under an idea's message sweeps its border the same way, keyed by its message.
 const sweepOf = (plate) => plate.getAnimations({ subtree: true }).find((a) => a.animationName === 'gx-sweep');
 export function noteAnims(anims, into = new Map()) {
   for (const a of anims) if (a.currentTime != null) into.set(a.effect.pseudoElement ? a.effect.target.dataset.board : a.effect.target, { t: a.currentTime, rate: a.playbackRate });
@@ -200,20 +370,23 @@ export function carryAnims(anims, from) {
 export function holdSkies(host) {
   held.clear();
   if (typeof IntersectionObserver === 'undefined') return;
-  noteAnims([...host.querySelectorAll('.job-plate')].map(sweepOf).filter(Boolean), held);
-  for (const sky of kept.values()) if (sky.isConnected) noteAnims(sky.getAnimations({ subtree: true }), held);
+  noteAnims([...host.querySelectorAll('.job-plate,.job-launch')].map(sweepOf).filter(Boolean), held);
+  for (const sky of keptOf(host).values()) if (sky.isConnected) noteAnims(sky.getAnimations({ subtree: true }), held);
 }
 
 // Painted skies outlive a board re-render: the board rebuilds its plates' markup on every graph tick, so a
 // painted sky is kept by its parameters and put back in place of the fresh placeholder. Painting is lazy
 // (one plate per frame, as each nears the viewport) and an off-screen plate's animations pause.
-const kept = new Map(), widths = new Map(), queue = [], hosts = new WeakSet();
+// Kept per host: the board and the open dialog each render on every tick, and one's
+// render must not drop the other's painted skies.
+const keptBy = new WeakMap(), widths = new Map(), queue = [], hosts = new WeakSet();
+const keptOf = (host) => { let k = keptBy.get(host); if (!k) keptBy.set(host, k = new Map()); return k; };
 let near, seen, resize, pumping = false, timer;
 const keyOf = (a) => Object.values(a.dataset).join('|');
 function pump() {
   const a = queue.shift();
   if (!a) { pumping = false; return; }
-  if (paint(a)) widths.set(a, a.clientWidth);
+  if (paintOf(a)) widths.set(a, a.clientWidth);
   requestAnimationFrame(pump);
 }
 function setup() {
@@ -223,7 +396,7 @@ function setup() {
   seen = new IntersectionObserver((es) => { for (const e of es) e.target.classList.toggle('off', !e.isIntersecting); });
   resize = new ResizeObserver(() => {
     clearTimeout(timer);
-    timer = setTimeout(() => widths.forEach((w, a) => { if (a.isConnected && a.clientWidth !== w) { widths.set(a, a.clientWidth); paint(a); } }), 200);
+    timer = setTimeout(() => widths.forEach((w, a) => { if (a.isConnected && a.clientWidth !== w) { widths.set(a, a.clientWidth); paintOf(a); } }), 200);
   });
   resize.observe(document.body);
 }
@@ -232,15 +405,17 @@ let hot = null;
 function hover(host) {
   if (hosts.has(host) || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   hosts.add(host);
-  const edge = (e, target) => {
-    const plate = e.target.closest?.('.job-plate');
-    if (!plate || plate.contains(e.relatedTarget)) return;
-    hot = target > 1 ? plate.dataset.board : null;
-    plate.classList.toggle('hot', target > 1);
+  // A plate spins up to 24; anything else marked `data-spin` (the idea's header, a launch
+  // strip) to its own number.
+  const edge = (e, on) => {
+    const plate = e.target.closest?.('.job-plate,[data-spin]');
+    if (!plate || plate.contains(e.relatedTarget) || plate.closest('.firing')) return;
+    const target = on ? +plate.dataset.spin || 24 : 1;
+    if (plate.matches('.job-plate')) { hot = on ? plate.dataset.board : null; plate.classList.toggle('hot', on); }
     spinTo(plate, target);
   };
-  host.addEventListener('pointerover', (e) => edge(e, 24));
-  host.addEventListener('pointerout', (e) => edge(e, 1));
+  host.addEventListener('pointerover', (e) => edge(e, true));
+  host.addEventListener('pointerout', (e) => edge(e, false));
 }
 
 // Call after a board render: put back the skies already painted for these plates and paint the rest.
@@ -254,13 +429,13 @@ export function mountSkies(host) {
     // The pointer may have left while the plate was being replaced, so no pointerout will ever reach it.
     requestAnimationFrame(() => { if (lit.isConnected && !lit.matches(':hover')) { if (hot === lit.dataset.board) hot = null; lit.classList.remove('hot'); spinTo(lit, 1); } });
   }
-  const live = new Set();
+  const kept = keptOf(host), shown = new Set();
   for (const slot of host.querySelectorAll('.gx')) {
     const key = keyOf(slot), old = kept.get(key);
-    live.add(key);
+    shown.add(key);
     if (old && !old.isConnected && old.firstChild) {
       slot.replaceWith(old);
-      if (old.clientWidth !== widths.get(old) && paint(old)) widths.set(old, old.clientWidth);
+      if (old.clientWidth !== widths.get(old) && paintOf(old)) widths.set(old, old.clientWidth);
       else carryAnims(old.getAnimations({ subtree: true }), held);
       continue;
     }
@@ -268,9 +443,16 @@ export function mountSkies(host) {
     kept.set(key, slot);
     near.observe(slot); seen.observe(slot);
   }
-  carryAnims([...host.querySelectorAll('.job-plate')].map(sweepOf).filter(Boolean), held);
+  carryAnims([...host.querySelectorAll('.job-plate,.job-launch')].map(sweepOf).filter(Boolean), held);
   held.clear();
-  for (const [key, a] of kept) if (!live.has(key)) { near.unobserve(a); seen.unobserve(a); widths.delete(a); kept.delete(key); }
+  for (const [key, a] of kept) if (!shown.has(key)) { near.unobserve(a); seen.unobserve(a); widths.delete(a); dropLive(a); kept.delete(key); }
+}
+
+// A host whose skies are gone for good (the dialog closed): stop drawing and forget them.
+export function releaseSkies(host) {
+  const kept = keptOf(host);
+  for (const a of kept.values()) { near?.unobserve(a); seen?.unobserve(a); widths.delete(a); dropLive(a); }
+  kept.clear();
 }
 
 // The masthead's sky: only the light from a plate's Gargantua, no disc, so the header doesn't repeat the

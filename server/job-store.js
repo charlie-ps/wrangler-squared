@@ -10,6 +10,7 @@ import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
+import { plannerReply, humanReply, acceptIdea, unsentIdea } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
@@ -307,6 +308,16 @@ export class JobStore {
         record(j, s, 'restart-running', null, `Asked the session to start ${down.map((i) => i.name).join(', ')} again`);
         return;
       }
+      // New idea's conversation (job-idea.js): the human's answer to the planner, and
+      // the press that turns its suggestion into the job's plan.
+      if (action === 'idea-reply') { humanReply(j, payload.text, Date.now()); return; }
+      if (action === 'accept-idea') {
+        const plan = acceptIdea(j, payload.messageId, Date.now());
+        if (!reviewPlan(j)) approve(j, plan);
+        else { j.plan = withStoryCreates(planSchema.parse(plan)); j.repos = planRepos(j.plan); }
+        record(j, null, 'accept-idea', null, `Created the job from the planner's suggestion: ${quoted(j.title)}`);
+        return;
+      }
       if (action === 'pause') { j.paused = true; return; }
       if (action === 'resume') { j.paused = false; return; }
       if (action === 'start') {
@@ -446,6 +457,8 @@ export class JobStore {
       // What its prompt tells it to draft, kept so a Writes switch mid-run
       // reaches the next launch rather than refusing this one's receipt.
       if (phase === 'session') run.drafting = toDraft(j, j.subJobs.find((s) => s.id === subJobId)).map((w) => w.id);
+      // A new planner reads the whole conversation from its prompt, so nothing is left to mail it.
+      if (phase === 'planning') for (const m of unsentIdea(j)) m.sentAt = run.startedAt;
       j.runs.push(run); j.revision++;
       return run;
     });
@@ -494,7 +507,7 @@ export class JobStore {
       // (or one that pushed anyway) must still be able to land what it did — a
       // PR that exists is a PR, whatever the board expected. A `write` run is
       // the batched writer's, which no longer exists: nothing it says is taken.
-      const expected = { planning: ['plan'], write: [], implementation: ['ready', 'reply', 'published'], publish: ['published'], repair: ['repaired'], verify: ['deployed'], session: ['completed', 'drafts'] }[r.phase];
+      const expected = { planning: ['plan', 'reply'], write: [], implementation: ['ready', 'reply', 'published'], publish: ['published'], repair: ['repaired'], verify: ['deployed'], session: ['completed', 'drafts'] }[r.phase];
       if (!expected.length) throw new Error('This run predates session-owned writes; stop now');
       // Going up one level is always open: blocked and escalate from any step, replan
       // from every step but the planner's own (which has no one above it but you).
@@ -516,7 +529,10 @@ export class JobStore {
       if (report.kind === 'completed' && r.parkedAt && !r.mailedAt) throw new Error('Your drafts are with the human: wait for mail saying which writes to make, then complete');
       // A session parked on its ready receipt is answering the human. A reply
       // keeps it parked; a fresh ready is a new round of the same run.
-      if (report.kind === 'reply') return this._reply(j, r, s, report);
+      if (report.kind === 'reply') {
+        if (r.phase === 'planning') { if (!j.cancelledAt) plannerReply(j, r, report, Date.now()); return; }
+        return this._reply(j, r, s, report);
+      }
       const parked = r.parkedFor === 'ready' && r.parkedAt && !r.mailedAt;
       if (parked && report.kind === 'ready' && JSON.stringify(r.readyReport) === JSON.stringify(report)) return;
       if (parked && report.kind !== 'blocked') throw new Error('You already reported ready; wait for mail from the human');
@@ -532,7 +548,7 @@ export class JobStore {
         Object.assign(r, { readyReport: report, readyCount: (r.readyCount || 0) + 1, parkedFor: 'ready', parkedAt: Date.now(), mailedAt: null, idleSince: null });
       } else {
         r.report = report;
-        if (r.parkedFor === 'ready') r.parkedAt = null;
+        if (r.parkedFor) r.parkedAt = null;
       }
       // A receipt racing a cancel is kept on the run for the record but never
       // moves the sub-job: a late `published` must not pull it back out of cleanup,
@@ -545,6 +561,7 @@ export class JobStore {
   // current round, in files of its own, so it cannot overwrite what was read.
   _reply(j, r, s, report) {
     if (r.parkedFor !== 'ready' || !s?.ready) throw new Error('A reply answers the human after you reported ready; there is nothing to answer');
+    if (report.suggest) throw new Error('Only a new idea\'s planner suggests a job');
     if (r.parkedAt && !r.mailedAt) {
       if (JSON.stringify(r.lastReply) === JSON.stringify(report)) return;
       throw new Error('You already answered; wait for mail from the human');
