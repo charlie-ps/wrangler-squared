@@ -232,7 +232,7 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     const lands = isPrSub(s) ? `Lands on ${targetOf({ base }, s) || 'the default branch'}${offBase({ base }, s) ? `, not the job's ${base || 'default branch'}` : ''}` : '';
     const tip = [KIND_TITLE[kindClass(s)], story(s), isPrSub(s) ? tildify(s.repo) : '', lands, isPrSub(s) && s.worktree?.branch ? `Branch ${s.worktree.branch}` : '', deps, stateOf ? STATES[state].label : ''].filter(Boolean).join('\n');
     const tile = `<span class="job-node-tile ${stateSolid(state) ? 'on' : ''}">${kindChipHtml(s)}<span class="job-node-state">${stateIconHtml(state)}</span></span>`;
-    const cls = `job-node tone-${STATES[state].tone} ${kindClass(s)}`;
+    const cls = `job-node tone-${STATES[state].tone} ${kindClass(s)}${s.cancelledAt ? ' cancelled' : ''}`;
     const repo = isPrSub(s) && s.kind !== 'jira' && s.repo ? `<span class="job-node-repo">${esc(tildify(s.repo).split('/').pop())}</span>${landingHtml(s, base)}`
       : triggerLine(plan, s) ? `<span class="job-node-repo job-node-on" title="Starts at this milestone">${esc(triggerLine(plan, s))}</span>` : '';
     if (editable) {
@@ -258,7 +258,8 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
   const template = rows.map((_, w) => `minmax(148px,1fr)${w < waves - 1 ? ` var(--g${w}, ${grid.gutters[w] ? GUTTER.curve : GUTTER.min}px)` : ''}`).join(' ');
   const edges = subs.flatMap((s) => edgesOf(s).filter((id) => levels.has(id)).map((id) => {
     const deploy = isPrSub(byId.get(id)) && s.after.includes(id);
-    return `<path class="${deploy ? 'deploy' : s.after.includes(id) ? 'start' : 'on'}" data-from="${esc(id)}" data-to="${esc(s.id)}"/>`;
+    // A flag, not a class: the class is the connector's style, which picks its port.
+    return `<path class="${deploy ? 'deploy' : s.after.includes(id) ? 'start' : 'on'}" data-from="${esc(id)}" data-to="${esc(s.id)}"${s.cancelledAt ? ' data-cancelled' : ''}/>`;
   })).join('');
   // Every deploy connector out of a PR says the same thing (it waits for that
   // PR to deploy), so the PR gets one rocket, beside its tile, not one per connector.

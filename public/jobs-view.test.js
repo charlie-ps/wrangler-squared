@@ -1134,6 +1134,17 @@ test('a PR node names its repo under the title in every graph mode; session, hum
   }
 });
 
+test('a cancelled sub-job (superseded, dropped, not needed) is drawn as a cancelled node, still clickable, and so are the connectors into it', () => {
+  const plan = { stories: [], subJobs: [sub('api'), { ...sub('old', ['api']), superseded: true, cancelledAt: 1 }, { ...sub('gone', ['api']), cancelledAt: 1 }, { ...sessionSub('spare', ['api']), notNeeded: true, cancelledAt: 1 }, sub('web', ['api'])] };
+  const { document } = new Window();
+  document.body.innerHTML = planGraphHtml(plan, { stateOf: () => 'done' });
+  assert.deepEqual([...document.querySelectorAll('.job-node.cancelled')].map((e) => e.dataset.node), ['old', 'gone', 'spare']);
+  assert.ok(!document.querySelector('[data-node="web"]').classList.contains('cancelled'), 'a planned sub-job is drawn live');
+  assert.equal(document.querySelector('.job-node.cancelled[data-node="old"]').dataset.openSub, 'old', 'its detail still opens');
+  assert.deepEqual([...document.querySelectorAll('.job-graph-edges path[data-cancelled]')].map((p) => p.dataset.to), ['old', 'gone', 'spare']);
+  assert.equal(document.querySelector('path[data-to="old"]').getAttribute('class'), 'deploy', 'the flag leaves the connector style (its port) alone');
+});
+
 test('every column shares one row grid, and a connector that skips a wave takes a lane under the tile it passes', () => {
   const plan = { stories: [], subJobs: [sub('api'), sub('web', ['api']), sub('docs', ['api', 'web'])] };
   const { document } = new Window();
