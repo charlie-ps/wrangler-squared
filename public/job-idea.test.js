@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView } from './jobs-view.js';
 import { ideaStage, liveSuggestion, jobNeedsReview, jobStatus } from './jobs.js';
-import { plateAsk } from './job-plates.js';
+import { plateAsk, plateHtml } from './job-plates.js';
 import { proseHtml, suggestionSummary } from './job-idea.js';
 
 const suggest = { title: 'Nudge when a green PR waits over a day', plan: { context: '', stories: [], subJobs: [
@@ -125,7 +125,7 @@ test('on the board an idea waiting on you is a needs-you stub; one the planner i
   assert.deepEqual([ideaStage(reply), ideaStage(suggested), ideaStage(thinking)], ['reply', 'suggested', 'thinking']);
   assert.deepEqual([jobNeedsReview(reply, null), jobNeedsReview(suggested, null), jobNeedsReview(thinking, null)], [true, true, false]);
   assert.deepEqual([plateAsk(reply).label, plateAsk(reply).button], ['Your reply', 'Reply']);
-  assert.deepEqual([plateAsk(suggested).label, plateAsk(suggested).detail], ['Job suggested', '2 PRs · 1 session · 1 write']);
+  assert.deepEqual([plateAsk(suggested).label, plateAsk(suggested).detail], ['Job suggested', '2 PRs · 1 session · 1 write · wrangler-squared']);
   assert.equal(plateAsk(thinking), null);
   assert.deepEqual(jobStatus(thinking, null), { tone: 'working', text: 'Planner is reading the idea' });
   assert.equal(ideaStage({ ...reply, idea: undefined }), null, 'a job not made from New idea has no conversation');
@@ -136,4 +136,48 @@ test('the planner\'s prose is escaped before it is marked up, and a summary coun
   assert.equal(proseHtml('Two things:\n1. Whose CI?\n   a) ours\n2. Which pain?\nIf you mean (a), I would'), '<p>Two things:</p><ol><li>Whose CI?<br>a) ours</li><li>Which pain?</li></ol><p>If you mean (a), I would</p>');
   const s = suggestionSummary(suggest.plan);
   assert.deepEqual([s.work.length, s.repos.length, s.line], [3, 1, '3 sub-jobs · wrangler-squared · Slack']);
+});
+
+test('an idea is a plate under a forming sky, tagged IDEA, idle while the planner thinks and amber when it waits on you', (t) => {
+  const thinking = { ...ideaJob([], [parked({ parkedAt: null })]), id: 'think' }, reply = { ...ideaJob([asked]), id: 'reply' };
+  const suggested = { ...ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]), id: 'sugg' }, backlog = { ...ideaJob([], []), id: 'later', stage: 'backlog' };
+  const job = { id: 'job', title: 'A job', intent: 'x', repos: ['/r'], stage: 'active', plan: suggest.plan, subJobs: [{ id: 'a', title: 'A', repo: '/r', after: [], stage: 'pr', sessions: [], repairs: [] }], runs: [], moves: [], createdAt: 0 };
+  const sky = (html) => html.match(/class="gx nb"[^>]*data-stage="(\d)"/)?.[1];
+  assert.deepEqual([thinking, reply, suggested, backlog].map((j) => sky(plateHtml(j, 'opus'))), ['0', '1', '2', '0'], 'the point brightens as the planner asks, then suggests');
+  assert.equal(plateHtml(job, 'opus').includes('gx nb'), false, 'a job keeps its black hole');
+  assert.match(plateHtml(thinking, 'opus'), /class="job-plate idea tone-idle /);
+  assert.match(plateHtml(reply, 'opus'), /class="job-plate idea tone-warn /);
+  assert.match(plateHtml(thinking, 'opus', 'full'), /class="gx nb"/, 'with launch-page scenes too: an idea has no scene yet');
+  const f = fixture(t, [job, thinking, reply, suggested, backlog]);
+  const ideaPlate = f.q('[data-board="reply"]');
+  assert.ok(ideaPlate.classList.contains('idea'));
+  assert.equal(ideaPlate.querySelector('.job-plate-tag').textContent, 'Idea');
+  assert.equal(ideaPlate.querySelector('.job-plate-idea').textContent, '2 messages');
+  assert.equal(f.q('[data-board="think"] .job-status').textContent, 'Planner is reading the idea');
+  f.q('[data-filter="ideas"]').click();
+  assert.deepEqual([...document.querySelectorAll('.job-plate')].map((p) => p.dataset.board).sort(), ['later', 'reply', 'sugg', 'think'], 'the Ideas filter shows only ideas');
+  assert.equal(f.q('[data-filter="ideas"] .jobs-rail-n').textContent, '4');
+  f.q('[data-board="reply"] .job-plate-open').click();
+  assert.ok(f.q('#job-dialog .job-idea-band .gx.nb'), 'clicking an idea opens its conversation');
+  assert.ok(f.q('#job-dialog [data-idea-composer]'));
+});
+
+test('an accepted idea becomes a job plate, folding its cloud into the job\'s sky once', async (t) => {
+  const idea = ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]);
+  const f = fixture(t, [idea]);
+  assert.ok(f.q('[data-board="idea1"]').classList.contains('idea'));
+  Object.assign(f.data.jobs[0], { plan: suggest.plan, title: suggest.title, runs: [{ ...parked(), stopped: true }] });
+  f.data.jobs[0].idea.thread[0].acceptedAt = 5;
+  f.view.update(f.data);
+  const plate = f.q('[data-board="idea1"]'), art = plate.querySelector('.job-plate-art');
+  assert.equal(plate.classList.contains('idea'), false, 'now a job plate');
+  assert.ok(art.classList.contains('collapsing'));
+  assert.ok(art.querySelector(':scope > .gx.nb') && art.querySelector(':scope > .gx:not(.nb)'), 'the cloud over the job\'s own sky');
+  assert.equal(plate.querySelectorAll('.job-plate-graph .node').length, 4, 'the plan it became, its write a moon');
+  await new Promise((r) => setTimeout(r, 200));
+  assert.ok(art.classList.contains('collapsed'), 'then it folds in');
+  f.view.update(f.data);
+  assert.ok(f.q('[data-board="idea1"] .job-plate-art').classList.contains('collapsed'), 'a redraw mid-fold keeps it folded');
+  await new Promise((r) => setTimeout(r, 2300));
+  assert.equal(f.q('[data-board="idea1"] .gx.nb'), null, 'and after it the cloud is gone');
 });
