@@ -3,6 +3,7 @@ import { ICONS } from './icons.js';
 import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject } from './jobs.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
+import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, mountMastSky } from './job-skylines.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 
@@ -309,7 +310,7 @@ export function primaryAction(dialog) {
 }
 
 const MAX_ASK_IMAGES = 4;
-export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, updates = null }) {
+export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, updates = null, toast = () => {} }) {
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, maxReplans: 2, deploymentStaleMinutes: 30 } };
@@ -623,14 +624,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const kept = (job) => { const n = job.subJobs.filter((x) => x.cleanupRefusal && !x.discard).length; return n ? ` (${n} kept now; open ${n === 1 ? 'it' : 'each'} to Retry or Discard)` : ''; };
   // Confirmed first, like Drop, and wrapped in a form so a live graph tick does not
   // re-render the detail view over the question (render() leaves any open form alone).
-  function openCancel(job) {
+  function openCancel(job, back = renderDetail) {
     const live = job.runs.filter((r) => !r.stopped).length;
     const unfinished = job.subJobs.filter((s) => !['cleanup', 'done'].includes(s.stage)).length;
     const prs = job.subJobs.filter((s) => s.pr && s.stage === 'pr').length;
     const what = job.stage === 'active' ? `This drops the ${unfinished === 1 ? 'one unfinished sub-job' : `${unfinished} unfinished sub-jobs`}${live ? ` and stops the ${live === 1 ? 'running step' : `${live} running steps`}; their receipts are ignored` : ''}. Sub-jobs already delivered stay delivered. ` : `This stops ${live ? 'the running ' : ''}planning${live ? '' : ' before it starts'}; no tickets or PRs are created. `;
     show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Cancel this job?</h2><form id="job-cancel-form"><p>${what}${prs ? `${prs === 1 ? 'Its open pull request stays' : `${prs} open pull requests stay`} open on GitHub for you to close. ` : ''}Sessions are archived; each worktree is removed only if it has no uncommitted files and every commit is already on the branch the job lands on (or it is unchanged), and kept otherwise for you to retry or discard.</p><div class="job-actions"><button type="button" class="danger" data-cancel-job="1">Cancel job</button><button type="button" id="job-move-back">Keep working</button></div></form>`);
     dialog.querySelector('[data-cancel-job]').onclick = () => send({ type: 'job-action', id: job.id, action: 'cancel-job' });
-    dialog.querySelector('#job-move-back').onclick = () => renderDetail();
+    dialog.querySelector('#job-move-back').onclick = () => back();
   }
   // One escaped line per intervention, newest first, with when it was made — the
   // record of every human decision in a job, kept out of the way until asked for.
@@ -1356,6 +1357,34 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const el = e.target.closest('[data-job]'); if (el) return openDetail(el.getAttribute('data-job'), el.getAttribute('data-sub'));
     // Anywhere else on a plate (the sky, the gaps between chips) opens the job, as the title does.
     const plate = e.target.closest('.job-plate'); if (plate && !e.target.closest('a,button')) openDetail(plate.dataset.board, '');
+  };
+  // A plate's right-click menu (job-menu.js), mounted outside #jobs-boards so a
+  // tick's redraw leaves it be; a pick reads the job as it is now, not as it was.
+  let closeMenu = null;
+  function copyText(text, done) {
+    const p = globalThis.navigator?.clipboard?.writeText?.(text);
+    if (!p) return toast('Clipboard unavailable');
+    p.then(() => toast(done), () => toast('Could not copy to clipboard'));
+  }
+  function pickMenu(jobId, item) {
+    const job = data.jobs.find((j) => j.id === jobId);
+    if (!job) return;
+    if (item.id === 'open') return openDetail(job.id, '');
+    if (item.id === 'copy-ref') return copyText(jobReference(job), 'Copied job reference');
+    if (item.id === 'copy-id') return copyText(job.id, 'Copied job ID');
+    if (item.id === 'link') return void globalThis.open?.(item.href, '_blank', 'noopener');
+    if (['start', 'pause', 'resume'].includes(item.id)) return send({ type: 'job-action', id: job.id, action: item.id });
+    if (item.id === 'cancel') { selected = null; planDraft = null; return openCancel(job, () => dialog.close()); }
+  }
+  q('#jobs-boards').oncontextmenu = (e) => {
+    const plate = e.target.closest('.job-plate');
+    const job = plate && data.jobs.find((j) => j.id === plate.dataset.board);
+    if (!job) return;
+    e.preventDefault();
+    closeMenu?.(); closePlacePop();
+    // The keyboard's menu key fires at (0, 0): open it under the plate's title instead.
+    const at = e.clientX || e.clientY ? [e.clientX, e.clientY] : (() => { const r = plate.querySelector('.job-plate-open')?.getBoundingClientRect() || plate.getBoundingClientRect(); return [r.left, r.bottom]; })();
+    closeMenu = mountJobMenu(root, jobMenuItems(job), at[0], at[1], (item) => pickMenu(job.id, item));
   };
   q('#jobs-boards').onkeydown = (e) => {
     const node = e.target.closest?.('g[data-job]');

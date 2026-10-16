@@ -224,6 +224,14 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .job-plate-places { position:relative; z-index:1; display:flex; flex-wrap:wrap; gap:6px; margin-top:2px; }
 .job-plate-pop { position:fixed; z-index:40; width:300px; max-width:calc(100vw - 24px); box-sizing:border-box; display:grid; grid-template-columns:minmax(0,1fr); gap:2px; padding:8px; border-radius:16px; background:color-mix(in srgb, var(--surface) 94%, transparent); border:1px solid var(--border-muted); backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); box-shadow:0 18px 44px -16px var(--shadow); color:var(--fg); }
 .job-plate-pop[hidden] { display:none; }
+/* A plate's right-click menu (job-menu.js): core's card menu in this view's frosted glass. */
+.job-menu { position:fixed; z-index:45; min-width:180px; max-width:calc(100vw - 8px); box-sizing:border-box; display:flex; flex-direction:column; gap:1px; padding:4px; border-radius:10px; background:color-mix(in srgb, var(--surface) 96%, transparent); border:1px solid var(--border); backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); box-shadow:0 12px 32px -10px var(--shadow); font-family:var(--font); }
+.job-menu-item { display:flex; align-items:center; gap:9px; width:100%; padding:6px 9px; border:0; border-radius:6px; background:transparent; color:var(--fg-muted); font:inherit; font-size:13px; text-align:left; white-space:nowrap; cursor:pointer; }
+.job-menu-item:hover,.job-menu-item:focus-visible,.job-menu-item:focus { background:var(--surface-2); color:var(--fg); outline:none; }
+.job-menu-item svg { width:15px; height:15px; flex:none; }
+.job-menu-item.danger { color:var(--red-fg); }
+.job-menu-item.danger:hover,.job-menu-item.danger:focus-visible,.job-menu-item.danger:focus { background:var(--danger-bg); color:var(--red-fg); }
+.job-menu-sep { height:1px; margin:3px 2px; background:var(--border-muted); }
 .job-plate-pop header { display:flex; align-items:center; gap:8px; padding:6px 8px 8px; border-bottom:1px solid var(--border-muted); margin-bottom:4px; font-size:13px; }
 .job-plate-pop header .icon { flex:none; }
 .job-plate-pop header b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
