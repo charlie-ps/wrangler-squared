@@ -13,6 +13,7 @@ import { jobCreateHandler, makeJobCreateHandler, jobActionHandler, jobSettingsHa
 import { _resetForTests, runnerFor } from './jobs.js';
 import { jobReportTool, getJobContextTool } from './tools.js';
 import { changeView } from './job-change.js';
+import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 
 const input = { title: 'Reliable sign-in', intent: 'Customers can sign in reliably', repos: ['/repo'], reviewMerge: true };
@@ -130,6 +131,16 @@ test('usualPick persists across restart, merges like any setting, and is validat
   assert.throws(() => f.store.settings({ usualPick: { agent: 'claude', model: 'm'.repeat(151), effort: '' } }));
   assert.throws(() => f.store.settings({ usualPick: { agent: 'claude', model: 'opus', effort: 'e'.repeat(41) } }));
   assert.equal(f.store.snapshot().settings.usualPick.model, 'opus', 'a rejected patch changes nothing');
+});
+
+test('backdrop defaults to the sky, persists the Wrangler background across restart, and rejects anything else', (t) => {
+  const f = fixture(t);
+  assert.equal(f.store.snapshot().settings.backdrop, 'sky');
+  f.store.settings({ backdrop: 'wrangler' }); f.store.settings({ concurrency: 3 });
+  assert.equal(new JobStore(f.store.file).snapshot().settings.backdrop, 'wrangler');
+  assert.throws(() => f.store.settings({ backdrop: 'nebula' }));
+  const { backdrop, ...old } = f.store.snapshot().settings;
+  assert.equal(settingsSchema.parse(old).backdrop, 'sky', 'settings saved before it existed parse to the sky');
 });
 
 // --- Migration (version 1 -> 2) ---

@@ -20,6 +20,51 @@
    --tile-bg/--card-bg); the plate art and the ink drawn into it are fixed colours. */
 #jobs { --jobs-serif:"Newsreader","Iowan Old Style",Georgia,serif; --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; flex:1; min-width:0; overflow:auto; padding:22px 24px 84px; background:transparent; display:flex; flex-direction:column; gap:20px; }
 #jobs.hidden { display:none; }
+/* Wrangler² sky, the default backdrop (settings `backdrop`): one static night in every host theme, so the
+   masthead and plates read as cut from it. Stars are one radial-gradient each, tiled at co-prime sizes so the
+   repeat never lines up; the amber corner echoes the masthead glare. `wrangler` keeps the host's wallpaper. */
+#jobs:not([data-backdrop="wrangler"]) {
+  background-color:#020306;
+  background-image:
+    radial-gradient(0.8px at 59px 190px, rgba(232,236,255,.52), transparent),
+    radial-gradient(1px at 14px 1px, rgba(232,236,255,.4), transparent),
+    radial-gradient(0.9px at 39px 121px, rgba(232,236,255,.54), transparent),
+    radial-gradient(0.9px at 128px 89px, rgba(232,236,255,.49), transparent),
+    radial-gradient(0.8px at 74px 106px, rgba(232,236,255,.5), transparent),
+    radial-gradient(0.7px at 171px 67px, rgba(255,226,196,.53), transparent),
+    radial-gradient(0.9px at 54px 195px, rgba(232,236,255,.51), transparent),
+    radial-gradient(1.4px at 135px 262px, rgba(232,236,255,.45), transparent),
+    radial-gradient(1.2px at 16px 78px, rgba(255,226,196,.69), transparent),
+    radial-gradient(1px at 182px 267px, rgba(232,236,255,.42), transparent),
+    radial-gradient(1.4px at 338px 331px, rgba(232,236,255,.67), transparent),
+    radial-gradient(1.1px at 175px 13px, rgba(232,236,255,.74), transparent),
+    radial-gradient(1.6px at 377px 549px, rgba(255,226,196,.72), transparent),
+    radial-gradient(1.8px at 458px 347px, rgba(232,236,255,.89), transparent),
+    radial-gradient(1.8px at 343px 252px, rgba(232,236,255,.82), transparent),
+    radial-gradient(65% 45% at 90% -4%, rgba(245,158,27,.16), transparent 70%),
+    radial-gradient(55% 50% at 3% 100%, rgba(69,48,216,.16), transparent 72%),
+    linear-gradient(180deg, #05070e 0%, #020306 55%, #05050b 100%);
+  background-size:211px 211px, 211px 211px, 211px 211px, 211px 211px, 211px 211px, 211px 211px, 211px 211px,
+    347px 347px, 347px 347px, 347px 347px, 347px 347px, 347px 347px, 563px 563px, 563px 563px, 563px 563px, auto, auto, auto;
+}
+/* The only text drawn straight on the sky. */
+#jobs:not([data-backdrop="wrangler"]) .jobs-empty { color:rgba(244,237,226,.62); }
+/* White chrome on a night sky glares, so under the sky Jobs (and its dialogs, which live on <body>) wear the
+   board's DARK palette even on a light host: a copy of core's :root values for every token body.light remaps. */
+body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job-image-zoom) {
+  color-scheme:dark; color:var(--fg);
+  --bg:#0d1117; --surface:#151b23; --surface-2:#1c2128;
+  --fg:#f0f6fc; --fg-muted:#9198a1; --fg-subtle:#656c76;
+  --border:#3d444d; --border-muted:#2a3038;
+  --green:#3fb950; --green-fg:#56d364; --red:#f85149; --red-fg:#ff7b72; --cyan:#39c5cf;
+  --purple:#d2a8ff; --purple-fg:#0d1117; --blue:#4493f8; --blue-fg:#79c0ff; --wf:#a371f7;
+  --chrome:#11161d; --tile-bg:rgba(21,27,35,0.5); --card-bg:rgba(21,27,35,0.5);
+  --accent:#1f6feb; --accent-fg:#fff; --field-bg:#0d1117;
+  --danger-bg:#2b1416; --danger-border:#5c2125; --danger-strong:#ff5c6c;
+  --pill-needs-bg:#3a0d0d; --pill-working-bg:#0d2818; --pill-idle-bg:#1c2128;
+  --snooze:#d29922; --snooze-fg:#e3b341; --mail:#d29922; --mail-fg:#e3b341; --warn:#d29922; --warn-fg:#e3b341;
+  --rt:#39c5cf; --rt-fg:#56d4dd; --bar-on:#0d1117; --overlay:rgba(0,0,0,0.6); --shadow:rgba(0,0,0,0.4);
+}
 .jobs-kicker { font-size:10px; font-weight:700; letter-spacing:.16em; color:var(--fg-muted); }
 /* The masthead is a wide plate: the glare of a Gargantua with no disc (job-skylines.js mountMastSky) behind
    the title and tools, which wear the plates' fixed ink; the rail below is board chrome. */
@@ -832,10 +877,11 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
    effort meter in the sidebar, and a cabinet that opens over the brief column only.
    Chrome follows the board's variables; the plates keep their own fixed palettes.
    Claude's chrome is the near-black of the Opus and Sonnet launch pages on a dark
-   board and Haiku's ivory on a light one (core's body.light). */
+   board and Haiku's ivory on a light one (core's body.light, and only under the Wrangler background:
+   the sky keeps Jobs dark). */
 .job-create { position:relative; }
 .job-pick,.pick-cabinet { --c-ground:#141413; --c-raised:#201f1d; --c-line:#33322e; --c-ink:#f0eee6; --c-hover:#ffffff0a; --pick-night:#070a10; --pick-star:#eef0f6; --pick-star-soft:#8b93a7; --pick-sans:system-ui,-apple-system,"Segoe UI",sans-serif; --pick-serif:Georgia,"Iowan Old Style",serif; --pick-mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
-body.light .job-pick,body.light .pick-cabinet { --c-ground:#faf9f5; --c-raised:#f0eee6; --c-line:#e3e0d6; --c-ink:#141413; --c-hover:#1414130a; }
+body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { --c-ground:#faf9f5; --c-raised:#f0eee6; --c-line:#e3e0d6; --c-ink:#141413; --c-hover:#1414130a; }
 .pick-ticket { appearance:none; display:grid; width:100%; padding:0; border-radius:10px; overflow:hidden; text-align:left; cursor:pointer; color:inherit; font:inherit; transition:transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s; }
 .pick-ticket:hover { transform:translateY(-1px); box-shadow:0 8px 18px -12px var(--shadow); }
 .pick-ticket:focus-visible,.pick-bar:focus-visible,.pick-cell:focus-visible,.pick-tab:focus-visible,.pick-close:focus-visible,.pick-reset:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }

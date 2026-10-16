@@ -433,6 +433,9 @@ export const settingsSchema = z.object({
   // scene (public/job-plates.js PLATE_ART). A hover mode, 'peek', was dropped and
   // reads as the skyline.
   plateArt: z.preprocess((v) => (v === 'peek' ? 'quiet' : v), z.enum(['quiet', 'full']).default('quiet')),
+  // What the Jobs view itself is drawn over: its own night sky, made to sit with the
+  // dark plate art, or the host board's wallpaper (public/jobs-view.js BACKDROPS).
+  backdrop: z.enum(['sky', 'wrangler']).default('sky'),
   // The agent/model/effort the last created job used: New job's picker opens on it
   // while the catalog still offers that model. Same bounds as the job's own fields.
   usualPick: z.object({

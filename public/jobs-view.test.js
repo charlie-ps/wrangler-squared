@@ -735,7 +735,23 @@ test('global concurrency, pause and repair limits are explicit controls, and no 
   f.q('#jobs-settings').click(); const form = f.q('#job-settings-form');
   assert.equal(form.elements.maxRunMinutes, undefined, 'a step ends with a receipt or an idle session, not a timeout');
   form.elements.maxRepairs.value = '1'; form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, maxReplans: 2, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA', plateArt: 'quiet', reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
+  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, maxReplans: 2, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA', plateArt: 'quiet', backdrop: 'sky', reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
+});
+
+test('the Jobs view draws over its own sky unless the Wrangler background is chosen, which persists through settings', (t) => {
+  const f = fixture(t), jobs = f.q('#jobs');
+  assert.equal(jobs.dataset.backdrop, 'sky', 'settings saved before the backdrop existed read as the sky');
+  f.q('#jobs-settings').click(); const form = f.q('#job-settings-form');
+  assert.deepEqual([...form.elements.backdrop.options].map((o) => [o.value, o.textContent]), [['sky', 'Wrangler² sky'], ['wrangler', 'Wrangler background']]);
+  assert.equal(form.elements.backdrop.value, 'sky');
+  form.elements.backdrop.value = 'wrangler'; form.dispatchEvent(f.event('submit'));
+  assert.equal(f.sent.at(-1).patch.backdrop, 'wrangler');
+  f.data.settings.backdrop = 'wrangler'; f.view.update(f.data);
+  assert.equal(jobs.dataset.backdrop, 'wrangler');
+  f.q('#jobs-settings').click();
+  assert.equal(f.q('#job-settings-form').elements.backdrop.value, 'wrangler', 'the dialog opens on the saved choice');
+  f.data.settings.backdrop = 'nebula'; f.view.update(f.data);
+  assert.equal(jobs.dataset.backdrop, 'sky', 'an unknown value falls back to the sky');
 });
 
 test('dependency waves, session waits and escaped titles remain compact', () => {
