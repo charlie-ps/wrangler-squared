@@ -25,21 +25,35 @@ const SAMPLE = [
   { id: 'c', date: '2026-11-01', title: 'Third release', body: '<p>Third body</p>' },
 ];
 
-test('the shipped registry is the two Writes pages, review defaults, See it working and the three planner pages, and every frame of their figures draws', (t) => {
+test('the shipped registry is the two Writes pages, review defaults, See it working, the three planner pages and New idea, and every frame of their figures draws', (t) => {
   const p = page(t);
-  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places', 'review-defaults', 'see-it-working', 'planner-red-steps', 'planner-options', 'planner-add-idea']);
+  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places', 'review-defaults', 'see-it-working', 'planner-red-steps', 'planner-options', 'planner-add-idea', 'new-idea']);
   for (const u of UPDATES.filter((u) => u.anim)) {
-    for (let i = 0; i < u.anim.frames; i++) assert.match(u.figure(i), /job-node|job-option/, `${u.id} frame ${i}`);
+    for (let i = 0; i < u.anim.frames; i++) assert.match(u.figure(i), /job-node|job-option|job-plate/, `${u.id} frame ${i}`);
     assert.ok(u.anim.still < u.anim.frames, u.id);
   }
   const see = UPDATES.find((u) => u.id === 'see-it-working');
   assert.match(see.figure(4), /class="wn-change-text">Does it keep the column order when a filter is on\?</, 'the question shows in full, not in a one-row textarea');
   assert.doesNotMatch(see.figure(4), /<textarea/);
   assert.match(see.figure(8), /Stopped what the agent started/);
+  const idea = UPDATES.find((u) => u.id === 'new-idea');
+  const drawn = (i) => { const d = document.createElement('div'); d.innerHTML = idea.figure(i); return d; };
+  const at = (i) => { const d = drawn(i); return { plate: d.querySelector('.wn-ideas-plate .job-plate'), sky: d.querySelector('.wn-ideas-plate .gx')?.dataset, chat: d.querySelector('.wn-ideas-chat .job-idea-thread') }; };
+  assert.match(at(0).chat.textContent, /Planner is reading the idea/, 'an idea opens on the planner reading it');
+  assert.ok(at(0).plate.classList.contains('idea'));
+  assert.deepEqual([0, 1, 2, 3].map((i) => at(i).sky.stage), ['0', '1', '0', '2'], 'its sky brightens as the planner asks, then suggests');
+  assert.match(at(1).plate.querySelector('.job-plate-stub').textContent, /Your reply/);
+  assert.ok(at(3).chat.querySelector('.job-launch.live [data-accept-idea]'), 'the suggestion is a launch strip with one button');
+  assert.ok(at(3).plate.querySelector('.job-plate-stub').textContent.startsWith('Job suggested'));
+  assert.ok(at(5).chat.querySelector('.job-launch.firing'));
+  assert.match(at(6).chat.querySelector('.job-launch.done').textContent, /Creating the job/);
+  assert.ok(!at(7).plate.classList.contains('idea'), 'and the job takes the idea’s place on the board');
+  assert.match(at(7).plate.querySelector('.job-plate-stub').textContent, /Plan ready/);
+  assert.ok([...Array(idea.anim.frames).keys()].every((i) => !drawn(i).querySelector('button:not([tabindex="-1"])')), 'its buttons stay out of the tab order');
   const storage = memoryStorage();
   assert.equal(createUpdates({ storage }).maybeShow(), true);
   assert.equal(p.title(), 'See the design before anything is built');
-  assert.equal(p.q('.intro-count').textContent, '1 of 7');
+  assert.equal(p.q('.intro-count').textContent, '1 of 8');
   assert.ok(p.q('.update-panel .wn-row3'));
   p.click('[data-update="next"]');
   assert.match(p.title(), /^Jira, Slack and Confluence/);
@@ -58,9 +72,12 @@ test('the shipped registry is the two Writes pages, review defaults, See it work
   p.click('[data-update="next"]');
   assert.equal(p.title(), 'Say what to change, on any step');
   assert.ok(p.q('.update-panel .wn-idea .job-change'));
+  p.click('[data-update="next"]');
+  assert.equal(p.title(), 'Start with an idea, not a plan');
+  assert.ok(p.q('.update-panel .wn-ideas .job-plate.idea .gx.nb[data-inflow]'), 'the idea’s plate with its forming sky');
   assert.equal(p.q('[data-update="next"]').textContent, 'Got it');
   p.click('[data-update="next"]');
-  assert.deepEqual(seenIds(storage), ['planner-add-idea', 'planner-options', 'planner-red-steps', 'review-defaults', 'see-it-working', 'writes-designs', 'writes-places']);
+  assert.deepEqual(seenIds(storage), ['new-idea', 'planner-add-idea', 'planner-options', 'planner-red-steps', 'review-defaults', 'see-it-working', 'writes-designs', 'writes-places']);
 });
 
 test('a reader behind on several releases steps through each unseen one, oldest first, with Next and Back', (t) => {
@@ -179,7 +196,7 @@ test('the client never opens an update on top of the first-run intro', (t) => {
   assert.equal(p.q('#jobs-update'), null);
   p.click('.jobs-intro .job-dialog-close');
   assert.equal(storage.get(SEEN_KEY), '1');
-  assert.deepEqual(seenIds(storage), ['planner-add-idea', 'planner-options', 'planner-red-steps', 'review-defaults', 'see-it-working', 'writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
+  assert.deepEqual(seenIds(storage), ['new-idea', 'planner-add-idea', 'planner-options', 'planner-red-steps', 'review-defaults', 'see-it-working', 'writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
 });
 
 test('the client holds unseen updates until the reader opens the Jobs view', (t) => {
