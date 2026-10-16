@@ -214,7 +214,7 @@ export function plateAsk(job) {
   if (codeAwaitingReview(lead)) return ask('Review code', 'Review', ICONS.code);
   if (isSessionSub(lead)) return ask(subLabel(job, lead), 'Review', ICONS.doc);
   if (isHumanSub(lead)) return ask(subLabel(job, lead), 'Open task', ICONS.hand);
-  return ask(subLabel(job, lead), deploymentStalled(lead) ? 'Resolve' : 'Open', ICONS.eye);
+  return ask(job.cancelledAt ? jobLabel(job) : subLabel(job, lead), deploymentStalled(lead) ? 'Resolve' : 'Open', ICONS.eye);
 }
 
 const ago = (at) => { const m = Math.max(1, Math.round((Date.now() - at) / 60000)); return m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`; };

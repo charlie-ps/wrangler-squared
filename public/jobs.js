@@ -466,12 +466,16 @@ export function jobNeedsReview(job, sub) {
 }
 // One kind of prerequisite names itself; a mix is only ever "prerequisites".
 const waitingNoun = (list) => list.every(isSessionSub) ? 'session' : list.every(isHumanSub) ? 'human task' : list.every(isPrSub) ? 'deployment' : 'prerequisite';
+// Cleanup refused to lose work and waits for the human to Retry or Discard anyway.
+export const worktreeKept = (sub) => !!sub?.cleanupRefusal && !sub.discard && sub.stage === 'cleanup';
 export function jobStatus(job, sub) {
   if (!job.error && sub?.error && !sub.cancelledAt) {
     if (redFixing(job, sub)) return { tone: 'working', text: 'Fixing' };
     if (redFixReady(job, sub)) return { tone: 'needs', text: 'Fix ready' };
     if (redDeclared(job, sub)) return { tone: 'needs', text: 'Declared red' };
   }
+  if (sub?.cancelledAt && worktreeKept(sub)) return { tone: 'needs', text: 'Worktree kept' };
+  if (!sub && job.cancelledAt && job.subJobs.some(worktreeKept)) return { tone: 'needs', text: 'Cancelled · worktree kept' };
   if (job.error || sub?.error) return { tone: 'needs', text: 'Needs attention' };
   if (sub?.cancelledAt) { const word = sub.superseded ? 'Superseded' : sub.notNeeded ? 'Not needed' : 'Dropped'; return { tone: sub.stage === 'done' ? 'done' : 'muted', text: sub.stage === 'done' ? word : `${word} · cleaning up` }; }
   if (!sub && job.cancelledAt) return { tone: job.stage === 'done' ? 'done' : 'muted', text: job.stage === 'done' ? 'Cancelled' : 'Cancelled · cleaning up' };
