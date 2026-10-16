@@ -184,7 +184,7 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
   for (const { id, fields } of changes.edited) {
     const sub = job.subJobs.find((s) => s.id === id);
     const spec = plan.subJobs.find((s) => s.id === id);
-    for (const k of EDITABLE) { if (spec[k] === undefined) delete sub[k]; else sub[k] = spec[k]; }
+    for (const k of [...EDITABLE, 'base']) { if (spec[k] === undefined) delete sub[k]; else sub[k] = spec[k]; }
     // A changed write waits for its session afresh, and a reviewed one is drafted
     // again: an approval was of what it said before. A made output in review
     // already exists: it stays there for Accept.

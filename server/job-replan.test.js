@@ -160,3 +160,14 @@ test('a PR\'s base moves in a replan until its worktree or PR exists, then it is
   assert.throws(() => mergeReplan(k, { context: '', stories: [], subJobs: [spec('a'), spec('b', [], { base: 'main' })] }), /PR open/);
   assert.deepEqual(mergeReplan(j, { context: '', stories: [], subJobs: [spec('a'), spec('b', [], { base: 'next' })] }).changes.kept, ['a', 'b']);
 });
+
+test('an approved base change reaches the live sub-job, which is what the launch reads', () => {
+  const subs = [spec('a', [], { base: 'next' })];
+  const j = { ...job(subs, [live(subs[0], { base: 'next' })]), replan: { feedback: 'Land on main', proposal: { id: 'p1', plan: { context: '', stories: [], subJobs: [spec('a')] } } } };
+  approveReplan(j, 'p1', { now: 1 });
+  assert.equal(j.plan.subJobs[0].base, undefined);
+  assert.equal(j.subJobs[0].base, undefined, 'a base left out lands on the default branch');
+  const k = { ...job(subs, [live(subs[0], { base: 'next' })]), replan: { feedback: 'Land on main', proposal: { id: 'p1', plan: { context: '', stories: [], subJobs: [spec('a', [], { base: 'main' })] } } } };
+  approveReplan(k, 'p1', { now: 1 });
+  assert.equal(k.subJobs[0].base, 'main');
+});
