@@ -1147,7 +1147,7 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .jobs-idea-teaser:hover { border-color:color-mix(in srgb, var(--purple) 45%, var(--border-muted)); transform:translateY(-2px); }
 .jobs-idea-teaser b { display:block; font:500 15px/1.2 var(--jobs-serif, Georgia, serif); letter-spacing:-.01em; }
 .jobs-idea-teaser small { display:block; margin-top:3px; font:500 9.5px/1 var(--jobs-mono, ui-monospace, monospace); letter-spacing:.16em; text-transform:uppercase; color:var(--fg-muted); }
-.jobs-idea-panel { width:380px; max-width:calc(100vw - 40px); box-sizing:border-box; background:var(--tile-bg); backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); border:1px solid var(--border-muted); border-radius:20px; box-shadow:0 24px 60px -20px var(--shadow); padding:20px 20px 18px; display:grid; gap:14px; margin:0; }
+.jobs-idea-panel { width:380px; max-width:calc(100vw - 40px); box-sizing:border-box; background:var(--tile-bg); backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); border:1px solid var(--border-muted); border-radius:20px; box-shadow:0 24px 60px -20px var(--shadow); padding:20px 20px 18px; display:grid; grid-template-columns:minmax(0,1fr); gap:14px; margin:0; }
 .jobs-idea-head { display:flex; align-items:flex-start; gap:12px; }
 .jobs-idea-head .jobs-idea-bulb { width:36px; height:36px; font-size:18px; }
 .jobs-idea-head h3 { margin:2px 0 4px; font:500 21px/1.2 var(--jobs-serif, Georgia, serif); letter-spacing:-.01em; text-wrap:balance; }
@@ -1173,7 +1173,7 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .jobs-idea-text:hover { background:color-mix(in srgb, var(--blue) 12%, transparent); }
 .jobs-idea-text.quiet { color:var(--fg-muted); }
 .jobs-idea-as { margin-left:auto; font:400 11px var(--jobs-mono, ui-monospace, monospace); color:var(--fg-subtle); }
-.jobs-idea-result { display:grid; justify-items:start; gap:10px; }
+.jobs-idea-result { display:grid; grid-template-columns:minmax(0,1fr); justify-items:start; gap:10px; }
 .jobs-idea-result h3 { margin:0; font:500 22px/1.2 var(--jobs-serif, Georgia, serif); letter-spacing:-.01em; text-wrap:balance; }
 .jobs-idea-result p { margin:0; font-size:12.5px; line-height:1.6; color:var(--fg-muted); }
 .jobs-idea-badge { width:47px; height:47px; border-radius:50%; display:grid; place-items:center; font-size:23px; }
