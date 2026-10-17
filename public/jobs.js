@@ -24,6 +24,23 @@ export const offBase = (job, sub) => isPrSub(sub) && !!sub.base && sub.base !== 
 export const reviewedSession = (sub) => isSessionSub(sub) && !sub.stories;
 export const hasSessionSubs = (job) => job.subJobs.some(reviewedSession);
 export const hasHumanSubs = (job) => job.subJobs.some(isHumanSub);
+// New idea's conversation (mirrors server/job-idea.js). Its stage is the planner's turn
+// (`thinking`, also while a reply waits to be mailed) or the human's: a reply to answer,
+// or a job it suggests.
+export const ideaThread = (job) => job?.idea?.thread || [];
+export const inConversation = (job) => !!job?.idea && job.stage === 'planning' && !job.plan && !job.replan && !job.cancelledAt;
+// An idea's plate on the board: talked through, or parked in the backlog, until it has a plan.
+export const ideaOpen = (job) => !!job?.idea && ['planning', 'backlog'].includes(job.stage) && !job.plan && !job.replan && !job.cancelledAt;
+export function liveSuggestion(job) {
+  const last = ideaThread(job).at(-1);
+  return last?.from === 'planner' && last.suggest && !last.acceptedAt ? last : null;
+}
+export function ideaStage(job) {
+  if (!inConversation(job) || job.error) return null;
+  const parked = job.runs.find((r) => !r.stopped && !r.subJobId && r.parkedFor === 'idea' && r.parkedAt && !r.mailedAt);
+  if (!parked || ideaThread(job).some((m) => m.from === 'human' && !m.sentAt)) return 'thinking';
+  return liveSuggestion(job) ? 'suggested' : 'reply';
+}
 // Mirrors server/jobs-schema.js reviewCode: a job from before the flag reviews.
 export const reviewCode = (job) => job.reviewCode ?? true;
 // The six review checkpoints, in the one set of words the New job form, the
@@ -267,7 +284,7 @@ export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : dep
 export const pendingDependencies = (job, sub) => sub.after.map((id) => job.subJobs.find((s) => s.id === id)).filter((d) => !dependencySatisfied(d));
 // A session parked on its ready receipt (server/job-parked.js) is only waiting on
 // the human, so it is not a running step until a message to it is in flight.
-const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null) && !(r.parkedFor === 'ready' && !sub?.answering));
+const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null) && !(r.parkedFor === 'ready' && !sub?.answering) && !(r.parkedFor === 'idea' && ideaStage(job) !== 'thinking'));
 // The open session behind a Code review step: parked, or answering what was sent.
 export const readyRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === sub?.id && r.parkedFor === 'ready') || null;
 // What the card says while that session works on a message. A question is
@@ -463,6 +480,7 @@ export function jobNeedsReview(job, sub) {
   // gates it would otherwise show belong to the head the repair is about to replace.
   if (sub?.stage === 'pr' && (sub.fixRequested || liveRun(job, sub))) return false;
   if (sub && mergeHeldByComments(job, sub)) return true;
+  if (!sub && ['reply', 'suggested'].includes(ideaStage(job))) return !job.paused;
   if (!sub) return !job.cancelledAt && (job.stage === 'planning' && job.plan || replanProposed(job)) && !job.runs.some((r) => !r.stopped && !r.subJobId);
   if (!sub.cancelledAt && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return true;
   if (isWriteSub(sub)) return writeAwaitingReview(sub);
@@ -491,6 +509,8 @@ export function jobStatus(job, sub) {
   if (job.paused) return { tone: 'muted', text: 'Paused' };
   if (sub && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return { tone: 'needs', text: triggerDropped(job, sub) ? 'Trigger dropped' : 'Depends on a dropped sub-job' };
   if (isWriteSub(sub)) return writeStatusLine(job, sub);
+  const idea = !sub && ideaStage(job);
+  if (idea) return idea === 'thinking' ? { tone: 'working', text: ideaThread(job).length ? 'Planner is thinking' : 'Planner is reading the idea' } : { tone: 'needs', text: idea === 'suggested' ? 'Job suggested' : 'Your reply' };
   const run = liveRun(job, sub);
   if (run) {
     if (run.status === 'needs-you') return { tone: 'needs', text: 'Waiting on a prompt' };

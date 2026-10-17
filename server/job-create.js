@@ -8,7 +8,7 @@ import { runnerFor } from './jobs.js';
 // next sweep.
 export const kick = (host) => runnerFor(host).tick();
 
-// One create path for the New job form (`job-create`) and an agent's
+// One create path for the New idea form (`job-create`) and an agent's
 // `create_job`: validate, settle the Task, create, optionally start, rebuild,
 // kick. A throw means nothing was created; each caller reports it its own way
 // (a broadcast for the form, an MCP error for the tool).
@@ -24,7 +24,9 @@ export function makeCreateJob({ run = runHeadlessClaude } = {}) {
     await host.rebuild();
     if (sid && liveSessionId) host.sessions.bill(sid, liveSessionId);
   };
-  return async (host, { job: raw, newTaskName, start }) => {
+  // `idea`: made from New idea, so planning may talk it through first (job-idea.js).
+  // Only the board's form sets it; an agent's create_job plans straight away.
+  return async (host, { job: raw, newTaskName, start, idea = false }) => {
     const input = jobInputSchema.parse(raw);
     let taskId = input.taskId;
     if (newTaskName !== undefined) {
@@ -45,7 +47,7 @@ export function makeCreateJob({ run = runHeadlessClaude } = {}) {
       if (host.images.keep(name)) kept.push(name);
       else { for (const k of kept) host.images.remove(k); throw new Error('An attached image is no longer available. Attach it again.'); }
     }
-    const job = host.stores.jobs.create({ ...input, taskId });
+    const job = host.stores.jobs.create({ ...input, taskId }, idea ? { idea: { thread: [] } } : {});
     if (start) host.stores.jobs.action(job.id, 'start', {});
     await host.rebuild();
     if (start) kick(host).catch((e) => host.log('job-create tick failed', e));

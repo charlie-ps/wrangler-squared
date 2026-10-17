@@ -6,7 +6,8 @@ import { isFrozen } from './job-replan.js';
 import { heldBy, needsTriage, triesOn, triesAllowed, startRed, failRedReplan } from './job-red.js';
 import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from './job-writes.js';
 import { dropSub } from './job-sub-ops.js';
-import { draftsDecidedMail, threadMail } from './job-prompts.js';
+import { draftsDecidedMail, threadMail, ideaMail } from './job-prompts.js';
+import { inConversation, unsentIdea } from './job-idea.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
 import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps } from './job-running.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
@@ -95,7 +96,9 @@ export class JobRunner {
       // the human can still approve the tree without it.
       const cancelled = job.cancelledAt || (run.subJobId && job.subJobs.find((s) => s.id === run.subJobId)?.cancelledAt)
         || (run.phase === 'planning' && job.stage === 'active' && !job.replan) || run.phase === 'write'
-        || (run.parkedFor === 'ready' && !run.report && (!waitsOnReview(job, run) || !(await this.runtime.exists(run))));
+        || (run.parkedFor === 'ready' && !run.report && (!waitsOnReview(job, run) || !(await this.runtime.exists(run))))
+        // A new idea's planner is done talking once the idea is planned (its suggestion accepted).
+        || (run.parkedFor === 'idea' && !run.report && !inConversation(job));
       if (!run.report && !cancelled) {
         if (!run.sessionId) error = 'Launch was interrupted. Check for an existing session/worktree before retrying.';
         // Parked on its drafts, a session sits idle (or goes dormant) by design
@@ -103,7 +106,7 @@ export class JobRunner {
         // away ends it.
         else if (run.parkedAt && !run.mailedAt) {
           if (await this.runtime.exists(run)) continue;
-          error = 'Session was closed while its drafts waited for review. Retry to run it again.';
+          error = run.parkedFor === 'idea' ? 'The planner\'s session was closed while it waited for your reply. Retry to plan again.' : 'Session was closed while its drafts waited for review. Retry to run it again.';
         }
         else if (!(await this.runtime.isAlive(run))) error = 'Session stopped without a receipt. Open it to see why, then retry.';
         else {
@@ -228,6 +231,11 @@ export class JobRunner {
     // one takes the ordinary road below — every sub-job is already in cleanup.
     if (job.cancelledAt && job.stage !== 'active') { if (!job.runs.some(runnable)) await this.finish(id); return; }
     if (job.stage === 'planning' && !job.plan && !activeFor(job)) { await this.launch(job, null, 'planning'); return; }
+    if (inConversation(job)) {
+      const run = job.runs.find((r) => runnable(r) && r.parkedFor === 'idea' && r.parkedAt && !r.mailedAt);
+      if (run && unsentIdea(job).length) await this.deliverIdea(id, run);
+      return;
+    }
     if (job.stage !== 'active') return;
     if (!job.replan) await this.triageRed(id);
     job = this.store.get(id);
@@ -436,6 +444,21 @@ export class JobRunner {
     } catch (e) {
       const note = `Could not send your message to the session: ${shortError(e)}`;
       if (sub.observationError !== note) this.patchSub(id, sub.id, (s) => { s.observationError = note; });
+    }
+  }
+  // The human answered a new idea's planner (job-idea.js): mail it, waking its card
+  // first if it went dormant. A failed send is tried again next tick.
+  async deliverIdea(id, run) {
+    const job = this.store.get(id);
+    const batch = unsentIdea(job);
+    try {
+      await this.runtime.resumeWithMail(run, ideaMail(job, run, batch));
+      const now = this.now();
+      this.patchRun(id, run.id, (r) => { r.mailedAt = now; r.idleSince = null; });
+      this.store.update(id, (j) => { for (const m of j.idea.thread) if (batch.some((b) => b.id === m.id)) m.sentAt = now; j.idea.error = null; });
+    } catch (e) {
+      const note = `Could not send your reply to the planner: ${shortError(e)}`;
+      if (job.idea.error !== note) this.store.update(id, (j) => { j.idea.error = note; });
     }
   }
   // Delivered or cancelled, the job ends the same way: planning sessions and

@@ -849,6 +849,30 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .intro-figure .job-run-panel { position:static; width:auto; margin-top:6px; box-shadow:none; }
 .intro-figure .job-running ul { display:none; }
 .intro-inert { display:contents; }
+/* An idea on the mini board: a card drawn on its forming sky (job-skylines.js), like its
+   plate, edged in amber while it waits on you. Its text sits on the art, so its ink is fixed. */
+.intro-mini-idea { position:relative; isolation:isolate; overflow:hidden; min-height:54px; box-sizing:border-box; background:#020306; transition:box-shadow .3s; }
+.intro-mini-idea.tone-warn { box-shadow:inset 0 0 0 1.5px var(--c); }
+.intro-mini-sky { position:absolute; inset:0; z-index:-1; }
+.intro-mini-sky::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg, rgba(2,3,6,.55), transparent 65%); }
+.intro-mini-idea b { color:#f4ede2; }
+.intro-mini-idea small { color:rgba(244,237,226,.78); }
+.intro-mini-idea.tone-warn small { color:#f7cd5f; }
+.intro-mini-idea .job-idea-mark { color:#f4ede2; }
+/* New idea's chat: a fixed window, newest at the foot, the planner's own thread markup inside. */
+.intro-chat { height:330px; display:flex; flex-direction:column; justify-content:flex-end; gap:12px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 36px); mask-image:linear-gradient(180deg, transparent, #000 36px); }
+.intro-chat .job-idea-thread { flex:none; gap:12px; padding:0; }
+.intro-chat .job-idea-msg { grid-template-columns:24px minmax(0,1fr); gap:10px; }
+.intro-chat .job-idea-orb { width:24px; height:24px; }
+.intro-chat .job-idea-body { font-size:13.5px; line-height:1.45; }
+.intro-chat .job-idea-body p { margin:0; font-size:inherit; line-height:inherit; }
+.intro-chat .job-idea-who time { display:none; }
+.intro-chat .job-launch-steps,.intro-chat .job-launch-fine { display:none; }
+.intro-chat .job-launch-go { height:64px; padding-bottom:10px; cursor:default; }
+.intro-chat-plan { display:flex; flex-direction:column; gap:10px; }
+.intro-idea .intro-flow .job-node-tile { width:48px; height:48px; border-radius:15px; }
+.intro-idea .intro-flow .job-node-tile .icon { font-size:23px; }
+.intro-idea .intro-flow-line { margin-top:27px; }
 .wn-pending { opacity:.55; }
 @media(max-width:700px) {
   .jobs-intro { padding:22px 20px; border-radius:20px; }
@@ -1129,6 +1153,12 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .wn-route { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--fg-muted); }
 .wn-route b { color:var(--fg); font-weight:500; }
 .wn-route .icon { color:var(--wf); }
+.wn-ideas { --jobs-serif:"Newsreader","Iowan Old Style",Georgia,serif; --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:20px; align-items:center; }
+.wn-ideas :is(.job-plate,.job-plate-open,button) { cursor:default; }
+/* The chat holds its tallest frame and keeps its newest message at the foot, so older ones scroll up under a fade. */
+.wn-ideas-chat { display:flex; flex-direction:column; justify-content:flex-end; height:360px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 56px); mask-image:linear-gradient(180deg, transparent, #000 56px); }
+.wn-ideas-chat .job-idea-thread { flex:none; gap:12px; padding:0; }
+.wn-ideas-chat :is(.job-launch-steps,.job-launch-fine) { display:none; }
 @media(prefers-reduced-motion:reduce) { .wn-fade { animation:none; } .wn-edge,.wn-art,.wn-note,.wn-ask .job-option,.wn-btn { transition:none; } }
 @media(max-width:700px) {
   .jobs-update { padding:22px 20px; border-radius:20px; }
@@ -1220,14 +1250,16 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-change:focus-within .job-change-foot, .job-change.has-text .job-change-foot, .job-change.has-img .job-change-foot, .job-change.is-open .job-change-foot { display:flex; }
 .job-change-foot kbd { margin-left:auto; font:500 10.5px var(--jobs-mono, ui-monospace, monospace); color:var(--fg-subtle); background:none; border:0; padding:0; }
 .job-sent { display:grid; gap:6px; margin:8px 0 4px; }
-.job-sent-bubble { justify-self:end; max-width:86%; display:grid; gap:6px; padding:9px 13px; border-radius:16px 16px 4px 16px; background:var(--fg); color:var(--bg); font-size:13.5px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; transform-origin:bottom right; }
+/* A custom style may make --bg translucent (a frosted wallpaper), which would print the ink at that alpha
+   on a solid --fg bubble, so the ink takes --bg's hue opaque. */
+.job-sent-bubble { justify-self:end; max-width:86%; display:grid; gap:6px; padding:9px 13px; border-radius:16px 16px 4px 16px; background:var(--fg); color:var(--bg); color:rgb(from var(--bg) r g b / 1); font-size:13.5px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; transform-origin:bottom right; }
 .job-sent-imgs { display:flex; flex-wrap:wrap; gap:6px; }
 .job-sent-imgs img { width:72px; height:52px; object-fit:cover; border-radius:8px; display:block; }
 .job-sent.failed .job-sent-bubble { opacity:.55; }
 .job-sent-meta { justify-self:end; display:inline-flex; align-items:center; gap:7px; font-size:11.5px; color:var(--fg-muted); }
 .job-sent-meta.failed { color:var(--red-fg); }
 .job-sent-meta .icon { width:12px; height:12px; }
-.job-sent-tick { width:16px; height:16px; border-radius:50%; display:grid; place-items:center; background:var(--green-fg); color:var(--surface); }
+.job-sent-tick { width:16px; height:16px; border-radius:50%; display:grid; place-items:center; background:var(--green-fg); color:var(--surface); color:rgb(from var(--surface) r g b / 1); }
 .job-sent-tick .icon { width:10px; height:10px; stroke-width:3; }
 .job-sent-sending { background:linear-gradient(90deg, var(--fg-muted) 0 40%, var(--fg) 50%, var(--fg-muted) 60% 100%); background-size:250% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; }
 @media(prefers-reduced-motion:no-preference) {
@@ -1439,3 +1471,105 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-node-branch input { display:block; width:100%; min-width:16ch; margin-top:6px; font:12px ui-monospace,SFMono-Regular,Menlo,monospace; }
 .job-node-branch>span { max-width:24ch; text-align:left; }
 .job-node-edit>details[open] { flex-basis:100%; }
+
+/* New idea's conversation (job-idea.js), per the approved mock-up: the idea's formation
+   sky across the top in the masthead's dress, a thread with the planner, and the job it
+   suggests as a horizon strip whose event horizon is the button. Plate art and the ink on
+   it are fixed colours; everything else is the board's variables. */
+.job-dialog:has(> .job-idea) { width:min(920px,95vw); padding:0; }
+.job-dialog:has(> .job-idea) > .job-dialog-close { z-index:3; color:rgba(244,237,226,.8); }
+.job-dialog:has(> .job-idea) > .job-dialog-close:hover { background:rgba(244,237,226,.12); }
+.job-idea { --jobs-serif:"Newsreader","Iowan Old Style",Georgia,serif; --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; display:flex; flex-direction:column; min-height:min(640px,88vh); }
+.job-idea-band { position:relative; isolation:isolate; flex:none; height:150px; display:flex; align-items:flex-end; padding:20px 26px 18px; background:#020306; color:#f4ede2; overflow:hidden; }
+.job-idea-band .gx { z-index:-2; left:auto; width:min(100%,420px); -webkit-mask-image:linear-gradient(90deg, transparent, #000 45%); mask-image:linear-gradient(90deg, transparent, #000 45%); }
+.job-idea-band::after { content:""; position:absolute; inset:0; z-index:-1; pointer-events:none; background:linear-gradient(90deg, rgba(2,3,6,.82) 0%, rgba(2,3,6,.4) 50%, transparent 78%), linear-gradient(0deg, rgba(2,3,6,.6), transparent 60%); }
+.job-dialog .job-idea-band h2 { margin:8px 44px 0 0; max-width:24ch; font:500 30px/1.1 var(--jobs-serif); letter-spacing:-.015em; color:#f4ede2; text-shadow:0 2px 18px rgba(0,0,0,.6); }
+.job-idea-kicker { font:600 10.5px/1 var(--jobs-mono); letter-spacing:.22em; text-transform:uppercase; color:rgba(244,237,226,.66); }
+.job-idea-mark { display:inline-flex; align-items:center; gap:6px; color:#f4ede2; }
+.job-idea-mark::before { content:""; width:5px; height:5px; border-radius:50%; background:#ffc7d6; box-shadow:0 0 6px #f07fa8; }
+.gx.nb .infall { mix-blend-mode:screen; }
+.gx.nb .jets { mix-blend-mode:screen; animation:gx-glare calc(14s * var(--k)) ease-in-out infinite alternate; }
+.gx.nb .drift { animation:nb-drift calc(40s * var(--k)) ease-in-out infinite alternate; }
+@keyframes nb-drift { to { transform:scale(.9); opacity:.75; } }
+.job-idea-band > div { flex:1; min-width:0; }
+.job-idea-band .job-detail-cost { flex:none; margin-left:12px; border-color:rgba(244,237,226,.22); background:rgba(2,3,6,.45); color:#f4ede2; }
+.job-idea > .job-error { margin:12px 26px 0; }
+.job-idea-orb { position:relative; flex:none; display:inline-block; width:30px; height:30px; border-radius:50%; overflow:hidden; background:radial-gradient(circle at 50% 50%, #fff 0 6%, #ffd2c0 12%, #c0508f 34%, #2a0f4d 62%, #08031a 100%); box-shadow:0 0 0 1px color-mix(in srgb, var(--fg) 10%, transparent), 0 0 18px -4px #c0508f; }
+.job-idea-orb::after { content:""; position:absolute; inset:-30%; border-radius:50%; background:conic-gradient(from 0deg, transparent 0 30%, rgba(255,210,192,.45) 42%, transparent 55% 80%, rgba(47,196,192,.35) 90%, transparent); animation:gx-spin 9s linear infinite; mix-blend-mode:screen; }
+.job-idea-orb.small { width:18px; height:18px; }
+.job-idea-thread { flex:1; display:grid; align-content:start; gap:18px; padding:22px 26px 8px; }
+.job-idea-thread .job-sent { margin:0; }
+.job-idea-thread .job-sent-bubble { max-width:min(86%,560px); }
+.job-idea-msg { display:grid; grid-template-columns:30px minmax(0,1fr); gap:12px; max-width:720px; }
+.job-idea-msg.fresh { animation:job-idea-fade .4s both; }
+.job-idea-who { display:flex; align-items:baseline; gap:8px; margin-bottom:6px; font:600 10px/1.9 var(--jobs-mono); letter-spacing:.16em; text-transform:uppercase; color:var(--fg-muted); }
+.job-idea-who time { font-weight:400; letter-spacing:.04em; text-transform:none; color:var(--fg-subtle); }
+.job-idea-body { padding:12px 15px; border-radius:4px 18px 18px 18px; background:color-mix(in srgb, var(--surface-2) 70%, transparent); box-shadow:inset 0 0 0 1px var(--border-muted); color:var(--fg); font-size:13.5px; line-height:1.6; overflow-wrap:anywhere; }
+.job-dialog .job-idea-body p { margin:0; font-size:inherit; color:inherit; }
+.job-idea-body :is(p,ol,ul)+:is(p,ol,ul) { margin-top:8px; }
+.job-idea-body :is(ol,ul) { margin:0; padding-left:20px; } .job-idea-body li+li { margin-top:4px; }
+.job-idea-body code { padding:1px 5px; border-radius:5px; background:color-mix(in srgb, var(--fg) 8%, transparent); font:12px var(--jobs-mono); }
+.job-idea-thinking { display:flex; align-items:center; gap:10px; padding-left:2px; font:500 12px var(--jobs-mono); }
+.job-idea-shine { background:linear-gradient(90deg, var(--fg-muted) 0 40%, var(--fg) 50%, var(--fg-muted) 60% 100%); background-size:250% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:job-idea-shine 1.6s linear infinite; }
+.job-idea-dock { position:sticky; bottom:0; z-index:2; display:grid; gap:2px; padding:8px 26px 14px; background:linear-gradient(transparent, var(--surface) 14px); }
+.job-idea-dock .job-change { margin:0; }
+.job-idea-dock .job-actions { justify-content:flex-end; margin:6px 0 0; }
+.job-idea-dock .job-actions button { padding:6px 10px; font-size:12px; }
+
+/* The suggested job (the mock-up's Horizon strip, picked): needs-you gold, because the
+   suggestion waits on you. Hover moves nothing; the ring only saturates and streams faster. */
+.job-launch { position:relative; display:grid; margin-top:12px; border-radius:18px; overflow:hidden; background:var(--card-bg, var(--surface)); border:1px solid color-mix(in srgb, var(--c) 40%, var(--border-muted)); box-shadow:0 18px 50px -24px color-mix(in srgb, var(--c) 60%, transparent); }
+.job-launch::before { content:""; position:absolute; inset:0; z-index:3; pointer-events:none; border-radius:inherit; padding:1.5px; opacity:.8; background:conic-gradient(from var(--sweep), transparent 0 62%, color-mix(in srgb, var(--c) 70%, transparent) 80%, #fff 84%, transparent 86%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask:linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); animation:gx-sweep 6s linear infinite; }
+.job-launch-text { display:grid; gap:9px; min-width:0; padding:16px 18px 14px; }
+.job-launch-kicker { display:flex; align-items:center; gap:8px; font:600 9px/1 var(--jobs-mono); letter-spacing:.26em; text-transform:uppercase; color:var(--c-fg); }
+.job-launch-kicker i { width:6px; height:6px; border-radius:50%; background:#ffc85c; box-shadow:0 0 8px #f59e1b; }
+.job-dialog .job-launch-title { margin:0; font:500 22px/1.2 var(--jobs-serif); letter-spacing:-.01em; color:var(--fg); text-wrap:balance; }
+.job-launch-meta { display:flex; flex-wrap:wrap; gap:6px; }
+.job-launch-chip { display:inline-flex; align-items:center; gap:6px; max-width:100%; box-sizing:border-box; height:24px; padding:0 9px; border-radius:999px; background:color-mix(in srgb, var(--fg) 8%, transparent); color:var(--fg); font:500 11.5px var(--jobs-mono); white-space:nowrap; }
+.job-launch-chip.ghost { background:color-mix(in srgb, var(--fg) 4%, transparent); color:var(--fg-muted); }
+.job-launch-chip b { font:500 13px/1 var(--jobs-serif); }
+.job-launch-chip .icon,.job-launch-chip .job-kind { width:13px; height:13px; font-size:13px; }
+.job-launch-steps { display:grid; gap:2px; margin:0; padding:0; list-style:none; }
+.job-launch-steps li { display:grid; grid-template-columns:18px minmax(0,1fr) auto; align-items:center; gap:10px; padding:6px 2px; border-top:1px solid var(--border-muted); font-size:12.5px; }
+.job-launch-steps li:first-child { border-top:0; }
+.job-launch-steps .job-kind { justify-self:center; font-size:13px; }
+.job-launch-steps small { font:11px var(--jobs-mono); color:var(--fg-subtle); white-space:nowrap; }
+.job-launch-go { all:unset; box-sizing:border-box; position:relative; isolation:isolate; display:flex; align-items:flex-end; justify-content:center; width:100%; height:92px; padding:0 18px 13px; overflow:hidden; background:#020306; color:#f4ede2; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.job-launch-go:focus-visible { outline:2px solid var(--blue); outline-offset:-4px; }
+.job-launch-sky { position:absolute; z-index:-1; inset:0; transition:filter .6s ease; }
+.job-launch.live .job-launch-go:is(:hover,:focus-visible) .job-launch-sky { filter:saturate(1.8) brightness(1.12); }
+.job-launch.firing .job-launch-sky { filter:saturate(1.9) brightness(1.9); transition:filter .35s; }
+.job-launch-face { display:flex; align-items:center; gap:11px; min-width:0; }
+.job-launch-dot { display:grid; place-items:center; flex:none; width:30px; height:30px; border-radius:50%; background:#f4ede2; color:#05070c; box-shadow:0 0 20px rgba(255,186,80,.45); transition:background .3s, box-shadow .3s; }
+.job-launch-dot .icon { width:15px; height:15px; }
+.job-launch.live .job-launch-go:is(:hover,:focus-visible) .job-launch-dot { background:#fff; box-shadow:0 0 26px rgba(255,186,80,.7); }
+.job-launch-label { display:grid; gap:4px; min-width:0; }
+.job-launch-label b { font:500 19px/1 var(--jobs-serif); letter-spacing:-.01em; text-shadow:0 1px 10px #000; }
+.job-launch-label small { overflow:hidden; font:400 10.5px var(--jobs-mono); color:rgba(244,237,226,.62); white-space:nowrap; text-overflow:ellipsis; }
+.job-launch-fine { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; padding:9px 12px 9px 18px; border-top:1px solid var(--border-muted); font:400 11.5px/1.45 var(--jobs-mono); color:var(--fg-subtle); }
+.job-launch-fine>span { flex:1 1 220px; min-width:0; }
+.job-launch-fine b { font-weight:500; color:var(--fg-muted); }
+.job-launch-refine { margin-left:auto; height:30px; padding:0 12px; border:0; border-radius:999px; background:transparent; color:var(--fg-muted); font:500 12.5px var(--font); cursor:pointer; }
+.job-launch-refine:hover { background:var(--surface-2); color:var(--fg); }
+.job-launch-refine:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.job-launch:not(.live) .job-launch-go { cursor:default; }
+.job-launch.stale { opacity:.45; transition:opacity .3s; }
+.job-launch.firing::before { animation-duration:1.4s; }
+.job-launch.done { border-color:color-mix(in srgb, var(--st-ok) 50%, var(--border-muted)); }
+.job-launch.done .job-launch-dot { background:#7fe0b0; box-shadow:0 0 20px rgba(127,224,176,.5); }
+.job-idea-past .job-idea-thread { padding:4px 0 0; }
+.job-idea-past .job-launch-refine { display:none; }
+/* An idea on the board (job-plates.js ideaPlateHtml): a job's plate under a sky still
+   forming, tagged IDEA where a job names its repos. Once it has a plan the cloud folds
+   into its point and the job's own sky rises from under it. */
+.job-plate.idea .job-plate-art::after { opacity:1; animation:none; background:linear-gradient(180deg, rgba(2,3,6,.35), transparent 30%); }
+.job-plate-where .job-plate-idea { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.job-plate-where .job-plate-idea::before { content:""; width:6px; height:6px; border-radius:50%; background:radial-gradient(circle, #ffd8e4, #c0508f 60%, transparent 70%); }
+.job-plate-art.collapsing > .gx.nb { z-index:1; transform-origin:var(--ox,50%) var(--oy,50%); transition:transform 1.3s cubic-bezier(.6,0,.4,1), opacity .9s .5s ease, filter 1.3s ease; }
+.job-plate-art.collapsing > :not(.nb) { opacity:0; transform:scale(1.12); transition:opacity 1.1s .55s ease, transform 1.6s .45s cubic-bezier(.2,.8,.2,1); }
+.job-plate-art.collapsing > :is(svg,.job-plate-tag,.job-plate-unplanned) { z-index:2; }
+.job-plate-art.collapsing.collapsed > .gx.nb { transform:scale(.12); opacity:0; filter:brightness(2.4) saturate(1.4); }
+.job-plate-art.collapsing.collapsed > :not(.nb) { opacity:1; transform:none; }
+@media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-dock { padding-left:16px; padding-right:16px; } }
+@media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-plate-art.collapsing > * { transition:opacity .3s !important; } .job-plate-art.collapsing.collapsed > .gx.nb { transform:none; } }

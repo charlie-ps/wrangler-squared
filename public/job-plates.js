@@ -1,8 +1,8 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
-import { skyHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady } from './jobs.js';
+import { skyHtml, inflowHtml } from './job-skylines.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, ideaStage, liveSuggestion, ideaOpen, ideaThread } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 import { runningDotHtml } from './job-running.js';
@@ -187,6 +187,10 @@ export function plateAsk(job) {
     return { tone, label: 'Prompt waiting', detail: `${promptWhere(job, p)}${prompts.length > 1 ? ` +${prompts.length - 1}` : ''}`, button: 'Answer', icon: ICONS.terminal, act: 'session', sub: p.sub?.id || '', session: p.sessionId };
   }
   if (!['needs', 'failing'].includes(state)) return null;
+  // An idea waiting on you: the planner's question, or the job it suggests.
+  const idea = ideaStage(job);
+  if (idea === 'suggested') { const { plan } = liveSuggestion(job).suggest; return { ...whole('Job suggested', 'Review', [kindCountLabel(plan.subJobs), repoLine({ plan })].filter(Boolean).join(' · ')), icon: ICONS.eye }; }
+  if (idea === 'reply') return { ...whole('Your reply', 'Reply', 'The planner asked you'), icon: ICONS.note };
   if (!live(job)) return job.plan ? whole('Plan ready', 'Review plan', kindCountLabel(job.plan.subJobs)) : whole(jobLabel(job), 'Open');
   const lead = leadSub(job, state);
   if (!lead) return whole(jobLabel(job), replanProposed(job) ? 'Review' : 'Open');
@@ -223,7 +227,27 @@ function repoLine(job) {
   return repos.length > 2 ? `${repos.length} repositories` : repos.map((r) => tildify(r).split('/').pop()).join(' + ');
 }
 
-export function plateHtml(job, scene, art = 'quiet') {
+// An idea's plate: the same frame, body and stub as a job's, under a sky still forming
+// (job-skylines.js paintInflow) whose point brightens as the planner asks and then
+// suggests. Its chrome stays idle until something waits on you.
+const IDEA_SKY = { thinking: 0, reply: 1, suggested: 2 };
+const ideaSkyHtml = (job) => inflowHtml(job.id, IDEA_SKY[ideaStage(job)] ?? 0);
+function ideaPlateHtml(job) {
+  const ask = plateAsk(job), tone = ask ? ask.tone : 'idle', said = ideaThread(job).length + 1;
+  const foot = ask
+    ? `<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span><button type="button" class="job-plate-go" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}"${ask.session ? ` data-session="${esc(ask.session)}"` : ''}>${esc(ask.button)}</button></div>`
+    : `<div class="job-plate-foot"><span class="job-plate-glyph">${stateIconHtml(jobState(job))}</span><span class="job-status">${esc(jobLabel(job))}</span></div>`;
+  return `<article class="job-plate idea tone-${tone} ${jobState(job)} ${ask ? 'stubbed' : ''}" data-board="${esc(job.id)}">
+    <div class="job-plate-art">${ideaSkyHtml(job)}<div class="job-plate-tag lt"><span class="job-idea-mark">Idea</span></div></div>
+    <div class="job-plate-body"><div class="job-plate-where"><span>${job.createdAt ? `${ago(job.createdAt)} ago` : ''}</span><span class="job-plate-idea">${said} message${said === 1 ? '' : 's'}</span></div>
+      <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="Open the conversation">${esc(job.title)}</button></div>
+    ${foot}</article>`;
+}
+
+// `collapse`: the idea this job was is still drawn over its art, and the board folds it
+// into its point (jobs.css .collapsing) as the job's own sky rises from under it.
+export function plateHtml(job, scene, art = 'quiet', { collapse = false } = {}) {
+  if (ideaOpen(job)) return ideaPlateHtml(job);
   const state = jobState(job), ask = plateAsk(job), lvl = levelOf(job), subs = planOf(job).subJobs, work = stepsOf(job);
   const full = art === 'full', tone = ask ? ask.tone : STATES[state].tone, ink = (x, y) => (full ? inkFor(scene, lvl, x, y) : 'lt');
   const cost = jobCostLabel(job.usd, job.usdEstimated);
@@ -237,7 +261,7 @@ export function plateHtml(job, scene, art = 'quiet') {
   const repo = repoLine(job), graph = work.length ? skyGraphHtml(job, scene, lvl, full) : null;
   const dim = !stateSolid(state);
   return `<article class="job-plate tone-${ask ? ask.tone : STATES[state].tone} ${state} ${ask ? 'stubbed' : ''}" data-board="${esc(job.id)}" data-scene="${scene}">
-    <div class="job-plate-art ${full && (scene === 'haiku' || scene === 'fable') ? 'ink-dark' : ''}">${full ? `<svg class="scene" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${sceneArt(scene, job.id, lvl)}</svg><div class="scrim"></div>` : skyHtml(job.id, tone, lvl, graph ? graph.floor : 82, dim)}
+    <div class="job-plate-art ${full && (scene === 'haiku' || scene === 'fable') ? 'ink-dark' : ''}${collapse ? ' collapsing' : ''}">${collapse ? inflowHtml(job.id, 2) : ''}${full ? `<svg class="scene" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${sceneArt(scene, job.id, lvl)}</svg><div class="scrim"></div>` : skyHtml(job.id, tone, lvl, graph ? graph.floor : 82, dim)}
       ${repo ? `<div class="job-plate-tag ${ink(160, 14)}">${esc(repo)}</div>` : ''}${graph ? graph.svg : `<div class="job-plate-unplanned ${ink(160, 75)}">${empty}</div>`}</div>
     <div class="job-plate-body"><div class="job-plate-where"><span>${job.createdAt ? `${ago(job.createdAt)} ago` : ''}</span>${runningDotHtml(job)}${cost ? `<span class="job-plate-cost" title="${esc(JOB_COST_TITLE)}${job.usdEstimated ? ' · includes an estimate for Codex sessions' : ''}">${esc(cost)}</span>` : ''}</div>
       <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="${esc(tip)}">${esc(job.title)}</button>${placesHtml(job)}</div>

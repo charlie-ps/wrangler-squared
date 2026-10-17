@@ -176,6 +176,15 @@ feature).
   temp index, `write-tree`) is read by the tool handler at the receipt; `approve-code` is
   refused unless the `job-action` handler's fresh read matches (`TREE_MOVED` also queues a
   `retell` message). Code on Auto never parks.
+- **New idea is a job that may start as a conversation** (`server/job-idea.js`, `public/job-idea.js`).
+  Only the board's form sets `idea` (`job-create` `idea:true` → `job.idea.thread`); `create_job` never does.
+  Its planning run either reports `plan` as any job's does, or `reply {text, suggest?:{title, plan}}`,
+  which parks the run (`parkedFor: 'idea'`, no slot, like a ready park) until the human's `idea-reply`
+  is mailed by the runner (`deliverIdea`, `ideaMail`). `accept-idea {messageId}` is pinned to the newest
+  message: it applies the suggestion exactly as a plan receipt (Plan review still applies), and settle()
+  then ends the parked run quietly because the job is no longer `inConversation`. A fresh planning run
+  (a retry) reads the whole thread from its prompt, so `claim` marks unsent messages sent. The chat
+  dialog redraws on ticks even with the cursor in its empty reply box; only new messages fade in.
 - **What the agent leaves running is the agent's; tearing it down is ours** (`server/job-running.js`).
   `ready` (and a restarting `reply`) may carry `running: [{name, url?, pid?, stop?, log?}]`, the
   agent's own detached (`setsid`) dev server, database, worker; the extension never starts one. It is kept

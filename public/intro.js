@@ -2,6 +2,8 @@ import { ICONS } from './icons.js';
 import { layoutGraphEdges, rocketHtml } from './job-graph.js';
 import { CHECKPOINTS, checkpointFlagHtml, checkpointHint, checkpointToggleHtml } from './jobs.js';
 import { composer, proofFigure, runningBar } from './figs.js';
+import { ideaThreadHtml } from './job-idea.js';
+import { inflowHtml, holdSkies, mountSkies, releaseSkies } from './job-skylines.js';
 
 // The "How Jobs works" walkthrough: shown once to every browser that has not
 // dismissed it (installed today or long ago), then only on request from the Jobs
@@ -57,22 +59,31 @@ function graph(phase) {
 }
 
 // The Jobs figure: a mini board whose rail badge and Needs me chip count its
-// amber rows. Each frame is every job's [state, line, segments done].
-const BOARD = [['CSV export', 3], ['Rotate secret', 3], ['Node 22', 4]];
+// amber rows. Each frame is every job's [state, line, segments done]; the first
+// row is an idea, drawn under its forming sky (job-skylines.js inflowHtml) while
+// the planner talks it through, then the job it became.
+const BOARD = [['Dark mode for reports', 3], ['CSV export', 3], ['Rotate secret', 3], ['Node 22', 4]];
+const IDEA = { thinking: ['idle', 0, 'Planner is reading it'], reply: ['warn', 1, 'The planner asked you'], suggested: ['warn', 2, 'Job suggested · review'] };
 const BOARD_FRAMES = [
-  [['running', '2 agents working', 0], ['running', 'Writing the PR', 1], ['planned', 'Backlog', 0]],
-  [['running', '2 agents working', 1], ['review', 'Ready for your review', 1], ['planned', 'Backlog', 0]],
-  [['review', 'Tests passed · review', 1], ['review', 'Ready for your review', 1], ['running', '4 agents working', 0]],
-  [['running', 'Checks running', 2], ['review', 'Ready for your review', 1], ['review', 'Green PR · merge?', 2]],
-  [['running', 'Checks running', 2], ['deploying', 'Merged · deploying', 2], ['running', '3 agents working', 2]],
-  [['done', 'Delivered', 3], ['done', 'Delivered', 3], ['running', '2 agents working', 3]],
-  [['done', 'Delivered', 3], ['done', 'Delivered', 3], ['review', 'Check the backfill', 3]],
+  [['thinking'], ['running', '2 agents working', 0], ['running', 'Writing the PR', 1], ['planned', 'Backlog', 0]],
+  [['thinking'], ['running', '2 agents working', 1], ['review', 'Ready for your review', 1], ['planned', 'Backlog', 0]],
+  [['reply'], ['review', 'Tests passed · review', 1], ['review', 'Ready for your review', 1], ['running', '4 agents working', 0]],
+  [['thinking'], ['running', 'Checks running', 2], ['review', 'Ready for your review', 1], ['review', 'Green PR · merge?', 2]],
+  [['suggested'], ['running', 'Checks running', 2], ['deploying', 'Merged · deploying', 2], ['running', '3 agents working', 2]],
+  [['review', 'Plan ready for review', 0], ['done', 'Delivered', 3], ['done', 'Delivered', 3], ['running', '2 agents working', 3]],
+  [['running', '2 agents working', 0], ['done', 'Delivered', 3], ['done', 'Delivered', 3], ['review', 'Check the backfill', 3]],
 ];
-const needYou = (phase) => BOARD_FRAMES[phase].filter(([st]) => st === 'review').length;
+const waits = ([st]) => st === 'review' || IDEA[st]?.[0] === 'warn';
+const needYou = (phase) => BOARD_FRAMES[phase].filter(waits).length;
 function board(phase) {
   const need = needYou(phase);
   const bump = need && need !== needYou((phase || BOARD_FRAMES.length) - 1);
+  const idea = ([title], [stage]) => {
+    const [tone, sky, line] = IDEA[stage];
+    return `<div class="intro-mini-job intro-mini-idea tone-${tone}"><span class="intro-mini-sky">${inflowHtml('intro-idea', sky)}</span><span><b>${title}</b><small><span class="job-idea-mark">Idea</span> · ${line}</small></span></div>`;
+  };
   const row = ([title, n], [state, line, done]) => {
+    if (IDEA[state]) return idea([title], [state]);
     const [tone, glyph] = ST[state];
     const segs = Array.from({ length: n }, (_, i) => `<span class="job-seg ${i < done ? 'tone-ok' : i === done && state !== 'planned' && state !== 'done' ? `tone-${tone}` : 'tone-idle planned'}"></span>`).join('');
     return `<div class="intro-mini-job tone-${tone}"><span class="job-avatar">${ICONS[glyph]}</span><span><b>${title}</b><small>${line}</small></span><span class="job-progress">${segs}</span></div>`;
@@ -87,10 +98,40 @@ const YOU = `<b class="intro-cp you">${ICONS.hand}You review</b>`;
 const AUTO = `<b class="intro-cp">${ICONS.ff}Auto</b>`;
 const checkpointsFigure = (reviews) => `<div class="intro-checkpoints">${CHECKPOINTS.map((cp) => `<div class="job-review intro-checkpoint" data-checkpoint="${cp.field}"><div class="job-review-row">${checkpointFlagHtml(cp, reviews[cp.field])}<span class="job-review-name">${cp.name}<small>${checkpointHint(cp, reviews[cp.field])}</small></span>${checkpointToggleHtml(cp, reviews[cp.field], `intro-${cp.field}`)}</div></div>`).join('')}</div>`;
 
-// New job: the flow, the branch the planner chose, and Add idea under the plan.
-const newJobFigure = () => `<div class="intro-flow">${node('ok', 'edit', 'Describe', 'Done', 'check')}<span class="intro-flow-line"></span>${node('run', 'robot', 'Plan', 'Planning', 'spin', true)}<span class="intro-flow-line"></span>${node('warn', 'eye', 'Approve', 'Needs you', 'eye')}</div>
-  <div class="job-chips"><span class="job-chip job-plan-branch">${ICONS.branch}<span>next</span></span><span class="job-chip">${ICONS.pr}<span>2 PRs · 1 session</span></span></div>
-  ${composer('Planner', 'Add an idea for the planner…', 'Redraws the plan for you to review.', 'Design the export button first, and land it on next')}`;
+// New idea: the idea, the planner's question and the job it suggests, drawn by
+// job-idea.js itself, then the plan waiting to be approved. The chat is a fixed
+// window that keeps its newest message at the foot, so the dialog never grows.
+const SUGGEST = { title: 'Dark mode for the reports dashboard', plan: { subJobs: [
+  { id: 'tokens', kind: 'pr', title: 'Dark theme colours in the UI kit', repo: 'acme/ui-kit', base: 'next' },
+  { id: 'toggle', kind: 'pr', title: 'Theme toggle on the dashboard', repo: 'acme/reports', base: 'next', after: ['tokens'] },
+  { id: 'check', kind: 'session', title: 'Check every chart in both themes', after: ['toggle'] },
+] } };
+const SAID = [
+  { id: 'q', from: 'planner', text: 'Should it follow the system setting, or have its own switch? And which branch should it land on?' },
+  { id: 'a', from: 'human', sentAt: 1, text: 'Follow the system, with a switch to override it. Land it on next.' },
+  { id: 's', from: 'planner', text: 'Here is a job for that: the colours first, then the switch, then a check of every chart.', suggest: SUGGEST },
+];
+// [messages said, planner thinking, suggestion pressed, plan shown, flow states]
+const IDEA_FRAMES = [
+  [0, true, false, false, ['run', 'ok', 'idle']],
+  [1, false, false, false, ['warn', 'ok', 'idle']],
+  [2, true, false, false, ['run', 'ok', 'idle']],
+  [3, false, false, false, ['warn', 'ok', 'idle']],
+  [3, false, true, false, ['ok', 'ok', 'run']],
+  [3, false, true, true, ['ok', 'ok', 'warn']],
+  [3, false, true, true, ['ok', 'ok', 'warn']],
+];
+const FLOW = { ok: ['check', 'Done'], run: ['spin', 'Working'], warn: ['eye', 'Needs you'], idle: ['planned', 'Next'] };
+const flowNode = (tone, icon, title) => node(tone, icon, title, FLOW[tone][1], FLOW[tone][0], tone !== 'idle');
+const newIdeaFigure = (phase) => {
+  const [n, thinking, pressed, plan, [talk, , approve]] = IDEA_FRAMES[phase];
+  const thread = SAID.slice(0, n).map((m) => (m.suggest && pressed ? { ...m, acceptedAt: 1 } : m));
+  const job = { id: 'intro-idea', intent: 'Add a dark mode to the reports dashboard', idea: { thread }, stage: 'planning', runs: thinking ? [] : [{ parkedFor: 'idea', parkedAt: 1 }], reviewPlan: true };
+  const fresh = (id) => id === SAID[n - 1]?.id && !pressed;
+  return `<div class="intro-flow">${flowNode('ok', 'edit', 'Idea')}<span class="intro-flow-line"></span>${flowNode(talk, 'robot', 'Planner')}<span class="intro-flow-line"></span>${flowNode(approve, 'eye', 'Approve')}</div>
+  <div class="intro-chat" inert>${ideaThreadHtml(job, { fresh })}${plan ? `<div class="intro-chat-plan"><div class="job-chips"><span class="job-chip job-plan-branch">${ICONS.branch}<span>next</span></span><span class="job-chip">${ICONS.pr}<span>2 PRs · 1 session</span></span></div>
+  ${composer('Planner', 'Add an idea for the planner…', 'Redraws the plan for you to review.', 'Design the switch first')}</div>` : ''}</div>`;
+};
 
 // Sub-jobs: three kinds of tile, and the places a session writes to as pills.
 const placePill = (icon, label, tone = 'idle', on = false) => `<span class="job-place-chip">${ICONS[icon]}<b>${label}</b><span class="job-place-dots"><span class="job-place-dot tone-${tone}${on ? ' on' : ''}"></span></span></span>`;
@@ -140,13 +181,14 @@ export const INTRO_STEPS = [
     anim: { frames: GRAPH.length, ms: 1400, still: GRAPH.length - 1 },
     figure: (reviews, phase) => graph(phase) },
   { tab: 'Jobs', title: `Hand ${W2} an outcome. It splits the work and tracks it for you.`,
-    body: `<p>${W2} adds <b>automated jobs</b> to Agent Wrangler. You describe a goal; it splits the goal into sub-jobs, starts agent sessions for them, and stops for you wherever you’ve asked to review.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board.</p>`,
+    body: `<p>${W2} adds <b>automated jobs</b> to Agent Wrangler. You describe a goal; it splits the goal into sub-jobs, starts agent sessions for them, and stops for you wherever you’ve asked to review.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board. An idea you are still talking through is a forming nebula until it becomes a job.</p>`,
     cls: 'intro-board', anim: { frames: BOARD_FRAMES.length, ms: 1600, still: 2 },
     figure: (reviews, phase) => board(phase) },
-  { tab: 'New job',
-    title: 'New job, then a plan you approve before anything runs.',
-    body: `<p>Press <b>New job</b> and describe the outcome, in words or with screenshots. ${W2} drafts a <b>plan</b> of ordered sub-jobs and picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>To change the plan, write in <b>Add idea</b> under it. Nothing runs until you <b>Approve</b>: no session, ticket or PR. Ask it to “design it first” and the plan starts with a design for you to sign off. You can also save a job to the backlog and start it later.</p>`,
-    figure: () => newJobFigure() },
+  { tab: 'New idea',
+    title: 'New idea, then a plan you approve before anything runs.',
+    body: `<p>Press <b>New idea</b> and describe the outcome, in words or with screenshots. If it is unclear, the planner asks you, then suggests a job; if it is clear, ${W2} drafts the <b>plan</b> straight away. It picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>Press <b>Create job</b> and you get the plan of ordered sub-jobs. To change it, write in <b>Add idea</b> under it. Nothing runs until you <b>Approve</b>: no session, ticket or PR. You can also save an idea to the backlog and come back to it.</p>`,
+    cls: 'intro-idea', anim: { frames: IDEA_FRAMES.length, ms: 1700, still: 5 },
+    figure: (reviews, phase) => newIdeaFigure(phase) },
   { tab: 'Sub-jobs',
     title: 'Three kinds of sub-job, and the places they write to.',
     body: '<p>The kind sits on the corner of every tile in the stepper. Hover a tile to see what it is.</p><p>A <b>PR</b> works in a worktree, shows you it working, opens a pull request, waits for checks, merges and confirms the deploy. A <b>session</b> runs on this machine with no pull request. A <b>human</b> step is yours alone, and the job waits for it.</p><p>A session can also write to places outside the board: a Jira ticket, a Slack channel, a Confluence page, or a Claude artifact it publishes. Each place is a pill under the session that writes to it.</p>',
@@ -167,7 +209,7 @@ export const INTRO_STEPS = [
     figure: (reviews, phase) => seeFigure(phase) },
   { tab: 'Reviews',
     title: 'You choose where a job stops for you.',
-    body: `<p>Every job has six checkpoints: the plan, the code, the merge, session results, writes to other places, and red steps. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself, so a Plan on Auto starts as soon as it is drafted. For red steps you choose <b>You decide</b> or <b>Wrangler replans</b>.</p><p>New job starts from the defaults in <b>Automation settings</b>, where all but Writes start on You review. To stop everything at once, press <b>Pause</b> in the Jobs header.</p>`,
+    body: `<p>Every job has six checkpoints: the plan, the code, the merge, session results, writes to other places, and red steps. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself, so a Plan on Auto starts as soon as it is drafted. For red steps you choose <b>You decide</b> or <b>Wrangler replans</b>.</p><p>New idea starts from the defaults in <b>Automation settings</b>, where all but Writes start on You review. To stop everything at once, press <b>Pause</b> in the Jobs header.</p>`,
     figure: (reviews) => checkpointsFigure(reviews) },
   { tab: 'Writes',
     title: 'Tickets, designs and posts, kept up to date as the job runs.',
@@ -176,7 +218,7 @@ export const INTRO_STEPS = [
     figure: (reviews, phase) => writesFigure(phase) },
   { tab: 'Start',
     title: 'You’re ready to start a job.',
-    body: `<p>Start with something small you would normally hand to one agent, so you can watch each step once.</p><ul class="intro-done">${['Jobs in the rail, with the needs-you count', 'New job, then approve the plan', 'PR, session and human sub-jobs, and the places they write to', 'Short receipts, and each PR shown working', 'Red steps go to the planner before you', `Six checkpoints you set per job: ${YOU} or ${AUTO}`].map((t) => `<li>${ICONS.check}${t}</li>`).join('')}</ul><p>Open this again from the ${ICONS.info} button in the Jobs header, or from <b>Automation settings</b>.</p>`,
+    body: `<p>Start with something small you would normally hand to one agent, so you can watch each step once.</p><ul class="intro-done">${['Jobs in the rail, with the needs-you count', 'New idea: talk it through with the planner, then approve the plan', 'PR, session and human sub-jobs, and the places they write to', 'Short receipts, and each PR shown working', 'Red steps go to the planner before you', `Six checkpoints you set per job: ${YOU} or ${AUTO}`].map((t) => `<li>${ICONS.check}${t}</li>`).join('')}</ul><p>Open this again from the ${ICONS.info} button in the Jobs header, or from <b>Automation settings</b>.</p>`,
     figure: () => `<div class="intro-flow">${node('ok', 'pr', 'Add CSV export', 'Delivered', 'check', true)}<span class="intro-flow-line"></span>${node('ok', 'robot', 'Backfill data', 'Delivered', 'check', true)}</div>` },
 ];
 
@@ -193,7 +235,8 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
   const reviews = { reviewPlan: true, reviewCode: true, reviewMerge: false, reviewSessions: true, reviewWrites: false, reviewRed: true };
   const win = () => document.defaultView;
   const still = () => !win() || !!win().matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  const relayout = () => layoutGraphEdges(dialog?.querySelector('.intro-graph'));
+  // The idea skies are painted by job-skylines.js, kept across each frame's redraw under the one body.
+  const relayout = () => { layoutGraphEdges(dialog?.querySelector('.intro-graph')); if (dialog) mountSkies(dialog.querySelector('.intro-body')); };
 
   function build() {
     dialog = document.createElement('dialog');
@@ -229,7 +272,7 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
     });
     // Every way out (close, Skip, Escape, finishing) is the reader saying they
     // have seen it; a reload while it is still open is not.
-    dialog.addEventListener('close', () => { stop(); storage?.set(SEEN_KEY, '1'); onClose(); });
+    dialog.addEventListener('close', () => { stop(); releaseSkies(dialog.querySelector('.intro-body')); storage?.set(SEEN_KEY, '1'); onClose(); });
     win()?.addEventListener('resize', relayout);
   }
 
@@ -239,10 +282,11 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
     const last = at === INTRO_STEPS.length - 1;
     dialog.querySelector('.intro-count').textContent = `${at + 1} of ${INTRO_STEPS.length}`;
     dialog.querySelector('.intro-steps').innerHTML = INTRO_STEPS.map((s, i) => `<button type="button" class="job-seg tone-ok${i <= at ? '' : ' planned'}" role="tab" aria-selected="${i === at}" data-go="${i}"><span>${s.tab}</span></button>`).join('');
+    holdSkies(dialog.querySelector('.intro-body'));
     dialog.querySelector('.intro-body').innerHTML = INTRO_STEPS.map((s, i) => `<div class="intro-panel${s.stack ? ' intro-stack' : ''}"${i === at ? '' : ' inert aria-hidden="true"'}><div><h2${i === at ? ' id="jobs-intro-title"' : ''}>${s.title}</h2>${s.body}</div><div class="intro-figure ${s.cls || ''}">${s.figure(reviews, phases[i])}</div></div>`).join('');
     const next = dialog.querySelector('[data-intro="next"]');
     next.className = `primary tone-${last ? 'ok' : 'run'}`;
-    next.innerHTML = last ? `${ICONS.plus}New job` : `Next${ICONS.next}`;
+    next.innerHTML = last ? `${ICONS.plus}New idea` : `Next${ICONS.next}`;
     dialog.querySelector('[data-intro="back"]').hidden = at === 0;
     dialog.querySelector('[data-intro="skip"]').hidden = last;
     relayout();
@@ -260,7 +304,7 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
     timer = win().setInterval(() => {
       phases[at] = (phases[at] + 1) % anim.frames;
       const fig = dialog.querySelectorAll('.intro-panel')[at]?.querySelector('.intro-figure');
-      if (fig) fig.innerHTML = INTRO_STEPS[at].figure(reviews, phases[at]);
+      if (fig) { holdSkies(dialog.querySelector('.intro-body')); fig.innerHTML = INTRO_STEPS[at].figure(reviews, phases[at]); }
       relayout();
     }, anim.ms);
   }
@@ -280,6 +324,6 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
   return {
     open,
     maybeShow() { if (!storage || storage.get(SEEN_KEY)) return false; open(0); return true; },
-    remove() { stop(); win()?.removeEventListener('resize', relayout); dialog?.remove(); dialog = null; },
+    remove() { stop(); win()?.removeEventListener('resize', relayout); if (dialog) releaseSkies(dialog.querySelector('.intro-body')); dialog?.remove(); dialog = null; },
   };
 }
