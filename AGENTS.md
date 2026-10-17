@@ -125,7 +125,8 @@ feature).
   and the idea's `images`), except a first plan (redrawn via `job.feedback`); a
   declared red still goes up with what was tried. The planner sorts it into
   actions on live steps (`forward` to a session parked on review, `rework`) and
-  plan edits, and the human approves that proposal: an action on the source step
+  plan edits, and the human approves that proposal (one of `forward`s alone is
+  applied at once, `forwardsOnly`): an action on the source step
   is refused at stamp and approval once its view has moved (`job-actions.js
   sourceHolds`). A second idea while a proposal waits adds to it (`Earlier: … /
   Now: …`, `previousActions`); while the planner is drawing the box steps aside.

@@ -16,7 +16,7 @@ function messageHtml(job, sub, m) {
   const files = [...(m.shots || []), ...(m.images || [])].map((x) => x.file);
   const attach = files.length ? `<div class="job-msg-att">${files.map((f, k) => shotButtonHtml(job, sub, m.round, f, k)).join('')}</div>` : '';
   const run = m.run ? `<pre class="job-msg-run"><i>$</i> ${esc(m.run.cmd)}\n${esc(m.run.out)}\n<b class="${m.run.exit === 0 ? 'ok' : 'bad'}">exit ${esc(m.run.exit)}</b></pre>` : '';
-  const via = m.via === 'planner' ? '<span class="job-msg-via">via the planner · approved</span>' : '';
+  const via = m.via === 'planner' ? '<span class="job-msg-via">via the planner</span>' : '';
   return `<div class="job-msg ${esc(m.from)}"><span class="job-msg-who">${m.from === 'system' ? `Round ${esc(m.round)}` : WHO[m.from] || esc(m.from)}</span><div><p>${esc(m.text)}<time>${m.from === 'human' && m.sentAt ? `<i class="job-msg-tick" title="Delivered to the session">${ICONS.check}</i>` : ''}${esc(clock(m.at))}</time></p>${run}${attach}${via}</div></div>`;
 }
 

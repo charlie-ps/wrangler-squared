@@ -6,6 +6,7 @@ import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaiti
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 import { runningDotHtml } from './job-running.js';
+import { titleLoaderHtml } from './job-idea.js';
 
 // The board as a wall of night skies: each job's plan is drawn into a quiet sky
 // over its own Gargantua sky (job-skylines.js), lit in the colour of the job's state,
@@ -240,7 +241,7 @@ function ideaPlateHtml(job) {
   return `<article class="job-plate idea tone-${tone} ${jobState(job)} ${ask ? 'stubbed' : ''}" data-board="${esc(job.id)}">
     <div class="job-plate-art">${ideaSkyHtml(job)}<div class="job-plate-tag lt"><span class="job-idea-mark">Idea</span></div></div>
     <div class="job-plate-body"><div class="job-plate-where"><span>${job.createdAt ? `${ago(job.createdAt)} ago` : ''}</span></div>
-      <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="Open the conversation">${esc(job.title)}</button></div>
+      <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="Open the conversation">${job.titlePending ? titleLoaderHtml('small') : esc(job.title)}</button></div>
     ${foot}</article>`;
 }
 
@@ -264,6 +265,6 @@ export function plateHtml(job, scene, art = 'quiet', { forming = null } = {}) {
     <div class="job-plate-art ${full && (scene === 'haiku' || scene === 'fable') ? 'ink-dark' : ''}${forming != null ? ' forming' : ''}">${forming != null ? inflowHtml(job.id, forming) : ''}${full ? `<svg class="scene" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${sceneArt(scene, job.id, lvl)}</svg><div class="scrim"></div>` : skyHtml(job.id, tone, lvl, graph ? graph.floor : 82, dim)}
       ${repo ? `<div class="job-plate-tag ${ink(160, 14)}">${esc(repo)}</div>` : ''}${graph ? graph.svg : `<div class="job-plate-unplanned ${ink(160, 75)}">${empty}</div>`}</div>
     <div class="job-plate-body"><div class="job-plate-where"><span>${job.createdAt ? `${ago(job.createdAt)} ago` : ''}</span>${runningDotHtml(job)}${cost ? `<span class="job-plate-cost" title="${esc(JOB_COST_TITLE)}${job.usdEstimated ? ' · includes an estimate for Codex sessions' : ''}">${esc(cost)}</span>` : ''}</div>
-      <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="${esc(tip)}">${esc(job.title)}</button>${placesHtml(job)}</div>
+      <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="${esc(tip)}">${job.titlePending ? titleLoaderHtml('small') : esc(job.title)}</button>${placesHtml(job)}</div>
     ${foot}</article>`;
 }

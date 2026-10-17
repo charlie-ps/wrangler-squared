@@ -87,7 +87,7 @@ test('code review is a stop before anything is committed: the card asks for a re
   job.runs = [{ id: 'run_1', subJobId: 'api', phase: 'implementation', stopped: false, parkedFor: 'ready' }]; f.view.update(f.data);
   const parked = f.q('.job-change');
   assert.deepEqual([parked.querySelector('.job-change-to').textContent, parked.querySelector('textarea').placeholder, parked.querySelector('[data-change-send]').getAttribute('aria-label')], ['PPlanner', 'Ask about it, or say what to change…', 'Send to planner'], 'its session is open, and the idea still goes to the planner');
-  assert.match(parked.textContent, /The planner forwards feedback to its open session and anything else into the plan\. You approve first\./);
+  assert.match(parked.textContent, /The planner forwards feedback straight to its open session; anything else goes into the plan, which you approve first\./);
   job.runs = []; f.view.update(f.data);
   f.q('[data-action="approve-code"]').click();
   assert.equal(f.sent.at(-1).action, 'approve-code'); assert.equal(f.sent.at(-1).readyReceiptId, 'run_1');
@@ -2726,7 +2726,7 @@ test('a forward reads as the quote the session will be told, pinned to its round
   const job = { id: 'job1', runs: [{ id: 'run_1', subJobId: 'api', stopped: false, parkedFor: 'ready', sessionId: 's1' }] };
   const sub = { id: 'api', ready: { round: 2 }, answering: { kind: 'change', round: 2 }, thread: [{ id: 'm1', at: 1, from: 'human', via: 'planner', to: 'agent', text: 'Not enough <b>spacing</b>', round: 2, sentAt: null }] };
   const html = threadHtml(job, sub);
-  assert.match(html, /<span class="job-msg-via">via the planner · approved<\/span>/);
+  assert.match(html, /<span class="job-msg-via">via the planner<\/span>/);
   assert.match(html, /Not enough &lt;b&gt;spacing&lt;\/b&gt;/, 'the words are escaped');
   assert.doesNotMatch(threadHtml(job, { ...sub, thread: [{ ...sub.thread[0], via: undefined }] }), /job-msg-via/);
 });

@@ -135,7 +135,6 @@ test('a later round that no longer lists an entry stops it at once and keeps the
   await f.tick();
   const planner = f.launched.at(-1);
   f.report({ kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'Drop the database' }] }, planner);
-  f.store.action(f.job.id, 'approve-replan', { proposalId: planner.run.id });
   await f.tick();
   f.deps.urls.add('http://localhost:55432/');
   await f.ready([VITE], [shot]);

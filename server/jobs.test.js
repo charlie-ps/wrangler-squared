@@ -1898,10 +1898,12 @@ test('a job created without a title starts under its description and takes the g
   const id = host.broadcasts[0].jobId;
   assert.equal(host.broadcasts[0].event, 'job-created', 'the create does not wait for a title');
   assert.equal(f.store.get(id).title, 'Customers can sign in reliably');
+  assert.equal(f.store.get(id).titlePending, true, 'the board draws a loader until Haiku answers');
   const { revision } = f.store.get(id); const rebuilds = host.rebuilds;
   answer({ text: 'Reliable SSO sign-in', liveSessionId: 'live-1', error: null });
   await new Promise(setImmediate);
   assert.equal(f.store.get(id).title, 'Reliable SSO sign-in');
+  assert.equal(f.store.get(id).titlePending, undefined);
   assert.equal(f.store.get(id).revision, revision, 'a title is not a plan revision');
   assert.equal(host.rebuilds, rebuilds + 1);
   assert.deepEqual(billed, [], 'no card yet, so nothing to bill');
@@ -1914,11 +1916,32 @@ test('a failed title generation keeps the fallback, and a supplied title is neve
   let calls = 0;
   const handler = makeJobCreateHandler({ run: async () => { calls++; return { text: null, liveSessionId: 'live-1', error: new Error('boom') }; } });
   await handler.handler({ job: { intent: 'Make sign-in reliable' } }, host);
+  const rebuilds = host.rebuilds;
   await new Promise(setImmediate);
   assert.equal(f.store.get(host.broadcasts[0].jobId).title, 'Make sign-in reliable');
+  assert.equal(f.store.get(host.broadcasts[0].jobId).titlePending, undefined, 'a failure ends the wait, never a stuck loader');
+  assert.equal(host.rebuilds, rebuilds + 1, 'and the board hears so');
   await handler.handler({ job: input }, host);
   await new Promise(setImmediate);
   assert.equal(calls, 1); assert.equal(f.store.get(host.broadcasts[1].jobId).title, 'Reliable sign-in');
+  assert.equal(f.store.get(host.broadcasts[1].jobId).titlePending, undefined, 'a supplied title waits on nothing');
+});
+
+test('an empty title answer ends the wait under the fallback', async (t) => {
+  const f = fixture(t);
+  const host = fakeHost(f);
+  stubRunner(t, host);
+  const handler = makeJobCreateHandler({ run: async () => ({ text: '   ', liveSessionId: null, error: null }) });
+  await handler.handler({ job: { intent: 'Make sign-in reliable' } }, host);
+  await new Promise(setImmediate);
+  const job = f.store.get(host.broadcasts[0].jobId);
+  assert.deepEqual([job.title, job.titlePending], ['Make sign-in reliable', undefined]);
+});
+
+test('a restart drops a pending title: the Haiku run it waited on died with the process', (t) => {
+  const f = fixture(t);
+  const job = f.store.create({ intent: 'Make sign-in reliable' }, { titlePending: true });
+  assert.equal(new JobStore(f.store.file).get(job.id).titlePending, undefined);
 });
 
 test('a generated title replaces only the title it was generated for', (t) => {

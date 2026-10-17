@@ -12,6 +12,7 @@ import { dropSub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
+import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
 
@@ -198,7 +199,8 @@ export function migrateJobs(raw) {
   for (const job of data.jobs) {
     // `reviewCode` is kept: a version-1 job's flag meant the same thing — the
     // human reads the diff before it is committed — and the field is back.
-    drop(job, 'amendmentAuthority', 'amendments', 'recoveryOf');
+    // `titlePending`: the Haiku run it waited on died with the last process.
+    drop(job, 'amendmentAuthority', 'amendments', 'recoveryOf', 'titlePending');
     migratePlan(job.plan); migratePlan(job.previousPlan);
     for (const s of job.subJobs || []) migrateSub(s);
     if (raw.version < 3) migrateTicketing(job);
@@ -247,12 +249,15 @@ export class JobStore {
   }
   // A generated title replaces only the one it was generated for, and is not a
   // revision: approval compares revisions, and a title is not part of the plan.
+  // Any answer, a null one included, ends the wait.
   retitle(id, from, to) {
     return this.change((d) => {
       const job = d.jobs.find((j) => j.id === id);
-      if (!job || job.title !== from || !to || to === from) return false;
-      job.title = to; job.updatedAt = Date.now();
-      return true;
+      if (!job) return false;
+      const swap = job.title === from && !!to && to !== from;
+      delete job.titlePending;
+      if (swap) { job.title = to; job.updatedAt = Date.now(); }
+      return swap;
     });
   }
   // Approval authorises every write in the plan and the implementation. A
@@ -602,6 +607,11 @@ export class JobStore {
         if (j.replan.red) {
           const fate = settleProposal(j, r, { now: Date.now(), apply: () => this._approveReplan(j, j.replan.proposal.id, 0, 'Red steps: Wrangler replans') });
           if (fate === 'declared') record(j, null, 'declare-red', null, 'Declared the red step to you');
+        } else if (forwardsOnly(j.replan.proposal)) {
+          // A pin that fails here leaves the proposal waiting, as any other would.
+          const before = structuredClone(j);
+          try { this._approveReplan(j, j.replan.proposal.id, 0, 'Forwarded without a prompt'); }
+          catch { for (const k of Object.keys(j)) delete j[k]; Object.assign(j, before); }
         }
       }
       return;

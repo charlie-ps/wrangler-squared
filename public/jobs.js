@@ -384,7 +384,7 @@ export function changeRoute(at, job = null, sub = null) {
   if (sub && job && redDeclared(job, sub)) return { ...PLANNER, hint: 'Gets everything already tried, and proposes a fix for you to approve.' };
   if (CHANGE_ROUTE[at]) return CHANGE_ROUTE[at];
   if (!sub) return PLANNER;
-  if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…', hint: 'About this step. The planner forwards feedback to its open session and anything else into the plan. You approve first.' };
+  if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…', hint: 'About this step. The planner forwards feedback straight to its open session; anything else goes into the plan, which you approve first.' };
   return STEP;
 }
 export const changeHint = (at, job = null, sub = null) => changeRoute(at, job, sub).hint;

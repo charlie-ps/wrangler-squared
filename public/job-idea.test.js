@@ -4,7 +4,7 @@ import { Window } from 'happy-dom';
 import { initJobsView } from './jobs-view.js';
 import { ideaStage, liveSuggestion, jobNeedsReview, jobStatus } from './jobs.js';
 import { plateAsk, plateHtml } from './job-plates.js';
-import { proseHtml, suggestionSummary } from './job-idea.js';
+import { TITLE_FADE_MS, proseHtml, suggestionSummary } from './job-idea.js';
 
 const suggest = { title: 'Nudge when a green PR waits over a day', plan: { context: '', stories: [], subJobs: [
   { id: 'track', title: 'Track how long a merge-ready PR has waited', repo: '/Users/me/wrangler-squared', after: [], brief: 'b' },
@@ -191,4 +191,35 @@ test('an accepted idea becomes a job plate, forming its black hole from the clou
   await new Promise((r) => setTimeout(r, 600));
   assert.equal(f.q('[data-board="idea1"] .gx.nb'), null, 'and after it the cloud is gone');
   assert.equal(f.q('[data-board="idea1"] .job-plate-art').classList.contains('forming'), false);
+});
+
+test('the idea header is its title alone: no uppercase kicker above it', (t) => {
+  const f = fixture(t, [ideaJob([asked])]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const band = f.q('#job-dialog .job-idea-band');
+  assert.equal(band.querySelector('.job-idea-kicker, .job-idea-mark'), null);
+  assert.doesNotMatch(band.textContent, /talking with the planner/i);
+  assert.equal(band.querySelector('h2').textContent, 'Nudge me when a green PR waits on me');
+});
+
+test('a title Haiku is still naming is a loader, on the plate and in the dialog, until the real one cross-fades in', (t) => {
+  const f = fixture(t, [{ ...ideaJob(), title: 'PRs sit green for ages. Can the board…', titlePending: true }]);
+  assert.ok(f.q('[data-board="idea1"] .job-plate-open .job-title-loader.small'), 'the plate waits too');
+  assert.doesNotMatch(f.q('[data-board="idea1"] .job-plate-open').textContent, /PRs sit green/);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const h2 = () => f.q('#job-dialog .job-idea-band h2');
+  assert.equal(h2().getAttribute('aria-busy'), 'true');
+  assert.equal(h2().querySelector('.job-title-loader').getAttribute('role'), 'status');
+  assert.equal(h2().textContent, '', 'the clipped description never shows as the title');
+  t.mock.timers.enable({ apis: ['Date'], now: 1000 });
+  f.data.jobs[0] = { ...f.data.jobs[0], title: 'Nudge on waiting green PRs', titlePending: undefined }; f.view.update(f.data);
+  assert.equal(h2().textContent, 'Nudge on waiting green PRs');
+  assert.ok(h2().classList.contains('titled'), 'it fades in');
+  assert.equal(h2().querySelector('.job-title-loader').getAttribute('aria-hidden'), 'true', 'over the bars fading out, which no longer announce');
+  assert.equal(h2().getAttribute('aria-busy'), null);
+  t.mock.timers.tick(400); f.view.update(f.data);
+  assert.equal(h2().style.getPropertyValue('--fade-at'), '-400ms', 'a tick mid-fade resumes it rather than restarting or cutting it');
+  t.mock.timers.tick(TITLE_FADE_MS); f.view.update(f.data);
+  assert.equal(h2().classList.contains('titled'), false, 'and once it has ended a tick does not replay it');
+  assert.equal(h2().querySelector('.job-title-loader'), null);
 });
