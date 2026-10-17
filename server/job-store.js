@@ -688,7 +688,7 @@ export class JobStore {
       if (report.options?.length) throw new Error('Only the planner can attach options to an escalation; say the decision you need in ask');
       s.error = report.summary.split('\n')[0].slice(0, 240);
       s.blocked = { summary: s.error, phase: r.phase, at: Date.now(), kind: 'escalate' };
-      declareRed(j, s, { summary: report.summary, tried: report.tried, ask: report.ask }, Date.now());
+      declareRed(j, s, { summary: report.summary, tried: report.tried, ask: report.ask, by: 'agent' }, Date.now());
       record(j, s, 'declare-red', null, `${quoted(s.title)} was declared red to you by its agent`);
     }
   }

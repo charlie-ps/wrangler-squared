@@ -81,6 +81,7 @@ const staleHint = (sub) => {
     ? `${cancelled.join(', ')} was cancelled on merge commit ${commit} and no later run that includes it has started in ${minutes} min. If it was cancelled on purpose, Request changes and say so. Wrangler keeps polling in case a run appears.`
     : `No GitHub Actions run has started for merge commit ${commit} in ${minutes} min. If this repository does not deploy for these paths, Request changes and say so. Wrangler keeps polling in case a run appears.`;
 };
+const DECLARED_BY = { agent: 'Declared by its agent', planner: 'Declared by the planner', auto: 'Declared automatically' };
 // What happened, in the danger register. Title and detail are agent- or
 // observation-written, so both are escaped.
 function eventHtml(job, sub) {
@@ -93,7 +94,9 @@ function eventHtml(job, sub) {
     ? `<div class="job-event-fix fixing">${ICONS.spin}<span><b>${esc(f.title)}</b>${esc(f.detail)}<small>Replanning · try ${f.n}</small></span></div>`
     : f.kind === 'ready'
       ? `<div class="job-event-fix ready">${ICONS.sparkle}<span><b>${esc(f.title)}</b>${esc(f.detail)}<small>${f.waits ? 'Waiting because Red steps is “You decide”' : 'Waiting for you: it changes the plan or claims something about the outside world'}</small></span></div>`
-      : `<div class="job-event-fix declared">${ICONS.x}<span><b>${esc(f.title)}</b>${esc(f.detail)}${f.tried.length ? `<ul>${f.tried.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}${f.ask ? `<span class="ask">Needs you: ${esc(f.ask)}</span>` : ''}<small>${f.auto ? 'Declared automatically' : 'Declared by the planner'}${f.options ? ' · options are in the job’s plan change' : ''}</small></span></div>`;
+      : `<div class="job-event-fix declared${ev.detail ? '' : ' alone'}">${ICONS.x}<span><b>${esc(f.title)}</b>${esc(f.detail)}${f.tried.length ? `<ul>${f.tried.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}${f.ask ? `<span class="ask">Needs you: ${esc(f.ask)}</span>` : ''}<small>${DECLARED_BY[f.by] || DECLARED_BY.planner}${f.options ? ' · options are in the job’s plan change' : ''}</small></span></div>`;
+  // A declaration that repeats the failure word for word stands in for it.
+  if (!ev.detail && f) return `<div class="job-event">${fix}</div>`;
   return `<div class="job-event">${ICONS.x}<div><b>${esc(ev.title)}</b><p>${esc(ev.detail)}</p>${fix}</div></div>`;
 }
 // A sub-job's prerequisites that still matter, as small chips: one dropped, or

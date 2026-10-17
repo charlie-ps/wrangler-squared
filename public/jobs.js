@@ -423,6 +423,7 @@ function eventTitle(sub) {
   if (isWriteSub(sub) && sub.state === 'failed') return `${placeShort(sub)} refused the write`;
   return 'Needs attention';
 }
+const flat = (text) => String(text || '').replace(/\s+/g, ' ').trim();
 // What happened, in one line.
 export function eventFor(job, sub) {
   if (!sub) return job.error ? { title: 'Job needs attention', detail: job.error } : null;
@@ -430,7 +431,12 @@ export function eventFor(job, sub) {
   if (sub.cancelledAt && !sub.error) return null;
   // The failure itself stays as the event; `fix` is what Wrangler has done about it.
   const base = { title: eventTitle(sub), detail: sub.error };
-  if (sub.error && !job.error && redDeclared(job, sub)) { const d = sub.red.declared; return { ...base, fix: { kind: 'declared', title: 'Declared red', detail: d.summary, tried: d.tried || [], ask: d.ask || '', auto: !!d.auto, options: !!job.replan?.proposal?.escalation } }; }
+  // An escalation's error is its own summary cut short: the declaration alone says it, in full.
+  if (sub.error && !job.error && redDeclared(job, sub)) {
+    const d = sub.red.declared;
+    const fix = { kind: 'declared', title: 'Declared red', detail: d.summary, tried: d.tried || [], ask: d.ask || '', by: d.by || (d.auto ? 'auto' : 'planner'), options: !!job.replan?.proposal?.escalation };
+    return { ...base, ...(flat(d.summary).startsWith(flat(sub.error)) ? { detail: '' } : {}), fix };
+  }
   if (sub.error && !job.error && redFixing(job, sub)) return { ...base, fix: { kind: 'fixing', title: 'Fixing', detail: 'Wrangler is replanning this step. It holds this sub-job and the ones after it; everything else carries on.', n: job.replan.red.n || 1 } };
   if (sub.error && !job.error && redFixReady(job, sub)) return { ...base, fix: { kind: 'ready', title: 'Fix ready', detail: job.replan.proposal.diagnosis?.summary || job.replan.proposal.label || 'Wrangler proposed a fix. Review it.', waits: job.reviewRed ?? true } };
   if (sub.error) return { title: eventTitle(sub), detail: sub.error };

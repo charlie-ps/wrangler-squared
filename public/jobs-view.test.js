@@ -2609,6 +2609,40 @@ test('a declared red is the only red you act on: counted in Needs you, with what
   assert.match(f.q('#job-dialog').textContent, /Declared red.*Deliver api.*Needs you.*Merge #412/s);
 });
 
+test('a step its own agent escalated shows one block: the declaration in full, footed "Declared by its agent"', (t) => {
+  const f = fixtureWithRed(t);
+  const job = redJob(f); const api = job.subJobs[0];
+  const summary = `Cannot reproduce the log noise on main. ${'Ran isolated servers for six minutes with codex off PATH. '.repeat(5)}A fix without the real line would be a guess.`;
+  api.error = summary.slice(0, 240); api.blocked = { summary: api.error, phase: 'implementation', kind: 'escalate', at: 1 };
+  api.red = { declared: { at: 1, ref: redRef(job, api), summary, tried: ['Ran it with codex off PATH'], ask: 'Paste the repeating log line?', auto: false, by: 'agent' } };
+  f.view.update(f.data);
+  assert.deepEqual([eventFor(job, api).title, eventFor(job, api).detail], ['Worker blocked', ''], 'the card still says what happened');
+  f.view.openDetail('job1', 'api');
+  const event = f.q('#job-dialog .job-event');
+  assert.equal(event.querySelectorAll('.job-event-fix').length, 1); assert.equal(event.querySelector('p'), null, 'the cut-off copy is gone');
+  assert.ok(event.textContent.includes(summary));
+  assert.deepEqual([...event.querySelectorAll('li')].map((l) => l.textContent), ['Ran it with codex off PATH']);
+  assert.match(event.querySelector('.ask').textContent, /Needs you: Paste the repeating log line\?/);
+  assert.equal(event.querySelector('small').textContent, 'Declared by its agent');
+});
+
+test('a red the planner declared after a real failure still shows both, and a declaration saved before "by" reads as it did', (t) => {
+  const f = fixtureWithRed(t);
+  const job = redJob(f); const api = job.subJobs[0];
+  api.red = { declared: { at: 1, ref: redRef(job, api), summary: 'e2e is flaky on main and needs QA sign-off', tried: [], ask: 'Merge or hold?', auto: false, by: 'planner' } };
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  let event = f.q('#job-dialog .job-event');
+  assert.match(event.querySelector('p').textContent, /Automatic repair limit reached/);
+  assert.ok(event.querySelector('.job-event-fix.declared:not(.alone)'));
+  assert.equal(event.querySelector('small').textContent, 'Declared by the planner');
+  for (const [auto, footer] of [[false, 'Declared by the planner'], [true, 'Declared automatically']]) {
+    api.red = { declared: { at: 1, ref: redRef(job, api), summary: 'Still red', tried: [], ask: '', auto } };
+    f.view.update(f.data); f.view.openDetail('job1', 'api');
+    event = f.q('#job-dialog .job-event');
+    assert.equal(event.querySelector('small').textContent, footer); assert.ok(event.querySelector('p'));
+  }
+});
+
 test('Red steps is the sixth checkpoint (You decide / Wrangler replans) and Replans per step is a setting', (t) => {
   const f = fixtureWithRed(t);
   f.q('#jobs-settings').click(); const form = f.q('#job-settings-form');

@@ -2637,7 +2637,7 @@ test('out of tries, a step is declared red with every attempt listed; a declared
   const job = redJob(f);
   assert.equal(job.replan, null); assert.equal(f.launched.filter((w) => w.run.red).length, 1);
   const declared = job.subJobs[0].red.declared;
-  assert.deepEqual([declared.auto, declared.tried], [true, ['Replan 1: Raised the e2e timeout']]);
+  assert.deepEqual([declared.auto, declared.by, declared.tried], [true, 'auto', ['Replan 1: Raised the e2e timeout']]);
   assert.match(declared.summary, /used its 1 automatic try on this step/);
   assert.match(job.moves.at(-1).detail, /Declared “Deliver api” red to you: 1 automatic try used/);
   await f.tick(); await f.tick();
@@ -2654,7 +2654,7 @@ test('the planner escalates with options: the step is declared red and the optio
   f.report({ kind: 'escalate', summary: 'login-flow.spec is flaky on main and quarantining it needs QA sign-off', tried: ['Reran e2e twice', 'Added a wait'], ask: 'Merge #1 with the red check, or hold it?',
     options: [{ label: 'Accept red and merge', plan: redJob(f).plan, actions: [{ type: 'accept-red', sub: 'api' }] }, { label: 'Hold for QA', plan: redJob(f).plan, actions: rework('Wait for QA') }] }, planner);
   const job = redJob(f);
-  assert.deepEqual([job.subJobs[0].red.declared.ask, job.subJobs[0].red.declared.tried.slice(-2)], ['Merge #1 with the red check, or hold it?', ['Reran e2e twice', 'Added a wait']]);
+  assert.deepEqual([job.subJobs[0].red.declared.ask, job.subJobs[0].red.declared.by, job.subJobs[0].red.declared.tried.slice(-2)], ['Merge #1 with the red check, or hold it?', 'planner', ['Reran e2e twice', 'Added a wait']]);
   assert.equal(job.replan.proposal.escalation.sub, 'api'); assert.equal(job.replan.proposal.alternatives.length, 1);
   assert.equal(job.replan.proposal.diagnosis.summary, job.subJobs[0].red.declared.summary);
   f.store.action(f.job.id, 'approve-replan', { proposalId: job.replan.proposal.id, option: 0 });
@@ -2676,7 +2676,7 @@ test('a step agent may declare its own step red, or ask for a replan: blocked an
   g.report({ kind: 'escalate', summary: 'Production creds are needed to test this', tried: ['Looked in the vault'], ask: 'Can you supply a read-only key?' });
   await g.tick(); await g.tick();
   job = g.store.get(g.job.id);
-  assert.equal(job.subJobs[0].red.declared.ask, 'Can you supply a read-only key?');
+  assert.deepEqual([job.subJobs[0].red.declared.ask, job.subJobs[0].red.declared.by], ['Can you supply a read-only key?', 'agent']);
   assert.ok(!job.replan, 'declared by its own agent: nobody is sent after it');
   assert.equal(g.launched.filter((w) => w.run.phase === 'planning').length, 1, 'only the first plan');
   assert.throws(() => g.report({ kind: 'replan', summary: 'x' }, g.launched.find((w) => w.run.phase === 'planning')), /already submitted|must submit/);

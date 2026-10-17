@@ -54,10 +54,11 @@ export const triedLines = (sub) => (sub.red?.attempts || []).map((a, i) => oneLi
 
 // Hand the step to the human: they act on a declared red, nothing else is red
 // to them. A step that was not red (an idea the planner escalated about it) is
-// made red by its own summary.
-export function declareRed(job, sub, { summary, tried, ask, auto = false }, now) {
+// made red by its own summary. `by` is who declared it: the step's own agent,
+// the planner, or Wrangler itself (`auto`, kept for jobs saved before `by`).
+export function declareRed(job, sub, { summary, tried, ask, auto = false, by = auto ? 'auto' : 'planner' }, now) {
   if (!sub.error) { sub.error = oneLine(summary, 240); sub.blocked = { summary: oneLine(summary, 240), phase: 'planning', kind: 'escalate', at: now }; }
-  sub.red = { ...(sub.red || {}), declared: { at: now, ref: redRef(job, sub), summary: String(summary).trim().slice(0, 1200), tried: tried?.length ? tried : triedLines(sub), ask: ask || null, auto } };
+  sub.red = { ...(sub.red || {}), declared: { at: now, ref: redRef(job, sub), summary: String(summary).trim().slice(0, 1200), tried: tried?.length ? tried : triedLines(sub), ask: ask || null, auto, by } };
 }
 // The human decided about this failure (discarded the proposal, or approved one
 // that left the step red): the planner is not sent after the same red again.

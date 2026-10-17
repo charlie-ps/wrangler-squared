@@ -672,6 +672,8 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-event-fix.declared>.icon, .job-event-fix.declared b { color:var(--st-bad-fg); }
 .job-event-fix ul { margin:6px 0 0; padding-left:16px; color:var(--fg-muted); font-size:11.5px; }
 .job-event-fix .ask { display:block; margin-top:6px; color:var(--fg); font-weight:500; }
+.job-event-fix.alone { grid-column:1 / -1; margin-top:0; padding-top:0; border-top:0; }
+.job-event-fix.alone>.icon { font-size:16px; margin-top:0; }
 .job-move-log { list-style:none; padding:0; margin:8px 0 0; font-size:12px; }
 .job-move-log li { display:flex; justify-content:space-between; align-items:baseline; gap:14px; padding:6px 0; border-top:1px solid var(--border-muted); line-height:1.5; overflow-wrap:anywhere; }
 .job-move-log li:first-child { border-top:0; }
