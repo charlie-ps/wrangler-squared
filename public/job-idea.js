@@ -106,12 +106,21 @@ export function ideaComposerHtml(draft = '') {
     <div class="job-change-foot"><span>Resumes the same planner session. A reply after a suggestion replaces it.</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 }
 
+// Haiku is still naming the job (server `titlePending`): two faint bars stand where
+// the title will land, so the clipped description never shows as a title first.
+export const titleLoaderHtml = (cls = '') => `<span class="job-title-loader ${cls}" role="status" aria-label="Naming this idea…"><i></i><i></i></span>`;
+const fadingLoader = '<span class="job-title-loader" aria-hidden="true"><i></i><i></i></span>';
+// How long the loader and the landed title cross-fade (jobs.css h2.titled).
+export const TITLE_FADE_MS = 1100;
+
 // The whole dialog body for an idea still being talked through. `cost` and `actions`
 // are the job dialog's own (price chip, Cancel), passed in.
-export function ideaViewHtml(job, { cost = '', actions = '', error = '', pending = null, firing = null, fresh, draft = '' } = {}) {
+// `titled`: ms since the title replaced the loader while the two still cross-fade, else false.
+export function ideaViewHtml(job, { cost = '', actions = '', error = '', pending = null, firing = null, fresh, draft = '', titled = false } = {}) {
   const stage = ideaStage(job) || 'thinking';
+  const title = job.titlePending ? `<h2 class="pending" aria-busy="true">${titleLoaderHtml()}</h2>` : titled !== false ? `<h2 class="titled" style="--fade-at:-${titled}ms"><span>${esc(job.title)}</span>${fadingLoader}</h2>` : `<h2>${esc(job.title)}</h2>`;
   return `<div class="job-idea">
-    <header class="job-idea-band" data-spin="24">${inflowHtml(job.id, STAGE_SKY[stage] ?? 0)}<div><div class="job-idea-kicker"><span class="job-idea-mark">Idea · talking with the planner</span></div><h2>${esc(job.title)}</h2></div>${cost}</header>${error}
+    <header class="job-idea-band" data-spin="24">${inflowHtml(job.id, STAGE_SKY[stage] ?? 0)}<div>${title}</div>${cost}</header>${error}
     ${ideaThreadHtml(job, { pending, firing, fresh })}
     <div class="job-idea-dock">${ideaComposerHtml(draft)}${actions ? `<div class="job-actions">${actions}</div>` : ''}</div></div>`;
 }

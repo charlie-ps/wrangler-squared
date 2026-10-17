@@ -1484,7 +1484,20 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-idea-band .gx { z-index:-2; left:auto; width:min(100%,420px); -webkit-mask-image:linear-gradient(90deg, transparent, #000 45%); mask-image:linear-gradient(90deg, transparent, #000 45%); }
 .job-idea-band::after { content:""; position:absolute; inset:0; z-index:-1; pointer-events:none; background:linear-gradient(90deg, rgba(2,3,6,.82) 0%, rgba(2,3,6,.4) 50%, transparent 78%), linear-gradient(0deg, rgba(2,3,6,.6), transparent 60%); }
 .job-dialog .job-idea-band h2 { margin:8px 44px 0 0; max-width:24ch; font:500 30px/1.1 var(--jobs-serif); letter-spacing:-.015em; color:#f4ede2; text-shadow:0 2px 18px rgba(0,0,0,.6); }
-.job-idea-kicker { font:600 10.5px/1 var(--jobs-mono); letter-spacing:.22em; text-transform:uppercase; color:rgba(244,237,226,.66); }
+/* The title loader (job-idea.js titleLoaderHtml): two faint ivory bars set on the title's
+   own line boxes (so the band never moves), a slow soft glow drifting through them. */
+.job-title-loader { display:grid; grid-auto-rows:1.1em; align-items:center; width:min(100%,20ch); }
+.job-title-loader i { display:block; height:.6em; border-radius:.3em; background:linear-gradient(100deg, rgba(244,237,226,.06) 0 35%, rgba(255,214,226,.15) 50%, rgba(244,237,226,.06) 65% 100%); background-size:300% 100%; animation:job-title-glow 3.6s ease-in-out infinite; }
+.job-title-loader i + i { width:58%; animation-delay:.35s; }
+.job-title-loader.small { width:min(100%,16ch); grid-auto-rows:1.2em; }
+.job-title-loader.small i { background-image:linear-gradient(100deg, color-mix(in srgb, var(--fg) 7%, transparent) 0 35%, color-mix(in srgb, var(--fg) 15%, transparent) 50%, color-mix(in srgb, var(--fg) 7%, transparent) 65% 100%); }
+/* The title lands: it sharpens in where the bars were as they dissolve, opacity and blur only. */
+.job-dialog .job-idea-band h2.titled { position:relative; }
+.job-dialog .job-idea-band h2.titled > span { display:inline; animation:job-title-in 1.1s ease-out var(--fade-at, 0ms) both; }
+.job-dialog .job-idea-band h2.titled > .job-title-loader { position:absolute; left:0; bottom:0; animation:job-title-out .8s ease-in var(--fade-at, 0ms) both; }
+@keyframes job-title-glow { from { background-position:100% 0; } to { background-position:0 0; } }
+@keyframes job-title-in { from { opacity:0; filter:blur(6px); } }
+@keyframes job-title-out { to { opacity:0; filter:blur(4px); } }
 .job-idea-mark { display:inline-flex; align-items:center; gap:6px; color:#f4ede2; }
 .job-idea-mark::before { content:""; width:5px; height:5px; border-radius:50%; background:#ffc7d6; box-shadow:0 0 6px #f07fa8; }
 .gx.nb .infall { mix-blend-mode:screen; }
@@ -1570,4 +1583,4 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-plate-art.collapsing.collapsed > .gx.nb { transform:scale(.12); opacity:0; filter:brightness(2.4) saturate(1.4); }
 .job-plate-art.collapsing.collapsed > :not(.nb) { opacity:1; transform:none; }
 @media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-dock { padding-left:16px; padding-right:16px; } }
-@media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-plate-art.collapsing > * { transition:opacity .3s !important; } .job-plate-art.collapsing.collapsed > .gx.nb { transform:none; } }
+@media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-title-loader i,.job-dialog .job-idea-band h2.titled > *,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-dialog .job-idea-band h2.titled > .job-title-loader { display:none; } .job-plate-art.collapsing > * { transition:opacity .3s !important; } .job-plate-art.collapsing.collapsed > .gx.nb { transform:none; } }

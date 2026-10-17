@@ -1,7 +1,7 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaStage, ideaOpen, readyRun, reworkRound } from './jobs.js';
-import { ideaViewHtml, ideaThreadHtml } from './job-idea.js';
+import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
@@ -358,6 +358,18 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   let ideaSent = null, ideaFiring = null, ideaSeen = null, openOnCreate = null;
   const ideaDrawn = new Set();
   const freshMessage = (id) => !ideaDrawn.has(id) && !!ideaDrawn.add(id);
+  // Ideas drawn with the title loader, then when their title landed: a tick redraws the
+  // dialog mid-fade, so each draw resumes the cross-fade where it is (ms in) until it ends.
+  const titleWaited = new Map();
+  const titledNow = (job) => {
+    if (job.titlePending) { titleWaited.set(job.id, null); return false; }
+    if (!titleWaited.has(job.id)) return false;
+    if (titleWaited.get(job.id) == null) titleWaited.set(job.id, Date.now());
+    const since = Date.now() - titleWaited.get(job.id);
+    if (since < TITLE_FADE_MS) return since;
+    titleWaited.delete(job.id);
+    return false;
+  };
   // Which folded sections the human has opened: the detail is rebuilt on every
   // graph tick, so the open state has to outlive the markup.
   const openMore = new Set();
@@ -967,7 +979,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const actions = `${job.error ? `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>` : ''}<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel idea</button>`;
     // What was on screen when the dialog opened is not new; only what arrives after fades in.
     if (ideaSeen?.jobId !== job.id) for (const m of ideaThread(job)) ideaDrawn.add(m.id);
-    return ideaViewHtml(job, { cost, actions, error, pending: ideaSent?.jobId === job.id ? ideaSent : null, firing: ideaFiring?.jobId === job.id ? ideaFiring : null, fresh: freshMessage });
+    return ideaViewHtml(job, { cost, actions, error, pending: ideaSent?.jobId === job.id ? ideaSent : null, firing: ideaFiring?.jobId === job.id ? ideaFiring : null, fresh: freshMessage, titled: titledNow(job) });
   }
   const conversationHtml = (job) => ideaThread(job).length ? more('idea', `${ICONS.note}Conversation <small>${ideaThread(job).length + 1}</small>`, ideaThreadHtml(job), 'job-idea-past') : '';
   function jobDetail(job) {
