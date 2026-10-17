@@ -2,7 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml, inflowHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, ideaStage, liveSuggestion, ideaOpen, ideaThread } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, ideaStage, liveSuggestion, ideaOpen } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 import { runningDotHtml } from './job-running.js';
@@ -233,13 +233,13 @@ function repoLine(job) {
 const IDEA_SKY = { thinking: 0, reply: 1, suggested: 2 };
 const ideaSkyHtml = (job) => inflowHtml(job.id, IDEA_SKY[ideaStage(job)] ?? 0);
 function ideaPlateHtml(job) {
-  const ask = plateAsk(job), tone = ask ? ask.tone : 'idle', said = ideaThread(job).length + 1;
+  const ask = plateAsk(job), tone = ask ? ask.tone : 'idle';
   const foot = ask
     ? `<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span><button type="button" class="job-plate-go" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}"${ask.session ? ` data-session="${esc(ask.session)}"` : ''}>${esc(ask.button)}</button></div>`
     : `<div class="job-plate-foot"><span class="job-plate-glyph">${stateIconHtml(jobState(job))}</span><span class="job-status">${esc(jobLabel(job))}</span></div>`;
   return `<article class="job-plate idea tone-${tone} ${jobState(job)} ${ask ? 'stubbed' : ''}" data-board="${esc(job.id)}">
     <div class="job-plate-art">${ideaSkyHtml(job)}<div class="job-plate-tag lt"><span class="job-idea-mark">Idea</span></div></div>
-    <div class="job-plate-body"><div class="job-plate-where"><span>${job.createdAt ? `${ago(job.createdAt)} ago` : ''}</span><span class="job-plate-idea">${said} message${said === 1 ? '' : 's'}</span></div>
+    <div class="job-plate-body"><div class="job-plate-where"><span>${job.createdAt ? `${ago(job.createdAt)} ago` : ''}</span></div>
       <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="Open the conversation">${esc(job.title)}</button></div>
     ${foot}</article>`;
 }

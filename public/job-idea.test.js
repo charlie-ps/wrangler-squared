@@ -159,7 +159,8 @@ test('an idea is a plate under a forming sky, tagged IDEA, idle while the planne
   const ideaPlate = f.q('[data-board="reply"]');
   assert.ok(ideaPlate.classList.contains('idea'));
   assert.equal(ideaPlate.querySelector('.job-plate-tag').textContent, 'Idea');
-  assert.equal(ideaPlate.querySelector('.job-plate-idea').textContent, '2 messages');
+  assert.equal(ideaPlate.querySelector('.job-plate-idea'), null, 'the card shows only its age');
+  assert.doesNotMatch(ideaPlate.querySelector('.job-plate-where').textContent, /message/);
   assert.equal(f.q('[data-board="think"] .job-status').textContent, 'Planner is reading the idea');
   f.q('[data-filter="ideas"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-plate')].map((p) => p.dataset.board).sort(), ['later', 'reply', 'sugg', 'think'], 'the Ideas filter shows only ideas');
