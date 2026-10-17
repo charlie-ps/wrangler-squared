@@ -131,6 +131,14 @@ export function checkActions(job, actions = [], plan) {
 const PIN_NOUN = { head: 'head', merge: 'merge commit', stage: 'stage', round: 'review' };
 const short = (ref) => String(ref ?? 'none').slice(0, 9);
 
+// The human's own words to a step's open session, kept verbatim, and nothing
+// else: approving that would only repeat what they just wrote.
+export function forwardsOnly(proposal) {
+  const { added, edited, removed } = proposal.changes;
+  return !proposal.escalation && !proposal.alternatives?.length && !added.length && !edited.length && !removed.length
+    && proposal.actions.length > 0 && proposal.actions.every((a) => a.type === 'forward');
+}
+
 // After the plan is installed (a recover's fix exists by now). Returns the
 // history lines; what runs next is the runner's: it reads these fields. `images`
 // are the idea's pictures (job-replan.js requestReplan).

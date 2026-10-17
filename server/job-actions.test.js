@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { gateAction, stampActions, checkActions, applyActions } from './job-actions.js';
+import { gateAction, stampActions, checkActions, applyActions, forwardsOnly } from './job-actions.js';
 import { proposeReplan, approveReplan, optionsOf } from './job-replan.js';
 import { changeView } from './job-change.js';
 import { reportSchema } from './jobs-schema.js';
@@ -198,4 +198,16 @@ test('a red step\'s fix never applies a forward by itself', () => {
   j.replan = { feedback: 'x', at: 1, proposal: null, previous: null };
   proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'x' }] }, 2);
   assert.equal(autoApplicable({ ...j, reviewPlan: false }, j.replan.proposal), false);
+});
+
+test('only a proposal of forwards and nothing else skips the human: any plan change, other action, option or escalation waits', () => {
+  const j = parkedJob({ web: redOf() });
+  const of = (report) => { j.replan = { feedback: 'x', at: 1, proposal: null, previous: null }; proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), ...report }, 2); return forwardsOnly(j.replan.proposal); };
+  const fwd = { type: 'forward', sub: 'api', note: 'x' };
+  assert.equal(of({ actions: [fwd] }), true);
+  assert.equal(of({ actions: [] }), false, 'a diagnosis alone is for the human to read');
+  assert.equal(of({ actions: [fwd, { type: 'rework', sub: 'web', note: 'y' }] }), false);
+  assert.equal(of({ actions: [fwd], plan: { ...empty(j), subJobs: [...empty(j).subJobs, spec('docs')] } }), false, 'a plan edit');
+  assert.equal(of({ actions: [fwd], alternatives: [{ label: 'Or', plan: empty(j), actions: [] }] }), false);
+  assert.equal(forwardsOnly({ ...j.replan.proposal, actions: [fwd], alternatives: [], escalation: { sub: 'api' } }), false);
 });

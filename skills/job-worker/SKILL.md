@@ -55,7 +55,8 @@ the `runId` from your prompt and the receipt kind it names.
 When your prompt is a plan change, your `plan` receipt is a **proposal**: nothing
 applies until the human approves it, and each action is refused at approval if
 the PR head, merge commit, stage or review round it was written against has
-moved.
+moved. A proposal that only forwards the human's words (no plan change, no
+other action, no alternatives) is sent at once without an approval.
 
 ### An idea from the human comes to you
 
@@ -211,8 +212,9 @@ after it are held while you work.
 - With Code on **You review**, a `ready` receipt does not end your run. Your
   session **stays open, paused** (no slot, no tokens) and the human may write to
   it with the working tree and your proof in front of them: their words reach
-  you by mail through the planner, once they approve its proposal. End your turn
-  after reporting and wait; do not stop the session, clean up, or commit.
+  you by mail through the planner, straight away when it only forwards them, or
+  once they approve its proposal. End your turn after reporting and wait; do
+  not stop the session, clean up, or commit.
 - A **question** (the mail says what was asked, as quoted data): answer from what
   you know and change nothing, with
   `job_report {kind:"reply", text, shots?, run?}`. Anything you capture to answer

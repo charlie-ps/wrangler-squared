@@ -12,6 +12,7 @@ import { dropSub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
+import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
 
@@ -606,6 +607,11 @@ export class JobStore {
         if (j.replan.red) {
           const fate = settleProposal(j, r, { now: Date.now(), apply: () => this._approveReplan(j, j.replan.proposal.id, 0, 'Red steps: Wrangler replans') });
           if (fate === 'declared') record(j, null, 'declare-red', null, 'Declared the red step to you');
+        } else if (forwardsOnly(j.replan.proposal)) {
+          // A pin that fails here leaves the proposal waiting, as any other would.
+          const before = structuredClone(j);
+          try { this._approveReplan(j, j.replan.proposal.id, 0, 'Forwarded without a prompt'); }
+          catch { for (const k of Object.keys(j)) delete j[k]; Object.assign(j, before); }
         }
       }
       return;
