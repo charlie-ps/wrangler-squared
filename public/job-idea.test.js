@@ -170,7 +170,11 @@ test('an idea is a plate under a forming sky, tagged IDEA, idle while the planne
   assert.ok(f.q('#job-dialog [data-idea-composer]'));
 });
 
-test('an accepted idea becomes a job plate, folding its cloud into the job\'s sky once', async (t) => {
+test('an accepted idea becomes a job plate, forming its black hole from the cloud once', async (t) => {
+  // Reduced motion's crossfade, so the test waits for its end rather than the whole sequence.
+  const prevMatch = globalThis.matchMedia;
+  globalThis.matchMedia = (q) => ({ matches: q.includes('reduce') });
+  t.after(() => { globalThis.matchMedia = prevMatch; });
   const idea = ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]);
   const f = fixture(t, [idea]);
   assert.ok(f.q('[data-board="idea1"]').classList.contains('idea'));
@@ -179,13 +183,12 @@ test('an accepted idea becomes a job plate, folding its cloud into the job\'s sk
   f.view.update(f.data);
   const plate = f.q('[data-board="idea1"]'), art = plate.querySelector('.job-plate-art');
   assert.equal(plate.classList.contains('idea'), false, 'now a job plate');
-  assert.ok(art.classList.contains('collapsing'));
+  assert.ok(art.classList.contains('forming'));
   assert.ok(art.querySelector(':scope > .gx.nb') && art.querySelector(':scope > .gx:not(.nb)'), 'the cloud over the job\'s own sky');
   assert.equal(plate.querySelectorAll('.job-plate-graph .node').length, 4, 'the plan it became, its write a moon');
-  await new Promise((r) => setTimeout(r, 200));
-  assert.ok(art.classList.contains('collapsed'), 'then it folds in');
   f.view.update(f.data);
-  assert.ok(f.q('[data-board="idea1"] .job-plate-art').classList.contains('collapsed'), 'a redraw mid-fold keeps it folded');
-  await new Promise((r) => setTimeout(r, 2300));
+  assert.ok(f.q('[data-board="idea1"] .job-plate-art').classList.contains('forming'), 'a redraw mid-transition keeps it forming');
+  await new Promise((r) => setTimeout(r, 600));
   assert.equal(f.q('[data-board="idea1"] .gx.nb'), null, 'and after it the cloud is gone');
+  assert.equal(f.q('[data-board="idea1"] .job-plate-art').classList.contains('forming'), false);
 });

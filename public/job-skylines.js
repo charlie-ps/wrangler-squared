@@ -39,7 +39,7 @@ export const inflowHtml = (seed, stage = 0, style = 'dust') => `<div class="gx n
 export const arcHtml = (seed, tone = 'warn') => `<div class="gx" data-arc data-seed="${hash(seed).toString(36)}" data-tone="${PAL[tone] ? tone : 'warn'}"></div>`;
 
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-function ramp(stops) {
+export function ramp(stops) {
   const c = stops.map(hex);
   return (t, a = 1) => {
     t = Math.max(0, Math.min(1, t)) * (c.length - 1);
@@ -47,22 +47,49 @@ function ramp(stops) {
     return `rgba(${m[0]},${m[1]},${m[2]},${a})`;
   };
 }
-function rng(str) {
+export function rng(str) {
   let a = 2166136261;
   for (const ch of str) a = Math.imul(a ^ ch.charCodeAt(0), 16777619);
   return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 }
-const gauss = (r) => (r() + r() + r() + r() - 2) / .577;
+export const gauss = (r) => (r() + r() + r() + r() - 2) / .577;
 const el = (t, c, p) => { const e = document.createElement(t); if (c) e.className = c; if (p) p.appendChild(e); return e; };
-function cv(w, h, dpr, parent, cls) {
+export function cv(w, h, dpr, parent, cls) {
   const c = el('canvas', cls, parent);
   c.width = Math.ceil(w * dpr); c.height = Math.ceil(h * dpr); c.style.width = `${w}px`; c.style.height = `${h}px`;
   const x = c.getContext('2d'); x.scale(dpr, dpr);
   return [c, x];
 }
 // A blurred shape without ctx.filter (Safari): draw it off-canvas and let only its shadow land.
-function soft(x, dpr, blur, color, draw) {
+export function soft(x, dpr, blur, color, draw) {
   x.save(); x.shadowColor = color; x.shadowBlur = blur * dpr; x.shadowOffsetX = 1e4 * dpr; x.translate(-1e4, 0); x.fillStyle = x.strokeStyle = '#000'; draw(x); x.restore();
+}
+
+// Where paint() puts a sky's hole, from the same first draws of its seed: the
+// idea→job transition (job-forming.js) lands its travelling hole exactly there.
+export function holeOf(sky, W) {
+  const D = sky.dataset, H = W * 150 / 320, s = W / 320, R = 150 * s, lvl = +D.lvl || 1, r = rng(D.seed);
+  const dir = r() < .5 ? -1 : 1, x = W * (.5 + dir * (.04 + r() * .04));
+  return { x, y: H + R - capFor(lvl, +D.floor || FLOOR) * s, R, s, dir, heat: (.8 + .05 * lvl) * ('dim' in D ? .62 : 1), pal: ramp(paletteOf(D.tone)) };
+}
+// One shell of the lensed ring's arc streaks, around (0,0) of `x`.
+export function streaks(x, r, R, s, a0, a1, cnt, heat, pal) {
+  x.globalCompositeOperation = 'lighter'; x.lineCap = 'round';
+  for (let i = 0; i < cnt; i++) {
+    const rho = R * (a0 + (a1 - a0) * r() ** 1.5), hot = Math.max(0, 1 - (rho / R - 1) / .5);
+    const t = .16 + .83 * hot ** 1.4 * (.6 + .4 * r()), al = (.04 + .36 * r() ** 2.2) * heat * (a0 === 1 ? 1.35 : 1) * Math.max(.15, 1 - (rho / R - 1) * 2.5), st = r() * 6.283, len = .12 + r() ** 1.5 * 1.6;
+    x.lineWidth = s * (.2 + 1.4 * r() ** 3);
+    for (const [p0, p1, m] of [[0, .22, .35], [.2, .8, 1], [.78, 1, .35]]) { x.strokeStyle = pal(t, al * m); x.beginPath(); x.arc(0, 0, rho, st + len * p0, st + len * p1); x.stroke(); }
+  }
+}
+// The black disc and its photon ring, brightest on the approaching side.
+export function horizon(F, cx, cy, R, s, dpr, dir, pal) {
+  F.fillStyle = '#000'; F.beginPath(); F.arc(cx, cy, R, 0, 7); F.fill();
+  soft(F, dpr, 3 * s, pal(.92, .85), (x) => { x.lineWidth = 1.4 * s; x.beginPath(); x.arc(cx, cy, R * 1.004, 0, 7); x.stroke(); });
+  const cg = F.createConicGradient(dir > 0 ? 0 : Math.PI, cx, cy);
+  cg.addColorStop(0, pal(1, 1)); cg.addColorStop(.25, pal(.92, .8)); cg.addColorStop(.5, pal(.8, .35)); cg.addColorStop(.75, pal(.92, .8)); cg.addColorStop(1, pal(1, 1));
+  F.strokeStyle = cg; F.lineWidth = .9 * s; F.beginPath(); F.arc(cx, cy, R * 1.004, 0, 7); F.stroke();
+  F.strokeStyle = pal(.9, .4); F.lineWidth = .45 * s; F.beginPath(); F.arc(cx, cy - .01 * R, R * 1.028, 0, 7); F.stroke();
 }
 
 function paint(art) {
@@ -115,22 +142,12 @@ function paint(art) {
     const ro = a1 * R, box = el('div', 'l ring', bh); box.style.maskImage = box.style.webkitMaskImage = mask;
     const [c, x] = cv(ro * 2, ro * 2, dpr, box, `spin${dir < 0 ? ' rev' : ''}`);
     c.style.left = `${rc[0] - ro}px`; c.style.top = `${rc[1] - ro}px`; c.style.setProperty('--dur', `${per}s`); c.style.animationDelay = `${-r() * per}s`;
-    x.translate(ro, ro); x.globalCompositeOperation = 'lighter'; x.lineCap = 'round';
-    for (let i = 0; i < cnt; i++) {
-      const rho = R * (a0 + (a1 - a0) * r() ** 1.5), hot = Math.max(0, 1 - (rho / R - 1) / .5);
-      const t = .16 + .83 * hot ** 1.4 * (.6 + .4 * r()), al = (.04 + .36 * r() ** 2.2) * heat * (a0 === 1 ? 1.35 : 1) * Math.max(.15, 1 - (rho / R - 1) * 2.5), st = r() * 6.283, len = .12 + r() ** 1.5 * 1.6;
-      x.lineWidth = s * (.2 + 1.4 * r() ** 3);
-      for (const [p0, p1, m] of [[0, .22, .35], [.2, .8, 1], [.78, 1, .35]]) { x.strokeStyle = pal(t, al * m); x.beginPath(); x.arc(0, 0, rho, st + len * p0, st + len * p1); x.stroke(); }
-    }
+    x.translate(ro, ro);
+    streaks(x, r, R, s, a0, a1, cnt, heat, pal);
   }
 
   const [, F] = cv(W, H, dpr, bh, 'l');
-  F.fillStyle = '#000'; F.beginPath(); F.arc(cx, cy, R, 0, 7); F.fill();
-  soft(F, dpr, 3 * s, pal(.92, .85), (x) => { x.lineWidth = 1.4 * s; x.beginPath(); x.arc(cx, cy, R * 1.004, 0, 7); x.stroke(); });
-  const cg = F.createConicGradient(dir > 0 ? 0 : Math.PI, cx, cy);
-  cg.addColorStop(0, pal(1, 1)); cg.addColorStop(.25, pal(.92, .8)); cg.addColorStop(.5, pal(.8, .35)); cg.addColorStop(.75, pal(.92, .8)); cg.addColorStop(1, pal(1, 1));
-  F.strokeStyle = cg; F.lineWidth = .9 * s; F.beginPath(); F.arc(cx, cy, R * 1.004, 0, 7); F.stroke();
-  F.strokeStyle = pal(.9, .4); F.lineWidth = .45 * s; F.beginPath(); F.arc(cx, cy - .01 * R, R * 1.028, 0, 7); F.stroke();
+  horizon(F, cx, cy, R, s, dpr, dir, pal);
 
   // The beam: the disc's near side rising from the bottom edge, one tile of streaks sliding along it.
   const Lb = 2 * R, Hb = .8 * R, Tw = Lb * .5, mid = at(1.25);
@@ -198,6 +215,8 @@ function goLive(art, step, gain) {
   liveOf.set(art, st); live.add(st);
   if (!looping) { looping = true; requestAnimationFrame(frame); }
 }
+// A live sky's speed, set outright (the transition speeds an idea's infall up as it collapses).
+export function pullSky(art, speed) { const st = liveOf.get(art); if (st) st.target = speed; }
 const dropLive = (art) => { const st = liveOf.get(art); if (st) live.delete(st); liveOf.delete(art); };
 
 // Infall: dust drifting in from the whole sky and collecting at one point, before there is

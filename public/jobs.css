@@ -1561,13 +1561,33 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-idea-past .job-idea-thread { padding:4px 0 0; }
 .job-idea-past .job-launch-refine { display:none; }
 /* An idea on the board (job-plates.js ideaPlateHtml): a job's plate under a sky still
-   forming, tagged IDEA where a job names its repos. Once it has a plan the cloud folds
-   into its point and the job's own sky rises from under it. */
+   forming, tagged IDEA where a job names its repos. */
 .job-plate.idea .job-plate-art::after { opacity:1; animation:none; background:linear-gradient(180deg, rgba(2,3,6,.35), transparent 30%); }
-.job-plate-art.collapsing > .gx.nb { z-index:1; transform-origin:var(--ox,50%) var(--oy,50%); transition:transform 1.3s cubic-bezier(.6,0,.4,1), opacity .9s .5s ease, filter 1.3s ease; }
-.job-plate-art.collapsing > :not(.nb) { opacity:0; transform:scale(1.12); transition:opacity 1.1s .55s ease, transform 1.6s .45s cubic-bezier(.2,.8,.2,1); }
-.job-plate-art.collapsing > :is(svg,.job-plate-tag,.job-plate-unplanned) { z-index:2; }
-.job-plate-art.collapsing.collapsed > .gx.nb { transform:scale(.12); opacity:0; filter:brightness(2.4) saturate(1.4); }
-.job-plate-art.collapsing.collapsed > :not(.nb) { opacity:1; transform:none; }
+/* Once it has a plan the cloud collapses into the job's black hole (job-forming.js), which moves
+   every part with Web Animations. The sky's own hole is repainted whenever the sky likes, so it
+   follows a variable on the art instead, resting at its last frame. */
+@property --bhx-hole { syntax:'<number>'; inherits:true; initial-value:1; }
+.job-plate-art.forming > .gx.nb { z-index:1; will-change:opacity; }
+/* The haze shrinks to the point as it forms, so on a plate its canvas's edges always fade rather
+   than show as a box (always, so accepting the idea changes nothing on its first frame). */
+.job-plate-art > .gx.nb .drift { -webkit-mask-image:radial-gradient(closest-side, #000 60%, transparent); mask-image:radial-gradient(closest-side, #000 60%, transparent); }
+.job-plate-art.forming > .gx.nb .drift { will-change:transform; }
+.job-plate-art.forming > :is(.gx:not(.nb),.scene,.scrim) { z-index:2; }
+.job-plate-art.forming > .gx:not(.nb) > .fx { opacity:var(--bhx-hole); }
+.job-plate-art.forming > .bhx { position:absolute; inset:0; z-index:3; pointer-events:none; overflow:hidden; }
+.job-plate-art.forming > :is(.job-plate-graph,.job-plate-tag,.job-plate-unplanned) { z-index:4; }
+.bhx canvas { position:absolute; left:0; top:0; }
+.bhx .layer { mix-blend-mode:screen; }
+.bhx-at { position:absolute; width:0; height:0; }
+.bhx-at > :not(canvas,.ring) { position:absolute; left:0; top:0; width:var(--w); height:var(--h,var(--w)); margin:calc(var(--h,var(--w)) / -2) 0 0 calc(var(--w) / -2); border-radius:50%; }
+.bhx-hole,.bhx-hole .ring canvas,.bhx-at > div,.bhx-wash { will-change:transform, opacity; }
+.bhx-hole { opacity:0; }
+.bhx-hole .ring { position:absolute; }
+/* Newborn, its ring burns white before it cools to the sky's colour. */
+.bhx-heat { background:radial-gradient(closest-side, transparent 78%, rgba(255,255,255,.9) 84%, rgba(255,236,228,.45) 90%, transparent); }
+.bhx-wash { position:absolute; inset:0; opacity:0; background:radial-gradient(90% 120% at var(--px) var(--py), #fff, rgba(232,236,255,.85) 30%, rgba(158,171,255,.35) 70%, rgba(111,124,255,.12)); }
+.bhx-flash { opacity:0; background:radial-gradient(closest-side, #fff, rgba(255,255,255,.95) 20%, rgba(255,226,214,.55) 42%, rgba(240,138,154,.18) 70%, transparent); }
+.bhx-streak { --h:5px; opacity:0; background:radial-gradient(closest-side, #fff, rgba(217,222,255,.75) 25%, rgba(111,124,255,0)); }
+.bhx-wave { box-sizing:border-box; opacity:0; border:1.5px solid rgba(255,236,228,.9); box-shadow:0 0 16px rgba(240,138,154,.55), inset 0 0 16px rgba(158,171,255,.4); }
 @media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-dock { padding-left:16px; padding-right:16px; } }
-@media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-plate-art.collapsing > * { transition:opacity .3s !important; } .job-plate-art.collapsing.collapsed > .gx.nb { transform:none; } }
+@media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } }

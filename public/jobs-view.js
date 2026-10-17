@@ -6,11 +6,9 @@ import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, mountMastSky, releaseSkies, spinTo } from './job-skylines.js';
+import { mountForming, dropForming, formingClock, formingMs } from './job-forming.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 
-// How long an accepted idea's plate takes to fold into its job's (jobs.css .collapsing).
-const COLLAPSE_MS = 2200;
-const frame = (fn) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(fn) : setTimeout(fn, 16));
 // The board's filter rail: what each shows, and the one an empty view explains.
 const FILTERS = [
   ['all', 'In flight', (job) => job.stage !== 'done'],
@@ -324,9 +322,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, maxReplans: 2, deploymentStaleMinutes: 30 } };
-  // Ideas on the board at the last render, and those folding into a job since (id → when).
+  // Ideas on the board at the last render, and those forming into a job since (id → { start, ms, stage }):
+  // `stage` is the idea's sky as last drawn, so the painted cloud is kept rather than drawn again.
   let ideasShown = new Set();
-  const collapsing = new Map();
+  const forming = new Map();
   let filter = 'all', selected = null, planDraft = null, revision = null, basePlan = null, writeEdit = null;
   // A story create in review: its summary and fields as the panel holds them,
   // so adding or removing a field (which redraws) keeps what was typed.
@@ -429,21 +428,24 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const art = PLATE_ART.includes(data.settings.plateArt) ? data.settings.plateArt : 'quiet';
     root.dataset.plateArt = art;
     root.dataset.backdrop = backdropOf(data.settings);
-    // An idea that gained a plan since the last render collapses into the job it became.
-    const now = Date.now(), ideas = new Set(data.jobs.filter(ideaOpen).map((j) => j.id)), starting = [];
-    for (const j of data.jobs) if (ideasShown.has(j.id) && !ideas.has(j.id) && j.plan && !j.cancelledAt) { collapsing.set(j.id, now); starting.push(j.id); }
-    for (const [id, at] of collapsing) if (now - at > COLLAPSE_MS) collapsing.delete(id);
+    // An idea that gained a plan since the last render forms the job it became (job-forming.js).
+    const now = formingClock(), ideas = new Set(data.jobs.filter(ideaOpen).map((j) => j.id)), starting = [];
+    for (const j of data.jobs) if (ideasShown.has(j.id) && !ideas.has(j.id) && j.plan && !j.cancelledAt) {
+      const stage = +(q(`#jobs-boards [data-board="${CSS.escape(j.id)}"] .gx.nb`)?.dataset.stage ?? 2);
+      forming.set(j.id, { start: now, ms: formingMs(), stage }); starting.push(j.id);
+    }
+    for (const [id, f] of forming) if (now - f.start > f.ms) { forming.delete(id); dropForming(id); }
     ideasShown = ideas;
     holdSkies(q('#jobs-boards'));
-    q('#jobs-boards').innerHTML = jobs.map((j) => plateHtml(j, scenes.get(j.id), art, { collapse: collapsing.has(j.id) })).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
+    q('#jobs-boards').innerHTML = jobs.map((j) => plateHtml(j, scenes.get(j.id), art, { forming: forming.get(j.id)?.stage })).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
     mountSkies(q('#jobs-boards'));
-    // A redraw mid-collapse picks it up where it would be by now (at its end); a new one
-    // waits two frames so the transition has a start, and a render after it drops the cloud.
-    for (const art of q('#jobs-boards').querySelectorAll('.job-plate-art.collapsing')) {
-      if (!starting.includes(art.closest('[data-board]').dataset.board)) art.classList.add('collapsed');
-      else frame(() => frame(() => art.classList.add('collapsed')));
+    // Keyed to when each started, so a redraw mid-transition picks it up at the same instant; a
+    // render after it drops the cloud, which is clear by then.
+    for (const art of q('#jobs-boards').querySelectorAll('.job-plate-art.forming')) {
+      const id = art.closest('[data-board]').dataset.board;
+      mountForming(art, id, forming.get(id));
     }
-    if (starting.length) setTimeout(() => { if (root.isConnected) render(); }, COLLAPSE_MS + 50);
+    if (starting.length) setTimeout(() => { if (root.isConnected) render(); }, Math.max(...starting.map((id) => forming.get(id).ms)) + 50);
     hydrateEvidence(q('#jobs-boards'), evidence, send);
     // Keep a human's plan edits and review snapshot intact across live graph ticks;
     // any open form, or a change being typed, is a human mid-edit and is left alone.
