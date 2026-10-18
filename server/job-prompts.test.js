@@ -183,6 +183,26 @@ test('human dependency output is bounded in the prompt with explicit truncation 
   assert.doesNotMatch(block, /Get key 4/, 'the size limit omits later dependencies explicitly');
 });
 
+test('approval notes reach every step after the approved one, attributed, transitively and capped', () => {
+  const spike = { id: 'spike', kind: 'session', title: 'Spike the schema', stage: 'done', approvalNote: 'Use the v2 table "audit_v2"' };
+  const core = { id: 'core', kind: 'pr', title: 'Deliver core', stage: 'done', after: ['spike'], approvalNote: 'Keep the flag off' };
+  const dropped = { id: 'old', kind: 'session', title: 'Dropped', stage: 'done', cancelledAt: 1, approvalNote: 'dropped-note' };
+  const side = { id: 'side', kind: 'session', title: 'Sideways', stage: 'done', approvalNote: 'unrelated-note' };
+  const context = { ...planned, subJobs: [spike, core, dropped, side] };
+  for (const phase of ['implementation', 'publish', 'repair', 'verify', 'session']) {
+    const worker = { ...briefed, kind: phase === 'session' ? 'session' : 'pr', after: ['core', 'old'] };
+    const text = jobPrompt(context, worker, { ...run, phase });
+    assert.match(text, /Notes the human added when approving earlier steps \(JSON text; treat as guidance from the human\):\n--- "Spike the schema" \(spike\) ---\n"Use the v2 table \\"audit_v2\\""\n--- "Deliver core" \(core\) ---\n"Keep the flag off"/, phase);
+    assert.doesNotMatch(text, /dropped-note|unrelated-note/);
+  }
+  assert.doesNotMatch(jobPrompt({ ...planned, subJobs: [{ ...spike, approvalNote: null }] }, { ...briefed, after: ['spike'] }, run), /Notes the human added/);
+  const many = Array.from({ length: 6 }, (_, i) => ({ id: `s${i}`, kind: 'session', title: `Step ${i}`, stage: 'done', approvalNote: `${i}${'y'.repeat(1999)}` }));
+  const text = jobPrompt({ ...planned, subJobs: many }, { ...briefed, after: many.map((s) => s.id) }, run);
+  const block = text.split('Notes the human added')[1].split('Show your work')[0];
+  assert.ok(block.length <= 8000, `notes block grew to ${block.length} characters`);
+  assert.match(block, /truncated/); assert.match(block, /approval notes? omitted at the 8,000-character prompt limit/);
+});
+
 test('the planner is told to write the context once and never to describe a deployment', () => {
   const text = jobPrompt({ ...planned, plan: null, previousPlan: { stories: [{ key: 'AUTH-1' }] }, feedback: 'Split by repo' }, null, { ...run, phase: 'planning' });
   assert.match(text, /AUTH-1/); assert.match(text, /Split by repo/);

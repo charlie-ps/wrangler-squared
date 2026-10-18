@@ -625,6 +625,14 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-note { display:flex; align-items:center; gap:8px; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
 .job-context,.job-intent { white-space:pre-wrap; color:var(--fg) !important; }
 .job-brief { color:var(--fg) !important; }
+.job-approve-split { order:-1; margin-right:6px; }
+.job-approve-split>button.primary { margin-right:2px; }
+.job-approve-pop { width:min(340px, 75vw); gap:8px; padding:10px; backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); }
+.job-approve-pop label { display:grid; gap:6px; font-size:12px; color:var(--fg-muted); }
+.job-approve-pop textarea { font-size:13px; }
+.job-approve-pop button { justify-self:end; }
+.job-approval-note { white-space:pre-wrap; overflow-wrap:anywhere; }
+.job-move-log q { display:block; margin-top:2px; color:var(--fg-muted); white-space:pre-wrap; }
 .job-human-output { white-space:pre-wrap; overflow-wrap:anywhere; color:var(--fg); background:var(--field-bg); padding:12px; border:1px solid var(--border-muted); border-radius:10px; }
 /* A folded section: one quiet row until opened. */
 .job-more { margin:8px 0; border-radius:12px; font-size:12px; color:var(--fg-muted); }

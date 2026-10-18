@@ -109,9 +109,10 @@ function releaseWaiting(j, field, { plan, revision }, now) {
       : field === 'reviewSessions' && isSessionSub(s) && s.result));
   if (waiting.length && j.replan) throw new Error('A plan change is pending. Approve or discard it first.');
   for (const s of waiting) {
-    if (field === 'reviewCode') { s.ready = { ...s.ready, approvedAt: now }; s.state = 'approved'; record(j, s, 'approve-code', null, `Approved the working tree of ${quoted(s.title)}`); }
+    // A bulk release carries no words, so it clears any an earlier approval left.
+    if (field === 'reviewCode') { s.ready = { ...s.ready, approvedAt: now }; s.state = 'approved'; s.approvalNote = null; record(j, s, 'approve-code', null, `Approved the working tree of ${quoted(s.title)}`); }
     else if (field === 'reviewWrites') record(j, s, 'approve-write', null, approveWrite(j, s, now));
-    else { s.sessionApprovedAt = now; s.stage = 'cleanup'; s.state = 'queued'; record(j, s, 'approve-session', null, `Approved the result of ${quoted(s.title)}`); }
+    else { s.sessionApprovedAt = now; s.stage = 'cleanup'; s.state = 'queued'; s.approvalNote = null; record(j, s, 'approve-session', null, `Approved the result of ${quoted(s.title)}`); }
   }
   return waiting.length;
 }
@@ -124,6 +125,15 @@ function setReview(j, { field, you, release, plan, revision }, now) {
   if (flagOf(j, field) === you && !released) return;
   j[field] = you;
   record(j, null, 'set-review', null, `Switched ${name} to ${checkpointWord(field, you)}${released ? `, releasing ${released === 1 ? 'what was waiting' : `${released} waiting`}` : ''}`);
+}
+// The human's words for later steps, given with an approval (job-prompts.js approvalNotesBlock).
+export const APPROVAL_NOTE_MAX = 2000;
+function approvalNote(payload) {
+  if (payload.note == null) return null;
+  if (typeof payload.note !== 'string') throw new Error('An approval note must be text');
+  const text = payload.note.trim();
+  if (text.length > APPROVAL_NOTE_MAX) throw new Error(`An approval note must be at most ${APPROVAL_NOTE_MAX.toLocaleString('en-GB')} characters`);
+  return text || null;
 }
 const HELD_BY_REPLAN = new Set(['approve-code', 'approve-merge', 'approve-session', 'start-human', 'finish-human', 'approve-write', 'skip-write', 'edit-write']);
 export const MERGE_IS_DELIVERY = 'Merged; nothing runs on push for these paths';
@@ -380,8 +390,9 @@ export class JobStore {
       }
       if (action === 'approve-session') {
         if (!isSessionSub(s) || s.stage !== 'review' || !s.result || s.result.receiptId !== sessionReceiptId || s.error) throw new Error('The session result is not ready for review');
-        s.sessionApprovedAt = Date.now(); s.stage = 'cleanup'; s.state = 'queued';
-        record(j, s, 'approve-session', null, `Approved the result of ${quoted(s.title)}`); return;
+        const said = approvalNote(payload);
+        s.sessionApprovedAt = Date.now(); s.stage = 'cleanup'; s.state = 'queued'; s.approvalNote = said;
+        record(j, s, 'approve-session', said, `Approved the result of ${quoted(s.title)}`); return;
       }
       // The two marks that are the whole engine of a human task: no agent is ever
       // launched for one, so nothing but a human click moves it. Done releases
@@ -421,8 +432,9 @@ export class JobStore {
         // (handlers.js): approval belongs to those exact bytes, not to whatever
         // the worktree holds after someone typed into the session.
         if (s.ready.treeHash && payload.treeHash !== s.ready.treeHash) throw Object.assign(new Error(payload.treeHash ? 'The working tree changed since the agent reported ready. It has been asked to report ready again; approve once it does.' : 'Could not read the working tree to check it is what the agent reported. Try again.'), { code: payload.treeHash ? TREE_MOVED : undefined });
-        s.ready = { ...s.ready, approvedAt: Date.now() }; s.state = 'approved';
-        record(j, s, 'approve-code', null, `Approved the working tree of ${quoted(s.title)}`); return;
+        const said = approvalNote(payload);
+        s.ready = { ...s.ready, approvedAt: Date.now() }; s.state = 'approved'; s.approvalNote = said;
+        record(j, s, 'approve-code', said, `Approved the working tree of ${quoted(s.title)}`); return;
       }
       if (['approve-write', 'skip-write', 'edit-write'].includes(action)) {
         if (!s) throw new Error('Choose a sub-job');

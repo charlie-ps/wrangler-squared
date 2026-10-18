@@ -825,6 +825,42 @@ test('a reported session needs you, a running one spins, and approval is pinned 
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'request-change', at: 'session', ref: 'receipt9', text: 'Check staging too' });
 });
 
+test('Approve keeps one click, and its caret opens a popup whose words go to later steps, on a session result and on code', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sessionSub('spike'), stage: 'review', result: { checks: ['Schema documented'], receiptId: 'receipt9' } },
+    { ...sub('api', ['spike']), stage: 'review', state: 'verified', worktree: { path: '/wt', branch: 'fix/AUTH-1' }, sessions: ['s1'], ready: { checks: ['Tests pass'], receiptId: 'run_1' } }];
+  f.view.update(f.data);
+  f.q('[data-sub="spike"]').dispatchEvent(f.event('click'));
+  const split = f.q('.job-actions .job-approve-split');
+  assert.equal(split.querySelector('button.primary').dataset.action, 'approve-session');
+  const more = split.querySelector('.job-approve-more');
+  assert.equal(more.open, false, 'the note is out of the way until asked for');
+  assert.equal(more.querySelector('summary').getAttribute('aria-label'), 'Approve with context for later steps');
+  more.open = true; more.dispatchEvent(f.event('toggle'));
+  assert.match(more.querySelector('label').textContent, /Add context for later steps/);
+  more.querySelector('textarea').value = '  Use the <v2> table  ';
+  f.view.update(f.data);
+  assert.equal(f.q('.job-approve-more').open, true, 'the popup survives a tick');
+  assert.equal(f.q('[data-approve-note]').value, '  Use the <v2> table  ', 'a tick does not wipe what is being typed');
+  f.q('[data-action="approve-session"][data-with-note]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'approve-session', head: undefined, sessionReceiptId: 'receipt9', note: 'Use the <v2> table' });
+  f.q('.job-approve-split > button.primary').click();
+  assert.equal('note' in f.sent.at(-1), false, 'plain Approve never sends the popup\'s words');
+  Object.assign(job.subJobs[0], { stage: 'cleanup', approvalNote: 'Use the <v2> table' });
+  job.moves = [{ id: 'mv_1', at: 1757400000000, subJobId: 'spike', move: 'approve-session', note: 'Use the <v2> table', detail: 'Approved the result of “Run spike”' }];
+  f.q('[data-approve-note]').value = ''; f.view.update(f.data);
+  assert.equal(f.q('[data-approve-note]'), null, 'no popup once it is approved');
+  assert.equal(f.q('.job-approval-note').textContent, 'Use the <v2> table', 'escaped, and kept on the step');
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('.job-approve-split > button.primary').textContent, 'Approve & open PR');
+  assert.equal(f.q('[data-with-note]').textContent, 'Approve & open PR with note');
+  f.q('[data-approve-note]').value = 'Keep the flag off';
+  f.q('[data-action="approve-code"][data-with-note]').click();
+  assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).readyReceiptId, f.sent.at(-1).note], ['approve-code', 'run_1', 'Keep the flag off']);
+  f.q('[data-open-job]').click();
+  assert.equal(f.q('.job-move-log q').textContent, 'Use the <v2> table', 'the job history shows the words with the approval');
+});
+
 const humanSub = (id, after = []) => ({ id, kind: 'human', title: `Sign ${id}`, storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Click approve in the vendor console', sessions: [], repairs: [] });
 
 test('a waiting human task needs you, and the work behind it waits', (t) => {

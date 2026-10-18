@@ -177,6 +177,14 @@ feature).
   temp index, `write-tree`) is read by the tool handler at the receipt; `approve-code` is
   refused unless the `job-action` handler's fresh read matches (`TREE_MOVED` also queues a
   `retell` message). Code on Auto never parks.
+- **An approval can carry words for later steps.** `approve-session` and `approve-code` take an
+  optional `note` (a string, trimmed, at most 2,000 characters or refused; `job-store.js
+  approvalNote`), kept as `sub.approvalNote` and recorded on the move, so the step's own history
+  shows it. `job-prompts.js approvalNotesBlock` hands every note upstream of a sub-job (transitive
+  `after`, `upstreamOf`) to each of its prompts as quoted JSON, capped at 8,000 characters like
+  `humanOutputBlock`. A bulk release (a checkpoint switched to Auto) carries none and clears it.
+  On the board Approve stays one click that sends no note; its caret (`approveSplitHtml`) opens a
+  popup whose `[data-with-note]` button sends `[data-approve-note]`, and typed text holds back a tick's redraw.
 - **New idea is a job that may start as a conversation** (`server/job-idea.js`, `public/job-idea.js`).
   Only the board's form sets `idea` (`job-create` `idea:true` → `job.idea.thread`); `create_job` never does.
   Its planning run either reports `plan` as any job's does, or `reply {text, suggest?:{title, plan}}`,

@@ -397,6 +397,43 @@ test('a session sub-job is a hard prerequisite: nothing behind it starts until i
   assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'implementation']);
 });
 
+test('an approval note is kept on the step, recorded on its move and handed to every step after it', async (t) => {
+  const f = fixture(t);
+  await f.approve(plan([sessionSpec('spike'), spec('api', ['spike']), spec('web', ['api'])]));
+  f.report({ kind: 'completed', checks: ['Schema documented in task memory'] }); await f.tick();
+  const pinned = { subJobId: 'spike', sessionReceiptId: f.sub().result.receiptId };
+  assert.throws(() => f.store.action(f.job.id, 'approve-session', { ...pinned, note: { text: 'hi' } }), /must be text/);
+  assert.throws(() => f.store.action(f.job.id, 'approve-session', { ...pinned, note: 'x'.repeat(2001) }), /at most 2,000 characters/);
+  assert.equal(f.sub().stage, 'review', 'a refused note approves nothing');
+  f.store.action(f.job.id, 'approve-session', { ...pinned, note: '  Use the v2 table, not v1.  ' });
+  assert.equal(f.sub().approvalNote, 'Use the v2 table, not v1.');
+  assert.deepEqual(f.store.get(f.job.id).moves.at(-1).note, 'Use the v2 table, not v1.');
+  await f.tick();
+  const api = f.workerFor('api');
+  assert.match(jobPrompt(f.store.get(f.job.id), api.sub, api.run), /Notes the human added when approving earlier steps \(JSON text; treat as guidance from the human\):\n--- "Run spike" \(spike\) ---\n"Use the v2 table, not v1\."/);
+  f.report({ kind: 'ready', checks: ['Tests pass'] }, api); await f.tick();
+  f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub(1).ready.receiptId, note: 'Keep the flag off by default' }); await f.tick();
+  assert.equal(f.sub(1).approvalNote, 'Keep the flag off by default');
+  const publish = f.workerFor('api', 'publish');
+  assert.match(jobPrompt(f.store.get(f.job.id), publish.sub, publish.run), /human approved the working tree: "Keep the flag off by default"/, 'the step\'s own history shows it');
+  const web = { ...f.sub(2) };
+  const later = jobPrompt(f.store.get(f.job.id), web, { ...f.last().run, phase: 'implementation', subJobId: 'web' });
+  assert.match(later, /"Run spike" \(spike\) ---\n"Use the v2 table, not v1\."/, 'a transitive step gets it too');
+  assert.match(later, /\(api\) ---\n"Keep the flag off by default"/);
+});
+
+test('an approval with no note, or a blank one, is exactly the approval it was', async (t) => {
+  const f = fixture(t);
+  await f.approve(plan([sessionSpec('spike'), spec('api', ['spike'])]));
+  f.report({ kind: 'completed', checks: ['Done'] }); await f.tick();
+  f.store.action(f.job.id, 'approve-session', { subJobId: 'spike', sessionReceiptId: f.sub().result.receiptId, note: '   ' });
+  assert.equal(f.sub().approvalNote, null);
+  assert.deepEqual(f.store.get(f.job.id).moves.map((m) => [m.move, m.note, m.detail]), [['approve-session', null, 'Approved the result of “Run spike”']]);
+  await f.tick();
+  const api = f.workerFor('api');
+  assert.doesNotMatch(jobPrompt(f.store.get(f.job.id), api.sub, api.run), /Notes the human added/);
+});
+
 // --- Review checkpoints switched mid-job ---
 
 const setReview = (f, field, you, extra = {}) => f.store.action(f.job.id, 'set-review', { field, you, ...extra });
@@ -417,6 +454,7 @@ test('a code review switch counts from the next gate: waiting diffs stay until r
   setReview(f, 'reviewCode', false, { release: true });
   assert.deepEqual([f.sub().state, !!f.sub().ready.approvedAt], ['approved', true]);
   assert.deepEqual(f.store.get(f.job.id).moves.slice(-2).map((m) => [m.move, m.subJobId]), [['approve-code', 'api'], ['set-review', null]]);
+  assert.deepEqual([f.store.get(f.job.id).moves.at(-2).note, f.sub().approvalNote], [null, null], 'a bulk release carries no words');
   const revision = f.store.get(f.job.id).revision;
   setReview(f, 'reviewCode', false);
   assert.equal(f.store.get(f.job.id).moves.length, 3, 'switching to what it already is records nothing');
