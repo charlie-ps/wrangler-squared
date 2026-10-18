@@ -270,27 +270,17 @@ export function writeProblem(w) {
   return !w.place?.ref ? 'Paste the page’s URL.' : a.text ? '' : 'Write the comment.';
 }
 
-// What Approve authorises, in plain sentences: the approve button's title. Each
-// write's own review decides whether it runs on its own or waits for the human.
+// The approve button's title: what Approve starts and how many writes wait for
+// the human. Each write's own review decides whether it waits.
 export function authorityText(job, plan) {
   const writes = plan.subJobs.filter(isWriteSub);
-  const held = (list) => list.filter((w) => writeReviewed(job, w)).length;
-  const waits = (n) => `${n} wait${n === 1 ? 's' : ''}`;
-  const fresh = (plan.stories || []).filter((t) => !t.key);
   const creates = writes.filter(isStoryCreate);
   // A keyless story always gets a create write on the server; one not in this
   // draft yet is reviewed by the job's default.
-  const heldStories = fresh.filter((t) => writeReviewed(job, creates.find((c) => c.storyId === t.id) || {})).length;
-  const given = writes.filter((w) => !isStoryCreate(w) && !isMakeWrite(w));
-  const made = writes.filter(isMakeWrite);
-  const n = fresh.length;
-  const stories = !n ? '' : !heldStories ? ` ${n === 1 ? 'The new Jira story is' : `The ${n} new Jira stories are`} created in Jira straight away.`
-    : heldStories === n ? ` ${n === 1 ? 'The new Jira story is' : `The ${n} new Jira stories are`} held for your review before ${n === 1 ? 'it is' : 'they are'} created.`
-    : ` Of the ${n} new Jira stories, ${n - heldStories} ${n - heldStories === 1 ? 'is' : 'are'} created in Jira straight away and ${heldStories} ${heldStories === 1 ? 'is' : 'are'} held for your review first.`;
-  const fired = given.length ? ` ${given.length === 1 ? 'Its session makes the write' : `Their sessions make the ${given.length} writes`}${held(given) ? `; ${held(given)} ${held(given) === 1 ? 'is' : 'are'} drafted for your review first` : ''}.` : '';
-  const outputs = made.length ? ` ${made.length === 1 ? 'Its session makes the output and says where it is' : `Their sessions make the ${made.length} outputs and say where each is`}${held(made) ? `; ${waits(held(made))} for your review once published` : ''}.` : '';
-  const sessions = plan.subJobs.some(reviewedSession), humans = plan.subJobs.some(isHumanSub);
-  return `Approve starts work in dedicated worktrees.${stories}${fired}${outputs} ${['reviewCode', 'reviewMerge', ...(sessions ? ['reviewSessions'] : [])].map((f) => `${checkpoint(f).name}: ${checkpointHint(checkpoint(f), youReview(job, f))}.`).join(' ')}${humans ? ' Nothing starts a human task: you mark it done, and that releases whatever waits on it.' : ''}`;
+  const stories = (plan.stories || []).filter((t) => !t.key && writeReviewed(job, creates.find((c) => c.storyId === t.id) || {})).length;
+  const held = stories + writes.filter((w) => !isStoryCreate(w) && writeReviewed(job, w)).length;
+  const steps = plan.subJobs.length - writes.length;
+  return `Starts ${steps} step${steps === 1 ? '' : 's'}${held ? ` · ${held} write${held === 1 ? '' : 's'} held for you` : ''}`;
 }
 
 // What a refused cleanup would lose, exactly as the server listed it: commit
@@ -1114,7 +1104,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       sessionDormant(job, sub) ? `${triggerLine(job, sub)}: it is dropped itself once ${trigger?.title || sub.on.sub} lands.` : '',
       ...writeHints(job, sub, held),
       yours ? `No agent will ever run this one${sub.state === 'doing' ? '; you marked it in progress' : ''}. Marking it done is what releases the work waiting on it.` : '',
-      codeAwaitingReview(sub) ? `Nothing is committed yet. Read the diff with Review code — comments there go straight to the session — then approve: a short session commits the working tree as it stands and ${sub.pr ? 'pushes it to the open PR' : 'pushes and opens the PR'}.` : pr && sub.stage === 'review' && !sub.error && !held ? `Approved. A session commits and ${sub.pr ? 'pushes to the open PR' : 'pushes and opens the PR'} next.` : '',
+      codeAwaitingReview(sub) ? `Uncommitted · approve to commit and ${sub.pr ? 'push to the open PR' : 'open the PR'}` : pr && sub.stage === 'review' && !sub.error && !held ? `Approved. A session commits and ${sub.pr ? 'pushes to the open PR' : 'pushes and opens the PR'} next.` : '',
       mergeHeldByComments(job, sub) ? 'Comments read as blocking, so the automatic merge is on hold. Approve merge to override for this head.' : '',
       sub.stage === 'pr' && sub.pr?.mergeWithAdmin ? 'Checks have passed. Merging will override GitHub’s required review.' : '',
       sub.fixRequested ? `Fix requested${sub.fixRequested.note ? `: ${sub.fixRequested.note}` : ''}. A repair session starts ${pendingDependencies(job, sub).length ? 'once its prerequisites deploy' : 'on the next tick'}.` : '',
@@ -1181,7 +1171,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         ${sub.pr ? commentsHtml(sub, commentsShown) : ''}
         ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
         ${sub.deployed ? `<h3>Landed</h3>${receiptHtml(sub.deployed.checks)}` : ''}${noteFor(sub)}${approvalNoteFor(sub)}${refusalHtml(sub)}`;
-      actions = `${codeAwaitingReview(sub) && !sub.error && !held ? approveSplitHtml('approve-code', [hints.find((h) => h.startsWith('Nothing is committed')) || '', sub.ready?.round ? `Approval is tied to round ${sub.ready.round}${sub.ready.treeHash ? ` and working tree ${sub.ready.treeHash.slice(0, 7)}` : ''}.` : ''].filter(Boolean).join(' '), `Approve &amp; ${sub.pr ? 'push' : 'open PR'}`) : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="Merge head ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
+      actions = `${codeAwaitingReview(sub) && !sub.error && !held ? approveSplitHtml('approve-code', [hints.find((h) => h.startsWith('Uncommitted')) || '', sub.ready?.round ? `Approval is tied to round ${sub.ready.round}${sub.ready.treeHash ? ` and working tree ${sub.ready.treeHash.slice(0, 7)}` : ''}.` : ''].filter(Boolean).join(' · '), `Approve &amp; ${sub.pr ? 'push' : 'open PR'}`) : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="Merge head ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
         ${sub.worktree && sub.stage !== 'done' ? reviewCodeHtml(sub) : ''}${session}${retry}${sub.cleanupRefusal && sub.cleanupRefusal.pinned !== false && sub.stage === 'cleanup' && !sub.discard ? `<button class="danger" id="job-discard">${ICONS.x}Discard anyway</button>` : ''}
         ${sub.recoveredBy ? `<button data-open-sub="${esc(sub.recoveredBy)}" title="${esc(hints.at(-1))}">${ICONS.wrench}Open fix sub-job</button>` : ''}`;
     }

@@ -72,7 +72,7 @@ test('code review is a stop before anything is committed: the card asks for a re
   assert.equal(jobNeedsReview(job, job.subJobs[0]), true);
   assert.deepEqual(jobCards([job])[0].stage, 'review');
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.match(f.q('#job-dialog').textContent, /Ready for review/); assert.match(hint(f), /Nothing is committed yet/);
+  assert.match(f.q('#job-dialog').textContent, /Ready for review/); assert.match(hint(f), /^Uncommitted · approve to commit and open the PR$/m);
   assert.deepEqual([...f.q('#job-dialog').querySelectorAll('.job-receipt li')].map((li) => li.textContent.trim()), ['✓ Tests pass', '✓ Lint clean']);
   assert.equal(f.q('#job-diff').textContent, 'Review code', 'the diff is the review surface');
   assert.equal(f.q('#job-ide').closest('.job-split-more .job-split-menu') !== null, true, 'the desktop IDE is the other review surface, in the same control\'s menu');
@@ -354,7 +354,7 @@ test('the plan under review shows the shared context, each brief and each check 
   const approve = f.q('[data-action="approve-plan"]');
   assert.equal(approve.textContent, 'Approve 2');
   assert.doesNotMatch(approve.title, /[Cc]ode review/);
-  assert.match(approve.title, /Approve starts work in dedicated worktrees/, 'what approval does is one hover away');
+  assert.equal(approve.title, 'Starts 2 steps', 'what approval does is one hover away');
 });
 
 test('the plan review names no worktree branch, and a cut PR tile shows it; a sub-job\'s detail shows the branch its worktree is actually on', (t) => {
@@ -945,7 +945,7 @@ test('a plan proposing a human task draws it as a third kind with no repository'
   assert.deepEqual(kinds(), ['Human', 'Session', 'PR'], 'the kind is a glyph, named for assistive tech and on hover');
   assert.deepEqual([...document.querySelectorAll('.job-node')].map((n) => n.title.split('\n')[0]), ['Only you can do this one — no agent, no pull request', 'An agent session on this machine — no pull request', 'A pull request in a repository']);
   assert.deepEqual([...document.querySelectorAll('.job-node')].map((n) => n.title.includes('~') || n.title.includes('/repo')), [false, false, true], 'only a PR names a repository');
-  assert.match(f.q('[data-action="approve-plan"]').title, /Nothing starts a human task: you mark it done/);
+  assert.equal(f.q('[data-action="approve-plan"]').title, 'Starts 3 steps', 'a human task is a step');
   f.q('#job-dialog').close();
 });
 
@@ -955,7 +955,7 @@ test('plans show session rows without a repository and new jobs default to revie
   f.q('.job-plate-open[data-job=\"job1\"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-node')].map((n) => [n.dataset.node, n.querySelector('.job-kind').getAttribute('aria-label')]), [['spike', 'Session'], ['api', 'PR']]);
   assert.match(f.q('[data-node="spike"]').title, /An agent session on this machine/);
-  assert.match(f.q('[data-action="approve-plan"]').title, /Session results: You approve each session’s receipt before it counts as done\./);
+  assert.equal(f.q('[data-action="approve-plan"]').title, 'Starts 2 steps');
   f.q('#job-dialog').close();
   f.q('#job-new').click(); const form = f.q('#job-create-form');
   form.elements.intent.value = 'Deliver it'; form.dispatchEvent(f.event('submit'));
@@ -973,12 +973,12 @@ test('a plan lists its story titles, and approval of keyless stories says whethe
   assert.deepEqual([...document.querySelectorAll('.job-node')].map((e) => e.title.split('\n')[1]), ['NEW-1', 'SEC-NEW-1']);
   assert.deepEqual([...document.querySelectorAll('.job-appbar .job-chip')].slice(1).map((c) => c.textContent), ['NEW-1', 'SEC-NEW-1', '+2'], 'the app bar names the first stories; the rest are one chip');
   assert.match(f.q('.job-appbar .job-chip[title^="Customers can sign in"]').title, /created only after you approve/);
-  assert.match(f.q('[data-action="approve-plan"]').title, /^Approve starts work in dedicated worktrees\. The 3 new Jira stories are created in Jira straight away\./);
+  assert.doesNotMatch(f.q('[data-action="approve-plan"]').title, /held/);
   job.reviewWrites = true; f.view.update(f.data); f.q('#job-dialog').close(); f.q('[data-job="job1"]').click();
-  assert.match(f.q('[data-action="approve-plan"]').title, /The 3 new Jira stories are held for your review before they are created\./, 'a job reviewing its writes holds every create');
+  assert.match(f.q('[data-action="approve-plan"]').title, / · 3 writes held for you$/, 'a job reviewing its writes holds every create');
   job.reviewWrites = false; job.plan.subJobs.unshift({ id: 'create-story', kind: 'write', place: { type: 'jira' }, title: 'Create story: Customers can sign in', storyId: 'story', after: [], action: { type: 'create' }, review: true });
   f.view.update(f.data); f.q('#job-dialog').close(); f.q('[data-job="job1"]').click();
-  assert.match(f.q('[data-action="approve-plan"]').title, /Of the 3 new Jira stories, 2 are created in Jira straight away and 1 is held for your review first\./, 'a create\'s own review wins over the job\'s');
+  assert.match(f.q('[data-action="approve-plan"]').title, / · 1 write held for you$/, 'a create\'s own review wins over the job\'s');
   job.plan.subJobs.shift(); job.plan.stories[0].title = 'Customers sign in without lockouts'; f.view.update(f.data); f.q('#job-dialog').close(); f.q('[data-job="job1"]').click();
   f.q('[data-action="approve-plan"]').click();
   assert.equal(f.sent[0].plan.stories[0].title, 'Customers sign in without lockouts');
@@ -1055,7 +1055,7 @@ test('a ticketless plan reviews with no stories, its sub-jobs carry No ticket an
   assert.equal(f.q('.job-appbar .job-chip[title="This work has no Jira ticket"]').textContent, 'No ticket');
   assert.equal(document.querySelectorAll('.job-story-key').length, 0);
   assert.deepEqual([...document.querySelectorAll('.job-node')].map((e) => e.title.split('\n')[1]), ['No ticket', 'No ticket']);
-  assert.match(f.q('[data-action="approve-plan"]').title, /^Approve starts work/);
+  assert.match(f.q('[data-action="approve-plan"]').title, /^Starts \d+ steps?$/);
   f.q('#job-dialog').close();
   job.stage = 'active'; job.subJobs = job.plan.subJobs.map((s) => ({ ...s, stage: 'implementation', sessions: [], repairs: [] })); f.view.update(f.data);
   assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'muted', text: 'Queued' });
@@ -1068,7 +1068,7 @@ test('a plan whose stories all exist reads as existing and approval starts work 
   const f = fixture(t); f.q('.job-plate-open[data-job=\"job1\"]').click();
   assert.match(f.q('.job-plan-more h4').textContent, /existing/);
   assert.equal(f.q('.job-appbar .job-chip[title="Customers can sign in"]').textContent, 'AUTH-1');
-  assert.match(f.q('[data-action="approve-plan"]').title, /^Approve starts work/);
+  assert.match(f.q('[data-action="approve-plan"]').title, /^Starts \d+ steps?$/);
   assert.equal(f.q('.job-story-key').textContent, 'AUTH-1');
 });
 
@@ -1287,7 +1287,7 @@ test('a change requested on an open PR under code review reads as a fix queued i
   assert.equal(jobCards([job])[0].stage, 'implementation', 'the card sits in Work, not PR');
   job.subJobs = [{ ...sub('api'), stage: 'review', state: 'verified', pr, ready: { checks: ['Pinned'], receiptId: 'run_2' } }];
   f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.match(hint(f), /pushes it to the open PR/);
+  assert.match(hint(f), /push to the open PR/);
   assert.equal(f.q('#job-dialog [data-action="approve-code"]').textContent, 'Approve & push');
 });
 
@@ -1647,11 +1647,11 @@ test('plan review hangs each proposed write under the session that makes it, dra
   eye('w-wont').click();
   assert.equal(f.q('[data-write-editor]'), null, 'flipping review does not open the editor');
   assert.equal(eye('w-wont').getAttribute('aria-pressed'), 'false'); assert.equal(f.q('.job-write-count').textContent, '2 writes');
-  assert.match(f.q('[data-action="approve-plan"]').title, /Their sessions make the 2 writes\. /);
+  assert.equal(f.q('[data-action="approve-plan"]').title, 'Starts 4 steps');
   eye('w-wont').click();
   assert.equal(f.q('.job-write-count').textContent, '2 writes · 1 reviewed');
   assert.equal(f.q('[data-action="approve-plan"]').textContent, 'Approve 4', 'writes are not counted as work; their sessions are');
-  assert.match(f.q('[data-action="approve-plan"]').title, /Their sessions make the 2 writes; 1 is drafted for your review first/);
+  assert.equal(f.q('[data-action="approve-plan"]').title, 'Starts 4 steps · 1 write held for you');
   assert.ok(![...document.querySelectorAll('[data-dep]')].some((c) => c.value.startsWith('w-')), 'nothing can wait on a write');
   assert.equal(f.q('[data-add-write="api"]'), null, 'only a session makes writes');
   f.q('[data-node="w-pr"]').click();
