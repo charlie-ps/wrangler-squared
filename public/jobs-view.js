@@ -91,7 +91,7 @@ function eventHtml(job, sub) {
   // Under the failure, what Wrangler did about it (job-red.js): looking at it, a fix
   // waiting for you, or given up on with what it tried and the decision it needs.
   const fix = !f ? '' : f.kind === 'fixing'
-    ? `<div class="job-event-fix fixing">${ICONS.spin}<span><b>${esc(f.title)}</b>${esc(f.detail)}<small>Replanning · try ${f.n}</small></span></div>`
+    ? `<div class="job-event-fix fixing">${ICONS.spin}<span><b>${esc(f.title)}</b><small>try ${f.n}</small></span></div>`
     : f.kind === 'ready'
       ? `<div class="job-event-fix ready">${ICONS.sparkle}<span><b>${esc(f.title)}</b>${esc(f.detail)}<small>${f.waits ? 'Waiting because Red steps is “You decide”' : 'Waiting for you: it changes the plan or claims something about the outside world'}</small></span></div>`
       : `<div class="job-event-fix declared${ev.detail ? '' : ' alone'}">${ICONS.x}<span><b>${esc(f.title)}</b>${esc(f.detail)}${f.tried.length ? `<ul>${f.tried.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}${f.ask ? `<span class="ask">Needs you: ${esc(f.ask)}</span>` : ''}<small>${DECLARED_BY[f.by] || DECLARED_BY.planner}${f.options ? ' · options are in the job’s plan change' : ''}</small></span></div>`;

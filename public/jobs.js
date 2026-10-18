@@ -437,7 +437,7 @@ export function eventFor(job, sub) {
     const fix = { kind: 'declared', title: 'Declared red', detail: d.summary, tried: d.tried || [], ask: d.ask || '', by: d.by || (d.auto ? 'auto' : 'planner'), options: !!job.replan?.proposal?.escalation };
     return { ...base, ...(flat(d.summary).startsWith(flat(sub.error)) ? { detail: '' } : {}), fix };
   }
-  if (sub.error && !job.error && redFixing(job, sub)) return { ...base, fix: { kind: 'fixing', title: 'Fixing', detail: 'Wrangler is replanning this step. It holds this sub-job and the ones after it; everything else carries on.', n: job.replan.red.n || 1 } };
+  if (sub.error && !job.error && redFixing(job, sub)) return { ...base, fix: { kind: 'fixing', title: 'Fixing', n: job.replan.red.n || 1 } };
   if (sub.error && !job.error && redFixReady(job, sub)) return { ...base, fix: { kind: 'ready', title: 'Fix ready', detail: job.replan.proposal.diagnosis?.summary || job.replan.proposal.label || 'Wrangler proposed a fix. Review it.', waits: job.reviewRed ?? true } };
   if (sub.error) return { title: eventTitle(sub), detail: sub.error };
   if (deploymentStalled(sub)) return { title: 'Nothing deployed', detail: `No post-merge run has started for merge commit ${(sub.pr?.mergeCommit || '').slice(0, 8)}.` };
