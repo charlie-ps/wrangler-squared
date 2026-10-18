@@ -150,7 +150,7 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 #jobs:not([data-plate-art="full"]) .job-plate-graph .lbl { paint-order:stroke; stroke:rgba(2,3,6,.85); stroke-width:2.4px; stroke-linejoin:round; }
 #jobs:not([data-plate-art="full"]) .job-plate-graph .edge { stroke-opacity:.55; }
 @media(prefers-reduced-motion:reduce) { .gx * { animation:none !important; } .job-plate::before { animation:none; } }
-.job-plate-art { position:relative; aspect-ratio:320 / 150; overflow:hidden; background:#05070c; }
+.job-plate-art { position:relative; aspect-ratio:320 / 150; overflow:hidden; background:#05070c; border-radius:17px 17px 0 0; }
 .job-plate-art>svg { position:absolute; inset:0; width:100%; height:100%; display:block; }
 .job-plate-art .scrim { position:absolute; inset:0; pointer-events:none; background:linear-gradient(180deg, rgba(5,6,10,.42) 0%, rgba(5,6,10,0) 26%, rgba(5,6,10,0) 78%, rgba(5,6,10,.3) 100%); }
 .job-plate-art.ink-dark .scrim { background:linear-gradient(180deg, rgba(250,249,245,.5) 0%, rgba(250,249,245,0) 26%); }
@@ -1581,30 +1581,22 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
    forming, tagged IDEA where a job names its repos. */
 .job-plate.idea .job-plate-art::after { opacity:1; animation:none; background:linear-gradient(180deg, rgba(2,3,6,.35), transparent 30%); }
 /* Once it has a plan the cloud collapses into the job's black hole (job-forming.js), which moves
-   every part with Web Animations. The sky's own hole is repainted whenever the sky likes, so it
-   follows a variable on the art instead, resting at its last frame. */
-@property --bhx-hole { syntax:'<number>'; inherits:true; initial-value:1; }
+   every part with Web Animations, each resting at its last frame: the plain plate's. */
 .job-plate-art.forming > .gx.nb { z-index:1; will-change:opacity; }
 /* The haze shrinks to the point as it forms, so on a plate its canvas's edges always fade rather
    than show as a box (always, so accepting the idea changes nothing on its first frame). */
 .job-plate-art > .gx.nb .drift { -webkit-mask-image:radial-gradient(closest-side, #000 60%, transparent); mask-image:radial-gradient(closest-side, #000 60%, transparent); }
 .job-plate-art.forming > .gx.nb .drift { will-change:transform; }
 .job-plate-art.forming > :is(.gx:not(.nb),.scene,.scrim) { z-index:2; }
-.job-plate-art.forming > .gx:not(.nb) > .fx { opacity:var(--bhx-hole); }
 .job-plate-art.forming > .bhx { position:absolute; inset:0; z-index:3; pointer-events:none; overflow:hidden; }
 .job-plate-art.forming > :is(.job-plate-graph,.job-plate-tag,.job-plate-unplanned) { z-index:4; }
 .bhx canvas { position:absolute; left:0; top:0; }
 .bhx .layer { mix-blend-mode:screen; }
 .bhx-at { position:absolute; width:0; height:0; }
-.bhx-at > :not(canvas,.ring) { position:absolute; left:0; top:0; width:var(--w); height:var(--h,var(--w)); margin:calc(var(--h,var(--w)) / -2) 0 0 calc(var(--w) / -2); border-radius:50%; }
-.bhx-hole,.bhx-hole .ring canvas,.bhx-at > div,.bhx-wash { will-change:transform, opacity; }
-.bhx-hole { opacity:0; }
-.bhx-hole .ring { position:absolute; }
-/* Newborn, its ring burns white before it cools to the sky's colour. */
-.bhx-heat { background:radial-gradient(closest-side, transparent 78%, rgba(255,255,255,.9) 84%, rgba(255,236,228,.45) 90%, transparent); }
+.bhx-at > * { position:absolute; left:0; top:0; width:var(--w); height:var(--w); margin:calc(var(--w) / -2) 0 0 calc(var(--w) / -2); border-radius:50%; }
+.bhx-at > div,.bhx-wash { will-change:transform, opacity; }
 .bhx-wash { position:absolute; inset:0; opacity:0; background:radial-gradient(90% 120% at var(--px) var(--py), #fff, rgba(232,236,255,.85) 30%, rgba(158,171,255,.35) 70%, rgba(111,124,255,.12)); }
 .bhx-flash { opacity:0; background:radial-gradient(closest-side, #fff, rgba(255,255,255,.95) 20%, rgba(255,226,214,.55) 42%, rgba(240,138,154,.18) 70%, transparent); }
-.bhx-streak { --h:5px; opacity:0; background:radial-gradient(closest-side, #fff, rgba(217,222,255,.75) 25%, rgba(111,124,255,0)); }
 .bhx-wave { box-sizing:border-box; opacity:0; border:1.5px solid rgba(255,236,228,.9); box-shadow:0 0 16px rgba(240,138,154,.55), inset 0 0 16px rgba(158,171,255,.4); }
 @media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-dock { padding-left:16px; padding-right:16px; } }
 @media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-title-loader i,.job-dialog .job-idea-band h2.titled > *,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-dialog .job-idea-band h2.titled > .job-title-loader { display:none; } }

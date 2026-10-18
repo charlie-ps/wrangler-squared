@@ -61,19 +61,19 @@ export function cv(w, h, dpr, parent, cls) {
   return [c, x];
 }
 // A blurred shape without ctx.filter (Safari): draw it off-canvas and let only its shadow land.
-export function soft(x, dpr, blur, color, draw) {
+function soft(x, dpr, blur, color, draw) {
   x.save(); x.shadowColor = color; x.shadowBlur = blur * dpr; x.shadowOffsetX = 1e4 * dpr; x.translate(-1e4, 0); x.fillStyle = x.strokeStyle = '#000'; draw(x); x.restore();
 }
 
 // Where paint() puts a sky's hole, from the same first draws of its seed: the
-// idea→job transition (job-forming.js) lands its travelling hole exactly there.
+// idea→job transition (job-forming.js) collapses at its top.
 export function holeOf(sky, W) {
   const D = sky.dataset, H = W * 150 / 320, s = W / 320, R = 150 * s, lvl = +D.lvl || 1, r = rng(D.seed);
   const dir = r() < .5 ? -1 : 1, x = W * (.5 + dir * (.04 + r() * .04));
   return { x, y: H + R - capFor(lvl, +D.floor || FLOOR) * s, R, s, dir, heat: (.8 + .05 * lvl) * ('dim' in D ? .62 : 1), pal: ramp(paletteOf(D.tone)) };
 }
 // One shell of the lensed ring's arc streaks, around (0,0) of `x`.
-export function streaks(x, r, R, s, a0, a1, cnt, heat, pal) {
+function streaks(x, r, R, s, a0, a1, cnt, heat, pal) {
   x.globalCompositeOperation = 'lighter'; x.lineCap = 'round';
   for (let i = 0; i < cnt; i++) {
     const rho = R * (a0 + (a1 - a0) * r() ** 1.5), hot = Math.max(0, 1 - (rho / R - 1) / .5);
@@ -83,7 +83,7 @@ export function streaks(x, r, R, s, a0, a1, cnt, heat, pal) {
   }
 }
 // The black disc and its photon ring, brightest on the approaching side.
-export function horizon(F, cx, cy, R, s, dpr, dir, pal) {
+function horizon(F, cx, cy, R, s, dpr, dir, pal) {
   F.fillStyle = '#000'; F.beginPath(); F.arc(cx, cy, R, 0, 7); F.fill();
   soft(F, dpr, 3 * s, pal(.92, .85), (x) => { x.lineWidth = 1.4 * s; x.beginPath(); x.arc(cx, cy, R * 1.004, 0, 7); x.stroke(); });
   const cg = F.createConicGradient(dir > 0 ? 0 : Math.PI, cx, cy);
@@ -92,9 +92,22 @@ export function horizon(F, cx, cy, R, s, dpr, dir, pal) {
   F.strokeStyle = pal(.9, .4); F.lineWidth = .45 * s; F.beginPath(); F.arc(cx, cy - .01 * R, R * 1.028, 0, 7); F.stroke();
 }
 
+// The idea→job transition (job-forming.js) has a sky paint the same picture into a frame reaching
+// past the plate (`X0`/`Y0` of room left and above, `BW` × `BH` in all), so its camera can start
+// out far enough to show the whole hole. Inside the plate every pixel is the plain sky's: the same
+// draws, offset by whole pixels. The frame is kept until the sky next repaints on its own.
+const wholes = new WeakMap();
+export function paintWhole(sky, frame, onPaint) {
+  if (wholes.get(sky)?.frame === frame) return;
+  wholes.set(sky, { frame, onPaint });
+  if (sky.firstChild) paint(sky);
+}
+export const dropWhole = (sky) => wholes.delete(sky);
+
 function paint(art) {
   const W = art.clientWidth;
   if (!W) return false;
+  const whole = wholes.get(art), fr = whole?.frame, ox = fr?.X0 || 0, oy = fr?.Y0 || 0;
   const H = W * 150 / 320, s = W / 320, R = 150 * s, D = art.dataset;
   const pal = ramp(paletteOf(D.tone)), lvl = +D.lvl || 1, floor = +D.floor || FLOOR;
   const r = rng(D.seed), dpr = Math.min(1.25, devicePixelRatio || 1);
@@ -106,53 +119,68 @@ function paint(art) {
   const th = Math.acos(Math.max(-1, 1 - (cap + 5) * s / R)), hp = [cx + dir * R * 1.01 * Math.sin(th), cy - R * 1.01 * Math.cos(th)];
   const P0 = [hp[0] - d[0] * R, hp[1] - d[1] * R], at = (q) => [P0[0] + d[0] * q * R, P0[1] + d[1] * q * R];
   art.replaceChildren();
+  // A whole frame is the plate's canvases grown to it; a plain one keeps them exactly as they were.
+  const root = fr ? el('div', 'whole', art) : art, FW = fr ? fr.BW : W, FH = fr ? fr.BH : H;
+  if (fr) root.style.cssText = `position:absolute;left:${-ox}px;top:${-oy}px;width:${FW}px;height:${FH}px`;
+  const tall = (dp, parent, cls) => {
+    const [c, x] = fr ? cv(FW, FH, dp, parent, cls) : cv(W, 2 * H, dp, parent, cls);
+    if (fr) x.translate(ox, oy); else { c.style.top = `${-H}px`; x.translate(0, H); }
+    return [c, x, fr ? [-ox, -oy, FW, FH] : [0, -H, W, 2 * H]];
+  };
 
-  const [, b] = cv(W, H, dpr, art, 'l');
-  const sky = b.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#020306'); sky.addColorStop(1, '#07070a'); b.fillStyle = sky; b.fillRect(0, 0, W, H);
+  const [, b] = cv(FW, FH, dpr, root, 'l'); b.translate(ox, oy);
+  const all = [-ox, -oy, FW, FH];
+  const sky = b.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#020306'); sky.addColorStop(1, '#07070a'); b.fillStyle = sky; b.fillRect(...all);
   for (let i = 0; i < 2; i++) {
     const x = r() * W, y = r() * H * .6, rr = (.3 + r() * .4) * W, g = b.createRadialGradient(x, y, 0, x, y, rr);
-    g.addColorStop(0, pal(.3, .06)); g.addColorStop(1, pal(.3, 0)); b.fillStyle = g; b.fillRect(0, 0, W, H);
+    g.addColorStop(0, pal(.3, .06)); g.addColorStop(1, pal(.3, 0)); b.fillStyle = g; b.fillRect(...all);
   }
-  for (let i = 0; i < 120; i++) {
-    const x = r() * W, y = r() * H, dx = x - cx, dy = y - cy, dd = Math.hypot(dx, dy);
-    if (dd < R * 1.04) continue;
-    const sz = (.22 + r() ** 3 * 1.05) * s * .75, a = .2 + r() * .6, k = Math.max(0, (1.3 * R - dd) / (.26 * R));
+  const star = (q, x, y) => {
+    const dx = x - cx, dy = y - cy, dd = Math.hypot(dx, dy);
+    if (dd < R * 1.04) return;
+    const sz = (.22 + q() ** 3 * 1.05) * s * .75, a = .2 + q() * .6, k = Math.max(0, (1.3 * R - dd) / (.26 * R));
     b.save(); b.translate(x, y); b.rotate(Math.atan2(dy, dx) + Math.PI / 2);
-    b.fillStyle = r() < .2 ? `rgba(255,226,196,${a})` : `rgba(232,236,255,${a})`;
+    b.fillStyle = q() < .2 ? `rgba(255,226,196,${a})` : `rgba(232,236,255,${a})`;
     b.beginPath(); b.ellipse(0, 0, sz * (1 + 2.2 * k * k), sz * Math.max(.35, 1 - .6 * k), 0, 0, 7); b.fill(); b.restore();
+  };
+  for (let i = 0; i < 120; i++) star(r, r() * W, r() * H);
+  // Past the plate, as many again per area from their own draws, so the plate's own never move.
+  if (fr) for (let i = 0, q = rng(`${D.seed}:far`), n = 120 * FW * FH / (W * H); i < n; i++) {
+    const x = q() * FW - ox, y = q() * FH - oy;
+    if (x < 0 || x > W || y < 0 || y > H) star(q, x, y);
   }
 
   // Everything bright sits in .fx, whose mask drops it to a third above the plan's floor.
-  const fx = el('div', 'fx', art), fp = (v) => `${(Math.max(0, Math.min(150, v)) / 1.5).toFixed(1)}%`;
+  const fx = el('div', 'fx', root), fp = (v) => { const p = (Math.max(0, Math.min(150, v)) / 1.5).toFixed(1); return fr ? `${(oy + p / 100 * H).toFixed(2)}px` : `${p}%`; };
   fx.style.maskImage = fx.style.webkitMaskImage = `linear-gradient(rgba(0,0,0,.32) ${fp(floor - 6)}, #000 ${fp(floor + 10)})`;
   const bh = el('div', 'bh', fx);
 
-  const [gw, G] = cv(W, 2 * H, 1, bh, 'l'); gw.style.top = `${-H}px`; G.translate(0, H); G.globalCompositeOperation = 'lighter';
+  const [, G, gbox] = tall(1, bh, 'l'); G.globalCompositeOperation = 'lighter';
   const hg = G.createRadialGradient(cx, cy, R * .96, cx, cy, R * 2);
   hg.addColorStop(0, pal(.75, .5 * heat)); hg.addColorStop(.06, pal(.62, .16 * heat)); hg.addColorStop(.3, pal(.42, .04)); hg.addColorStop(1, pal(.3, 0));
-  G.fillStyle = hg; G.fillRect(0, -H, W, 2 * H);
+  G.fillStyle = hg; G.fillRect(...gbox);
   soft(G, 1, .09 * R, pal(.72, .55 * heat), (x) => { x.lineWidth = .12 * R; x.beginPath(); x.arc(cx, cy - .03 * R, R * 1.08, 0, 7); x.stroke(); });
   soft(G, 1, .22 * R, pal(.62, .45 * heat), (x) => { x.lineWidth = .24 * R; x.lineCap = 'round'; x.beginPath(); x.moveTo(...at(.4)); x.lineTo(...at(1.2)); x.stroke(); });
   soft(G, 1, .25 * R, pal(.55, .4), (x) => { x.beginPath(); x.ellipse(cx, H + .16 * R, 2.2 * R, .14 * R, 0, 0, 7); x.fill(); });
 
   // Two shells of arc streaks turning at different speeds; a static conic mask keeps the approaching side bright.
   const rc = [cx, cy - .03 * R], bright = dir > 0 ? 90 : 270;
-  const mask = `conic-gradient(from ${bright - 180}deg at ${rc[0]}px ${rc[1]}px, rgba(0,0,0,.16), rgba(0,0,0,.6) 25%, #000 44%, #000 56%, rgba(0,0,0,.6) 75%, rgba(0,0,0,.16))`;
+  const mask = `conic-gradient(from ${bright - 180}deg at ${rc[0] + ox}px ${rc[1] + oy}px, rgba(0,0,0,.16), rgba(0,0,0,.6) 25%, #000 44%, #000 56%, rgba(0,0,0,.6) 75%, rgba(0,0,0,.16))`;
   for (const [a0, a1, cnt, per] of [[1, 1.07, 340, 300], [1.03, 1.18, 200, 620]]) {
     const ro = a1 * R, box = el('div', 'l ring', bh); box.style.maskImage = box.style.webkitMaskImage = mask;
     const [c, x] = cv(ro * 2, ro * 2, dpr, box, `spin${dir < 0 ? ' rev' : ''}`);
-    c.style.left = `${rc[0] - ro}px`; c.style.top = `${rc[1] - ro}px`; c.style.setProperty('--dur', `${per}s`); c.style.animationDelay = `${-r() * per}s`;
+    c.style.left = `${rc[0] - ro + ox}px`; c.style.top = `${rc[1] - ro + oy}px`; c.style.setProperty('--dur', `${per}s`); c.style.animationDelay = `${-r() * per}s`;
     x.translate(ro, ro);
     streaks(x, r, R, s, a0, a1, cnt, heat, pal);
   }
 
-  const [, F] = cv(W, H, dpr, bh, 'l');
+  const [, F] = cv(FW, FH, dpr, bh, 'l'); F.translate(ox, oy);
   horizon(F, cx, cy, R, s, dpr, dir, pal);
 
   // The beam: the disc's near side rising from the bottom edge, one tile of streaks sliding along it.
   const Lb = 2 * R, Hb = .8 * R, Tw = Lb * .5, mid = at(1.25);
   const box = el('div', 'band', bh);
-  box.style.cssText = `left:${mid[0] - Lb / 2}px;top:${mid[1] - Hb / 2}px;width:${Lb}px;height:${Hb}px;transform:rotate(${Math.atan2(d[1], d[0])}rad)`;
+  box.style.cssText = `left:${mid[0] - Lb / 2 + ox}px;top:${mid[1] - Hb / 2 + oy}px;width:${Lb}px;height:${Hb}px;transform:rotate(${Math.atan2(d[1], d[0])}rad)`;
   const mc = document.createElement('canvas'); mc.width = 128; mc.height = 48;
   const mx = mc.getContext('2d'), md = mx.createImageData(128, 48);
   for (let i = 0; i < 128; i++) {
@@ -180,8 +208,22 @@ function paint(art) {
   fc.style.setProperty('--dur', '150s'); fc.style.setProperty('--tw', `${Tw}px`); fc.style.animationDelay = `${-r() * 150}s`;
   for (let k = 0; k * Tw < Lb + Tw; k++) fl.drawImage(tile, k * Tw, 0, Tw, Hb);
 
+  // Seen whole, the beam's foot and the flare would cross the disc and the flare's streak would run
+  // the width of the frame: past the plate, the disc covers them and the streak fades out.
+  const cover = fr && (() => {
+    const [mc, M] = cv(FW, FH, dpr, null, ''), m = .25 * W;
+    M.translate(ox, oy);
+    const across = (g) => { g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(m / (W + 2 * m), '#000'); g.addColorStop(1 - m / (W + 2 * m), '#000'); g.addColorStop(1, 'rgba(0,0,0,0)'); return g; };
+    M.fillStyle = across(M.createLinearGradient(-m, 0, W + m, 0)); M.fillRect(...all);
+    M.globalCompositeOperation = 'destination-in';
+    // Not below it: the flare sits just under the plate's foot, on the disc.
+    const v = M.createLinearGradient(0, -m * H / W, 0, H + 1);
+    v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(m * H / W / (H + 1 + m * H / W), '#000'); v.addColorStop(H / (H + 1 + m * H / W), '#000'); v.addColorStop(1, 'rgba(0,0,0,0)');
+    M.fillStyle = v; M.fillRect(...all);
+    return (x, op) => { x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = op; x.drawImage(mc, 0, 0, x.canvas.width, x.canvas.height); x.restore(); };
+  })();
   // The flare: a white-hot point where the beam crosses the photon ring, with an anamorphic streak.
-  const [gc, X] = cv(W, 2 * H, 1, bh, 'l glare'); gc.style.top = `${-H}px`; X.translate(0, H); X.globalCompositeOperation = 'lighter';
+  const [, X] = tall(1, bh, 'l glare'); X.globalCompositeOperation = 'lighter';
   const hr = .36 * R, bg = X.createRadialGradient(...hp, 0, ...hp, hr);
   bg.addColorStop(0, 'rgba(255,255,255,.95)'); bg.addColorStop(.1, pal(.96, .6 * heat)); bg.addColorStop(.42, pal(.75, .12 * heat)); bg.addColorStop(1, pal(.6, 0));
   X.fillStyle = bg; X.beginPath(); X.arc(...hp, hr, 0, 7); X.fill();
@@ -191,6 +233,13 @@ function paint(art) {
     ag.addColorStop(0, `rgba(255,255,255,${a * heat})`); ag.addColorStop(.12, pal(.92, a * .5 * heat)); ag.addColorStop(1, pal(.7, 0));
     X.fillStyle = ag; X.beginPath(); X.arc(0, 0, W * len, 0, 7); X.fill(); X.restore();
   }
+  if (cover) {
+    cover(X, 'destination-in');
+    const [, C] = cv(FW, FH, dpr, bh, 'l'); C.translate(ox, oy);
+    C.fillStyle = '#000'; C.beginPath(); C.arc(cx, cy, R * .995, 0, 7); C.fill();
+    cover(C, 'destination-out');
+  }
+  whole?.onPaint(root);
   return true;
 }
 

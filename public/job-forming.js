@@ -1,8 +1,10 @@
-import { FORM, holeOf, ramp, rng, cv, soft, streaks, horizon, pullSky } from './job-skylines.js';
+import { FORM, holeOf, ramp, rng, cv, pullSky, paintWhole, dropWhole } from './job-skylines.js';
 
 // An accepted idea's plate forms its job's black hole: the cloud's mass spirals in and piles up
-// at its point (0 to FL), implodes in a flash, and the job's own hole is born there and grows as
-// it sinks to where the job's sky paints it (to LAND), handing over to that sky.
+// at its point (0 to FL) and implodes in a flash. Under it the job's own sky comes up seen from
+// far out, its whole hole centred on the point, and the camera closes in on the plate in one
+// eased move. The hole on screen from the flash on is the sky's own, so it never changes as it
+// moves, and the plate the transition ends on is that same sky, so nothing is swapped.
 //
 // The board rebuilds every plate's markup on each live tick, so every animation here is a Web
 // Animation whose startTime is the moment the idea was accepted: one on a fresh element (the plan,
@@ -11,7 +13,7 @@ import { FORM, holeOf, ramp, rng, cv, soft, streaks, horizon, pullSky } from './
 // transform and opacity move, so the compositor runs them without repainting the big canvases.
 // Each ends where the plain job plate rests, so the render that drops `.forming` changes nothing.
 export const FORM_MS = 5600, CALM_MS = 450;
-const FL = .46, HAND = .86, LAND = .96;
+const FL = .46, HOLD = FL + .1, LAND = .88;
 const EASE_OUT = 'cubic-bezier(.215,.61,.355,1)', EASE_IN = 'cubic-bezier(.55,.055,.675,.19)';
 export const formingClock = () => globalThis.document?.timeline?.currentTime ?? performance.now();
 // Reduced motion trades the whole sequence for a short crossfade, chosen when the idea is accepted.
@@ -49,14 +51,37 @@ export function mountForming(art, id, t) {
   }
   const ov = nb && overlayOf(art, id, nb, sky, t);
   if (ov) art.append(ov.node);
-  // Collect: the haze pulls in toward the point; the cloud goes under the flash.
-  play(id, nb.querySelector('.drift'), 'bhx-pull', K('transform', [[0, 'scale(1)', EASE_IN], [FL, 'scale(.3)'], [1, 'scale(.3)']]), t);
+  // Collect: the haze pulls in toward the point (on top of its own slow drift, so accepting moves
+  // nothing); the cloud goes under the flash.
+  play(id, nb.querySelector('.drift'), 'bhx-pull', K('transform', [[0, 'scale(1)', EASE_IN], [FL, 'scale(.3)'], [1, 'scale(.3)']]), t, { composite: 'add' });
   play(id, nb, 'bhx-nb', K('opacity', [[0, 1], [FL - .02, 1], [FL + .01, 0], [1, 0]]), t);
-  // The job's sky comes up behind the flash, and the plan over it at the end; the sky's own hole
-  // (repainted whenever it likes, so a variable rather than an animation) waits for the travelling one.
-  for (const e of under) play(id, e, 'bhx-sky', K('opacity', [[0, 0], [FL - .005, 0, EASE_OUT], [FL + .14, 1], [1, 1]]), t);
-  for (const e of top) play(id, e, 'bhx-top', K('opacity', [[0, 0], [.8, 0, 'ease'], [1, 1]]), t);
-  play(id, art, 'bhx-hole', K('--bhx-hole', ov?.hole ? [[0, 0], [HAND, 0, 'ease-in-out'], [LAND, 1], [1, 1]] : [[0, 1], [1, 1]]), t);
+  // The job's sky comes up under the flash, held far out for a moment, and the plan over it as
+  // the camera lands. Both sky animations end early and hold nothing after (their last frames are
+  // the plate's own): a sky an animation still holds keeps the raster it was given for the zoom, a
+  // shade softer than the plate's, so it lets go mid-move rather than at the end.
+  const up = FL + .14;
+  for (const e of under) play(id, e, 'bhx-sky', K('opacity', [[0, 0], [(FL - .005) / up, 0, EASE_OUT], [1, 1]]), t, { duration: up * t.ms, fill: 'backwards' });
+  for (const e of top) play(id, e, 'bhx-top', K('opacity', [[0, 0], [.76, 0, 'ease'], [.94, 1], [1, 1]]), t);
+  const cam = ov?.cam;
+  if (cam) paintWhole(sky, cam, (root) => {
+    root.style.transformOrigin = `${cam.X0}px ${cam.Y0}px`;
+    play(id, root, 'bhx-cam', K('transform', [[0, cam.from], [HOLD / LAND, cam.from, 'cubic-bezier(.45,0,.25,1)'], [1, 'translate(0px, 0px) scale(1)']]), t, { duration: LAND * t.ms, fill: 'backwards' });
+  });
+}
+
+// The camera's start, far enough out that the hole, its rings and their glow fit the plate around
+// the point, and the frame the sky must paint so that no edge of it shows at any moment of the
+// move (the zoom and the pan run on one curve, so the move is one straight path to sample).
+function frameOf(h, W, H, px, py) {
+  const z = Math.min(.6, .9 * Math.min(py, H - py) / (1.25 * h.R)), T = [px - z * h.x, py - z * h.y];
+  let x0 = 0, y0 = 0, x1 = W, y1 = H;
+  for (let i = 0; i <= 32; i++) {
+    const w = i / 32, k = z + (1 - z) * w, tx = T[0] * (1 - w), ty = T[1] * (1 - w);
+    x0 = Math.min(x0, -tx / k); y0 = Math.min(y0, -ty / k); x1 = Math.max(x1, (W - tx) / k); y1 = Math.max(y1, (H - ty) / k);
+  }
+  // Whole pixels at the canvases' 1.25 scale, so the plate's part of the frame lands on the same pixels.
+  const X0 = 4 * Math.ceil(1 - x0 / 4), Y0 = 4 * Math.ceil(1 - y0 / 4);
+  return { X0, Y0, BW: X0 + Math.ceil(x1) + 4, BH: Y0 + Math.ceil(y1) + 4, from: `translate(${T[0].toFixed(2)}px, ${T[1].toFixed(2)}px) scale(${z.toFixed(4)})` };
 }
 
 // The overlay is painted for one width and one sky; a resize or a sky that changed (the job's
@@ -68,7 +93,7 @@ function overlayOf(art, id, nb, sky, t) {
   if (!ov || ov.key !== key) {
     const ox = parseFloat(nb.style.getPropertyValue('--ox')) / 100, oy = parseFloat(nb.style.getPropertyValue('--oy')) / 100;
     const px = W * (Number.isFinite(ox) ? ox : .5), py = H * (Number.isFinite(oy) ? oy : .5);
-    ov = { key, ...buildOverlay(id, W, H, px, py, rng(nb.dataset.seed || id)() < .5 ? -1 : 1, sky, t) };
+    ov = { key, sky, cam: sky && frameOf(holeOf(sky, W), W, H, px, py), ...buildOverlay(id, W, H, px, py, rng(nb.dataset.seed || id)() < .5 ? -1 : 1, t) };
     overlays.set(id, ov);
   }
   Object.assign(ov.gather, { start: t.start, ms: t.ms, nb, drawn: false });
@@ -78,72 +103,33 @@ function overlayOf(art, id, nb, sky, t) {
 
 // Drop a finished transition: its overlay and its animations, which all rest where the plate does without them.
 export function dropForming(id) {
+  if (overlays.get(id)?.sky) dropWhole(overlays.get(id).sky);
   overlays.delete(id);
   for (const a of owned.get(id) || []) a.cancel();
   owned.delete(id);
 }
 
-function buildOverlay(id, W, H, px, py, dir, sky, t) {
+function buildOverlay(id, W, H, px, py, dir, t) {
   const s = W / 320, dpr = Math.min(1.5, devicePixelRatio || 1);
   const node = document.createElement('div'); node.className = 'bhx';
   node.insertAdjacentHTML('afterbegin', `<div class="bhx-wash" style="--px:${px}px;--py:${py}px"></div>`);
   const [, X] = cv(W, H, dpr, node, 'layer');
-  const hole = sky ? buildHole(id, holeOf(sky, W), px, py, t) : null;
-  if (hole) node.appendChild(hole);
   // Sized to just clear the plate from anywhere the point can sit; the plate clips the rest.
   const at = document.createElement('div'); at.className = 'bhx-at'; at.style.cssText = `left:${px}px;top:${py}px`;
-  at.innerHTML = `<div class="bhx-flash" style="--w:${1.1 * W}px"></div><div class="bhx-streak" style="--w:${1.4 * W}px"></div><div class="bhx-wave" style="--w:${1.3 * Math.hypot(W, H)}px"></div>`;
+  at.innerHTML = `<div class="bhx-flash" style="--w:${1.1 * W}px"></div><div class="bhx-wave" style="--w:${1.3 * Math.hypot(W, H)}px"></div>`;
   node.appendChild(at);
-  // Flash: a wash over the plate, a bloom at the point, the anamorphic streak and a shock ring.
-  const [wash, flash, streak, wave] = [node.firstChild, ...at.children], o = (stops) => K('opacity', stops), tf = (stops) => K('transform', stops);
+  // Flash: a wash over the plate, a bloom at the point and a shock ring.
+  const [wash, flash, wave] = [node.firstChild, ...at.children], o = (stops) => K('opacity', stops), tf = (stops) => K('transform', stops);
   play(id, wash, 'bhx-wash', o([[0, 0], [FL - .015, 0, EASE_IN], [FL + .006, .9, EASE_OUT], [FL + .17, 0], [1, 0]]), t);
   play(id, flash, 'bhx-flash', o([[0, 0], [FL - .03, 0, EASE_IN], [FL, 1, EASE_OUT], [FL + .2, 0], [1, 0]]), t);
   play(id, flash, 'bhx-flash-k', tf([[0, 'scale(.15)'], [FL - .03, 'scale(.15)', EASE_IN], [FL, 'scale(.7)', EASE_OUT], [FL + .2, 'scale(1.6)'], [1, 'scale(1.6)']]), t);
-  play(id, streak, 'bhx-streak', o([[0, 0], [FL - .01, 0, EASE_OUT], [FL + .03, 1], [FL + .13, 0], [1, 0]]), t);
-  play(id, streak, 'bhx-streak-k', tf([[0, 'scaleX(.1)'], [FL - .01, 'scaleX(.1)', EASE_OUT], [FL + .03, 'scaleX(1)'], [FL + .13, 'scaleX(1.3)'], [1, 'scaleX(1.3)']]), t);
   play(id, wave, 'bhx-wave', o([[0, 0], [FL, .95, 'cubic-bezier(.1,.6,.3,1)'], [FL + .3, 0], [1, 0]]), t);
   play(id, wave, 'bhx-wave-k', tf([[0, 'scale(0)'], [FL, 'scale(0)', 'cubic-bezier(.1,.6,.3,1)'], [FL + .3, 'scale(1)'], [1, 'scale(1)']]), t);
   const r = rng(`${id}:gather`), ps = Array.from({ length: Math.round(340 * Math.max(.8, s)) }, () => {
     const d = r() * .26;
     return { r0: .3 + Math.sqrt(r()) * 1.05, th0: r() * 6.283, d, e: Math.min(FL - .01, d + .17 + r() * .08), k: .8 + .5 * r(), w: (.5 + 1.1 * r() ** 3) * s, cool: r() < .3 };
   });
-  return { node, hole, gather: { node, X, W, H, s, ps, px, py, dir, Rx: W * .62, Ry: Math.max(H * .8, W * .62 * .55), warm: ramp(FORM.form), cool: ramp(FORM.drift) } };
-}
-
-// The job sky's hole (job-skylines.js paint()), whole around its centre so it can travel: the
-// glow, two shells of arc streaks and the horizon. Born white-hot at the point, it cools and
-// grows as it sinks into place.
-function buildHole(id, h, px, py, t) {
-  const { R, s, dir, heat, pal } = h, dpr = Math.min(1.25, devicePixelRatio || 1), r = rng(`${id}:hole`);
-  const at = document.createElement('div'); at.className = 'bhx-at bhx-hole';
-  at.style.cssText = `left:${h.x}px;top:${h.y}px`;
-  const centre = (c, w) => { c.style.left = c.style.top = `${-w / 2}px`; };
-  const gs = 3.6 * R, [gc, G] = cv(gs, gs, 1, at, 'layer'); centre(gc, gs);
-  G.translate(gs / 2, gs / 2); G.globalCompositeOperation = 'lighter';
-  const hg = G.createRadialGradient(0, 0, R * .96, 0, 0, R * 1.8);
-  hg.addColorStop(0, pal(.75, .5 * heat)); hg.addColorStop(.06, pal(.62, .16 * heat)); hg.addColorStop(.3, pal(.42, .04)); hg.addColorStop(1, pal(.3, 0));
-  G.fillStyle = hg; G.fillRect(-gs / 2, -gs / 2, gs, gs);
-  soft(G, 1, .09 * R, pal(.72, .55 * heat), (x) => { x.lineWidth = .12 * R; x.beginPath(); x.arc(0, -.03 * R, R * 1.08, 0, 7); x.stroke(); });
-  const bright = dir > 0 ? 90 : 270;
-  for (const [a0, a1, cnt, turn] of [[1, 1.07, 340, 900], [1.03, 1.18, 200, 520]]) {
-    const ro = a1 * R, box = document.createElement('div');
-    box.className = 'ring layer'; at.appendChild(box);
-    box.style.cssText = `left:${-ro}px;top:${-ro - .03 * R}px;width:${2 * ro}px;height:${2 * ro}px`;
-    box.style.maskImage = box.style.webkitMaskImage = `conic-gradient(from ${bright - 180}deg, rgba(0,0,0,.16), rgba(0,0,0,.6) 25%, #000 44%, #000 56%, rgba(0,0,0,.6) 75%, rgba(0,0,0,.16))`;
-    const [c, x] = cv(ro * 2, ro * 2, dpr, box, '');
-    x.translate(ro, ro);
-    streaks(x, r, R, s, a0, a1, cnt, heat, pal);
-    play(id, c, 'bhx-spin', [{ rotate: '0deg' }, { rotate: `${dir * turn}deg` }], t, { delay: FL * t.ms, duration: (1 - FL) * t.ms, easing: 'cubic-bezier(.2,.7,.35,1)' });
-  }
-  const fs = 2.2 * R, [fc, F] = cv(fs, fs, dpr, at, ''); centre(fc, fs);
-  horizon(F, fs / 2, fs / 2, R, s, dpr, dir, pal);
-  const hot = document.createElement('div'); hot.className = 'bhx-heat'; hot.style.setProperty('--w', `${2.4 * R}px`); at.appendChild(hot);
-  play(id, hot, 'bhx-heat', K('opacity', [[0, 1], [FL + .03, 1, 'ease-out'], [.8, 0], [1, 0]]), t);
-  play(id, at, 'bhx-bh', K('opacity', [[0, 0], [FL, 0, EASE_OUT], [FL + .05, 1], [HAND, 1, 'ease-in-out'], [LAND, 0], [1, 0]]), t);
-  play(id, at, 'bhx-scale', K('scale', [[0, .04], [FL + .02, .04, 'cubic-bezier(.3,0,.3,1)'], [.65, .24, 'cubic-bezier(.45,0,.2,1)'], [.88, 1], [1, 1]]), t);
-  const from = `${px - h.x}px ${py - h.y}px`;
-  play(id, at, 'bhx-sink', K('translate', [[0, from], [.55, from, 'cubic-bezier(.55,0,.2,1)'], [.88, '0px 0px'], [1, '0px 0px']]), t);
-  return at;
+  return { node, gather: { node, X, W, H, s, ps, px, py, dir, Rx: W * .62, Ry: Math.max(H * .8, W * .62 * .55), warm: ramp(FORM.form), cool: ramp(FORM.drift) } };
 }
 
 // The gather's streams are a pure function of the time since acceptance, so a repainted overlay
