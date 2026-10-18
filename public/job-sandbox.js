@@ -33,7 +33,7 @@ export function mountSandbox(el, { mode = 'auto', dirs = [] } = {}) {
       ? `<div class="job-sbx-modes" role="group" aria-label="Codex sandbox">${modes}</div>
         <div class="job-sbx-dirs"${full ? ' hidden' : ''}><span class="job-sbx-label">Also writable</span><div class="job-sbx-chips">${chips}${add}</div></div>
         <div class="job-sbx-launch tone-${state.mode}"><span>Launches</span><code>${esc(launchesLine(state.mode, state.dirs))}</code></div>`
-      : `<div class="job-review-row job-sbx-claude"><span class="job-review-stage">${ICONS.info}</span><span class="job-review-name">Not used by Claude<small>Claude has no OS sandbox. Its own permission mode decides what runs.</small></span><span></span></div>`}`;
+      : `<div class="job-review-row job-sbx-claude"><span class="job-review-stage">${ICONS.info}</span><span class="job-review-name" title="Claude has no OS sandbox. Its own permission mode decides what runs.">Not used by Claude</span><span></span></div>`}`;
     const input = el.querySelector('.job-sbx-input');
     if (input) input.focus();
   };

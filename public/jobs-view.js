@@ -114,15 +114,15 @@ const metDepsHtml = (job, sub) => { const met = depsOf(job, sub).filter(dependen
 
 // The five checkpoint rows New job and Automation settings share, each starting
 // on `you[field]` (settings.reviewDefaults, so a write can still be held one by
-// one in plan review); `bindReviewPoints` keeps each hint on the choice. Only
+// one in plan review); `bindReviewPoints` keeps each hint (the name's tooltip) on the choice. Only
 // settings warns about Plan on Auto: there it also starts agent-created jobs.
 const PLAN_AUTO_NOTE = 'Jobs agents create will start work without your approval too';
 const planNote = (cp, you, warn) => cp.field === 'reviewPlan' && warn ? `<span class="job-review-note"${you ? ' hidden' : ''}>${PLAN_AUTO_NOTE}</span>` : '';
-export const reviewPointsHtml = (you, { warn = false } = {}) => CHECKPOINTS.map((cp) => `<div class="job-review" data-checkpoint="${cp.field}"><div class="job-review-row"><span class="job-review-stage">${ICONS[cp.icon]}</span><span class="job-review-name">${cp.name}<small>${checkpointHint(cp, you[cp.field])}</small>${planNote(cp, you[cp.field], warn)}</span>${checkpointToggleHtml(cp, you[cp.field])}</div></div>`).join('');
+export const reviewPointsHtml = (you, { warn = false } = {}) => CHECKPOINTS.map((cp) => `<div class="job-review" data-checkpoint="${cp.field}"><div class="job-review-row"><span class="job-review-stage">${ICONS[cp.icon]}</span><span class="job-review-name" title="${checkpointHint(cp, you[cp.field])}">${cp.name}${planNote(cp, you[cp.field], warn)}</span>${checkpointToggleHtml(cp, you[cp.field])}</div></div>`).join('');
 const bindReviewPoints = (form) => form.querySelectorAll('.job-review').forEach((row) => row.onchange = () => {
   const cp = checkpoint(row.dataset.checkpoint);
   const input = form.elements[cp.field]; syncCheckpointToggle(input, cp);
-  row.querySelector('small').textContent = checkpointHint(cp, input.checked);
+  row.querySelector('.job-review-name').title = checkpointHint(cp, input.checked);
   const note = row.querySelector('.job-review-note'); if (note) note.hidden = input.checked;
 });
 const reviewFlagsOf = (values) => Object.fromEntries(CHECKPOINTS.map((cp) => [cp.field, values.get(cp.field) === 'you']));
@@ -1446,11 +1446,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     picker?.dispose(); picker = null;
     const agents = getAgents();
     const tasks = getTasks().filter((t) => !t.archived && !t.archivedAt);
-    const toggle = (name, label, consequence, checked) => `<label class="job-toggle"><span>${label}${consequence ? `<small>${consequence}</small>` : ''}</span><input type="checkbox" class="job-switch" name="${name}" ${checked ? 'checked' : ''}></label>`;
+    const toggle = (name, label, consequence, checked) => `<label class="job-toggle"><span${consequence ? ` title="${consequence}"` : ''}>${label}</span><input type="checkbox" class="job-switch" name="${name}" ${checked ? 'checked' : ''}></label>`;
     show(`<form id="job-create-form" class="job-create">
-      <div class="job-create-brief"><h2>New idea</h2><div class="job-outcome"><label>Describe your idea<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should exist that doesn’t yet? One sentence is enough. If it needs more, the planner will ask."></textarea></label>${imagesPanelHtml()}</div><fieldset class="job-prop job-review-grid"><legend>Review checkpoints</legend><div class="job-review-tiles">${reviewPointsHtml(reviewDefaultsOf(data.settings))}</div></fieldset></div>
+      <div class="job-create-brief"><h2>New idea</h2><div class="job-outcome"><label>Idea<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should exist that doesn’t yet?"></textarea></label>${imagesPanelHtml()}</div><fieldset class="job-prop job-review-grid"><legend>Review checkpoints</legend><div class="job-review-tiles">${reviewPointsHtml(reviewDefaultsOf(data.settings))}</div></fieldset></div>
       <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop job-pick" id="job-pick"><legend>Agent</legend></fieldset><input type="hidden" name="agent"><input type="hidden" name="model"><input type="hidden" name="effort"><fieldset class="job-prop job-sandbox" id="job-sandbox"></fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset><fieldset class="job-prop"><legend>After delivery</legend>${toggle('updateMain', 'Fast-forward main', '', false)}</fieldset></aside>
-      <footer class="job-create-foot"><span>If the idea is clear, the planner plans it and the job starts. If not, it asks you here first and suggests a job when it’s ready. With Plan on You review, a plan the planner drafts waits for you before anything touches Jira; creating a suggested job approves its plan.</span><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
+      <footer class="job-create-foot"><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
     const form = dialog.querySelector('form');
     let images;
     images = createJobImages({

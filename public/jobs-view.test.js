@@ -596,12 +596,12 @@ test('the Plan checkpoint can be set to Auto in the new-job form, and is a flag 
   const toggle = row.querySelector('.job-review-toggle'); const input = form.elements.reviewPlan;
   assert.equal(row.querySelectorAll('input').length, 1, 'one click-to-toggle control, not a pair');
   assert.deepEqual([input.type, input.getAttribute('role'), input.checked, input.getAttribute('aria-label'), toggle.title, toggle.textContent], ['checkbox', 'switch', true, 'Plan: You review', 'Plan: You review', '']);
-  assert.ok(row.querySelector('.job-review-row').contains(toggle), 'on the same row as the name and hint');
-  assert.equal(row.querySelector('small').textContent, 'You approve the plan before any ticket, PR or session starts');
+  assert.ok(row.querySelector('.job-review-row').contains(toggle), 'on the same row as the name');
+  assert.equal(row.querySelector('.job-review-name').title, 'You approve the plan before any ticket, PR or session starts');
   toggle.click();
   assert.equal(input.checked, false);
   assert.deepEqual([input.getAttribute('aria-label'), toggle.title], ['Plan: Auto', 'Plan: Auto']);
-  assert.equal(row.querySelector('small').textContent, 'Work starts as soon as the plan is drafted', 'the hint follows the choice');
+  assert.equal(row.querySelector('.job-review-name').title, 'Work starts as soon as the plan is drafted', 'the hint follows the choice');
   form.elements.intent.value = 'Deliver it'; form.dispatchEvent(f.event('submit'));
   assert.equal(f.sent.at(-1).job.reviewPlan, false);
   assert.equal(f.sent.at(-1).job.reviewCode, true);
@@ -683,11 +683,11 @@ test('new idea is a brief beside a property sidebar, and the brief is the descri
   for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'shareImages', 'updateMain']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
   for (const name of ['reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites', 'reviewRed']) assert.ok(brief.contains(form.querySelector(`[name="${name}"]`)), `${name} is a tile under the brief`);
   assert.ok(props.querySelector('#job-pick').querySelector('.pick-ticket') && props.querySelector('#job-pick .pick-meter'), 'the picker is a ticket with an effort meter in the sidebar');
-  assert.deepEqual([...brief.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].checked, r.querySelector('small').textContent]),
-    [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts'], ['reviewCode', 'Code', true, 'You see each PR working and read its diff before it’s committed'], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass'], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done'], ['reviewWrites', 'Writes', false, 'Each write is made by its session, with a receipt'], ['reviewRed', 'Red steps', true, 'Wrangler proposes a fix for a red step and waits for you to decide']]);
-  assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('small')?.textContent]),
-    [['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, undefined]]);
-  assert.match(form.querySelector('.job-create-foot').textContent, /waits for you before anything touches Jira; creating a suggested job approves its plan/);
+  assert.deepEqual([...brief.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].checked, r.querySelector('.job-review-name').title, r.querySelector('small')]),
+    [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts', null], ['reviewCode', 'Code', true, 'You see each PR working and read its diff before it’s committed', null], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass', null], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done', null], ['reviewWrites', 'Writes', false, 'Each write is made by its session, with a receipt', null], ['reviewRed', 'Red steps', true, 'Wrangler proposes a fix for a red step and waits for you to decide', null]]);
+  assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('span').title]),
+    [['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, '']]);
+  assert.equal(form.querySelector('.job-create-foot').textContent, 'Start planningAdd to backlog');
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
   assert.deepEqual(f.sent[0], { type: 'job-create', idea: true, start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true, sandbox: 'auto', writableDirs: [], updateMain: false, images: [], shareImages: true, taskId: null } });
@@ -724,7 +724,7 @@ test('Automation settings holds the review defaults New job starts from', (t) =>
   assert.equal(form.querySelector('.job-settings-review legend').textContent, 'Review checkpoints for new jobs');
   assert.equal(note.hidden, true, 'the agent warning shows only while Plan is on Auto');
   form.elements.reviewPlan.checked = false; plan.dispatchEvent(f.event('change'));
-  assert.equal(note.hidden, false); assert.equal(plan.querySelector('small').textContent, 'Work starts as soon as the plan is drafted');
+  assert.equal(note.hidden, false); assert.equal(plan.querySelector('.job-review-name').title, 'Work starts as soon as the plan is drafted');
   assert.equal(form.elements.reviewPlan.getAttribute('aria-label'), 'Plan: Auto');
   form.elements.reviewWrites.checked = true; form.dispatchEvent(f.event('submit'));
   const reviewDefaults = f.sent.at(-1).patch.reviewDefaults;
@@ -733,7 +733,7 @@ test('Automation settings holds the review defaults New job starts from', (t) =>
   f.q('#job-new').click(); const create = f.q('#job-create-form');
   assert.deepEqual(CHECKPOINTS.map((cp) => create.elements[cp.field].checked), [false, true, true, true, true, true]);
   assert.equal(create.querySelector('.job-review-note'), null, 'New job is per job, so it carries no warning');
-  assert.equal(create.querySelector('[data-checkpoint="reviewPlan"] small').textContent, 'Work starts as soon as the plan is drafted');
+  assert.equal(create.querySelector('[data-checkpoint="reviewPlan"] .job-review-name').title, 'Work starts as soon as the plan is drafted');
 });
 
 test('global concurrency, pause and repair limits are explicit controls, and no step is on a clock', (t) => {
@@ -2696,7 +2696,7 @@ test('Red steps is the sixth checkpoint (You decide / Wrangler replans) and Repl
   assert.deepEqual([form.elements.reviewRed.checked, form.elements.reviewRed.getAttribute('aria-label')], [true, 'Red steps: You decide']);
   form.elements.reviewRed.checked = false; row.dispatchEvent(f.event('change'));
   assert.equal(form.elements.reviewRed.getAttribute('aria-label'), 'Red steps: Wrangler replans');
-  assert.match(row.querySelector('small').textContent, /^Wrangler replans a red step: it fixes the step, changes the plan \(if Plan is on Auto\), or declares it red for you/);
+  assert.match(row.querySelector('.job-review-name').title, /^Wrangler replans a red step: it fixes the step, changes the plan \(if Plan is on Auto\), or declares it red for you/);
   assert.equal(form.elements.maxReplans.value, '2'); form.elements.maxReplans.value = '3';
   form.dispatchEvent(f.event('submit'));
   const patch = f.sent.at(-1).patch;

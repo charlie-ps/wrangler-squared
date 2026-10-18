@@ -38,9 +38,9 @@ test('New idea replaces New job: the button, the form, and a create that asks th
   f.q('#job-new').click();
   const form = f.q('#job-create-form');
   assert.equal(form.querySelector('h2').textContent, 'New idea');
-  assert.match(form.querySelector('.job-outcome label').textContent, /^Describe your idea/);
-  assert.match(form.elements.intent.placeholder, /the planner will ask/);
-  assert.match(form.querySelector('.job-create-foot span').textContent, /If the idea is clear, the planner plans it/);
+  assert.match(form.querySelector('.job-outcome label').textContent, /^Idea$/);
+  assert.equal(form.elements.intent.placeholder, 'What should exist that doesn’t yet?');
+  assert.equal(form.querySelector('.job-create-foot span'), null);
   form.elements.intent.value = 'Something for flaky CI';
   form.dispatchEvent(new f.window.Event('submit', { bubbles: true, cancelable: true }));
   const create = f.sent.find((m) => m.type === 'job-create');
