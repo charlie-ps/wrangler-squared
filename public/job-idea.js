@@ -103,7 +103,7 @@ export function ideaThreadHtml(job, { pending = null, firing = null, fresh = () 
 export function ideaComposerHtml(draft = '') {
   return `<div class="job-change job-idea-composer is-open" data-idea-composer>
     <div class="job-change-row"><span class="job-change-to" title="Who hears it"><span class="job-idea-orb small" aria-hidden="true"></span>To planner</span><textarea rows="1" maxlength="8000" placeholder="Reply, or ask for a change to the suggestion…" aria-label="Reply to the planner">${esc(draft)}</textarea><button type="button" class="job-change-go" data-idea-send aria-label="Send to the planner" title="Send (↵)" ${draft.trim() ? '' : 'disabled'}>${ICONS.send}</button></div>
-    <div class="job-change-foot"><span>Resumes the same planner session. A reply after a suggestion replaces it.</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
+    <div class="job-change-foot"><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 }
 
 // Haiku is still naming the job (server `titlePending`): two faint bars stand where

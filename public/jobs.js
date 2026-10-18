@@ -372,22 +372,20 @@ export function actionLine(a, plan) {
 }
 // Every idea goes to one recipient, the planner (server/job-change.js): it sorts
 // the idea into feedback for a live step and changes to the plan, and the human
-// approves the proposal. `to` names it on the box, `hint` says what happens to the
-// idea from where it was typed.
-const PLANNER = { to: 'Planner', placeholder: 'Add an idea for the planner…', hint: 'Sorts it into feedback for a step or a change to the plan. Nothing changes until you approve.' };
-const STEP = { ...PLANNER, placeholder: 'Add an idea about this step…', hint: 'About this step. The planner sends feedback back to this step and anything else into the plan. You approve first.' };
+// approves the proposal. `to` names it on the box.
+const PLANNER = { to: 'Planner', placeholder: 'Add an idea for the planner…' };
+const STEP = { ...PLANNER, placeholder: 'Add an idea about this step…' };
 const CHANGE_ROUTE = {
-  plan: { ...PLANNER, hint: 'Redraws the plan for you to review.' },
-  proposal: { ...PLANNER, placeholder: 'Add to this proposal…', hint: 'Redraws the proposal, keeping what it already carries.' },
+  plan: PLANNER,
+  proposal: { ...PLANNER, placeholder: 'Add to this proposal…' },
 };
 export function changeRoute(at, job = null, sub = null) {
-  if (sub && job && redDeclared(job, sub)) return { ...PLANNER, hint: 'Gets everything already tried, and proposes a fix for you to approve.' };
+  if (sub && job && redDeclared(job, sub)) return PLANNER;
   if (CHANGE_ROUTE[at]) return CHANGE_ROUTE[at];
   if (!sub) return PLANNER;
-  if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…', hint: 'About this step. The planner forwards feedback straight to its open session; anything else goes into the plan, which you approve first.' };
+  if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…' };
   return STEP;
 }
-export const changeHint = (at, job = null, sub = null) => changeRoute(at, job, sub).hint;
 // What the human is looking at, and the exact thing in it, which Request changes
 // pins its idea to. Mirrors server/job-change.js changeView: the server refuses a
 // request whose pin no longer matches. Null means nothing is left to change.

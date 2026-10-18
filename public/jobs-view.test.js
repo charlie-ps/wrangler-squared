@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isPrimaryActionKey, primaryAction } from './jobs-view.js';
-import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeHint, actionLine, pinLine } from './jobs.js';
+import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml, plateAsk } from './job-plates.js';
@@ -83,11 +83,10 @@ test('code review is a stop before anything is committed: the card asks for a re
   const box = f.q('.job-change');
   assert.deepEqual([box.dataset.changeAt, box.dataset.changeRef], ['code', 'run_1'], 'the idea box is on the review itself, pinned to the receipt that was read');
   assert.equal(box.querySelector('textarea').placeholder, 'Add an idea about this step…');
-  assert.match(box.textContent, /Planner.*About this step\. The planner sends feedback back to this step and anything else into the plan\. You approve first\./s, 'one recipient, and what it does with the idea'); assert.equal(f.q('.job-moves'), null, 'no Moves menu');
+  assert.equal(box.querySelector('.job-change-to').textContent, 'PPlanner', 'one recipient'); assert.equal(box.querySelector('.job-change-foot').textContent, '⌘↵'); assert.equal(f.q('.job-moves'), null, 'no Moves menu');
   job.runs = [{ id: 'run_1', subJobId: 'api', phase: 'implementation', stopped: false, parkedFor: 'ready' }]; f.view.update(f.data);
   const parked = f.q('.job-change');
   assert.deepEqual([parked.querySelector('.job-change-to').textContent, parked.querySelector('textarea').placeholder, parked.querySelector('[data-change-send]').getAttribute('aria-label')], ['PPlanner', 'Ask about it, or say what to change…', 'Send to planner'], 'its session is open, and the idea still goes to the planner');
-  assert.match(parked.textContent, /The planner forwards feedback straight to its open session; anything else goes into the plan, which you approve first\./);
   job.runs = []; f.view.update(f.data);
   f.q('[data-action="approve-code"]').click();
   assert.equal(f.sent.at(-1).action, 'approve-code'); assert.equal(f.sent.at(-1).readyReceiptId, 'run_1');
@@ -1421,7 +1420,7 @@ test('Add idea on a running job asks the planner for a proposal; the sent idea s
   f.q('[data-board="job1"] .job-plate-open').click();
   assert.equal(f.q('#job-refine'), null, 'there is no separate Change plan dialog: the box is on the job');
   assert.equal(f.q('.job-change textarea').placeholder, 'Add an idea for the planner…');
-  assert.match(f.q('.job-change').textContent, /Sorts it into feedback for a step or a change to the plan\. Nothing changes until you approve\./);
+  assert.equal(f.q('.job-change-foot').textContent, '⌘↵');
   const text = f.q('.job-change textarea'); text.value = 'Split web in two'; text.dispatchEvent(f.event('input')); f.q('[data-change-send]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', at: 'job', ref: 'job', text: 'Split web in two' });
 
@@ -2637,7 +2636,7 @@ test('a declared red is the only red you act on: counted in Needs you, with what
   f.view.update(f.data);
   assert.deepEqual([subState(job, api), subLabel(job, api), subLine(job, api), jobNeedsReview(job, api), jobState(job)], ['failing', 'Declared red', '#412 · Declared red', true, 'failing']);
   assert.deepEqual([plateAsk(job).label, plateAsk(job).button, plateAsk(job).sub], ['Declared red', 'Decide', 'api']);
-  assert.equal(changeHint('pr', job, api), 'Gets everything already tried, and proposes a fix for you to approve.');
+  assert.equal(changeRoute('pr', job, api).placeholder, 'Add an idea for the planner…');
   f.view.openDetail('job1', 'api');
   const dialog = f.q('#job-dialog');
   const box = dialog.querySelector('.job-event-fix.declared');
