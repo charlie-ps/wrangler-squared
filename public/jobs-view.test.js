@@ -721,7 +721,7 @@ test('Automation settings holds the review defaults New job starts from', (t) =>
   assert.deepEqual(reviewDefaultsOf({}), { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true }, 'a graph from before the setting seeds the original form');
   f.q('#jobs-settings').click(); const form = f.q('#job-settings-form');
   const plan = form.querySelector('[data-checkpoint="reviewPlan"]'); const note = plan.querySelector('.job-review-note');
-  assert.equal(form.querySelector('.job-settings-review legend').textContent, 'Review checkpoints for new jobs');
+  assert.equal(form.querySelector('.job-settings-review legend').textContent, 'Defaults for new jobs');
   assert.equal(note.hidden, true, 'the agent warning shows only while Plan is on Auto');
   form.elements.reviewPlan.checked = false; plan.dispatchEvent(f.event('change'));
   assert.equal(note.hidden, false); assert.equal(plan.querySelector('.job-review-name').title, 'Work starts as soon as the plan is drafted');

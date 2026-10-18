@@ -1071,7 +1071,6 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .update-item-text time,.update-item-end { font-size:11.5px; color:var(--fg-subtle); font-variant-numeric:tabular-nums; }
 .update-item-end { display:flex; align-items:center; gap:8px; }
 .update-new { padding:1px 7px; border-radius:8px; font-size:10.5px; font-weight:600; letter-spacing:.04em; background:color-mix(in srgb, var(--blue) 18%, transparent); color:var(--blue-fg); }
-.update-empty { margin:0; padding:16px; text-align:center; font-size:12px; line-height:1.6; color:var(--fg-subtle); border:1px dashed var(--border-muted); border-radius:12px; }
 /* The Writes figures: a row of graph stacks, place pills under the session that
    writes them, and fixed heights so frames never move the buttons below. */
 .wn-row3 { display:grid; grid-template-columns:minmax(0,1fr) 40px minmax(0,1fr) 40px minmax(0,1fr); align-items:start; }

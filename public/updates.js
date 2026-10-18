@@ -441,5 +441,5 @@ export function createUpdates({ storage, updates = UPDATES }) {
 // The What's new section of Automation settings: each row reopens its splash.
 export function whatsNewHtml(items) {
   const rows = items.map((u) => `<li><button type="button" class="update-item tone-${u.tone || 'run'}" data-update-id="${u.id}"><span class="job-node-tile">${ICONS[u.icon] || ICONS.info}</span><span class="update-item-text"><strong>${u.title}</strong><time datetime="${u.date}">${dateLabel(u.date)}</time></span><span class="update-item-end">${u.seen ? '' : '<span class="update-new">NEW</span>'}${ICONS.next}</span></button></li>`).join('');
-  return `<section class="update-section" aria-labelledby="job-settings-updates"><h3 id="job-settings-updates">What’s new</h3>${rows ? `<ul class="update-list">${rows}</ul>` : '<p class="update-empty">Nothing here yet. When a release adds something bigger, it opens once on its own and stays listed here.</p>'}</section>`;
+  return `<section class="update-section" aria-labelledby="job-settings-updates"><h3 id="job-settings-updates">What’s new</h3>${rows ? `<ul class="update-list">${rows}</ul>` : ''}</section>`;
 }
