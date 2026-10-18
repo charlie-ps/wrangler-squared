@@ -194,7 +194,8 @@ after it are held while you work.
   pid is a process-group leader. Pick free ports (check them first).
 - An entry needs a `url` (where to open it), a `pid` (the setsid leader) or a
   `stop` command (`docker compose -p sec-412 down`, run in the worktree) for
-  what a pid cannot stop. `log` is the file you redirected output to, under the
+  what a pid cannot stop. It runs sandboxed: it may write only the worktree,
+  `$JOB_EVIDENCE`, the job's extra writable folders and temp. `log` is the file you redirected output to, under the
   worktree or `$JOB_EVIDENCE`; it is what the Logs button reads.
 - **You never tear it down.** Wrangler kills each pid's group, runs each `stop`,
   and checks each url stopped answering when the human approves or drops the

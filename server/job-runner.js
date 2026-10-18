@@ -9,7 +9,7 @@ import { dropSub } from './job-sub-ops.js';
 import { draftsDecidedMail, threadMail, ideaMail } from './job-prompts.js';
 import { inConversation, unsentIdea } from './job-idea.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
-import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps } from './job-running.js';
+import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps, stopSandbox } from './job-running.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
@@ -61,7 +61,7 @@ export class JobRunner {
       const due = dueTeardown(job, sub);
       if (due.length) {
         let outcome;
-        try { outcome = await teardown(due, { cwd: sub.worktree?.path, deps: this.running }); } catch (e) { outcome = { results: due.map((i) => ({ name: i.name, ok: false, detail: shortError(e) })), still: due.map((i) => i.name) }; }
+        try { outcome = await teardown(due, { cwd: sub.worktree?.path, sandbox: stopSandbox(job, sub), deps: this.running }); } catch (e) { outcome = { results: due.map((i) => ({ name: i.name, ok: false, detail: shortError(e) })), still: due.map((i) => i.name) }; }
         const reason = stopReason(job, sub);
         this.patchSub(id, sub.id, (s) => {
           const gone = (list) => (list || []).filter((i) => !due.some((d) => sameItem(i, d)));
