@@ -842,6 +842,15 @@ test('Approve keeps one click, and its caret opens a popup whose words go to lat
   f.view.update(f.data);
   assert.equal(f.q('.job-approve-more').open, true, 'the popup survives a tick');
   assert.equal(f.q('[data-approve-note]').value, '  Use the <v2> table  ', 'a tick does not wipe what is being typed');
+  f.q('.job-approve-more summary').dispatchEvent(new f.window.Event('click', { bubbles: true }));
+  f.q('[data-approve-note]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('.job-approve-more').open, true, 'a click inside the popup leaves it open');
+  f.q('#job-dialog h2, #job-dialog h3').dispatchEvent(f.event('click'));
+  assert.equal(f.q('.job-approve-more').open, false, 'a click elsewhere closes it');
+  f.view.update(f.data);
+  assert.equal(f.q('.job-approve-more').open, false, 'and the next tick does not reopen it');
+  f.q('.job-approve-more').open = true; f.q('.job-approve-more').dispatchEvent(f.event('toggle'));
+  f.q('[data-approve-note]').value = '  Use the <v2> table  ';
   f.q('[data-action="approve-session"][data-with-note]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'approve-session', head: undefined, sessionReceiptId: 'receipt9', note: 'Use the <v2> table' });
   f.q('.job-approve-split > button.primary').click();

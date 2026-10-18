@@ -1522,7 +1522,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   placePop.onclick = (e) => { const row = e.target.closest('[data-sub]'); if (row) { closePlacePop(); openDetail(row.dataset.job, row.dataset.sub); } };
   // Capture phase: the board's own handlers stop some clicks and keys from bubbling.
-  document.addEventListener('click', (e) => { if (!placePop.hidden && !placePop.contains(e.target) && !e.target.closest?.('[data-place]')) closePlacePop(); }, true);
+  // A split button's popup closes the same way, and forgets its key so a tick leaves it shut.
+  document.addEventListener('click', (e) => {
+    if (!placePop.hidden && !placePop.contains(e.target) && !e.target.closest?.('[data-place]')) closePlacePop();
+    dialog.querySelectorAll('.job-split-more[open]').forEach((d) => { if (!d.contains(e.target)) { d.open = false; openMore.delete(d.dataset.keep); } });
+  }, true);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !placePop.hidden) closePlacePop(); }, true);
   q('#jobs-boards').onclick = (e) => {
     const chip = e.target.closest('[data-place]'); if (chip) return openPlacePop(chip);
