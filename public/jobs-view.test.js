@@ -263,7 +263,7 @@ test('Cancel job is confirmed first, sends only the job action, and a cancelled 
   f.q('.job-plate-open[data-job=\"job1\"]').click(); f.q('#job-cancel').click();
   assert.equal(f.sent.length, 0, 'cancelling needs a confirmation first');
   const text = () => f.q('#job-dialog').textContent;
-  assert.match(text(), /drops the 2 unfinished sub-jobs and stops the running step/); assert.match(text(), /already delivered stay delivered/); assert.match(text(), /Its open pull request stays open/);
+  assert.deepEqual([...f.q('#job-dialog').querySelectorAll('.job-cancel-counts li')].map((li) => li.textContent), ['Drops 2 sub-jobs', 'PR #1 stays open on GitHub', 'Worktrees with unsaved work are kept']);
   assert.ok(f.q('#job-cancel-form'), 'a form, so a live graph tick leaves the question alone');
   f.q('#job-move-back').click(); assert.ok(f.q('#job-cancel'), 'backing out returns to the detail view');
   f.q('#job-cancel').click(); f.q('[data-cancel-job]').click();

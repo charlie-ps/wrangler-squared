@@ -687,9 +687,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   function openCancel(job, back = renderDetail) {
     const live = job.runs.filter((r) => !r.stopped).length;
     const unfinished = job.subJobs.filter((s) => !['cleanup', 'done'].includes(s.stage)).length;
-    const prs = job.subJobs.filter((s) => s.pr && s.stage === 'pr').length;
-    const what = job.stage === 'active' ? `This drops the ${unfinished === 1 ? 'one unfinished sub-job' : `${unfinished} unfinished sub-jobs`}${live ? ` and stops the ${live === 1 ? 'running step' : `${live} running steps`}; their receipts are ignored` : ''}. Sub-jobs already delivered stay delivered. ` : `This stops ${live ? 'the running ' : ''}planning${live ? '' : ' before it starts'}; no tickets or PRs are created. `;
-    show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Cancel this job?</h2><form id="job-cancel-form"><p>${what}${prs ? `${prs === 1 ? 'Its open pull request stays' : `${prs} open pull requests stay`} open on GitHub for you to close. ` : ''}Sessions are archived; each worktree is removed only if it has no uncommitted files and every commit is already on the branch the job lands on (or it is unchanged), and kept otherwise for you to retry or discard.</p><div class="job-actions"><button type="button" class="danger" data-cancel-job="1">Cancel job</button><button type="button" id="job-move-back">Keep working</button></div></form>`);
+    const prs = job.subJobs.filter((s) => s.pr && s.stage === 'pr');
+    const counts = job.stage === 'active' ? [`Drops ${unfinished} sub-job${unfinished === 1 ? '' : 's'}`, ...(prs.length ? [prs.length === 1 ? `PR #${prNumber(prs[0])} stays open on GitHub` : `${prs.length} PRs stay open on GitHub`] : []), 'Worktrees with unsaved work are kept'] : [live ? 'Stops planning' : 'Planning never starts'];
+    show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Cancel this job?</h2><form id="job-cancel-form"><ul class="job-cancel-counts">${counts.map((c) => `<li>${esc(c)}</li>`).join('')}</ul><div class="job-actions"><button type="button" class="danger" data-cancel-job="1">Cancel job</button><button type="button" id="job-move-back">Keep working</button></div></form>`);
     dialog.querySelector('[data-cancel-job]').onclick = () => send({ type: 'job-action', id: job.id, action: 'cancel-job' });
     dialog.querySelector('#job-move-back').onclick = () => back();
   }
