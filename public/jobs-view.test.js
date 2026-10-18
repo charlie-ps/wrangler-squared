@@ -350,7 +350,7 @@ test('the plan under review shows the shared context, each brief and each check 
   assert.equal(dialog.querySelector('.job-context').closest('details').open, false, 'context is folded until asked for; the landing order is the decision');
   assert.equal(dialog.querySelectorAll('.job-stories p').length, 0, 'a story is a title; its value is not the board’s business');
   assert.match(dialog.textContent, /Implement it and open the PR/);
-  assert.match(dialog.textContent, /Check after it lands: helm list shows auth-api in dev and prod/);
+  assert.match(dialog.textContent, /Check: helm list shows auth-api in dev and prod/);
   assert.doesNotMatch(dialog.textContent, /No deployment: merging the PR completes it/, 'the runner infers what a merge deploys');
   const approve = f.q('[data-action="approve-plan"]');
   assert.equal(approve.textContent, 'Approve 2');

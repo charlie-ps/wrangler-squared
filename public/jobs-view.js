@@ -824,13 +824,13 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
   }
   // What the agent must show before the code is committed (server/jobs-schema.js show).
-  const showMeHtml = (s) => showOf(s).length ? `<p>Show me before review:</p><ul class="job-show-list">${showOf(s).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
+  const showMeHtml = (s) => showOf(s).length ? `<p>Show me:</p><ul class="job-show-list">${showOf(s).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
   function planMoreHtml(job, plan) {
-    const briefs = (plan?.subJobs || []).map((s) => `<h5>${kindChipHtml(s)} ${esc(s.title)}</h5><p>${esc(s.brief)}</p>${s.check ? `<p>Check after it lands: ${esc(s.check)}</p>` : ''}${showMeHtml(s)}`).join('');
+    const briefs = (plan?.subJobs || []).map((s) => `<h5>${kindChipHtml(s)} ${esc(s.title)}</h5><p>${esc(s.brief)}</p>${s.check ? `<p>Check: ${esc(s.check)}</p>` : ''}${showMeHtml(s)}`).join('');
     const fresh = (plan?.stories || []).filter((s) => !s.key).length;
-    return more('plan', `${ICONS.doc}Plan details`, `${plan?.stories?.length ? `<h4>Stories <small>${fresh ? `${fresh} new · created only after you approve` : 'existing'}</small></h4>${storiesHtml(plan.stories)}` : ''}
-      ${plan?.context ? `<h4>Context <small>every session on this job gets it</small></h4><p class="job-context">${esc(plan.context)}</p>` : ''}
-      <h4>Outcome</h4><p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}${briefs ? `<h4>What each sub-job is asked to do</h4>${briefs}` : ''}`, 'job-plan-more');
+    return more('plan', `${ICONS.doc}Plan details`, `${plan?.stories?.length ? `<h4>Stories <small>${fresh ? `${fresh} new` : 'existing'}</small></h4>${storiesHtml(plan.stories)}` : ''}
+      ${plan?.context ? `<h4>Context</h4><p class="job-context">${esc(plan.context)}</p>` : ''}
+      <h4>Outcome</h4><p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}${briefs ? `<h4>Briefs</h4>${briefs}` : ''}`, 'job-plan-more');
   }
   // Superseded PRs are left open on GitHub (nothing here closes or deletes one),
   // so the job says where they are rather than leaving an orphan to puzzle over.
@@ -893,14 +893,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // job's next broadcast confirms it or a refusal snaps it back.
   const shownYou = (job, field) => flags.pending?.field === field ? flags.pending.you : youReview(job, field);
   function flagsHintHtml(job) {
-    let head = 'Review checkpoints', body = 'Click one to change it from the next gate on.', undo = false;
+    let head = 'Review checkpoints', body = '', undo = false;
     if (flags.note) ({ head, body, undo } = flags.note);
     else if (flags.hover) {
       const cp = checkpoint(flags.hover), you = shownYou(job, cp.field), lock = checkpointLock(job, cp.field);
       head = checkpointLabel(cp, you);
       body = lock ? `${lock}.` : `${checkpointHint(cp, you)}. Click for ${you ? 'Auto' : 'You review'}.`;
     }
-    return `<p class="job-flags-hint" aria-live="polite"><b>${esc(head)}</b> <span>${esc(body)}</span>${undo ? ' <button type="button" class="job-flags-undo" data-review-undo>Undo</button>' : ''}</p>`;
+    return `<p class="job-flags-hint" aria-live="polite"><b>${esc(head)}</b>${body ? ` <span>${esc(body)}</span>` : ''}${undo ? ' <button type="button" class="job-flags-undo" data-review-undo>Undo</button>' : ''}</p>`;
   }
   function footerHtml(job) {
     // Before approval the sub-jobs exist only in the plan, and Session results and

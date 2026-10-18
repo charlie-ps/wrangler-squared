@@ -1474,7 +1474,6 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-node-branch.set summary>span { color:var(--fg); }
 .job-node-branch.set summary { color:var(--fg); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .job-node-branch input { display:block; width:100%; min-width:16ch; margin-top:6px; font:12px ui-monospace,SFMono-Regular,Menlo,monospace; }
-.job-node-branch>span { max-width:24ch; text-align:left; }
 .job-node-edit>details[open] { flex-basis:100%; }
 
 /* New idea's conversation (job-idea.js), per the approved mock-up: the idea's formation

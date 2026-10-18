@@ -38,7 +38,7 @@ import { STATES, stateIconHtml, stateSolid } from './job-state.js';
 export const dependencyEditorHtml = (s, others, depKey) => others.filter((d) => !isWriteSub(d)).map((d) => `<label><input type="checkbox" data-dep="${esc(depKey)}" value="${esc(d.id)}" ${s.after.includes(d.id) ? 'checked' : ''}>${kindChipHtml(d)}<span>${esc(d.title)}</span></label>`).join('') || '<span>No other sub-jobs</span>';
 // "Show me before review", edited like the title: one input per item, redrawn
 // from the draft on add and remove so the stepper never holds a stale list.
-export const showEditorHtml = (s, key) => `<div class="job-show-ed"><small>Show me before review: things the agent must show working, one each</small>${(s.show || []).map((t, k) => `<div class="job-show-row"><input data-show="${esc(key)}" data-show-k="${k}" maxlength="180" value="${esc(t)}" aria-label="Show me item ${k + 1}"><button type="button" class="ghost" data-show-rm="${esc(key)}:${k}" aria-label="Remove item ${k + 1}">${ICONS.x}</button></div>`).join('')}<button type="button" class="job-show-add" data-show-add="${esc(key)}">${ICONS.plus}Add an item</button></div>`;
+export const showEditorHtml = (s, key) => `<div class="job-show-ed"><small>Show me</small>${(s.show || []).map((t, k) => `<div class="job-show-row"><input data-show="${esc(key)}" data-show-k="${k}" maxlength="180" value="${esc(t)}" aria-label="Show me item ${k + 1}"><button type="button" class="ghost" data-show-rm="${esc(key)}:${k}" aria-label="Remove item ${k + 1}">${ICONS.x}</button></div>`).join('')}<button type="button" class="job-show-add" data-show-add="${esc(key)}">${ICONS.plus}Add an item</button></div>`;
 // Blank lands where the job does; the summary names the branch only once it differs.
 // A PR tile's branch line: its worktree branch once cut, then where it lands. A PR
 // on the default branch with no worktree yet shows nothing: that is the usual case.
@@ -49,7 +49,7 @@ const landingHtml = (s, base) => {
   return `<span class="job-node-landing" title="${esc(tip)}">${branch ? `<span class="job-node-wt">${esc(branch)}</span>` : ''}${target ? `<span class="job-node-arrow" aria-hidden="true">→</span><span class="job-node-base ${offBase({ base }, s) ? 'own' : ''}">${esc(target)}</span>` : ''}</span>`;
 };
 const branchEditorHtml = (s, i, base, open) => `<details class="job-node-deps job-node-branch ${s.base ? 'set' : base ? '' : 'unset'}" data-base-of="${esc(s.id)}" ${open ? 'open' : ''}><summary title="Lands on ${esc(targetOf({ base }, s) || 'the default branch')} · change">${ICONS.branch}<span>${esc(s.base || base || 'default branch')}</span></summary>
-  <input data-base="${i}" value="${esc(s.base || '')}" placeholder="${esc(base || 'Default branch')}" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Land on branch"><span>Blank lands where the job does. The worktree is cut from origin/&lt;branch&gt; and the PR opens against it.</span></details>`;
+  <input data-base="${i}" value="${esc(s.base || '')}" placeholder="${esc(base || 'Default branch')}" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Land on branch"></details>`;
 // A place pill's parts: the glyph, a short mono label, a dot per write in its
 // state, and ↗ once the place exists.
 const urgentOf = (states) => ['failing', 'needs'].find((st) => states.includes(st));
