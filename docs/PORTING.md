@@ -1,6 +1,6 @@
 # Porting the job system onto the extensions API
 
-This repo is the automated-jobs system from agent-wrangler's `job-system` branch
+This repo is the job system from agent-wrangler's `job-system` branch
 (18 commits ahead of `main`, never merged), re-homed as an **installable
 extension**. The port is functionally complete against host API **1.31.0**: every
 feature the in-core system had is either wired through the `host` façade or is

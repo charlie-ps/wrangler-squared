@@ -1,5 +1,5 @@
 
-/* Automated jobs: one state vocabulary (job-state.js), drawn as colour + glyph. */
+/* Wrangler²: one state vocabulary (job-state.js), drawn as colour + glyph. */
 /* The state tones, derived from the board's semantic colours so dark and light
    both follow the theme: --c is the solid state colour, --c-fg its readable text
    on a tonal surface, --cb that tonal surface, --c-on text on a solid fill. */

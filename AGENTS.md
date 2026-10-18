@@ -1,7 +1,8 @@
 # AGENTS.md
 
-Developer notes for Wrangler² — the Agent Wrangler automated-jobs system as an
-installable extension. Only the non-obvious, durable things; point at code rather
+Developer notes for Wrangler² — a new way of working with AI (work broken into
+AI sessions and PRs, with proof that changes work) as an installable Agent
+Wrangler extension. Only the non-obvious, durable things; point at code rather
 than re-deriving it. **Read `docs/PORTING.md` first**: the port is functionally
 complete on host API 1.31.0, and that file is the map (what came from where, what
 stands in for what, and which of the eight open host-API gaps block which

@@ -1,7 +1,9 @@
 # Wrangler²
 
-The Agent Wrangler **automated jobs** system as an installable
-[extension](https://github.com/PortSwigger/agent-wrangler).
+**A new way of working with AI.** Wrangler² breaks work into AI sessions and PRs,
+provides proof that changes work, and allows you to get more done in parallel. It
+installs as an [extension](https://github.com/PortSwigger/agent-wrangler) for
+Agent Wrangler.
 
 A job starts from an outcome. A planning session turns it into an ordered set of
 PRs (and, where a step is not a repository change, an agent session on this

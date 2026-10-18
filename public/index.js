@@ -157,7 +157,7 @@ export default {
         // dialog goes on <body>, not in the host: a <dialog> under a display:none
         // ancestor cannot showModal(), and the host is hidden whenever another
         // view is active.
-        el.innerHTML = '<section id="jobs" aria-label="Automated jobs"></section>';
+        el.innerHTML = '<section id="jobs" aria-label="Wrangler²"></section>';
         viewHost = el;
         dialog = document.createElement('dialog');
         dialog.id = 'job-dialog';

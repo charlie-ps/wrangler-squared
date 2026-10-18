@@ -177,11 +177,11 @@ const writesFigure = (phase) => {
 // `anim` steps redraw their figure every `ms`; `still` is the frame shown with
 // reduced motion. `stack` puts the figure under the heading at full width.
 export const INTRO_STEPS = [
-  { tab: 'Welcome', title: 'Welcome', body: '', stack: true, cls: 'intro-value',
+  { tab: 'Welcome', title: 'Welcome', body: `<p>${W2} breaks work into AI sessions and PRs, provides proof that changes work, and allows you to get more done in parallel.</p>`, stack: true, cls: 'intro-value',
     anim: { frames: GRAPH.length, ms: 1400, still: GRAPH.length - 1 },
     figure: (reviews, phase) => graph(phase) },
   { tab: 'Jobs', title: `Hand ${W2} an outcome. It splits the work and tracks it for you.`,
-    body: `<p>${W2} adds <b>automated jobs</b> to Agent Wrangler. You describe a goal; it splits the goal into sub-jobs, starts agent sessions for them, and stops for you wherever you’ve asked to review.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board. An idea you are still talking through is a forming nebula until it becomes a job.</p>`,
+    body: `<p>You describe a goal; ${W2} splits it into sub-jobs, starts agent sessions for them, and stops for you wherever you’ve asked to review.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board. An idea you are still talking through is a forming nebula until it becomes a job.</p>`,
     cls: 'intro-board', anim: { frames: BOARD_FRAMES.length, ms: 1600, still: 2 },
     figure: (reviews, phase) => board(phase) },
   { tab: 'New idea',
@@ -244,7 +244,7 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
     dialog.className = 'job-dialog jobs-intro';
     dialog.setAttribute('aria-labelledby', 'jobs-intro-title');
     dialog.innerHTML = `<button class="job-dialog-close" aria-label="Close" title="Close">${ICONS.x}</button>
-      <div class="job-appbar intro-appbar"><span class="jobs-kicker">WRANGLER<sup>2</sup> · AUTOMATED JOBS</span><span class="intro-count"></span></div>
+      <div class="job-appbar intro-appbar"><span class="jobs-kicker">WRANGLER<sup>2</sup> · A NEW WAY OF WORKING WITH AI</span><span class="intro-count"></span></div>
       <div class="job-progress intro-steps" role="tablist" aria-label="Intro steps"></div>
       <div class="intro-body"></div>
       <div class="job-actions"><button class="primary" data-intro="next"></button><button data-intro="back">${ICONS.back}Back</button><button data-intro="skip">Skip intro</button></div>`;

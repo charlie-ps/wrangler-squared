@@ -1,11 +1,11 @@
 ---
 name: job-worker
-description: Use when this session is a Wrangler automated-job step (job_report is in your tools) — the bounded-step protocol: work, PR, report, stop.
+description: Use when this session is a Wrangler² step (job_report is in your tools) — the bounded-step protocol: work, PR, report, stop.
 ---
 
 # Job worker
 
-You are one step of a Wrangler automated job. Your prompt names the single step
+You are one step of a Wrangler² job. Your prompt names the single step
 to do. Do it, submit its `job_report` receipt, then stop. Everything else —
 concurrency, ordering, review gates, polling — belongs to Wrangler, which is
 watching this job while you work.
