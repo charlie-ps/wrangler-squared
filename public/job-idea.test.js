@@ -97,7 +97,7 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   assert.deepEqual([...panel.querySelectorAll('.job-launch-steps li small')].map((s) => s.textContent), ['wrangler-squared', 'wrangler-squared', 'agent · 1 write']);
   assert.ok(panel.querySelector('.job-launch-go .gx[data-arc][data-tone="warn"]'), 'the event horizon is the button');
   assert.equal(panel.querySelector('.job-launch-label b').textContent, 'Create job');
-  assert.match(panel.querySelector('.job-launch-fine').textContent, /Plan on You review/);
+  assert.match(panel.querySelector('.job-launch-fine').textContent, /Creating it approves this plan/);
   panel.querySelector('[data-accept-idea]').click();
   assert.ok(f.q('.job-launch').classList.contains('firing'), 'the hole flares first');
   assert.equal(f.sent.filter((m) => m.action === 'accept-idea').length, 0);
@@ -105,14 +105,15 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3' });
   assert.ok(f.q('.job-launch').classList.contains('done'));
   f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
-  assert.ok(f.q('#job-dialog').open, 'the dialog stays for the plan');
-  Object.assign(f.data.jobs[0], { title: suggest.title, plan: suggest.plan, runs: [parked({ stopped: true })] });
+  assert.ok(f.q('#job-dialog').open, 'the dialog stays for the job');
+  const subJobs = suggest.plan.subJobs.map((s) => ({ sessions: [], repairs: [], ...s, stage: 'queued' }));
+  Object.assign(f.data.jobs[0], { title: suggest.title, plan: suggest.plan, stage: 'active', approvedAt: 5, subJobs, runs: [parked({ stopped: true })] });
   f.data.jobs[0].idea.thread[2].acceptedAt = 5;
   f.view.update(f.data);
-  assert.equal(f.q('#job-dialog .job-idea'), null, 'the plan review takes over');
-  assert.ok(f.q('#job-dialog [data-action="approve-plan"]'));
-  assert.ok(f.q('#job-dialog details[data-keep="idea"] .job-launch.done'), 'the conversation is folded under the plan');
-  assert.equal(f.q('[data-board="idea1"] .job-status').textContent, 'Plan ready');
+  assert.equal(f.q('#job-dialog .job-idea'), null, 'the job takes over');
+  assert.equal(f.q('#job-dialog [data-action="approve-plan"]'), null, 'creating it approved the plan: nothing to approve again');
+  assert.ok(f.q('#job-dialog details[data-keep="idea"] .job-launch.done'), 'the conversation is folded under the job');
+  assert.notEqual(f.q('[data-board="idea1"] .job-status').textContent, 'Plan ready');
 });
 
 test('a suggestion something newer was said after is stale and cannot be pressed', (t) => {

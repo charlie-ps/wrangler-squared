@@ -230,9 +230,13 @@ const IDEAS = scenes([
 const inert = (html) => html.replaceAll('<button ', '<button tabindex="-1" ').replaceAll(' aria-live="polite"', '');
 function ideasFigure(phase) {
   const f = IDEAS[phase], { clock, suggest, threads } = ideaTalk(Date.now());
-  const job = { id: 'wn-idea', title: 'Friday digest of finished jobs', intent: 'Could the board tell the team what finished each week?', repos: [], stage: 'planning', subJobs: [], moves: [], revision: 1,
-    createdAt: clock(0), reviewPlan: true, idea: { thread: threads[f.thread] }, plan: f.made ? suggest.suggest.plan : null,
-    runs: [{ id: 'wn-run', subJobId: null, phase: 'planning', stopped: f.made, parkedFor: 'idea', parkedAt: f.parked ? clock(5) : null, mailedAt: null }] };
+  // Creating it approved the plan, so the job it became is already building.
+  const plan = f.made ? suggest.suggest.plan : null;
+  const subJobs = plan ? plan.subJobs.map((s) => ({ sessions: [], repairs: [], ...s, stage: s.id === 'build' ? 'implementation' : 'queued' })) : [];
+  const job = { id: 'wn-idea', title: 'Friday digest of finished jobs', intent: 'Could the board tell the team what finished each week?', repos: [], stage: f.made ? 'active' : 'planning', subJobs, moves: [], revision: 1,
+    createdAt: clock(0), reviewPlan: true, idea: { thread: threads[f.thread] }, plan,
+    runs: [{ id: 'wn-run', subJobId: null, phase: 'planning', stopped: f.made, parkedFor: 'idea', parkedAt: f.parked ? clock(5) : null, mailedAt: null },
+      ...(f.made ? [{ id: 'wn-build', subJobId: 'build', phase: 'implementation', stopped: false, status: 'working' }] : [])] };
   const thread = ideaThreadHtml(job, { fresh: (id) => id === f.fresh, firing: f.press && { id: 'm3', state: f.press } });
   return `<div class="wn-ideas" role="img" aria-label="An idea sits on the board as a forming sky while its planner asks one question, then suggests a job you create with one press">
       <div class="wn-ideas-plate">${inert(plateHtml(job, 'opus'))}</div>
@@ -330,7 +334,7 @@ export const UPDATES = [
     body: `<p><b>New job</b> is now <b>New idea</b>. Write what you’re after in your own words. If it’s clear, the planner plans it. If not, it asks what it needs to know, then suggests a job you create with one press.</p>${done([
       '<b>Ideas sit on the board</b> as forming skies, beside your jobs, until they become one. The <b>Ideas</b> filter shows just them.',
       '<b>Keep refining</b> as long as you like: a reply after a suggestion gets a fresh one.',
-      '<b>Your checkpoints still apply.</b> With Plan on You review, you approve the plan before anything runs.',
+      '<b>Creating a suggested job approves its plan</b>, so it starts at once. A plan the planner drafts itself still waits for you with Plan on You review.',
     ])}`,
     anim: { frames: 9, ms: 1700, still: 3 }, figure: (phase) => ideasFigure(phase) },
 ];

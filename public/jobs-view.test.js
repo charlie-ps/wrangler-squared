@@ -687,7 +687,7 @@ test('new idea is a brief beside a property sidebar, and the brief is the descri
     [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts'], ['reviewCode', 'Code', true, 'You see each PR working and read its diff before it’s committed'], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass'], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done'], ['reviewWrites', 'Writes', false, 'Each write is made by its session, with a receipt'], ['reviewRed', 'Red steps', true, 'Wrangler proposes a fix for a red step and waits for you to decide']]);
   assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('small')?.textContent]),
     [['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, undefined]]);
-  assert.match(form.querySelector('.job-create-foot').textContent, /nothing touches Jira until you approve/);
+  assert.match(form.querySelector('.job-create-foot').textContent, /waits for you before anything touches Jira; creating a suggested job approves its plan/);
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
   assert.deepEqual(f.sent[0], { type: 'job-create', idea: true, start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true, sandbox: 'auto', writableDirs: [], updateMain: false, images: [], shareImages: true, taskId: null } });

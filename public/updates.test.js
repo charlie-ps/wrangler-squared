@@ -48,7 +48,8 @@ test('the shipped registry is the two Writes pages, review defaults, See it work
   assert.ok(at(5).chat.querySelector('.job-launch.firing'));
   assert.match(at(6).chat.querySelector('.job-launch.done').textContent, /Creating the job/);
   assert.ok(!at(7).plate.classList.contains('idea'), 'and the job takes the idea’s place on the board');
-  assert.match(at(7).plate.querySelector('.job-plate-stub').textContent, /Plan ready/);
+  assert.ok(at(7).plate.classList.contains('running'), 'creating it approved the plan: the job is already working');
+  assert.doesNotMatch(at(7).plate.textContent, /Plan ready/);
   assert.ok([...Array(idea.anim.frames).keys()].every((i) => !drawn(i).querySelector('button:not([tabindex="-1"])')), 'its buttons stay out of the tab order');
   const storage = memoryStorage();
   assert.equal(createUpdates({ storage }).maybeShow(), true);

@@ -67,10 +67,10 @@ export function suggestionHtml(job, msg, state = 'live') {
   const steps = work.map((s) => `<li>${kindChipHtml(s)}<span>${esc(s.title)}</span><small>${esc(stepNote(plan, s))}</small></li>`).join('');
   const done = state === 'done', stale = state === 'stale';
   const label = done ? 'Creating the job' : 'Create job';
-  const review = job.reviewPlan ?? true;
+  // The press is the plan approval, whatever Plan review says (job-store.js accept-idea).
   const fine = stale ? '<b>Replaced by a newer reply</b> · the planner suggests again once it answers.'
-    : done ? `<b>${review ? 'Plan ready for review' : 'Job starting'}</b> · it takes this idea's place on the board.`
-      : review ? '<b>Plan on You review</b> · you approve it before Jira or PRs.' : '<b>Plan on Auto</b> · the job starts as soon as you press.';
+    : done ? '<b>Job starting</b> · it takes this idea\'s place on the board.'
+      : '<b>Creating it approves this plan</b> · the job starts as soon as you press; your other checkpoints still apply.';
   return `<div class="job-launch tone-warn ${state}" data-board="${esc(msg.id)}" data-launch="${esc(msg.id)}">
     <div class="job-launch-text"><span class="job-launch-kicker"><i></i>Suggested job</span><h3 class="job-launch-title">${esc(title)}</h3><div class="job-launch-meta">${meta}</div><ol class="job-launch-steps">${steps}</ol></div>
     <button type="button" class="job-launch-go" data-accept-idea="${esc(msg.id)}" data-spin="14" aria-label="${esc(`Create job: ${title}`)}" ${state === 'live' ? '' : 'aria-disabled="true"'}>

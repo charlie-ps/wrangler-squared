@@ -3,8 +3,9 @@
 // phase) and parks like a session parked on its ready receipt (job-parked.js): no
 // slot, held only to its card existing, mailed the human's answer by the runner
 // (job-runner.js deliverIdea). A reply may suggest a job, a whole plan with a
-// title, which the human accepts with one press; that is the plan receipt the
-// planner would have sent, and the parked run then ends quietly. Pure over the job
+// title, which the human accepts with one press; that press is the plan receipt and
+// its approval at once (Plan review never asks again), and the parked run then ends
+// quietly. Pure over the job
 // draft job-store.js is about to persist, like job-change.js.
 
 export const IDEA_TEXT_MAX = 8000;

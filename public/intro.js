@@ -70,7 +70,7 @@ const BOARD_FRAMES = [
   [['reply'], ['review', 'Tests passed · review', 1], ['review', 'Ready for your review', 1], ['running', '4 agents working', 0]],
   [['thinking'], ['running', 'Checks running', 2], ['review', 'Ready for your review', 1], ['review', 'Green PR · merge?', 2]],
   [['suggested'], ['running', 'Checks running', 2], ['deploying', 'Merged · deploying', 2], ['running', '3 agents working', 2]],
-  [['review', 'Plan ready for review', 0], ['done', 'Delivered', 3], ['done', 'Delivered', 3], ['running', '2 agents working', 3]],
+  [['running', 'Starting its sub-jobs', 0], ['done', 'Delivered', 3], ['done', 'Delivered', 3], ['running', '2 agents working', 3]],
   [['running', '2 agents working', 0], ['done', 'Delivered', 3], ['done', 'Delivered', 3], ['review', 'Check the backfill', 3]],
 ];
 const waits = ([st]) => st === 'review' || IDEA[st]?.[0] === 'warn';
@@ -99,7 +99,7 @@ const AUTO = `<b class="intro-cp">${ICONS.ff}Auto</b>`;
 const checkpointsFigure = (reviews) => `<div class="intro-checkpoints">${CHECKPOINTS.map((cp) => `<div class="job-review intro-checkpoint" data-checkpoint="${cp.field}"><div class="job-review-row">${checkpointFlagHtml(cp, reviews[cp.field])}<span class="job-review-name">${cp.name}<small>${checkpointHint(cp, reviews[cp.field])}</small></span>${checkpointToggleHtml(cp, reviews[cp.field], `intro-${cp.field}`)}</div></div>`).join('')}</div>`;
 
 // New idea: the idea, the planner's question and the job it suggests, drawn by
-// job-idea.js itself, then the plan waiting to be approved. The chat is a fixed
+// job-idea.js itself, then the job it starts: pressing the suggestion approves its plan. The chat is a fixed
 // window that keeps its newest message at the foot, so the dialog never grows.
 const SUGGEST = { title: 'Dark mode for the reports dashboard', plan: { subJobs: [
   { id: 'tokens', kind: 'pr', title: 'Dark theme colours in the UI kit', repo: 'acme/ui-kit', base: 'next' },
@@ -118,19 +118,19 @@ const IDEA_FRAMES = [
   [2, true, false, false, ['run', 'ok', 'idle']],
   [3, false, false, false, ['warn', 'ok', 'idle']],
   [3, false, true, false, ['ok', 'ok', 'run']],
-  [3, false, true, true, ['ok', 'ok', 'warn']],
-  [3, false, true, true, ['ok', 'ok', 'warn']],
+  [3, false, true, true, ['ok', 'ok', 'run']],
+  [3, false, true, true, ['ok', 'ok', 'run']],
 ];
 const FLOW = { ok: ['check', 'Done'], run: ['spin', 'Working'], warn: ['eye', 'Needs you'], idle: ['planned', 'Next'] };
 const flowNode = (tone, icon, title) => node(tone, icon, title, FLOW[tone][1], FLOW[tone][0], tone !== 'idle');
 const newIdeaFigure = (phase) => {
-  const [n, thinking, pressed, plan, [talk, , approve]] = IDEA_FRAMES[phase];
+  const [n, thinking, pressed, plan, [talk, , start]] = IDEA_FRAMES[phase];
   const thread = SAID.slice(0, n).map((m) => (m.suggest && pressed ? { ...m, acceptedAt: 1 } : m));
   const job = { id: 'intro-idea', intent: 'Add a dark mode to the reports dashboard', idea: { thread }, stage: 'planning', runs: thinking ? [] : [{ parkedFor: 'idea', parkedAt: 1 }], reviewPlan: true };
   const fresh = (id) => id === SAID[n - 1]?.id && !pressed;
-  return `<div class="intro-flow">${flowNode('ok', 'edit', 'Idea')}<span class="intro-flow-line"></span>${flowNode(talk, 'robot', 'Planner')}<span class="intro-flow-line"></span>${flowNode(approve, 'eye', 'Approve')}</div>
+  return `<div class="intro-flow">${flowNode('ok', 'edit', 'Idea')}<span class="intro-flow-line"></span>${flowNode(talk, 'robot', 'Planner')}<span class="intro-flow-line"></span>${flowNode(start, 'play', 'Job')}</div>
   <div class="intro-chat" inert>${ideaThreadHtml(job, { fresh })}${plan ? `<div class="intro-chat-plan"><div class="job-chips"><span class="job-chip job-plan-branch">${ICONS.branch}<span>next</span></span><span class="job-chip">${ICONS.pr}<span>2 PRs · 1 session</span></span></div>
-  ${composer('Planner', 'Add an idea for the planner…', 'Redraws the plan for you to review.', 'Design the switch first')}</div>` : ''}</div>`;
+  ${composer('Planner', 'Add an idea for the planner…', 'Sorts it into feedback for a step or a change to the plan.', 'Design the switch first')}</div>` : ''}</div>`;
 };
 
 // Sub-jobs: three kinds of tile, and the places a session writes to as pills.
@@ -186,7 +186,7 @@ export const INTRO_STEPS = [
     figure: (reviews, phase) => board(phase) },
   { tab: 'New idea',
     title: 'New idea, then a plan you approve before anything runs.',
-    body: `<p>Press <b>New idea</b> and describe the outcome, in words or with screenshots. If it is unclear, the planner asks you, then suggests a job; if it is clear, ${W2} drafts the <b>plan</b> straight away. It picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>Press <b>Create job</b> and you get the plan of ordered sub-jobs. To change it, write in <b>Add idea</b> under it. Nothing runs until you <b>Approve</b>: no session, ticket or PR. You can also save an idea to the backlog and come back to it.</p>`,
+    body: `<p>Press <b>New idea</b> and describe the outcome, in words or with screenshots. If it is unclear, the planner asks you, then suggests a job; if it is clear, ${W2} drafts the <b>plan</b> straight away. It picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>A drafted plan is ordered sub-jobs. To change it, write in <b>Add idea</b> under it. Nothing runs until you <b>Approve</b>: no session, ticket or PR. A suggested job needs no second look: pressing <b>Create job</b> approves its plan and starts it. You can also save an idea to the backlog and come back to it.</p>`,
     cls: 'intro-idea', anim: { frames: IDEA_FRAMES.length, ms: 1700, still: 5 },
     figure: (reviews, phase) => newIdeaFigure(phase) },
   { tab: 'Sub-jobs',

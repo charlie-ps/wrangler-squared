@@ -974,7 +974,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (focus) dialog.querySelector(`.job-detail-footer [data-review="${focus}"]`)?.focus();
   }
   // An idea still being talked through is its conversation (job-idea.js); once its
-  // suggestion is accepted the plan review below takes over, the thread folded under it.
+  // suggestion is accepted the job starts, the thread folded under its detail.
   function ideaDetail(job) {
     const cost = costChip(job.usd, job.usdEstimated, JOB_COST_TITLE);
     const error = job.error ? `<p class="job-error">${esc(job.error)}</p>` : job.idea?.error ? `<p class="job-error">${esc(job.idea.error)} · Retrying automatically</p>` : '';
@@ -1437,7 +1437,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     show(`<form id="job-create-form" class="job-create">
       <div class="job-create-brief"><h2>New idea</h2><div class="job-outcome"><label>Describe your idea<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should exist that doesn’t yet? One sentence is enough. If it needs more, the planner will ask."></textarea></label>${imagesPanelHtml()}</div><fieldset class="job-prop job-review-grid"><legend>Review checkpoints</legend><div class="job-review-tiles">${reviewPointsHtml(reviewDefaultsOf(data.settings))}</div></fieldset></div>
       <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop job-pick" id="job-pick"><legend>Agent</legend></fieldset><input type="hidden" name="agent"><input type="hidden" name="model"><input type="hidden" name="effort"><fieldset class="job-prop job-sandbox" id="job-sandbox"></fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset><fieldset class="job-prop"><legend>After delivery</legend>${toggle('updateMain', 'Fast-forward main', '', false)}</fieldset></aside>
-      <footer class="job-create-foot"><span>If the idea is clear, the planner plans it and the job starts. If not, it asks you here first and suggests a job when it’s ready. With Plan on You review, nothing touches Jira until you approve.</span><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
+      <footer class="job-create-foot"><span>If the idea is clear, the planner plans it and the job starts. If not, it asks you here first and suggests a job when it’s ready. With Plan on You review, a plan the planner drafts waits for you before anything touches Jira; creating a suggested job approves its plan.</span><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
     const form = dialog.querySelector('form');
     let images;
     images = createJobImages({

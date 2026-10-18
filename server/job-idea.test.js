@@ -78,25 +78,25 @@ test('a vague idea: the planner replies, parks without a slot, and the human ans
   assert.equal(liveSuggestion(f.get()).suggest.title, 'Nudge when a green PR waits');
 });
 
-test('accepting the suggestion is the plan receipt: plan review applies, the parked planner ends quietly', async (t) => {
+test('accepting the suggestion is the plan receipt and its approval, even with Plan on You review; the parked planner ends quietly', async (t) => {
   const f = fixture(t); await f.start();
   const planner = f.last();
   f.report({ kind: 'reply', text: 'Here is the job.', suggest: suggest() });
   const msg = f.get().idea.thread.at(-1);
   assert.throws(() => f.store.action(f.job.id, 'accept-idea', { messageId: 'msg_other' }), /changed since you looked/);
   f.store.action(f.job.id, 'accept-idea', { messageId: msg.id });
-  let job = f.get();
-  assert.deepEqual([job.stage, job.title, job.plan.subJobs[0].id], ['planning', 'Nudge when a green PR waits', 'nudge']);
+  const job = f.get();
+  assert.equal(job.reviewPlan ?? true, true);
+  assert.deepEqual([job.stage, job.title, job.plan.subJobs[0].id, job.subJobs[0].id], ['active', 'Nudge when a green PR waits', 'nudge', 'nudge']);
+  assert.ok(job.approvedAt, 'no second Approve for the plan just accepted');
   assert.ok(job.idea.thread.at(-1).acceptedAt);
   assert.equal(inConversation(job), false);
   assert.match(job.moves.at(-1).detail, /from the planner's suggestion/);
   await f.tick();
   assert.equal(f.run(planner).stopped, true);
   assert.equal(f.run(planner).error, undefined, 'stopped quietly, not as a missing receipt');
-  assert.equal(f.get().error, undefined);
-  f.store.approvePlan(f.job.id, f.get().revision);
-  job = f.get();
-  assert.equal(job.stage, 'active');
+  assert.ok(!f.get().error);
+  assert.deepEqual(f.launched.map((l) => l.run.phase), ['planning', 'implementation']);
   assert.throws(() => f.store.action(f.job.id, 'accept-idea', { messageId: msg.id }), /no longer a conversation/);
 });
 
@@ -119,14 +119,18 @@ test('a reply after a suggestion replaces it: the old one can no longer be accep
   assert.throws(() => f.store.action(f.job.id, 'idea-reply', { text: '  ' }), /Write a reply first/);
 });
 
-test('a well-defined idea goes straight to a plan, exactly as a job always did', async (t) => {
+test('a well-defined idea goes straight to a plan, exactly as a job always did: Plan review still waits for Approve', async (t) => {
   const f = fixture(t); await f.start();
   f.report({ kind: 'plan', plan: plan() });
   await f.tick();
   const job = f.get();
-  assert.deepEqual([job.stage, job.plan.subJobs.length, job.idea.thread.length], ['planning', 1, 0]);
+  assert.deepEqual([job.stage, job.plan.subJobs.length, job.idea.thread.length, job.subJobs.length], ['planning', 1, 0, 0]);
+  assert.equal(job.approvedAt, undefined);
   assert.equal(f.run(f.launched[0]).stopped, true);
   assert.equal(job.error, undefined);
+  assert.equal(f.launched.length, 1, 'nothing runs before Approve');
+  f.store.approvePlan(f.job.id, f.get().revision);
+  assert.equal(f.get().stage, 'active');
 });
 
 test('a parked planner may still send the plan itself, ending its run', async (t) => {
