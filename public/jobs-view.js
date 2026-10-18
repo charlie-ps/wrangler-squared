@@ -132,9 +132,9 @@ const PLACE_ACTIONS = { jira: ['transition', 'comment'], slack: ['post', 'make']
 const ACTION_LABEL = { post: 'Post a message', create: 'Create a page', comment: 'Comment on a page', write: 'Do something there' };
 const MADE_ONLY = ['artifact', 'file', 'url'];
 export const writeOwner = (plan, w) => plan.subJobs.find((s) => s.id === w.by) || null;
-const reviewToggleHtml = (job, w) => `<label class="job-write-toggle"><input type="checkbox" name="review" ${writeReviewed(job, w) ? 'checked' : ''}><span><b>${isMakeWrite(w) ? 'Review once published' : 'Review before writing'}</b><small>${isMakeWrite(w)
+const reviewToggleHtml = (job, w) => `<label class="job-write-toggle"><input type="checkbox" name="review" ${writeReviewed(job, w) ? 'checked' : ''}><span title="${isMakeWrite(w)
   ? 'Off: it is done as soon as its session reports where it is. On: once its session publishes it, it waits for you to accept it.'
-  : 'Off: its session makes it and reports a receipt. On: its session drafts it and waits while you approve the exact change, edit it or skip it.'}</small></span></label>`;
+  : 'Off: its session makes it and reports a receipt. On: its session drafts it and waits while you approve the exact change, edit it or skip it.'}"><b>${isMakeWrite(w) ? 'Review once published' : 'Review before writing'}</b></span></label>`;
 // A write's fields, shared by the plan-review editor, a live write's Edit form
 // and the panel a draft in review is approved from. `plan` supplies the owning
 // session, stories and the workflow statuses the planner read; a status the
@@ -156,14 +156,15 @@ export function writeFieldsHtml(plan, w, { ticket = false, pick = false, job = n
     ${type !== 'jira' && actions.length > 1 ? `<div class="job-form-row"><label>Do<select name="actionType">${actions.map((x) => `<option value="${x}" ${x === a.type ? 'selected' : ''}>${esc(actionLabel(x))}</option>`).join('')}</select></label></div>` : ''}` : '';
   const why = w.why ? `<p class="job-write-why"><b>Planner:</b> ${esc(w.why)}</p>` : '';
   const filled = '{pr.url}, {pr.title} and {deploy.run} come from its session\'s trigger, {<write id>.url} from that write once made';
-  const refField = (label, hint, placeholder) => `<label>${label}${hint ? ` <small>${hint}</small>` : ''}<input name="ref" maxlength="500" value="${esc(w.place?.ref || '')}" placeholder="${esc(placeholder)}"></label>`;
-  const textField = (label, optional) => `<label>${label} <small>${optional ? 'Optional · ' : ''}${filled}</small><textarea name="text" rows="3" maxlength="2000">${esc(a.text || '')}</textarea></label>`;
-  const elsewhere = type === 'other' ? `<div class="job-form-row"><label>Place <small>One line: what it is called</small><input name="name" maxlength="60" value="${esc(w.place?.name || '')}" placeholder="Status page"></label>${refField('Where', 'Optional · a link or a path', 'https://…')}</div>` : '';
+  const tip = (hint) => hint ? ` title="${esc(hint)}"` : '';
+  const refField = (label, hint, placeholder) => `<label${tip(hint)}>${label}<input name="ref" maxlength="500" value="${esc(w.place?.ref || '')}" placeholder="${esc(placeholder)}"></label>`;
+  const textField = (label, optional) => `<label${tip(`${optional ? 'Optional · ' : ''}${filled}`)}>${label}<textarea name="text" rows="3" maxlength="2000">${esc(a.text || '')}</textarea></label>`;
+  const elsewhere = type === 'other' ? `<div class="job-form-row"><label${tip('One line: what it is called')}>Place<input name="name" maxlength="60" value="${esc(w.place?.name || '')}" placeholder="Status page"></label>${refField('Where', 'Optional · a link or a path', 'https://…')}</div>` : '';
   if (a.type === 'make') {
     const where = type === 'slack' ? refField('Channel', '', '#channel') : type === 'confluence' ? refField('Where', 'Optional · space › parent', 'WEB › Incidents') : elsewhere;
-    return `${why}${picker}${where}<label>What it is <small>One line; the session it hangs under makes it and reports where it is</small><input name="what" maxlength="180" value="${esc(a.what || '')}"></label>${review}`;
+    return `${why}${picker}${where}<label${tip('One line; the session it hangs under makes it and reports where it is')}>What it is<input name="what" maxlength="180" value="${esc(a.what || '')}"></label>${review}`;
   }
-  if (type === 'other') return `${why}${picker}${elsewhere}<label>What to do there <small>The one instruction its session follows · ${filled}</small><textarea name="text" rows="3" maxlength="2000">${esc(a.text || '')}</textarea></label>${review}`;
+  if (type === 'other') return `${why}${picker}${elsewhere}<label${tip(`The one instruction its session follows · ${filled}`)}>What to do there<textarea name="text" rows="3" maxlength="2000">${esc(a.text || '')}</textarea></label>${review}`;
   if (type === 'slack') return `${why}${picker}${refField('Channel', '', '#channel')}${textField('Post')}${review}`;
   if (type === 'confluence') {
     return a.type === 'create' ? `${why}${picker}${refField('Where', 'Space › parent page', 'WEB › Incidents')}<label>Title<input name="title" maxlength="180" value="${esc(a.title || '')}"></label>${textField('Body', true)}${review}`
@@ -176,7 +177,7 @@ export function writeFieldsHtml(plan, w, { ticket = false, pick = false, job = n
     : `<input name="to" maxlength="180" value="${esc(to)}" placeholder="Status name, or blank to comment only">`;
   const stories = ticket && plan.stories?.length > 1 ? `<label>Ticket<select name="storyId">${plan.stories.map((t) => `<option value="${esc(t.id)}" ${t.id === w.storyId ? 'selected' : ''}>${esc(storyLabel(t, plan.stories))} · ${esc(t.title)}</option>`).join('')}</select></label>` : '';
   return `${why}${picker}${stories}<label>Move to${moveTo}</label>
-    <label>Comment <small>Optional · ${filled}</small><textarea name="comment" rows="3" maxlength="2000">${esc(a.comment || '')}</textarea></label>${review}`;
+    <label${tip(`Optional · ${filled}`)}>Comment<textarea name="comment" rows="3" maxlength="2000">${esc(a.comment || '')}</textarea></label>${review}`;
 }
 // The fields as the write they describe; empty means none, absent means the
 // form has no such field.
@@ -1146,7 +1147,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const box = (text) => text ? `<p class="job-write-hint">${ICONS.info}<span>${esc(text)}</span></p>` : '';
       const made = isMakeWrite(sub);
       const panel = review && !made;
-      body = `${box(review || sub.result?.outcome === 'already' ? hints.find((h) => /^(Review is on|.* reached |.* was already )/.test(h)) : orphan)}${review && made ? madeWhereHtml(sub) : ''}${sub.result ? `<h3>Reported</h3>${receiptHtml(sub.result.checks)}` : ''}${panel ? writeReviewHtml(job, sub, state) : writeSpecHtml(job, sub)}`;
+      body = `${box(review ? '' : sub.result?.outcome === 'already' ? hints.find((h) => /^(.* reached |.* was already )/.test(h)) : orphan)}${review && made ? madeWhereHtml(sub) : ''}${sub.result ? `<h3>Reported</h3>${receiptHtml(sub.result.checks)}` : ''}${panel ? writeReviewHtml(job, sub, state) : writeSpecHtml(job, sub)}`;
       // A write is only ever made by its session, so Retry (and an edit of a
       // failed one) runs that again for it, a finished session for its writes
       // alone; a dropped session leaves it to be marked done or dropped.

@@ -518,7 +518,6 @@ button.job-write:focus-visible { outline:2px solid var(--c); outline-offset:1px;
 .job-dialog label.job-write-toggle { flex-direction:row; align-items:flex-start; gap:10px; padding:10px; border-radius:10px; background:var(--surface); cursor:pointer; }
 .job-write-toggle input { margin-top:2px; accent-color:var(--snooze); }
 .job-write-toggle span { display:flex; flex-direction:column; gap:2px; }
-.job-write-toggle small { color:var(--fg-muted); }
 .job-write-hint { display:flex; align-items:flex-start; gap:8px; font-size:12px; line-height:1.55; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
 .job-write-hint .icon { margin-top:2px; color:var(--fg-muted); }
 .job-write-spec { margin:6px 0 16px; border:1px solid var(--border-muted); border-radius:12px; overflow:hidden; font-size:12px; }

@@ -1020,7 +1020,7 @@ test('a story create in review is its own editor: summary and fields as planned,
   job.runs = [{ id: 'r2', subJobId: 'stories', phase: 'session', stopped: false, sessionId: 's2', parkedAt: 1, drafts: ['create-audit'] }];
   f.view.update(f.data); f.q('.job-plate-open[data-job="job1"]').click(); f.q('.job-write[data-open-sub="create-audit"]').click();
   const panel = () => f.q('#job-write-review');
-  assert.match(f.q('.job-write-hint').textContent, /Review is on for this write: Create Jira stories drafted it below and nothing has been written to Jira yet/);
+  assert.match(f.q('.job-appbar .job-chip-state').title, /Review is on for this write: Create Jira stories drafted it below and nothing has been written to Jira yet/);
   assert.equal(panel().querySelector('[name="storyTitle"]').value, 'Sign-ins are audited');
   assert.deepEqual([...panel().querySelectorAll('dt')].map((e) => e.textContent), ['Project', 'Issue Type', 'Components', 'Description']);
   assert.ok(!panel().innerHTML.includes('<b>core'), 'a planner-written value is escaped');
@@ -1703,7 +1703,7 @@ test('a write waits on its session; a draft needs you, its panel the editor that
   assert.match(f.q('[data-node="w-rev"]').textContent, /Review write$/);
   assert.ok(f.q('[data-board="job1"] .job-plate-graph g.moon[data-sub="w-rev"]'), 'a write is a moon on the plate, no step of the plan');
   f.q('[data-open-sub="w-rev"]').click();
-  assert.match(f.q('.job-write-hint').textContent, /Review is on for this write: Run n-rev drafted it below and nothing has been written to Jira yet\. .*once every draft it sent is decided, Run n-rev is told what to make/);
+  assert.match(f.q('.job-appbar .job-chip-state').title, /Review is on for this write: Run n-rev drafted it below and nothing has been written to Jira yet\. .*once every draft it sent is decided, Run n-rev is told what to make/);
   const panel = f.q('#job-write-review');
   assert.match(panel.innerHTML, /Started &lt;script&gt;/); assert.match(panel.innerHTML, /Team &lt;i&gt;rule&lt;\/i&gt;/);
   assert.equal(panel.querySelector('[name="to"]').value, 'In Progress');
@@ -1898,7 +1898,8 @@ test('a Slack post in review asks to Post to Slack, with only its edited fields'
   Object.assign(job.subJobs.find((s) => s.id === 'post'), { stage: 'review', state: 'verified' }); f.view.update(f.data);
   f.q('[data-open-job]').click(); f.q('[data-open-sub="post"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Post to Slack', 'Skip']);
-  assert.match(f.q('.job-write-hint').textContent, /nothing has been written to Slack yet/);
+  assert.match(f.q('.job-appbar .job-chip-state').title, /nothing has been written to Slack yet/);
+  assert.equal(f.q('.job-write-hint'), null, 'the chip already says it');
   const panel = f.q('#job-write-review');
   assert.deepEqual([panel.querySelector('[name="ref"]').value, panel.querySelector('[name="text"]').value], ['#web-platform', 'Chart: {chart.url}']);
   panel.querySelector('[name="ref"]').value = '#web'; panel.querySelector('[name="text"]').value = 'Chart is up: {chart.url}';
@@ -1915,7 +1916,7 @@ test('a made output in review is already published: it says where, and Accept fi
   const chart = job.subJobs.find((s) => s.id === 'chart');
   assert.deepEqual([jobStatus(job, chart).text, jobNeedsReview(job, chart)], ['Review the output', true]);
   f.q('[data-board="job1"] .job-plate-open').click(); f.q('[data-open-sub="chart"]').click();
-  assert.equal(f.q('.job-write-hint').textContent, 'Review is on for this output: Run report published it. Accept it to finish, or drop it.');
+  assert.equal(f.q('.job-appbar .job-chip-state').title, 'Review is on for this output: Run report published it. Accept it to finish, or drop it.');
   const where = f.q('.job-write-where a');
   assert.deepEqual([where.getAttribute('href'), where.textContent, where.target], ['https://claude.ai/artifact/7f3c', 'Checkout <b>p95</b> ↗', '_blank']);
   assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Accept']);
@@ -1975,7 +1976,7 @@ test('plan review adds a write to somewhere else: named, optionally located, wit
   editor.querySelector('[name="placeType"][value="other"]').checked = true; editor.querySelector('[name="placeType"][value="other"]').dispatchEvent(f.event('change'));
   assert.deepEqual([...f.q('[data-write-editor] [name="actionType"]').options].map((o) => o.textContent), ['Do something there', 'Made by Run report']);
   set('name', 'Grafana'); set('actionType', 'make');
-  assert.match(f.q('[data-write-editor] .job-write-toggle').textContent, /once its session publishes it, it waits for you to accept it/);
+  assert.match(f.q('[data-write-editor] .job-write-toggle span').title, /once its session publishes it, it waits for you to accept it/);
   set('what', 'p95 dashboard');
   f.q('[data-action="approve-plan"]').click();
   const sent = f.sent.at(-1).plan.subJobs.filter((s) => s.kind === 'write');
@@ -1990,7 +1991,7 @@ test('a write elsewhere in review is approved as Write to its name, sending only
     sessionNode('notify', { on: { sub: 'api', at: 'pr' }, stage: 'session', state: 'queued', sessions: ['s1'] }),
     { id: 'status', kind: 'write', place: { type: 'other', name: 'Status page', ref: 'https://status.example.com' }, title: 'Write to Status page', after: [], by: 'notify', review: true, action: { type: 'write', text: 'Post a notice' }, stage: 'review', state: 'verified', sessions: [], repairs: [] }] });
   f.q('[data-board="job1"] .job-plate-open').click(); f.q('[data-open-sub="status"]').click();
-  assert.match(f.q('.job-write-hint').textContent, /nothing has been written to Status page yet/);
+  assert.match(f.q('.job-appbar .job-chip-state').title, /nothing has been written to Status page yet/);
   assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Write to Status page', 'Skip']);
   const panel = f.q('#job-write-review');
   panel.querySelector('[name="text"]').value = 'Post a resolved notice';
