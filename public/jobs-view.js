@@ -419,7 +419,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const { concurrency } = data.settings;
     root.classList.toggle('jobs-paused', paused);
     q('#jobs-date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
-    q('#jobs-active-count').innerHTML = `<b>${active}</b> of ${concurrency} agents ${paused ? 'paused' : 'working'}`;
+    q('#jobs-active-count').innerHTML = `<b>${active}</b>/${concurrency}`;
+    q('#jobs-active-count').title = `${active} of ${concurrency} agents ${paused ? 'paused' : 'working'}`;
     q('#jobs-bays').innerHTML = Array.from({ length: Math.max(concurrency, active) }, (_, i) => `<i class="${i < active ? 'on' : ''}"></i>`).join('');
     const spend = data.jobs.filter((j) => j.stage !== 'done').reduce((a, j) => a + (j.usd || 0), 0);
     q('#jobs-spend').innerHTML = spend > 0 ? `<b>$${spend.toFixed(2)}</b> on open jobs` : '';

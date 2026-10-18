@@ -79,8 +79,8 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .jobs-telemetry { display:flex; flex-wrap:wrap; align-items:center; gap:8px 20px; padding-bottom:6px; font:400 12px var(--jobs-mono); color:rgba(244,237,226,.66); font-variant-numeric:tabular-nums; }
 .jobs-telemetry b { color:#fff; font-weight:500; }
 .jobs-telemetry span:empty { display:none; }
-.jobs-beacon { display:inline-flex; align-items:center; gap:9px; }
-.jobs-beacon::before { content:""; width:7px; height:7px; border-radius:50%; background:#7fe0b0; animation:jobs-beacon 2.4s infinite; }
+.jobs-beacon { display:inline-flex; align-items:center; }
+.jobs-beacon::before { content:""; width:7px; height:7px; margin-right:9px; border-radius:50%; background:#7fe0b0; animation:jobs-beacon 2.4s infinite; }
 .jobs-paused .jobs-beacon::before { background:#d0b0f5; animation:none; }
 @keyframes jobs-beacon { 0% { box-shadow:0 0 0 0 rgba(127,224,176,.6); } 70%,100% { box-shadow:0 0 0 8px transparent; } }
 .jobs-bays { display:inline-flex; gap:3px; align-items:center; }

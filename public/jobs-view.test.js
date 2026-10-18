@@ -2080,13 +2080,15 @@ test('the masthead counts agents in bays and says when automation is paused', (t
   job.subJobs = [{ ...sub('api'), stage: 'implementation' }];
   job.runs = [{ id: 'r1', subJobId: 'api', phase: 'implementation', stopped: false, status: 'working' }];
   f.view.update(f.data);
-  assert.equal(f.q('#jobs-active-count').textContent, '1 of 2 agents working');
+  assert.equal(f.q('#jobs-active-count').textContent, '1/2');
+  assert.equal(f.q('#jobs-active-count').title, '1 of 2 agents working');
   assert.deepEqual([...document.querySelectorAll('#jobs-bays i')].map((i) => i.className), ['on', '']);
   assert.equal(f.q('#jobs-spend').textContent, '$3.50 on open jobs');
   f.data.settings.paused = true; f.view.update(f.data);
   assert.ok(f.q('#jobs').classList.contains('jobs-paused'));
   assert.equal(f.q('#jobs-pause').getAttribute('aria-pressed'), 'true');
-  assert.equal(f.q('#jobs-active-count').textContent, '1 of 2 agents paused');
+  assert.equal(f.q('#jobs-active-count').textContent, '1/2');
+  assert.equal(f.q('#jobs-active-count').title, '1 of 2 agents paused');
 });
 
 test('New job\'s Sandbox section follows the agent and round-trips its mode and folders into job-create', (t) => {
