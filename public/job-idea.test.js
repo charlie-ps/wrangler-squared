@@ -5,7 +5,6 @@ import { initJobsView } from './jobs-view.js';
 import { ideaStage, liveSuggestion, jobNeedsReview, jobStatus } from './jobs.js';
 import { plateAsk, plateHtml } from './job-plates.js';
 import { TITLE_FADE_MS, suggestionSummary } from './job-idea.js';
-import { markdownHtml } from './markdown.js';
 
 const suggest = { title: 'Nudge when a green PR waits over a day', plan: { context: '', stories: [], subJobs: [
   { id: 'track', title: 'Track how long a merge-ready PR has waited', repo: '/Users/me/wrangler-squared', after: [], brief: 'b' },
@@ -68,7 +67,7 @@ test('a vague idea is its conversation: the planner\'s reply, escaped, and Enter
   assert.equal(view.querySelector('.job-idea-band h2').textContent, 'Nudge me when a green PR waits on me');
   assert.equal(view.querySelector('.job-sent-bubble').textContent, 'PRs sit green for ages. Can the board nag me?', 'the idea itself opens the thread');
   const body = view.querySelector('.job-idea-msg .job-idea-body');
-  assert.deepEqual([...body.querySelectorAll('ol li')].map((l) => l.textContent), ['Which wait counts?', 'Where should the nudge land?']);
+  assert.match(body.textContent, /1\. Which wait counts\?\s*2\. Where should the nudge land\?/);
   assert.equal(body.querySelector('img'), null, 'agent text is never markup');
   assert.match(body.textContent, /<img src=x/);
   assert.equal(f.q('#job-dialog .job-idea-band > .job-detail-cost').textContent, '$0.39', 'the price sits in the band');
@@ -140,9 +139,7 @@ test('on the board an idea waiting on you is a needs-you stub; one the planner i
   assert.equal(ideaStage({ ...reply, idea: undefined }), null, 'a job not made from New idea has no conversation');
 });
 
-test('the planner\'s prose is escaped before it is marked up, and a summary counts only the work', () => {
-  assert.equal(markdownHtml('a `b<c>` d\n\n- one\n- two'), '<p>a <code>b&lt;c&gt;</code> d</p><ul><li>one</li><li>two</li></ul>');
-  assert.equal(markdownHtml('Two things:\n1. Whose CI?\n   a) ours\n2. Which pain?\nIf you mean (a), I would'), '<p>Two things:</p><ol><li>Whose CI?<br>a) ours</li><li>Which pain?</li></ol><p>If you mean (a), I would</p>');
+test('a suggestion\'s summary counts only the work', () => {
   const s = suggestionSummary(suggest.plan);
   assert.deepEqual([s.work.length, s.repos.length, s.line], [3, 1, '3 sub-jobs · wrangler-squared · Slack']);
 });

@@ -4,6 +4,7 @@ import { Window } from 'happy-dom';
 import { initJobsView, isPrimaryActionKey, primaryAction } from './jobs-view.js';
 import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
+import { useMarkdownRenderer } from './markdown.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml, plateAsk } from './job-plates.js';
 import { subState, subLabel, subLine, jobState, jobLabel } from './job-state.js';
@@ -2812,11 +2813,12 @@ test('a forward reads as the quote the session will be told, pinned to its round
   assert.doesNotMatch(threadHtml(job, { ...sub, thread: [{ ...sub.thread[0], via: undefined }] }), /job-msg-via/);
 });
 
-test('the session answers in Markdown and the thread draws it, still escaped', () => {
+test('the session\'s Markdown goes through the board\'s renderer, styled as board prose', (t) => {
+  useMarkdownRenderer((md) => `<rendered>${md}</rendered>`);
+  t.after(() => useMarkdownRenderer(null));
   const job = { id: 'job1', runs: [{ id: 'run_1', subJobId: 'api', stopped: false, parkedFor: 'ready', sessionId: 's1' }] };
-  const sub = { id: 'api', ready: { round: 1 }, thread: [{ id: 'm1', at: 1, from: 'agent', text: '**Fixed** in `export.js`:\n\n- spacing <b>raised</b>\n- [the PR](https://example.com/acme/widgets/pull/1)', round: 1 }] };
-  const html = threadHtml(job, sub);
-  assert.match(html, /<div class="job-msg-text job-md"><p><strong>Fixed<\/strong> in <code>export\.js<\/code>:<\/p><ul><li>spacing &lt;b&gt;raised&lt;\/b&gt;<\/li><li><a href="https:\/\/example\.com\/acme\/widgets\/pull\/1"/);
+  const sub = { id: 'api', ready: { round: 1 }, thread: [{ id: 'm1', at: 1, from: 'agent', text: '**Fixed**', round: 1 }] };
+  assert.match(threadHtml(job, sub), /<div class="job-msg-text chat-prose"><rendered>\*\*Fixed\*\*<\/rendered><\/div>/);
 });
 
 test('a tick that changes nothing leaves the board and detail DOM alone, and a selection holds a changed one until cleared', (t) => {
