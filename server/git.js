@@ -36,6 +36,13 @@ export async function gitRepoRoot(cwd) {
 // holding a submodule cannot be removed unforced at all; that refusal is
 // flagged `submodules` for the caller to decide. A missing dir is a no-op
 // success.
+// The line of a failed command's stderr that says why: git's `fatal:`/`error:`,
+// else the first. execFile's message keeps only the command on its first line.
+export function stderrLine(e) {
+  const lines = String(e?.stderr || '').trim().split('\n').filter(Boolean);
+  return lines.find((l) => /^(fatal|error):/.test(l)) || lines[0] || '';
+}
+
 export async function removeWorktree({ worktreePath, repoRoot = '', force = true }) {
   if (!worktreePath) throw new WorktreeError('No worktree path');
   if (!fs.existsSync(worktreePath)) return { ok: true, alreadyGone: true };

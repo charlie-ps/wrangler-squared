@@ -2848,6 +2848,23 @@ test('a refused cleanup on a dropped sub-job shows what would be lost, and Disca
   assert.equal(f.q('#job-discard'), null, 'a discard already chosen is not offered twice');
 });
 
+test('a detached worktree says so and offers Discard; one git cannot read shows why and offers none', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active'; job.cancelledAt = 1;
+  const detached = { path: '/wt/api', branch: 'job-api', base: 'main', head: 'cc47137aaaa', branchHead: 'abc12345ffff', fingerprint: 'fp1', pinned: true,
+    cause: 'detached', state: 'rebase', commits: [], commitCount: 0, files: [{ change: 'conflicted', path: 'README.md' }], fileCount: 1 };
+  const kept = (cleanupRefusal) => [{ ...sub('api'), stage: 'cleanup', state: 'cancelled', cancelledAt: 1, worktree: { path: '/wt/api', branch: 'job-api' }, error: 'refused', cleanupRefusal }];
+  job.subJobs = kept(detached); f.view.update(f.data);
+  f.view.openDetail('job1', 'api');
+  const text = () => f.q('#job-dialog').textContent;
+  assert.match(text(), /on a detached HEAD at cc47137a, with a rebase in progress, not on job-api \(at abc12345\)/);
+  assert.ok(f.q('#job-discard'));
+  job.subJobs = kept({ path: '/wt/api', branch: 'job-api', head: null, cause: 'unreadable', error: 'fatal: not a git repository: /nowhere', pinned: false, commits: [], commitCount: 0, files: [], fileCount: 0 });
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  assert.match(text(), /Git could not read the worktree: fatal: not a git repository: \/nowhere/);
+  assert.match(text(), /Git cannot read it/);
+  assert.equal(f.q('#job-discard'), null);
+});
+
 test('every PR tile shows its worktree branch → where it lands, the override marked and long names truncated', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active'; job.base = 'next';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', base: 'release/2.x', worktree: { path: '/wt/api', branch: 'fix/api-2x', repoRoot: '/repo' } },

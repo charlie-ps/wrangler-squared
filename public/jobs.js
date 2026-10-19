@@ -23,7 +23,6 @@ export const offBase = (job, sub) => isPrSub(sub) && !!sub.base && sub.base !== 
 // its result (server/job-store.js), so it alone does not make the switch matter.
 export const reviewedSession = (sub) => isSessionSub(sub) && !sub.stories;
 export const hasSessionSubs = (job) => job.subJobs.some(reviewedSession);
-export const hasHumanSubs = (job) => job.subJobs.some(isHumanSub);
 // New idea's conversation (mirrors server/job-idea.js). Its stage is the planner's turn
 // (`thinking`, also while a reply waits to be mailed) or the human's: a reply to answer,
 // or a job it suggests.
@@ -334,7 +333,6 @@ export const deploymentStalled = (sub) => sub?.stage === 'deployment' && !!sub.d
 export const mergeHeldByComments = (job, sub) => sub?.stage === 'pr' && !job.reviewMerge && sub.pr?.checkStatus === 'passing' && redComments(sub) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 // Mirrors server/job-store.js approve-merge: nothing merges before its prerequisites deploy.
 export const mergeApprovable = (job, sub) => sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && (job.reviewMerge || redComments(sub)) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
-export const sessionReviewLabel = (job) => checkpointLabel(checkpoint('reviewSessions'), youReview(job, 'reviewSessions'));
 export const hasWrites = (job) => (job.subJobs?.length ? job.subJobs : job.plan?.subJobs || []).some(isWriteSub);
 // The checkpoints a job's own flags show: Session results and Writes only where
 // the job has a sub-job they could stop.

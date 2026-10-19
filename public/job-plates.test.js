@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assignScenes, plateAsk, plateHtml, placePopHtml, levelOf, inkFor } from './job-plates.js';
+import { planGraphHtml } from './job-graph.js';
 
 const sub = (id, extra = {}) => ({ id, title: `Deliver ${id}`, repo: '/Users/me/repo', after: [], sessions: [], repairs: [], ...extra });
 const job = (extra = {}) => ({ id: 'job1', title: 'Sign-in', intent: 'x', repos: ['/Users/me/repo'], stage: 'active', subJobs: [], runs: [], moves: [], reviewMerge: true, createdAt: 1, ...extra });
@@ -114,4 +115,21 @@ test('a write is a moon off the session that makes it, its place a chip under th
   assert.deepEqual([output.label, output.button, output.alt], ['Check output', 'Accept', null], 'a made output is accepted, never skipped');
   const failing = plateAsk(job({ ...j, subJobs: [sub('api', { stage: 'implementation', error: 'boom' }), j.subJobs[1], draft] }));
   assert.equal(failing.tone, 'bad', 'failing still wins over a draft');
+});
+
+test('a plate stacks each column in the order and rows the expanded dialog untangles it into', () => {
+  // b → c and a → d cross in plan order, and a → e skips a wave past them.
+  const j = job({ subJobs: [sub('a'), sub('b'), sub('c', { after: ['b'] }), sub('d', { after: ['a'] }), sub('e', { after: ['c', 'a'] })] });
+  const svg = plateHtml(j, 'opus').match(/<svg class="job-plate-graph"[\s\S]*?<\/svg>/)[0];
+  const plate = new Map();
+  for (const m of svg.matchAll(/data-sub="([^"]+)"[\s\S]*?<circle cx="([\d.]+)" cy="([\d.]+)" r="13"/g)) plate.set(m[2], [...(plate.get(m[2]) || []), [+m[3], m[1]]]);
+  const plateCols = [...plate.entries()].sort((p, q) => p[0] - q[0]).map(([, col]) => col.sort((p, q) => p[0] - q[0]).map(([, id]) => id));
+  const dialog = [];
+  for (const m of planGraphHtml(j.plan || { subJobs: j.subJobs }, {}).matchAll(/data-col="(\d+)" style="[^"]*grid-row:(\d+)"><div[^>]*data-node="([^"]+)"/g)) (dialog[+m[1]] ||= []).push([+m[2], m[3]]);
+  const dialogCols = dialog.map((col) => col.sort((p, q) => p[0] - q[0]).map(([, id]) => id));
+  assert.deepEqual(dialogCols[1], ['d', 'c'], 'the dialog swaps the column out of plan order to untangle it');
+  assert.deepEqual(plateCols, dialogCols);
+  const ys = new Map([...plate.values()].flat().map(([y, id]) => [id, y]));
+  assert.equal(ys.get('e'), ys.get('a'), 'e takes the median row of its prerequisites, as in the dialog');
+  assert.match(svg, /<path class="edge [^"]*" d="M64,56 C[^"]*,70 160,70 C[^"]*"\/>/, 'the wave-skipping link follows its lane through the column it skips');
 });

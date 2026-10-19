@@ -13,7 +13,6 @@ export const isIdea = (job) => !!job?.idea;
 // Still talking: nothing is planned yet and no plan change has taken over.
 export const inConversation = (job) => isIdea(job) && job.stage === 'planning' && !job.plan && !job.replan && !job.cancelledAt;
 export const ideaThread = (job) => job?.idea?.thread || [];
-export const parkedIdeaRun = (job) => job.runs.find((r) => !r.stopped && !r.subJobId && r.parkedFor === 'idea') || null;
 export const unsentIdea = (job) => ideaThread(job).filter((m) => m.from === 'human' && !m.sentAt);
 // Only the newest message can carry the live suggestion: anything said after it
 // replaces it until the planner answers.
@@ -21,10 +20,14 @@ export function liveSuggestion(job) {
   const last = ideaThread(job).at(-1);
   return last?.from === 'planner' && last.suggest && !last.acceptedAt ? last : null;
 }
+// A plan or reply past words the planner has not been sent would answer only half
+// of what the human said; the runner mails them on its next tick (deliverIdea).
+export const UNSENT_IDEA = 'The human wrote again while you were working and it is on its way to you by mail: read your mail, then reply or report the plan';
 const nextId = (job, now) => `msg_${now.toString(36)}${ideaThread(job).length.toString(36)}`;
 
 // The planner's turn. It parks the run until the human answers; an identical retry
-// of the last reply is safe, a different one while parked is refused.
+// of the last reply is safe, a different one while parked is refused, and so is
+// one written before the human's newest message reached it.
 export function plannerReply(job, run, report, now) {
   if (!inConversation(job)) throw new Error('A planning reply is for a new idea\'s conversation; report the plan instead');
   if (report.shots || report.run || report.running) throw new Error('A planning reply is text, with an optional suggest:{title, plan}');
@@ -32,6 +35,7 @@ export function plannerReply(job, run, report, now) {
     if (JSON.stringify(run.lastReply) === JSON.stringify(report)) return false;
     throw new Error('You already replied; wait for mail with the human\'s answer');
   }
+  if (unsentIdea(job).length) throw new Error(UNSENT_IDEA);
   job.idea.thread.push({ id: nextId(job, now), at: now, from: 'planner', text: report.text, ...(report.suggest ? { suggest: report.suggest } : {}) });
   job.idea.error = null;
   Object.assign(run, { lastReply: report, parkedFor: 'idea', parkedAt: now, mailedAt: null, idleSince: null });

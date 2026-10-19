@@ -2,11 +2,12 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml, inflowHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, ideaStage, liveSuggestion, ideaOpen } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, ideaStage, liveSuggestion, ideaOpen } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 import { runningDotHtml } from './job-running.js';
 import { titleLoaderHtml } from './job-idea.js';
+import { planLayout } from './job-graph.js';
 
 // The board as a wall of night skies: each job's plan is drawn into a quiet sky
 // over its own Gargantua sky (job-skylines.js), lit in the colour of the job's state,
@@ -99,23 +100,24 @@ const KIND_NAME = { pr: 'Pull request', session: 'Agent session', human: 'Your t
 // `floor`: the lowest point (plate units) a node or label reaches, which the
 // quiet sky keeps its cap and brightness clear of.
 function skyGraphHtml(job, scene, lvl, art) {
-  const plan = planOf(job), steps = stepsOf(job), levels = dependencyLevels({ subJobs: steps });
-  // Wave order, so the nodes read (and tab) left to right as the plan runs.
-  const subs = [...steps].sort((a, b) => levels.get(a.id) - levels.get(b.id));
-  const writes = plan.subJobs.filter(isWriteSub);
-  const waves = Math.max(...levels.values()) + 1, pos = new Map(), out = [];
+  const plan = planOf(job), { waves, rows, grid } = planLayout(plan);
+  // The dialog's columns and order, so the nodes read (and tab) left to right as the plan runs.
+  const subs = rows.flatMap((col) => col.filter((it) => !it.pass).map((it) => it.sub));
+  const writes = plan.subJobs.filter(isWriteSub), pos = new Map(), out = [];
   const ink = inkOf(art, scene, lvl);
-  for (let w = 0; w < waves; w++) {
-    const col = subs.filter((s) => levels.get(s.id) === w), x = waves === 1 ? 160 : 56 + 208 * w / (waves - 1);
-    const span = Math.min(84, (col.length - 1) * 28);
-    col.forEach((s, i) => pos.set(s.id, [x, col.length === 1 ? 70 : 70 - span / 2 + span * i / (col.length - 1), col.length]));
-  }
+  // The dialog's rows (and the half-row lanes between them), spread around y=70.
+  const span = Math.min(84, (grid.rows - 1) * 28), colX = (w) => waves === 1 ? 160 : 56 + 208 * w / (waves - 1);
+  const rowY = (r) => grid.rows === 1 ? 70 : 70 - span / 2 + span * r / (grid.rows - 1);
+  rows.forEach((col, w) => { const n = col.filter((it) => !it.pass).length; for (const it of col) if (!it.pass) pos.set(it.key, [colX(w), rowY(grid.at.get(it.key)), n]); });
   const byId = new Map(subs.map((s) => [s.id, s]));
+  // A link that skips waves runs along its dialog lane, so it passes between the tiles it skips, not over them.
+  const curve = ([ax, ay], [bx, by]) => { const bend = Math.max(16, (bx - ax) / 2); return `C${ax + bend},${ay} ${bx - bend},${by} ${bx},${by}`; };
   for (const s of subs) for (const id of edgesOf(s).filter((a) => pos.has(a))) {
-    const [ax, ay] = pos.get(id), [bx, by] = pos.get(s.id), bend = Math.max(16, (bx - ax) / 2), dep = byId.get(id);
+    const [ax, ay] = pos.get(id), [bx, by] = pos.get(s.id), dep = byId.get(id), lane = grid.lanes.get(`${id}>${s.id}`);
     const kind = !s.after.includes(id) ? 'on' : isPrSub(dep) ? 'deploy' : '';
     const lit = kind !== 'on' && live(job) && dependencySatisfied(dep) && stateSolid(stateOf(job, s));
-    out.push(`<path class="edge ${kind} ${lit ? 'lit' : ''} ${ink((ax + bx) / 2, (ay + by) / 2)}" d="M${ax + 8},${ay} C${ax + bend},${ay} ${bx - bend},${by} ${bx - 8},${by}"/>`);
+    const pts = [[ax + 8, ay], ...(lane ? lane.cols.map((w) => [colX(w), rowY(lane.r) + lane.k * 3]) : []), [bx - 8, by]];
+    out.push(`<path class="edge ${kind} ${lit ? 'lit' : ''} ${ink((ax + bx) / 2, (ay + by) / 2)}" d="M${pts[0]} ${pts.slice(1).map((p, i) => curve(pts[i], p)).join(' ')}"/>`);
   }
   let floor = 0;
   const open = (s) => live(job) ? `data-job="${esc(job.id)}" data-sub="${esc(s.id)}" tabindex="0" role="button"` : '';

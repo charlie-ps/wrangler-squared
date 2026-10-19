@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gateAction, stampActions, checkActions, applyActions, forwardsOnly } from './job-actions.js';
 import { proposeReplan, approveReplan, optionsOf } from './job-replan.js';
-import { changeView } from './job-change.js';
 import { reportSchema } from './jobs-schema.js';
 import { buildSubJob } from './job-store.js';
 import { autoApplicable } from './job-red.js';

@@ -19,6 +19,17 @@ feature).
 > sense with such a detail, leave the detail out and say so to the human
 > instead.
 
+## This repository's own issues
+
+Some work on this repo is tracked in its GitHub issues. A planner for a
+Wrangler² job that targets this repo looks for a matching open issue (`gh issue
+list`/`gh issue view`) and proposes writes there with
+`place: {type: "other", name: "GitHub", ref: "charlie-ps/wrangler-squared#N"}`: a comment
+linking the PR (`{pr.url}`), or closing the issue once the PR merges
+(`on: {sub, at: "merged"}`). Work with no issue may propose creating one.
+Issues are optional, like Jira stories: never invent a number, and keep issue
+text as public as the rest of this repo.
+
 ## What this is
 
 - An **external extension** for agent-wrangler's extensions API, which is on
@@ -240,8 +251,9 @@ feature).
 - **New job's model picker is `public/model-picker.js` over `public/model-plates.js`.** It owns no form state: it reports `{ agent, model, effort }` through `onChange` into hidden inputs, so `form.onsubmit` and the `job-create` payload are untouched, and creating a job saves `settings.usualPick`. `describe()` must never invent a version from an alias (gap 18 in `docs/PORTING.md`). A galaxy plate is exactly one rAF loop, stopped by `dispose()`/re-render; art colours are fixed, chrome is board variables, except Claude's cabinet and ticket, whose launch-page near-black/ivory follows core's `body.light`. Each Claude plate declares its own noise filters (`fx()`), so plates never share an SVG id.
 - **A theme is one `public/themes.js` entry, one `[data-theme="<id>"]` block of `--jt-*` tokens in
   `jobs.css` and its id in `public/theme-ids.js`** (which the server schema also reads, and whose
-  `migrateTheme` turns a saved `backdrop`/top-level `plateArt` into `theme`/`themeOptions`, so a board
-  from before themes keeps Space; anything else gets `DEFAULT_THEME`, Wrangler).
+  `migrateTheme` turns a saved `backdrop`/top-level `plateArt` into `theme`/`themeOptions`; every board
+  from before themes gets `DEFAULT_THEME`, Wrangler, and `migrateJobs` resets a version-5 file's Space
+  to Wrangler once, so Space is only ever an active choice).
   `themes.test.js` holds every block to Space's token set, so never style a theme by excluding another
   (`:not([data-theme…])`) or read a `--jt-*` token Space does not set. `applyViewTheme` stamps
   `data-theme` (and `data-scheme="dark"` for a forced-dark theme) on `#jobs` and every dialog on

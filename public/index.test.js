@@ -124,6 +124,24 @@ test('the rail badge counts every job that needs a human, whatever the view is d
   assert.equal(c.badge(), 0, 'an unloaded extension leaves no stale count behind');
 });
 
+test('the rail badge, the Needs you tab and the cards asking for you agree, counting jobs', () => {
+  const { el, c } = mountClient();
+  const review = (id) => sub({ id, kind: 'session', stage: 'review', result: { checks: [] } });
+  const two = job({ id: 'job_2', title: 'Two waiting', stage: 'active', subJobs: [review('a'), review('b')] });
+  const plan = job({ id: 'job_3', title: 'Plan ready', stage: 'planning', plan: { context: '', stories: [], subJobs: [sub()] } });
+  const cancelled = job({ id: 'job_4', title: 'Cancelled', stage: 'active', cancelledAt: 1, subJobs: [sub({ stage: 'cleanup', cancelledAt: 1, error: 'cleanup failed' })] });
+  const finished = job({ id: 'job_5', title: 'Finished', stage: 'done', subJobs: [sub({ stage: 'done', error: 'cleanup failed' })] });
+  c.update(el, null, graphWith([two, plan, cancelled, finished]));
+  const asking = () => [...el.querySelectorAll('.job-plate.stubbed')].map((p) => p.dataset.board).sort();
+  el.querySelector('[data-filter="needs"]').click();
+  assert.deepEqual(asking(), ['job_2', 'job_3'], 'two waiting sub-jobs are one job; a cancelled or finished one asks nothing');
+  assert.equal(el.querySelectorAll('.job-plate').length, 2, 'the Needs you view draws only the jobs asking');
+  assert.equal(el.querySelector('#jobs-review-count').textContent, '2');
+  assert.equal(c.badge(), 2);
+  for (const f of ['all', 'done']) { el.querySelector(`[data-filter="${f}"]`).click(); assert.ok(asking().every((id) => ['job_2', 'job_3'].includes(id)), f); }
+  c.unmount(el);
+});
+
 test('the toolbar sends only this extension\'s own handler types', () => {
   const { window, el, c, sent } = mountClient();
   c.update(el, null, graphWith([]));

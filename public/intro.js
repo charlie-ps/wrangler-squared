@@ -182,7 +182,7 @@ export const INTRO_STEPS = [
     anim: { frames: GRAPH.length, ms: 1400, still: GRAPH.length - 1 },
     figure: (reviews, phase) => graph(phase) },
   { tab: 'Jobs', title: `Hand ${W2} an outcome. It splits the work and tracks it for you.`,
-    body: `<p>You describe a goal; ${W2} splits it into sub-jobs, starts agent sessions for them, and stops for you wherever you’ve asked to review.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board. An idea you are still talking through is a forming nebula until it becomes a job.</p>`,
+    body: `<p>You describe a goal; ${W2} splits it into sub-jobs, starts agent sessions for them, and stops for you wherever you’ve asked to review.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board. An idea you are still talking through sits there too, marked <b>Idea</b>, until it becomes a job.</p>`,
     cls: 'intro-board', anim: { frames: BOARD_FRAMES.length, ms: 1600, still: 2 },
     figure: (reviews, phase) => board(phase) },
   { tab: 'New idea',

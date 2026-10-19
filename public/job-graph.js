@@ -173,6 +173,16 @@ export function graphGrid(cols, work, levels, styleOf) {
   return { at, lanes, laneOnly, gutters: gutters.map((g) => g.size), rows: tileRows };
 }
 
+// A plan's steps laid out once, for the dialog's grid and the Jobs view's plate
+// alike, so both read in the same columns, order and rows.
+export function planLayout(plan) {
+  const levels = dependencyLevels(plan), byId = new Map(plan.subJobs.map((s) => [s.id, s]));
+  const styleOf = (s, id) => isPrSub(byId.get(id)) && s.after.includes(id) ? 'deploy' : s.after.includes(id) ? 'start' : 'on';
+  const waves = Math.max(...levels.values()) + 1, tiles = plan.subJobs.filter((s) => !isWriteSub(s));
+  const rows = graphRows(tiles, levels, waves);
+  return { levels, waves, tiles, rows, grid: graphGrid(rows, tiles, levels, styleOf) };
+}
+
 // A proposed change to a running job's plan (`markOf`) is drawn static, each
 // node in its live state and labelled with what approval would do to it.
 export const rocketHtml = (id) => `<g class="job-edge-glyph" data-glyph="${esc(id)}"><circle r="12"/><g transform="translate(-9.6 -9.6) scale(.8)">${ROCKET_PATH}</g></g>`;
@@ -181,7 +191,7 @@ const MARKS = { frozen: 'Locked · already landed', removed: 'Will be cancelled'
 export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, openDeps = new Set(), openTickets = new Set(), openShow = new Set(), editing = null, reviewWrites = false, base = null } = {}) {
   const subs = plan.subJobs;
   if (!subs.length) return '';
-  const levels = dependencyLevels(plan);
+  const { levels, waves, tiles, rows, grid } = planLayout(plan);
   const byId = new Map(subs.map((s) => [s.id, s]));
   const work = new Set(subs.filter((s) => !isWriteSub(s)).map((s) => s.id));
   const hangsOn = (w) => (work.has(w.by) ? w.by : null);
@@ -224,7 +234,6 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     const add = editable && isSessionSub(s) ? `<button type="button" class="job-place-add" data-add-write="${esc(s.id)}" title="Add a place this session writes to">${ICONS.plus}<b>place</b></button>` : '';
     return list.length || add ? `<div class="job-places">${pills(list, s.id)}${add}</div>` : '';
   };
-  const waves = Math.max(...levels.values()) + 1;
   const story = (s) => s.jiraKey || (s.storyId ? storyLabel(plan.stories?.find((t) => t.id === s.storyId), plan.stories) : 'No ticket');
   const node = (s, i) => {
     const state = stateOf ? stateOf(s) : 'planned';
@@ -245,10 +254,6 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     return `<button type="button" class="${cls} ${state === 'done' ? 'done' : ''}" data-node="${esc(s.id)}" data-open-sub="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}<span class="job-status">${esc(lineOf ? lineOf(s) : STATES[state].label)}</span></button>`;
   };
   const loose = subs.filter((w) => isWriteSub(w) && !hangsOn(w));
-  const styleOf = (s, id) => isPrSub(byId.get(id)) && s.after.includes(id) ? 'deploy' : s.after.includes(id) ? 'start' : 'on';
-  const tiles = subs.filter((s) => !isWriteSub(s));
-  const rows = graphRows(tiles, levels, waves);
-  const grid = graphGrid(rows, tiles, levels, styleOf);
   const top = loose.length ? 1 : 0;
   // Columns sit at odd grid tracks; the even track after column w is gutter w, sized by `layoutGraphEdges`.
   const cell = (w, r) => `grid-column:${2 * w + 1};grid-row:${2 * r + top + 1}`;

@@ -46,11 +46,6 @@ export function threadHtml(job, sub) {
 
 // Earlier rounds' proof, kept in case the human wants to see what changed.
 const earlierBody = (job, sub, rounds) => rounds.map((r) => `<div class="job-earlier-round"><h4>Round ${esc(r.round)}</h4><div class="job-msg-att">${(r.proof || []).flatMap((p) => (p.shots || []).map((s) => s.file)).map((f, k) => shotButtonHtml(job, sub, r.round, f, k)).join('')}</div><ul class="job-receipt">${(r.checks || []).map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul></div>`).join('');
-export function earlierRoundsHtml(job, sub) {
-  const rounds = Array.isArray(sub?.earlier) ? sub.earlier : [];
-  if (!rounds.length) return '';
-  return `<details class="job-more job-earlier"><summary>Earlier rounds <small>${rounds.map((r) => `Round ${esc(r.round)}`).join(' · ')}</small></summary>${earlierBody(job, sub, rounds)}</details>`;
-}
 
 // The review step folds the conversation and earlier rounds into one line. It
 // stays open while the session is answering, since that is news.

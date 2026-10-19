@@ -20,11 +20,6 @@
 // two are the only formats sent raw for the server to convert; everything else
 // the browser can draw is re-encoded to PNG here.
 
-// Bounded per paste. A clipboard can hold a whole screenshot burst, and each one
-// costs a base64 frame plus a file, so a slip is capped rather than unbounded —
-// the human can always paste again.
-export const MAX_IMAGES_PER_PASTE = 4;
-
 // Stored by the server exactly as sent.
 const STORED_AS_IS = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 // Converted by the server, and only because the browser cannot draw them.

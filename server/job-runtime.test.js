@@ -610,6 +610,59 @@ test('a planning worktree\'s scratch files are not grounds to refuse: the job ha
 
 const refusalOf = (r, opts) => r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, opts).then(() => assert.fail('expected a refusal'), (e) => { assert.ok(e instanceof CleanupRefused, e.message); return e.refusal; });
 
+test('a detached-HEAD worktree is refused with its Discard, naming the cause and the path, even with nothing to lose', async () => {
+  const r = await gitRepo();
+  await r.git(r.wt.path, 'checkout', '-q', '--detach', 'HEAD');
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused, e.message);
+  assert.equal(e.message, `Worktree at ${r.wt.path} is on a detached HEAD, not on job-api; preserve it for review`);
+  assert.deepEqual([e.refusal.cause, e.refusal.state, e.refusal.pinned, e.refusal.head, e.refusal.branchHead], ['detached', null, true, r.wt.cleanupHead, r.wt.cleanupHead]);
+  assert.ok(fs.existsSync(r.wt.path) && await r.branchExists());
+});
+
+test('Discard on a detached tree removes it and the branch it left behind, at the heads shown', async () => {
+  const r = await gitRepo();
+  await r.commit(r.wt.path, 'a.js', 'On the branch');
+  await r.git(r.wt.path, 'checkout', '-q', '--detach', r.wt.cleanupHead);
+  await r.commit(r.wt.path, 'b.js', 'On the detached HEAD');
+  const shown = await refusalOf(r);
+  assert.deepEqual(shown.commits.map((c) => c.subject).sort(), ['On the branch', 'On the detached HEAD'], 'the branch ref\'s commits are listed too');
+  await r.commit(r.wt.path, 'c.js', 'After the human looked');
+  const stale = await refusalOf(r, { discard: shown });
+  assert.equal(stale.commitCount, 3);
+  assert.ok(fs.existsSync(r.wt.path) && await r.branchExists(), 'nothing is deleted on a stale discard');
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: stale });
+  assert.equal(fs.existsSync(r.wt.path), false);
+  assert.equal(await r.branchExists(), false);
+});
+
+test('a worktree left mid-rebase is refused with the rebase and its conflict shown, and Discard clears it', async () => {
+  const r = await gitRepo();
+  await r.commit(r.wt.path, 'README.md', 'Branch edit');
+  await r.commit(r.repo, 'README.md', 'Main edit');
+  await r.git(r.repo, 'push', '-q', 'origin', 'HEAD:main');
+  await r.git(r.wt.path, 'fetch', '-q', 'origin');
+  await assert.rejects(r.git(r.wt.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'rebase', 'refs/remotes/origin/main'), /conflict/i);
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused, e.message);
+  assert.match(e.message, new RegExp(`^Worktree at ${r.wt.path} is on a detached HEAD with a rebase in progress, not on job-api \\(1 commit not on origin/main, 1 uncommitted file\\)`));
+  assert.deepEqual([e.refusal.state, e.refusal.files], ['rebase', [{ change: 'conflicted', path: 'README.md' }]]);
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: e.refusal });
+  assert.equal(fs.existsSync(r.wt.path), false);
+  assert.equal(await r.branchExists(), false);
+});
+
+test('a worktree git cannot read is refused with git\'s reason and no Discard, and nothing is removed', async () => {
+  const r = await gitRepo();
+  fs.writeFileSync(path.join(r.wt.path, '.git'), 'gitdir: /nowhere\n');
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused, e.message);
+  assert.match(e.message, new RegExp(`^Worktree at ${r.wt.path} could not be read by git \\(fatal: .+\\); preserve it for review$`));
+  assert.deepEqual([e.refusal.cause, e.refusal.pinned], ['unreadable', false]);
+  await assert.rejects(r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: { head: null, fingerprint: undefined } }), CleanupRefused);
+  assert.ok(fs.existsSync(path.join(r.wt.path, 'README.md')));
+});
+
 test('a Discard does not cover a change only to what is staged', async () => {
   const r = await gitRepo();
   fs.writeFileSync(path.join(r.wt.path, 'README.md'), 'edited\n');
