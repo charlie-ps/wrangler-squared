@@ -434,7 +434,8 @@ export const settingsSchema = z.preprocess(migrateTheme, z.object({
   // (job-main.js). It never blocks a sub-job, so it is on unless switched off.
   updateMain: z.boolean().default(true),
   // The Jobs view's look (public/themes.js), from the shared id list; settings saved
-  // before themes are migrated by migrateTheme (a `backdrop` and a top-level `plateArt`).
+  // before themes are migrated by migrateTheme (a `backdrop` and a top-level `plateArt`)
+  // onto the default, and a version-5 jobs.json's Space is reset once (job-store.js migrateJobs).
   theme: z.enum(THEME_IDS).default(DEFAULT_THEME),
   // Options that belong to one theme, kept per theme so switching away and back keeps
   // them. Space's plate art: each job's skyline or its launch-page scene (job-plates.js PLATE_ART).

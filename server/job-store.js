@@ -139,7 +139,7 @@ function approvalNote(payload) {
 }
 const HELD_BY_REPLAN = new Set(['approve-code', 'approve-merge', 'approve-session', 'start-human', 'finish-human', 'approve-write', 'skip-write', 'edit-write']);
 export const MERGE_IS_DELIVERY = 'Merged; nothing runs on push for these paths';
-export const CURRENT_VERSION = 5;
+export const CURRENT_VERSION = 6;
 
 const drop = (obj, ...keys) => { for (const k of keys) delete obj[k]; };
 // Version 1 named the plan's edges `dependsOn` and its text `instructions`, and
@@ -204,12 +204,15 @@ function migrateSessionWrites(job) {
 }
 export function migrateJobs(raw) {
   if (!raw) return null;
-  if (![1, 2, 3, 4, CURRENT_VERSION].includes(raw.version) || !Array.isArray(raw.jobs)) throw new Error('Unsupported jobs.json; refusing to discard jobs');
+  if (![1, 2, 3, 4, 5, CURRENT_VERSION].includes(raw.version) || !Array.isArray(raw.jobs)) throw new Error('Unsupported jobs.json; refusing to discard jobs');
   const data = structuredClone(raw);
   data.version = CURRENT_VERSION;
   if (data.settings) drop(data.settings, 'maxRunMinutes');
   // The board reads settings as stored, so a saved `backdrop` becomes its theme here, not only on the next save.
   if (data.settings) data.settings = migrateTheme(data.settings);
+  // Version 5 opened most boards in Space; everyone moves to Wrangler once, so Space is only a
+  // choice made since. Its options stay for whoever picks it again.
+  if (raw.version < 6 && data.settings?.theme === 'space') data.settings.theme = 'wrangler';
   for (const job of data.jobs) {
     // `reviewCode` is kept: a version-1 job's flag meant the same thing — the
     // human reads the diff before it is committed — and the field is back.

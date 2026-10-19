@@ -56,9 +56,9 @@ test('a theme lookup falls back to the default, and options fall back to their d
   assert.deepEqual(optionsOf({}, themeById('wrangler')), {});
 });
 
-test('migrateTheme keeps old settings in the look they had, gives new ones the default, and moves plate art under Space', () => {
-  assert.deepEqual(migrateTheme({ backdrop: 'wrangler', concurrency: 3 }), { theme: 'wrangler', concurrency: 3 });
-  assert.deepEqual(migrateTheme({ backdrop: 'sky', plateArt: 'peek' }), { theme: 'space', themeOptions: { space: { plateArt: 'quiet' } } });
+test('migrateTheme gives old and new settings the default, and moves plate art under Space', () => {
+  assert.deepEqual(migrateTheme({ backdrop: 'wrangler', concurrency: 3 }), { theme: DEFAULT_THEME, concurrency: 3 });
+  assert.deepEqual(migrateTheme({ backdrop: 'sky', plateArt: 'peek' }), { theme: DEFAULT_THEME, themeOptions: { space: { plateArt: 'quiet' } } }, 'Space is never inferred');
   assert.deepEqual(migrateTheme({ theme: 'nebula' }), { theme: 'nebula' }, 'an explicit theme is left for the schema to refuse');
   assert.deepEqual(migrateTheme({ concurrency: 3 }), { theme: DEFAULT_THEME, concurrency: 3 }, 'settings with neither old key get the default');
   assert.deepEqual(migrateTheme({ theme: 'space', plateArt: 'quiet', themeOptions: { space: { plateArt: 'full' } } }).themeOptions, { space: { plateArt: 'full' } });

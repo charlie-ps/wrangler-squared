@@ -128,7 +128,7 @@ async function atPr(f, p = plan()) {
 test('store persists settings, plans and live claims across restart', async (t) => {
   const f = fixture(t); await f.approve();
   f.store.settings({ concurrency: 4 });
-  assert.equal(f.store.snapshot().version, 5);
+  assert.equal(f.store.snapshot().version, 6);
   assert.deepEqual(new JobStore(f.store.file).snapshot(), f.store.snapshot());
   assert.equal(f.store.get(f.job.id).runs.filter((r) => !r.stopped).length, 1);
 });
@@ -159,11 +159,11 @@ test('theme defaults to Wrangler, persists across restart, keeps Space\'s plate 
   assert.equal(f.store.snapshot().settings.theme, 'space', 'a rejected patch changes nothing');
 });
 
-test('settings saved before themes open in the theme they had: a Wrangler backdrop is the Wrangler theme, anything else Space', (t) => {
+test('settings saved before themes open in the Wrangler theme, keeping Space\'s plate art for later', (t) => {
   const parse = (s) => { const { theme, themeOptions } = settingsSchema.parse(s); return { theme, themeOptions }; };
   assert.deepEqual(parse({ backdrop: 'wrangler' }), { theme: 'wrangler', themeOptions: { space: { plateArt: 'quiet' } } });
-  assert.deepEqual(parse({ backdrop: 'sky', plateArt: 'full' }), { theme: 'space', themeOptions: { space: { plateArt: 'full' } } });
-  assert.deepEqual(parse({ plateArt: 'peek' }), { theme: 'space', themeOptions: { space: { plateArt: 'quiet' } } }, 'the dropped hover mode reads as the skyline');
+  assert.deepEqual(parse({ backdrop: 'sky', plateArt: 'full' }), { theme: 'wrangler', themeOptions: { space: { plateArt: 'full' } } });
+  assert.deepEqual(parse({ plateArt: 'peek' }), { theme: 'wrangler', themeOptions: { space: { plateArt: 'quiet' } } }, 'the dropped hover mode reads as the skyline');
   assert.deepEqual(parse({}), { theme: 'wrangler', themeOptions: { space: { plateArt: 'quiet' } } }, 'settings from no earlier version get the default');
   assert.equal(parse({ backdrop: 'wrangler', theme: 'space' }).theme, 'space', 'a saved theme wins over a stale backdrop');
   const parsed = settingsSchema.parse({ backdrop: 'wrangler', plateArt: 'full' });
@@ -174,6 +174,19 @@ test('settings saved before themes open in the theme they had: a Wrangler backdr
   const loaded = new JobStore(f.store.file).snapshot().settings;
   assert.equal(loaded.theme, 'wrangler'); assert.deepEqual(loaded.themeOptions, { space: { plateArt: 'full' } });
   assert.equal(loaded.backdrop, undefined); assert.equal(loaded.concurrency, 3);
+});
+
+test('a version-5 board on Space opens in Wrangler once; Space picked since is kept', (t) => {
+  const f = fixture(t);
+  fs.writeFileSync(f.store.file, JSON.stringify({ version: 5, settings: { theme: 'space', themeOptions: { space: { plateArt: 'full' } } }, jobs: [] }));
+  const reset = new JobStore(f.store.file);
+  assert.equal(reset.snapshot().settings.theme, 'wrangler');
+  assert.deepEqual(reset.snapshot().settings.themeOptions, { space: { plateArt: 'full' } }, 'Space\'s options are kept');
+  reset.settings({ theme: 'space' });
+  assert.equal(JSON.parse(fs.readFileSync(f.store.file, 'utf8')).version, 6);
+  assert.equal(new JobStore(f.store.file).snapshot().settings.theme, 'space', 'the reset happens once');
+  fs.writeFileSync(f.store.file, JSON.stringify({ version: 6, settings: { theme: 'space' }, jobs: [] }));
+  assert.equal(new JobStore(f.store.file).snapshot().settings.theme, 'space');
 });
 
 // --- Migration (version 1 -> 2) ---
@@ -194,14 +207,14 @@ const legacy = {
   }],
 };
 
-test('a version-1 file loads as version 5: after/brief replace dependsOn/instructions and every removed field is gone', async (t) => {
+test('a version-1 file loads as version 6: after/brief replace dependsOn/instructions and every removed field is gone', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-jobs-v1-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'jobs.json');
   fs.writeFileSync(file, JSON.stringify(legacy));
   const store = new JobStore(file);
   const job = store.get('job_old');
-  assert.equal(store.snapshot().version, 5);
+  assert.equal(store.snapshot().version, 6);
   assert.equal(store.snapshot().settings.maxRunMinutes, undefined);
   for (const key of ['amendmentAuthority', 'amendments', 'recoveryOf']) assert.equal(job[key], undefined, key);
   assert.equal(job.reviewCode, true, 'the version-1 flag meant the same thing and is kept');
@@ -217,8 +230,8 @@ test('a version-1 file loads as version 5: after/brief replace dependsOn/instruc
   // The file itself is untouched until the next ordinary write.
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 1);
   store.action('job_old', 'pause');
-  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 5);
-  assert.throws(() => migrateJobs({ version: 6, jobs: [] }), /refusing to discard jobs/);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 6);
+  assert.throws(() => migrateJobs({ version: 7, jobs: [] }), /refusing to discard jobs/);
   assert.throws(() => migrateJobs({ version: 1, jobs: {} }), /refusing to discard jobs/);
   assert.deepEqual(migrateJobs(structuredClone(migrateJobs(legacy))), migrateJobs(legacy), 'migration is idempotent');
 });
@@ -1799,7 +1812,7 @@ test('a version-3 file migrates its Jira writes to writes to a Jira place, then 
     subJobs: [{ ...spec('api'), stage: 'pr', state: 'watching', sessions: [], repairs: [] }, { ...p.subJobs[1], stage: 'jira', state: 'writing', jiraKey: 'AUTH-123', sessions: [], repairs: [] }],
     runs: [{ id: 'run_w', subJobId: null, phase: 'jira', writes: ['w'], sessionId: 'sid', stopped: false, report: null }] }] });
   const [job] = data.jobs;
-  assert.equal(data.version, 5);
+  assert.equal(data.version, 6);
   for (const list of [job.subJobs, job.plan.subJobs, job.previousPlan.subJobs]) assert.deepEqual([list[1].kind, list[1].place], ['write', { type: 'jira' }]);
   assert.deepEqual([job.subJobs[1].stage, job.subJobs[1].state, job.subJobs[1].error], ['write', 'failed', 'This write predates session-owned writes; drop it or redo it by hand']);
   assert.equal(job.subJobs[0].kind, undefined, 'a PR is untouched');
