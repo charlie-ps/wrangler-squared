@@ -212,6 +212,8 @@ test('on the board an idea waiting on you is a needs-you stub; one the planner i
 test('the planner\'s prose is escaped before it is marked up, and a summary counts only the work', () => {
   assert.equal(proseHtml('a `b<c>` d\n\n- one\n- two'), '<p>a <code>b&lt;c&gt;</code> d</p><ul><li>one</li><li>two</li></ul>');
   assert.equal(proseHtml('Two things:\n1. Whose CI?\n   a) ours\n2. Which pain?\nIf you mean (a), I would'), '<p>Two things:</p><ol><li>Whose CI?<br>a) ours</li><li>Which pain?</li></ol><p>If you mean (a), I would</p>');
+  assert.equal(proseHtml('Three layers:\n\n1. One\n\n2. Two\n   more\n\n3. Three'), '<p>Three layers:</p><ol><li>One</li></ol><ol start="2"><li>Two<br>more</li></ol><ol start="3"><li>Three</li></ol>', 'a list split by blank lines keeps its written numbers');
+  assert.equal(proseHtml('1. One\n2. Two\n3. Three'), '<ol><li>One</li><li>Two</li><li>Three</li></ol>');
   const s = suggestionSummary(suggest.plan);
   assert.deepEqual([s.work.length, s.repos.length, s.line], [3, 1, '3 sub-jobs · wrangler-squared · Slack']);
 });

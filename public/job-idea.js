@@ -22,12 +22,12 @@ export function proseHtml(text) {
   const out = [];
   for (const block of String(text || '').trim().split(/\n\s*\n/)) {
     let list = null, para = [];
-    const flush = () => { if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`); para = []; if (list) out.push(`<${list.tag}>${list.items.map((i) => `<li>${i.map(inline).join('<br>')}</li>`).join('')}</${list.tag}>`); list = null; };
+    const flush = () => { if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`); para = []; if (list) out.push(`<${list.tag}${list.start > 1 ? ` start="${list.start}"` : ''}>${list.items.map((i) => `<li>${i.map(inline).join('<br>')}</li>`).join('')}</${list.tag}>`); list = null; };
     for (const raw of block.split('\n')) {
       const line = raw.trim();
       if (!line) continue;
       const tag = ITEM.ol.test(line) ? 'ol' : ITEM.ul.test(line) ? 'ul' : null;
-      if (tag) { if (para.length || list?.tag !== tag) flush(); (list ||= { tag, items: [] }).items.push([line.replace(ITEM[tag], '')]); }
+      if (tag) { if (para.length || list?.tag !== tag) flush(); (list ||= { tag, start: parseInt(line, 10), items: [] }).items.push([line.replace(ITEM[tag], '')]); }
       else if (list && /^\s/.test(raw)) list.items.at(-1).push(line);
       else { if (list) flush(); para.push(line); }
     }
