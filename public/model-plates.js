@@ -23,6 +23,13 @@ const SUN_AGES = [['#ffffff', '#ffe2c4', '#f39a6b', '#7a3a6e'], ['#fff8ef', '#f6
 // full id ('claude-opus-6', 'claude-haiku-4-5-20251001') shows one; an alias is
 // drawn by family alone.
 // TODO(host-api agents-resolved-id): api.agents() should pass the id the wrangler resolves each alias to, so 'opus' can read 'Claude Opus 5.5'.
+// The host gives each Claude entry its window (`contextWindow`, or a label ending '· 1M context'); the [1m] suffix is only a guess for a catalog that gives neither.
+const ctxOf = (m, label, long) => {
+  const n = Number(m.contextWindow);
+  if (n > 0) return n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}K`;
+  const x = label.match(/·\s*(\d+(?:\.\d+)?[KM])\s+context\s*$/i);
+  return x ? x[1].toUpperCase() : long ? '1M' : '200K';
+};
 const versionOf = (id) => { const x = id.match(/-(\d+)(?:-(\d{1,2}))?(?:$|-\d{8})/); return x ? (x[2] ? `${x[1]}.${x[2]}` : x[1]) : ''; };
 
 export function describe(agent, m, all = []) {
@@ -39,7 +46,7 @@ export function describe(agent, m, all = []) {
     return {
       name: `Claude ${short}`, short, desc: known ? CLAUDE_DESC[fam] : 'A Claude family the picker has no launch art for yet, so it gets a plain page.',
       // An unknown family borrows Haiku's ivory page: it is the one plate that is just the name.
-      plate: known ? fam : 'haiku', tag: (version ? bare : `claude-${fam}`).toUpperCase(), ctx: long ? '1M' : '200K',
+      plate: known ? fam : 'haiku', tag: (version ? bare : `claude-${fam}`).toUpperCase(), ctx: ctxOf(m, label, long),
       family: fam, version, resolved: bare.startsWith('claude-') ? bare : '', seed: v, known,
     };
   }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { initialPick, switchPick } from './model-picker.js';
+import { initialPick, switchPick, offeredAgents } from './model-picker.js';
 import { describe, weakModel, startGalaxy, plateArt, plateThumb } from './model-plates.js';
 
 const claude = { id: 'claude', label: 'Claude', efforts: ['low', 'high', 'max'].map((value) => ({ value })), models: [{ value: 'fable' }, { value: 'opus', default: true }, { value: 'sonnet' }] };
@@ -38,6 +38,17 @@ test('the 1M suffix becomes a context badge rather than part of the name', () =>
   assert.equal(long.name, 'Claude Sonnet'); assert.equal(long.short, 'Sonnet'); assert.equal(long.ctx, '1M');
   assert.equal(d(claude, 'claude-sonnet-5-5').ctx, '200K');
   assert.equal(d(claude, 'claude-opus-5-5[1m]').name, 'Claude Opus 5.5');
+});
+
+test('context comes from the host’s window or label, and the [1m] guess only when neither says', () => {
+  assert.equal(d(claude, 'opus', { label: 'Opus 5.5 · 1M context' }).ctx, '1M', 'a 1M alias with no suffix');
+  assert.equal(d(claude, 'fable', { label: 'Fable 5.1 · 1M context' }).ctx, '1M');
+  assert.equal(d(claude, 'sonnet', { label: 'Sonnet 5.5 · 200K context' }).ctx, '200K');
+  assert.equal(d(claude, 'sonnet[1m]', { label: 'Sonnet 5.5 · 1M context' }).ctx, '1M');
+  assert.equal(d(claude, 'opus', { contextWindow: 1_000_000 }).ctx, '1M');
+  assert.equal(d(claude, 'haiku', { contextWindow: 200_000, label: 'Haiku 4.5 · 1M context' }).ctx, '200K', 'contextWindow wins over the label');
+  assert.equal(d(claude, 'opus', { label: 'Opus 5.5' }).ctx, '200K', 'no window and no suffix: the old guess');
+  assert.equal(d(claude, 'opus[1m]', { label: 'Opus' }).ctx, '1M');
 });
 
 test('Claude plates are self-contained SVG: preview carries id and title, the tray the title, the band neither', () => {
@@ -146,4 +157,13 @@ test('a galaxy runs exactly one animation loop, stops on demand, and ends when i
     startGalaxy(canvas(), { seed: 'x', numeral: '6' }, 1);
     assert.equal(pending.size, 0, 'reduced motion draws one still frame');
   } finally { Object.assign(globalThis, { requestAnimationFrame: prev.raf, cancelAnimationFrame: prev.caf, matchMedia: prev.mm }); }
+});
+
+test('the picker never offers opusplan, and a usual of opusplan opens on opus', () => {
+  const withPlan = [{ ...claude, models: [...claude.models, { value: 'opusplan', label: 'Opus plan · Sonnet execution' }] }, codex];
+  const offered = offeredAgents(withPlan);
+  assert.deepEqual(offered[0].models.map((m) => m.value), ['fable', 'opus', 'sonnet']);
+  assert.equal(offered[1], codex, 'other agents pass through untouched');
+  assert.equal(withPlan[0].models.length, 4, 'the catalog itself is not changed');
+  assert.deepEqual(initialPick(offered, { agent: 'claude', model: 'opusplan', effort: 'high' }), { agent: 'claude', model: 'opus', effort: 'high' });
 });

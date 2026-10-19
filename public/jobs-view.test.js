@@ -12,14 +12,14 @@ const sub = (id, after = []) => ({ id, title: `Deliver ${id}`, repo: '/repo', st
 const plan = { context: 'Keys live in the vault; every service reads them at boot.', stories: [{ id: 'story', key: 'AUTH-1', title: 'Customers can sign in' }], subJobs: [sub('api'), sub('web', ['api'])] };
 const hint = (f) => f.q('#job-dialog .job-chip-state').title;
 const deploys = (summary = 'Deploys on merge · Deploy') => ({ head: 'head1', base: 'main', expected: true, workflows: [{ name: 'Deploy', file: 'deploy.yml', triggers: true, reason: 'runs on push' }], summary });
-function fixture(t) {
+function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }]) {
   const window = new Window({ url: 'http://localhost:7878' });
   const prevDoc = globalThis.document, prevFormData = globalThis.FormData;
   globalThis.document = window.document; globalThis.FormData = window.FormData;
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
   const staging = { stage: async () => ({ name: 'paste-1700000000000-aaaa1111.png' }) };
   const sent = [], usualSaves = [], sessions = [], diffs = [], diffContexts = [], onBoard = new Set();
-  const view = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
+  const view = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => agents, onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; await window.happyDOM.close(); });
   const job = { id: 'job1', title: 'Sign-in', intent: 'Reliable sign-in', repos: ['/repo'], stage: 'planning', plan, subJobs: [], runs: [], moves: [], revision: 2, reviewMerge: true };
   const data = { jobs: [structuredClone(job)], settings: { concurrency: 2, maxRepairs: 2 } };
@@ -642,6 +642,19 @@ test('new-job picker opens on your usual, says when it is not, and one click ret
   f.q('#job-dialog').close(); f.q('#job-new').click();
   assert.deepEqual(picked(f.q('#job-create-form')), ['claude', 'sonnet', ''], 'a usual the catalog no longer has falls back to the default');
   assert.equal(f.q('.pick-usual').textContent.trim(), 'Claude\'s default');
+});
+
+test('new-job picker hides opusplan, opens a usual of opusplan on opus and badges each model with the host’s context', (t) => {
+  const efforts = [{ value: 'high', label: 'High' }];
+  const f = fixture(t, [{ id: 'claude', label: 'Claude', efforts, models: [{ value: 'opus', label: 'Opus 5.5 · 1M context', default: true }, { value: 'opusplan', label: 'Opus plan · Sonnet execution' }, { value: 'sonnet', label: 'Sonnet 5.5 · 200K context' }] }]);
+  f.data.settings.usualPick = { agent: 'claude', model: 'opusplan', effort: 'high' };
+  f.q('#job-new').click(); const form = f.q('#job-create-form');
+  assert.deepEqual(picked(form), ['claude', 'opus', 'high']);
+  assert.equal(f.q('.pick-usual').textContent.trim(), 'Your usual');
+  assert.equal(f.q('.pick-tname small').textContent, '1M');
+  click(f, '.pick-ticket');
+  assert.deepEqual([...form.querySelectorAll('.pick-cell')].map((c) => c.dataset.value), ['opus', 'sonnet']);
+  assert.equal(form.querySelector('.pick-cell[data-value=sonnet] small').textContent, '200K');
 });
 
 test('new-job picker follows a changed catalog and Escape closes only the cabinet', (t) => {
