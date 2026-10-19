@@ -282,6 +282,13 @@ export const cancelledDependencies = (job, sub) => [...(triggerDropped(job, sub)
 // session or human task once it reached done.
 export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : dep.stage === 'done' && !dep.cancelledAt;
 export const pendingDependencies = (job, sub) => sub.after.map((id) => job.subJobs.find((s) => s.id === id)).filter((d) => !dependencySatisfied(d));
+// Mirrors server/job-prompts.js upstreamOf from the other end: an approval note
+// is read only by an agent step that has this one in its transitive `after`.
+export const noteReaders = (job, sub) => {
+  const byId = new Map(job.subJobs.map((s) => [s.id, s]));
+  const reaches = (s, seen = new Set()) => (s?.after || []).some((id) => id === sub.id || (!seen.has(id) && seen.add(id) && reaches(byId.get(id), seen)));
+  return job.subJobs.filter((s) => s.id !== sub.id && !s.cancelledAt && !isWriteSub(s) && !isHumanSub(s) && reaches(s));
+};
 // A session parked on its ready receipt (server/job-parked.js) is only waiting on
 // the human, so it is not a running step until a message to it is in flight.
 const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null) && !(r.parkedFor === 'ready' && !sub?.answering) && !(r.parkedFor === 'idea' && ideaStage(job) !== 'thinking'));

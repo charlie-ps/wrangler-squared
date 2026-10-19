@@ -882,6 +882,25 @@ test('Approve keeps one click, and its caret opens a popup whose words go to lat
   assert.equal(f.q('.job-move-log q').textContent, 'Use the <v2> table', 'the job history shows the words with the approval');
 });
 
+test('Approve has no note caret on a session nothing later reads, and says a PR\'s note reaches its own publish too', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sessionSub('spike'), stage: 'review', result: { checks: ['Schema documented'], receiptId: 'receipt9' } },
+    { ...sub('api', ['spike']), stage: 'implementation', cancelledAt: 1757400000000 },
+    { ...sub('ui'), stage: 'review', state: 'verified', worktree: { path: '/wt', branch: 'fix/AUTH-2' }, sessions: ['s2'], ready: { checks: ['Tests pass'], receiptId: 'run_2' } }];
+  f.view.update(f.data);
+  f.q('[data-sub="spike"]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('.job-approve-more'), null, 'a dropped dependant reads nothing, so no caret');
+  assert.equal(f.q('.job-actions button.primary[data-action="approve-session"]').textContent, 'Approve');
+  job.subJobs.push({ ...sub('docs', ['api', 'spike']), stage: 'pending' });
+  f.view.update(f.data);
+  assert.equal(f.q('.job-approve-more summary').getAttribute('aria-label'), 'Approve with context for later steps', 'a live dependant brings it back');
+  job.subJobs.at(-1).after = ['ui']; f.view.update(f.data);
+  assert.equal(f.q('.job-approve-more'), null, 'a step after something else does not read it');
+  f.q('[data-sub="ui"]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('.job-approve-more summary').getAttribute('aria-label'), 'Approve with context for this PR and later steps', 'a PR keeps it, since its publish run reads the note');
+  assert.match(f.q('.job-approve-pop label').textContent, /Add context for this PR and later steps/);
+});
+
 const humanSub = (id, after = []) => ({ id, kind: 'human', title: `Sign ${id}`, storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Click approve in the vendor console', sessions: [], repairs: [] });
 
 test('a waiting human task needs you, and the work behind it waits', (t) => {
