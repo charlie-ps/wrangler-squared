@@ -1104,6 +1104,17 @@ test('idle ticks and exhausted claims do not rewrite state or trigger extra grap
   await f.tick(); assert.equal(rebuilt, 1);
 });
 
+test('a tick over many idle jobs never deep-clones the store, and allowed() still honours both pause flags', async (t) => {
+  const f = fixture(t); for (let n = 0; n < 30; n++) f.store.create(input);
+  let clones = 0; const snapshot = f.store.snapshot.bind(f.store); f.store.snapshot = () => { clones++; return snapshot(); };
+  await f.tick(); assert.equal(clones, 0);
+  const data = f.store.data; assert.ok(data.jobs.length > 30);
+  assert.equal(f.runner.allowed(f.job.id), true);
+  f.store.action(f.job.id, 'pause'); assert.equal(f.runner.allowed(f.job.id), false);
+  assert.equal(f.runner.allowed(data.jobs.at(-1).id), true, 'a per-job pause is that job\'s own');
+  f.store.settings({ paused: true }); assert.equal(f.runner.allowed(data.jobs.at(-1).id), false);
+});
+
 test('tick overlap does not duplicate side effects and paused-in-flight polling cannot merge', async (t) => {
   const f = fixture(t); await atPr(f);
   let release; f.github.pr = async () => { await new Promise((r) => { release = r; }); return { state: 'OPEN', checkStatus: 'passing', head: 'head1' }; };

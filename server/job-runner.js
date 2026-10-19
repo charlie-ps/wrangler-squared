@@ -38,7 +38,7 @@ export class JobRunner {
     this.busy = true;
     const before = this.store.data;
     try {
-      for (const job of this.store.snapshot().jobs) {
+      for (const job of this.store.data.jobs) {
         try {
           await this.sweepRunning(job.id);
           await this.settle(job.id);
@@ -79,7 +79,7 @@ export class JobRunner {
     }
   }
   patchSub(jobId, subId, fn) { return this.store.update(jobId, (j) => fn(j.subJobs.find((s) => s.id === subId), j)); }
-  allowed(id) { const d = this.store.snapshot(); return !d.settings.paused && !d.jobs.find((j) => j.id === id)?.paused; }
+  allowed(id) { const d = this.store.data; return !d.settings.paused && !d.jobs.find((j) => j.id === id)?.paused; }
   // No clock runs against a session: a long step is legitimate work, and a
   // needs-you one is surfaced on the board rather than killed. What ends a run
   // is its receipt, its process, or having stopped working without either.
@@ -314,7 +314,7 @@ export class JobRunner {
             if (dependenciesSatisfied(job, sub)) await this.launch(job, sub, 'repair');
           } else if (pr.checkStatus === 'failing' && sub.acceptedRed?.ref !== pr.head) {
             const attempts = job.runs.filter((r) => r.subJobId === sub.id && r.phase === 'repair').length;
-            const limit = this.store.snapshot().settings.maxRepairs + (sub.repairAllowance || 0);
+            const limit = this.store.data.settings.maxRepairs + (sub.repairAllowance || 0);
             if (attempts >= limit) this.patchSub(id, sub.id, (s) => { s.error = 'Automatic repair limit reached. Review changes, then retry if needed.'; });
             else await this.launch(job, sub, 'repair');
           } else if (pr.behind && sub.acceptedRed?.ref !== pr.head || redBehind) {
@@ -343,7 +343,7 @@ export class JobRunner {
         } else if (sub.stage === 'deployment') {
           if (sub.nextPollAt > this.now()) continue;
           const result = await this.github.deployment(sub);
-          const staleMs = this.store.snapshot().settings.deploymentStaleMinutes * 60000;
+          const staleMs = this.store.data.settings.deploymentStaleMinutes * 60000;
           this.patchSub(id, sub.id, (s) => {
             s.deploymentResult = result; s.observationError = null; s.nextPollAt = this.now() + 30000;
             // NOTHING running this long after the merge means the workflows said
@@ -405,7 +405,7 @@ export class JobRunner {
   async triageRed(id) {
     const job = this.store.get(id);
     // Parsed, so a settings file from before `maxReplans` reads the default, not 0.
-    const settings = settingsSchema.parse(this.store.snapshot().settings ?? {});
+    const settings = settingsSchema.parse(this.store.data.settings ?? {});
     if (job.replan || job.stage !== 'active' || job.cancelledAt || !settings.maxReplans || !this.allowed(id) || job.runs.some((r) => !r.stopped && !r.subJobId)) return;
     const sub = job.subJobs.find((s) => needsTriage(job, s));
     if (!sub) return;

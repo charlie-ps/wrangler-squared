@@ -75,7 +75,7 @@ export default {
   // never awaited here, so the usage scan can never stall a rebuild.
   graph: ({ host, graph }) => {
     noteGraph(graph);
-    const snapshot = host.stores.jobs.snapshot();
+    const snapshot = host.stores.jobs.data;
     return { jobs: withRunStatus(withJobSpend(snapshot, spendFor(host).byCard(snapshot.jobs)), graph.sessions) };
   },
 
