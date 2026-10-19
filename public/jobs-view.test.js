@@ -1888,7 +1888,7 @@ test('a place that exists opens from its pill; a local file shows its path to co
   const copied = [];
   const prev = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async (s) => { copied.push(s); } } }, configurable: true });
-  t.after(() => Object.defineProperty(globalThis, 'navigator', prev));
+  t.after(() => { if (prev) Object.defineProperty(globalThis, 'navigator', prev); else delete globalThis.navigator; });
   pill('k6').querySelector('[data-copy-path]').click(); await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual(copied, ['/Users/me/k6 report.html']);
   assert.equal(pill('k6').querySelector('[data-copy-path]').textContent, 'Copied');

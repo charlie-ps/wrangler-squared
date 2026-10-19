@@ -6,7 +6,7 @@
   "description": "A new way of working with AI: breaks work into AI sessions and PRs, proves the changes work, and gets more done in parallel. An Agent Wrangler extension.",
   "license": "Apache-2.0",
   "scripts": {
-    "test": "node --test --import ./test-setup.js 'server/*.test.js' 'public/*.test.js'"
+    "test": "node --test --import ./test-setup.js server/*.test.js public/*.test.js"
   },
   "wranglerExtension": {
     "id": "jobs",
