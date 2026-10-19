@@ -2,6 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { isPrSub, isSessionSub, isHumanSub, isWriteSub, placeOf, placeShort, PLACES, kindChipHtml, ideaThread, ideaStage, liveSuggestion } from './jobs.js';
 import { inflowHtml, arcHtml } from './job-skylines.js';
+import { markdownHtml } from './markdown.js';
 
 // New idea's conversation (server/job-idea.js): the idea's formation sky across the
 // top, a thread with its planner, and the job the planner suggests as a launch strip
@@ -12,29 +13,6 @@ const STAGE_SKY = { thinking: 0, reply: 1, suggested: 2 };
 const time = (at) => at ? new Date(at).toLocaleTimeString(undefined, { timeStyle: 'short' }) : '';
 const base = (p) => tildify(p).split('/').pop();
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-// The planner writes plain text: blank lines are paragraphs, a run of "1." or "-"
-// lines a list (an indented line under an item stays with it), `backticks` code.
-// Escaped before anything is marked up.
-const ITEM = { ol: /^\d+[.)]\s+/, ul: /^[-*•]\s+/ };
-export function proseHtml(text) {
-  const inline = (s) => esc(s).replace(/`([^`\n]+)`/g, '<code>$1</code>');
-  const out = [];
-  for (const block of String(text || '').trim().split(/\n\s*\n/)) {
-    let list = null, para = [];
-    const flush = () => { if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`); para = []; if (list) out.push(`<${list.tag}>${list.items.map((i) => `<li>${i.map(inline).join('<br>')}</li>`).join('')}</${list.tag}>`); list = null; };
-    for (const raw of block.split('\n')) {
-      const line = raw.trim();
-      if (!line) continue;
-      const tag = ITEM.ol.test(line) ? 'ol' : ITEM.ul.test(line) ? 'ul' : null;
-      if (tag) { if (para.length || list?.tag !== tag) flush(); (list ||= { tag, items: [] }).items.push([line.replace(ITEM[tag], '')]); }
-      else if (list && /^\s/.test(raw)) list.items.at(-1).push(line);
-      else { if (list) flush(); para.push(line); }
-    }
-    flush();
-  }
-  return out.join('');
-}
 
 // What the job will be, in the words the board already uses: how many sub-jobs and
 // of which kinds, the repositories, and the places its writes go.
@@ -81,7 +59,7 @@ export function suggestionHtml(job, msg, state = 'live') {
 }
 
 const humanHtml = (text, at, extra = '') => `<div class="job-sent ${extra}"><div class="job-sent-bubble"><span>${esc(text)}</span></div><span class="job-sent-meta">You${at ? ` · ${esc(time(at))}` : ''}</span></div>`;
-const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh ? ' fresh' : ''}" data-msg="${esc(m.id)}"><span class="job-idea-orb" aria-hidden="true"></span><div><div class="job-idea-who">Planner<time>${esc(time(m.at))}</time></div><div class="job-idea-body">${proseHtml(m.text)}</div>${launch}</div></div>`;
+const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh ? ' fresh' : ''}" data-msg="${esc(m.id)}"><span class="job-idea-orb" aria-hidden="true"></span><div><div class="job-idea-who">Planner<time>${esc(time(m.at))}</time></div><div class="job-idea-body job-md">${markdownHtml(m.text)}</div>${launch}</div></div>`;
 
 // `pending` is the reply this tab just sent, drawn until the thread holds it; `firing`
 // the suggestion pressed here, whose hole flares before the job replaces the idea;

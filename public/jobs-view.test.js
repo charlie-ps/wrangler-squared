@@ -2812,6 +2812,13 @@ test('a forward reads as the quote the session will be told, pinned to its round
   assert.doesNotMatch(threadHtml(job, { ...sub, thread: [{ ...sub.thread[0], via: undefined }] }), /job-msg-via/);
 });
 
+test('the session answers in Markdown and the thread draws it, still escaped', () => {
+  const job = { id: 'job1', runs: [{ id: 'run_1', subJobId: 'api', stopped: false, parkedFor: 'ready', sessionId: 's1' }] };
+  const sub = { id: 'api', ready: { round: 1 }, thread: [{ id: 'm1', at: 1, from: 'agent', text: '**Fixed** in `export.js`:\n\n- spacing <b>raised</b>\n- [the PR](https://example.com/acme/widgets/pull/1)', round: 1 }] };
+  const html = threadHtml(job, sub);
+  assert.match(html, /<div class="job-msg-text job-md"><p><strong>Fixed<\/strong> in <code>export\.js<\/code>:<\/p><ul><li>spacing &lt;b&gt;raised&lt;\/b&gt;<\/li><li><a href="https:\/\/example\.com\/acme\/widgets\/pull\/1"/);
+});
+
 test('a tick that changes nothing leaves the board and detail DOM alone, and a selection holds a changed one until cleared', (t) => {
   const f = fixture(t);
   const plate = f.q('[data-board="job1"]');

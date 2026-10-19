@@ -1384,6 +1384,24 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-plate-film small { align-self:center; font-size:10px; color:var(--fg-muted); padding-left:2px; }
 .job-plate-film + .job-plate-stub { margin-top:0; }
 
+/* Markdown an agent wrote (markdown.js), in either thread. */
+.job-md :is(p,h4,h5,h6,ol,ul,pre,blockquote,hr) { margin:0; }
+.job-md p { font-size:inherit; line-height:inherit; color:inherit; }
+.job-md > :not(:first-child), .job-md li > :is(ol,ul,pre) { margin-top:8px; }
+.job-md :is(h4,h5,h6) { font-size:inherit; font-weight:600; color:inherit; }
+.job-md h4 { font-size:1.08em; }
+.job-md :is(ol,ul) { padding-left:20px; } .job-md li+li { margin-top:4px; }
+.job-md code { padding:1px 5px; border-radius:5px; background:color-mix(in srgb, var(--fg) 8%, transparent); font:.92em var(--jobs-mono); }
+.job-md pre { padding:8px 10px; border-radius:8px; background:color-mix(in srgb, var(--fg) 6%, transparent); overflow-x:auto; }
+.job-md pre code { padding:0; background:none; white-space:pre; }
+.job-md a { color:var(--blue-fg); text-decoration:underline; text-underline-offset:2px; }
+.job-md blockquote { padding-left:10px; border-left:3px solid var(--border-muted); color:var(--fg-muted); }
+.job-md hr { border:0; border-top:1px solid var(--border-muted); }
+.job-md .md-table { overflow-x:auto; }
+.job-md table { border-collapse:collapse; font-size:.95em; }
+.job-md :is(th,td) { padding:4px 8px; border:1px solid var(--border-muted); text-align:left; vertical-align:top; }
+.job-md th { font-weight:600; background:color-mix(in srgb, var(--fg) 5%, transparent); }
+
 /* The conversation under a Code review step (job-thread.js). */
 .job-thread { display:grid; margin-top:14px; border:1px solid var(--border-muted); border-radius:14px; overflow:hidden; }
 .job-thread-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:9px 12px; background:var(--surface-2); font-size:12.5px; }
@@ -1396,10 +1414,10 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-msg-who { font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; line-height:1.9; color:var(--blue-fg); }
 .job-msg.agent .job-msg-who { color:var(--purple); }
 .job-msg.system { background:var(--surface-2); }
-.job-msg.system .job-msg-who, .job-msg.system p { color:var(--fg-muted); }
-.job-msg p { margin:0; color:var(--fg); white-space:pre-wrap; overflow-wrap:anywhere; }
+.job-msg.system .job-msg-who, .job-msg.system .job-msg-text { color:var(--fg-muted); }
+.job-msg-text { color:var(--fg); overflow-wrap:anywhere; }
 .job-msg-via { display:inline-block; margin-top:4px; font-size:11px; color:var(--fg-muted); border:1px dashed var(--border-muted); border-radius:4px; padding:0 6px; }
-.job-msg time { display:inline-flex; align-items:center; gap:3px; margin-left:6px; font-size:11px; color:var(--fg-subtle); }
+.job-msg time { display:flex; align-items:center; gap:3px; margin-top:2px; font-size:11px; color:var(--fg-subtle); }
 .job-msg-tick { display:inline-flex; color:var(--green-fg); }
 .job-msg-tick svg { width:11px; height:11px; }
 .job-msg-att { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
@@ -1530,10 +1548,6 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-idea-who { display:flex; align-items:baseline; gap:8px; margin-bottom:6px; font:600 10px/1.9 var(--jobs-mono); letter-spacing:.16em; text-transform:uppercase; color:var(--fg-muted); }
 .job-idea-who time { font-weight:400; letter-spacing:.04em; text-transform:none; color:var(--fg-subtle); }
 .job-idea-body { padding:12px 15px; border-radius:4px 18px 18px 18px; background:color-mix(in srgb, var(--surface-2) 70%, transparent); box-shadow:inset 0 0 0 1px var(--border-muted); color:var(--fg); font-size:13.5px; line-height:1.6; overflow-wrap:anywhere; }
-.job-dialog .job-idea-body p { margin:0; font-size:inherit; color:inherit; }
-.job-idea-body :is(p,ol,ul)+:is(p,ol,ul) { margin-top:8px; }
-.job-idea-body :is(ol,ul) { margin:0; padding-left:20px; } .job-idea-body li+li { margin-top:4px; }
-.job-idea-body code { padding:1px 5px; border-radius:5px; background:color-mix(in srgb, var(--fg) 8%, transparent); font:12px var(--jobs-mono); }
 .job-idea-thinking { display:flex; align-items:center; gap:10px; padding-left:2px; font:500 12px var(--jobs-mono); }
 .job-idea-shine { background:linear-gradient(90deg, var(--fg-muted) 0 40%, var(--fg) 50%, var(--fg-muted) 60% 100%); background-size:250% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:job-idea-shine 1.6s linear infinite; }
 .job-idea-dock { position:sticky; bottom:0; z-index:2; display:grid; gap:2px; padding:8px 26px 14px; background:linear-gradient(transparent, var(--surface) 8px); }

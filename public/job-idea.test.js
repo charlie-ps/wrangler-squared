@@ -4,7 +4,8 @@ import { Window } from 'happy-dom';
 import { initJobsView } from './jobs-view.js';
 import { ideaStage, liveSuggestion, jobNeedsReview, jobStatus } from './jobs.js';
 import { plateAsk, plateHtml } from './job-plates.js';
-import { TITLE_FADE_MS, proseHtml, suggestionSummary } from './job-idea.js';
+import { TITLE_FADE_MS, suggestionSummary } from './job-idea.js';
+import { markdownHtml } from './markdown.js';
 
 const suggest = { title: 'Nudge when a green PR waits over a day', plan: { context: '', stories: [], subJobs: [
   { id: 'track', title: 'Track how long a merge-ready PR has waited', repo: '/Users/me/wrangler-squared', after: [], brief: 'b' },
@@ -140,8 +141,8 @@ test('on the board an idea waiting on you is a needs-you stub; one the planner i
 });
 
 test('the planner\'s prose is escaped before it is marked up, and a summary counts only the work', () => {
-  assert.equal(proseHtml('a `b<c>` d\n\n- one\n- two'), '<p>a <code>b&lt;c&gt;</code> d</p><ul><li>one</li><li>two</li></ul>');
-  assert.equal(proseHtml('Two things:\n1. Whose CI?\n   a) ours\n2. Which pain?\nIf you mean (a), I would'), '<p>Two things:</p><ol><li>Whose CI?<br>a) ours</li><li>Which pain?</li></ol><p>If you mean (a), I would</p>');
+  assert.equal(markdownHtml('a `b<c>` d\n\n- one\n- two'), '<p>a <code>b&lt;c&gt;</code> d</p><ul><li>one</li><li>two</li></ul>');
+  assert.equal(markdownHtml('Two things:\n1. Whose CI?\n   a) ours\n2. Which pain?\nIf you mean (a), I would'), '<p>Two things:</p><ol><li>Whose CI?<br>a) ours</li><li>Which pain?</li></ol><p>If you mean (a), I would</p>');
   const s = suggestionSummary(suggest.plan);
   assert.deepEqual([s.work.length, s.repos.length, s.line], [3, 1, '3 sub-jobs · wrangler-squared · Slack']);
 });

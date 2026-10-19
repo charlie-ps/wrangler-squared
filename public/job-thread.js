@@ -2,10 +2,12 @@ import { esc } from './util.js';
 import { ICONS } from './icons.js';
 import { shotButtonHtml } from './job-proof.js';
 import { readyRun } from './jobs.js';
+import { markdownHtml } from './markdown.js';
 
 // The conversation under a Code review step (server/job-parked.js): what the
 // human asked the session that wrote the tree, and what it answered. Every word of
-// it is agent- or human-written and reaches the page only through esc(); pictures
+// it is agent- or human-written and reaches the page only through esc() or
+// markdownHtml(), which escapes before it marks anything up; pictures
 // are evidence slots the view hydrates from `job-evidence` frames.
 
 export const hasThread = (sub) => Array.isArray(sub?.thread) && sub.thread.length > 0;
@@ -17,7 +19,7 @@ function messageHtml(job, sub, m) {
   const attach = files.length ? `<div class="job-msg-att">${files.map((f, k) => shotButtonHtml(job, sub, m.round, f, k)).join('')}</div>` : '';
   const run = m.run ? `<pre class="job-msg-run"><i>$</i> ${esc(m.run.cmd)}\n${esc(m.run.out)}\n<b class="${m.run.exit === 0 ? 'ok' : 'bad'}">exit ${esc(m.run.exit)}</b></pre>` : '';
   const via = m.via === 'planner' ? '<span class="job-msg-via">via the planner</span>' : '';
-  return `<div class="job-msg ${esc(m.from)}"><span class="job-msg-who">${m.from === 'system' ? `Round ${esc(m.round)}` : WHO[m.from] || esc(m.from)}</span><div><p>${esc(m.text)}<time>${m.from === 'human' && m.sentAt ? `<i class="job-msg-tick" title="Delivered to the session">${ICONS.check}</i>` : ''}${esc(clock(m.at))}</time></p>${run}${attach}${via}</div></div>`;
+  return `<div class="job-msg ${esc(m.from)}"><span class="job-msg-who">${m.from === 'system' ? `Round ${esc(m.round)}` : WHO[m.from] || esc(m.from)}</span><div><div class="job-msg-text job-md">${markdownHtml(m.text)}</div><time>${m.from === 'human' && m.sentAt ? `<i class="job-msg-tick" title="Delivered to the session">${ICONS.check}</i>` : ''}${esc(clock(m.at))}</time>${run}${attach}${via}</div></div>`;
 }
 
 // Where the session stands: answering, waiting on your review, or gone.
