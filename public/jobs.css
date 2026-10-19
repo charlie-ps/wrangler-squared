@@ -1363,14 +1363,21 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-proof-meta { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0; font-size:12px; }
 .job-proof-meta dt { color:var(--fg-subtle); }
 .job-proof-meta dd { margin:0; color:var(--fg); overflow-wrap:anywhere; }
-.job-proof-strip,.job-proof-shots { display:flex; flex-wrap:wrap; gap:6px; }
+.job-proof-strip { display:flex; flex-wrap:wrap; gap:6px; align-items:center; isolation:isolate; }
 .job-proof-row { display:grid; gap:6px; }
 .job-proof-row>small { font-size:11px; color:var(--fg-subtle); }
-.job-proof-row:has(.job-proof-shots) { padding-bottom:10px; border-bottom:1px solid var(--border-muted); }
-.job-proof-pick { all:unset; box-sizing:border-box; width:64px; border-radius:8px; cursor:pointer; border:2px solid transparent; }
+.job-proof-pick { all:unset; position:relative; box-sizing:border-box; width:64px; border-radius:8px; cursor:pointer; border:2px solid transparent; }
 .job-proof-pick .job-proof-thumb { border-radius:6px; }
 .job-proof-pick.sel { border-color:var(--blue); }
 .job-proof-pick:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+/* A check with several shots is a stack (a card peeking behind) with its count; open, it is a tray of its shots. */
+.job-proof-pick.stack { margin:4px 4px 0 0; }
+.job-proof-pick.stack::before { content:""; position:absolute; inset:-5px -5px 5px 5px; border-radius:6px; border:1px solid var(--border); background:var(--surface-2); z-index:-1; }
+.job-proof-count { position:absolute; right:-8px; top:-10px; min-width:18px; height:18px; padding:0 5px; box-sizing:border-box; border-radius:999px; background:var(--fg); color:var(--bg); font:600 11px/18px system-ui,sans-serif; text-align:center; font-variant-numeric:tabular-nums; }
+.job-proof-tray { display:flex; flex-wrap:wrap; gap:4px; align-items:center; max-width:100%; box-sizing:border-box; padding:3px 6px 3px 3px; border-radius:10px; border:1px solid var(--blue); background:color-mix(in srgb, var(--blue) 10%, var(--surface)); }
+.job-proof-tray .job-proof-pick { width:52px; }
+.job-proof-tray .job-proof-pick.sel { border-color:var(--fg); }
+.job-proof-tray>small { font-size:11px; color:var(--blue-fg); padding:0 2px 0 4px; font-variant-numeric:tabular-nums; }
 .job-plate-film { position:relative; z-index:1; display:flex; gap:4px; padding:0 10px 6px; align-items:stretch; margin-top:auto; }
 .job-plate-film .job-proof-thumb { flex:1; min-width:0; aspect-ratio:16/10; border-radius:5px; background:color-mix(in srgb, var(--bg) 80%, transparent); }
 .job-plate-film .job-proof-thumb svg { width:14px; height:14px; }

@@ -122,9 +122,9 @@ export function proofListHtml(job, sub, { isOpen = () => false, ask = true, stal
 }
 
 // The shot viewer: one item full size with where and how it was captured, the
-// other items as a strip, and the way back to the box with the question started.
-// An item with several shots gets a row of its own above the strip; both rows are
-// then labelled, since the strip's thumbnail for this item repeats its first shot.
+// items as one strip, and the way back to the box with the question started.
+// An item with several shots reads as a stack with its count; the open one opens
+// in place into a tray of its shots, so a shot always sits inside its check.
 // `view` is { i, j }: the item, and which of its shots.
 export function proofViewerHtml(job, sub, view, cache, { branch = '', ask = true } = {}) {
   const items = proofItems(sub), i = Math.min(Math.max(view.i || 0, 0), items.length - 1), p = items[i];
@@ -140,15 +140,19 @@ export function proofViewerHtml(job, sub, view, cache, { branch = '', ask = true
   const meta = p.couldNot ? '' : shot
     ? `<dl class="job-proof-meta">${row('URL', shot.url)}${row('Viewport', shot.viewport)}${row('How', shot.tool || 'Screenshot')}${row('At', shot.at ? new Date(shot.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '')}</dl>`
     : `<dl class="job-proof-meta">${row('In', sub.worktree?.path || '')}${row('How', 'Command output')}${row('Exit', String(p.run?.exit))}</dl>`;
-  const strip = items.map((x, k) => `<button type="button" class="job-proof-pick ${k === i ? 'sel' : ''}" data-proof-go="${k}" aria-label="${esc(x.text)}" title="${esc(x.text)}">${mediaHtml(job, sub, x)}</button>`).join('');
-  const many = shots.length > 1;
-  const shotStrip = many ? `<div class="job-proof-row"><small>Shots in this check · ${j + 1} of ${shots.length}</small><div class="job-proof-shots">${shots.map((s, k) => `<button type="button" class="job-proof-pick ${k === j ? 'sel' : ''}" data-proof-shot="${k}" aria-label="Shot ${k + 1} of ${shots.length}">${thumbHtml(job, sub, s.file)}</button>`).join('')}</div></div>` : '';
+  const strip = items.map((x, k) => {
+    const n = x.couldNot ? 0 : shotsOf(x).length;
+    if (k === i && n > 1) return `<div class="job-proof-tray" role="group" aria-label="${esc(x.text)} · ${n} shots">${shots.map((s, q) => `<button type="button" class="job-proof-pick ${q === j ? 'sel' : ''}" data-proof-shot="${q}" aria-label="Shot ${q + 1} of ${n}" title="Shot ${q + 1} of ${n}">${thumbHtml(job, sub, s.file)}</button>`).join('')}<small>${j + 1}/${n}</small></div>`;
+    const label = n > 1 ? `${x.text} · ${n} shots` : x.text;
+    return `<button type="button" class="job-proof-pick ${n > 1 ? 'stack' : ''} ${k === i ? 'sel' : ''}" data-proof-go="${k}" aria-label="${esc(label)}" title="${esc(label)}">${mediaHtml(job, sub, x)}${n > 1 ? `<b class="job-proof-count" aria-hidden="true">${n}</b>` : ''}</button>`;
+  }).join('');
   const itemStrip = `<div class="job-proof-strip">${strip}</div>`;
+  const anyMany = items.some((x) => !x.couldNot && shotsOf(x).length > 1);
   return `<header class="job-appbar"><button class="job-back" data-proof-back title="Back to the sub-job">${ICONS.back}<span>${esc(sub.title)}</span></button><h2>Shown working · ${i + 1} of ${items.length}</h2>
     <div class="job-chips job-detail-meta"><span class="job-chip">${ICONS.eye}<span>Round ${round}</span></span>${branch ? `<span class="job-chip job-plan-branch">${ICONS.branch}<span>${esc(branch)}</span></span>` : ''}</div></header>
     <div class="job-proof-viewer">${stage}<div class="job-proof-side"><h3 class="${p.couldNot ? 'gap' : ''}"><span aria-hidden="true">${p.couldNot ? '!' : '✓'}</span><span>${esc(p.text)}</span></h3>
       ${p.note ? `<p>${esc(p.note)}</p>` : ''}${p.couldNot ? '<p>The plan asked for this to be shown. You decide whether what covers it instead is enough, or ask for another way.</p>' : ''}${meta}
-      ${ask ? `<div class="job-actions"><button type="button" data-proof-ask="${i}">${ICONS.edit}${p.couldNot ? 'Ask it to try another way' : 'Ask about this'}</button></div>` : ''}${shotStrip}${many ? `<div class="job-proof-row"><small>All checks · ${items.length}</small>${itemStrip}</div>` : itemStrip}</div></div>`;
+      ${ask ? `<div class="job-actions"><button type="button" data-proof-ask="${i}">${ICONS.edit}${p.couldNot ? 'Ask it to try another way' : 'Ask about this'}</button></div>` : ''}${anyMany ? `<div class="job-proof-row"><small>Checks · ${items.length}</small>${itemStrip}</div>` : itemStrip}</div></div>`;
 }
 
 // The thread's lightbox: one shot of a message (or an earlier round) full size,
