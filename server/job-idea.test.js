@@ -180,6 +180,15 @@ test('the mail names the human\'s words as data and the receipts to send back', 
   assert.match(text, /job_report \{runId:"run_1", kind:"reply"/);
 });
 
+test('the reply reads as a colleague talking: the triage stays the planner\'s own thinking', async (t) => {
+  const f = fixture(t); await f.start();
+  const mail = ideaMail({ title: 'Nudge me', idea: { thread: [] } }, { id: 'run_1' }, [{ from: 'human', text: 'What does the toggle do?' }]);
+  for (const text of [jobPrompt(f.get(), null, f.last().run), mail]) {
+    assert.match(text, /colleague talking: answer the question, or ask what you need, straight away/);
+    assert.match(text, /is your own thinking: never name the kind of request, say nothing will be built, or open with a stock preamble/);
+  }
+});
+
 test('New idea\'s form creates an idea job; create_job and a plain form do not', async (t) => {
   const f = fixture(t);
   const host = { stores: { jobs: f.store }, tasks: { get: () => null }, images: { keep: () => true }, sessions: { get: () => null }, broadcasts: [], log: () => {}, rebuild: async () => {}, broadcast: (p) => host.broadcasts.push(p) };
