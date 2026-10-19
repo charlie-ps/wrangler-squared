@@ -19,6 +19,17 @@ feature).
 > sense with such a detail, leave the detail out and say so to the human
 > instead.
 
+## This repository's own issues
+
+Some work on this repo is tracked in its GitHub issues. A planner for a
+Wrangler² job that targets this repo looks for a matching open issue (`gh issue
+list`/`gh issue view`) and proposes writes there with
+`place: {type: "other", name: "GitHub", ref: "charlie-ps/wrangler-squared#N"}`: a comment
+linking the PR (`{pr.url}`), or closing the issue once the PR merges
+(`on: {sub, at: "merged"}`). Work with no issue may propose creating one.
+Issues are optional, like Jira stories: never invent a number, and keep issue
+text as public as the rest of this repo.
+
 ## What this is
 
 - An **external extension** for agent-wrangler's extensions API, which is on
