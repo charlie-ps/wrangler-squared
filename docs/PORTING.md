@@ -167,11 +167,12 @@ on `main` as their own small PRs. All are resolved.
 ## Tests
 
 `npm test` runs `node --test` over `server/*.test.js` and `public/*.test.js`:
-**449 tests, 448 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
-a checkout serving host API 1.31 or later, all 449 pass. Per file: jobs 130, jobs-view 100,
-job-runtime 21, manifest 21, deploys 16, index 16, prompts 16, writes 12, sub-ops 6,
-model-picker 10, intro 9, images 8 (server) + 8 (client), replan 8, spend 7, job-state 7,
-comments 6, spend-refresh 4, handlers 4, job-title 4, integration 2.
+**742 tests, 741 pass, 1 skipped** (the `AW_REPO` guard); with `AW_REPO` set to
+a checkout serving host API 1.31 or later, all 742 pass. CI
+(`.github/workflows/test.yml`, on every PR and push to `main`) checks out
+agent-wrangler `main` beside this repo, sets `AW_REPO` to it, and runs
+`scripts/validate-manifest.mjs` before `npm test`, so the real-loader test never
+skips there.
 
 `server/test-helpers.js` holds the single fake `host`
 (`{ sessions: { spawn, get, wake, archive, bill }, mail: { send }, usage: { byCard }, stores.jobs, rebuild, broadcast, log }`,

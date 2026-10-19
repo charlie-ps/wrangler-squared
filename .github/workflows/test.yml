@@ -1,0 +1,55 @@
+name: Test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Side by side, not nested: validate-manifest.mjs copies this checkout into a
+# fake extensions dir and runs the loader's import scan over every file in it,
+# so agent-wrangler must not live inside it.
+defaults:
+  run:
+    working-directory: wrangler-squared
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      AW_REPO: ${{ github.workspace }}/agent-wrangler
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: wrangler-squared
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: PortSwigger/agent-wrangler
+          ref: main
+          path: agent-wrangler
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            wrangler-squared/package-lock.json
+            agent-wrangler/package-lock.json
+
+      - run: npm ci
+
+      # Only its loader and host-API modules are imported, so no install scripts.
+      - run: npm ci --ignore-scripts
+        working-directory: agent-wrangler
+
+      # Exits 2 if AW_REPO is not a loader checkout, so the real-loader test in
+      # npm test cannot quietly fall back to skipping.
+      - run: node scripts/validate-manifest.mjs
+
+      - run: npm test
