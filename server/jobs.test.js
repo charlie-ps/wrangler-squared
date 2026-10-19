@@ -642,6 +642,73 @@ test('a failing post-merge run names the workflow and creates no second job', as
   assert.equal(f.sub().deployed, undefined);
 });
 
+// The runner's deployment poll on a real JobGithub over a fake `gh`: `onCommit`
+// is what `gh run list --commit merge1` prints, `later` the workflow's later runs
+// on the branch, `contains(head)` whether that head's commit contains the merge.
+function ghOver(f, world) {
+  const gh = new JobGithub(async (_bin, args) => {
+    if (args.includes('--commit')) return JSON.stringify(world.onCommit);
+    if (args[0] === 'run') return JSON.stringify(world.later || []);
+    return world.contains(args[1].split('...')[1]) ? 'ahead' : 'diverged';
+  });
+  f.github.deployment = (sub) => gh.deployment(sub);
+}
+const pushRun = (over) => ({ headBranch: 'main', event: 'push', workflowName: 'Deploy', status: 'completed', attempt: 1, databaseId: 10, headSha: 'merge1', url: 'https://github.example.com/run', ...over });
+// A red sub-job is polled every two minutes; two ticks always reach the next poll.
+const poll = async (f) => { await f.tick(); await f.tick(); };
+
+test('a failed post-merge run stays red but watched, and a re-run attempt that passes reaches deployed without Retry', async (t) => {
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], contains: () => false };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick();
+  await f.tick();
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  assert.equal(f.sub().nextPollAt - f.clockNow(), 120000, 'a red deployment is polled, more slowly');
+  world.onCommit = [pushRun({ attempt: 2, status: 'in_progress', conclusion: '' })]; await poll(f);
+  assert.equal(f.sub().deploymentResult.status, 'pending');
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'the failure stays on the board while the re-run is in flight');
+  world.onCommit = [pushRun({ attempt: 2, conclusion: 'success' })]; await poll(f);
+  const sub = f.sub();
+  assert.equal(sub.error, null); assert.deepEqual(sub.deployed.checks, ['Post-merge runs passed']); assert.equal(sub.deployed.commit, 'merge1');
+  assert.equal(f.launched.filter((w) => w.sub?.id === 'api' && w.run.phase !== 'implementation').length, 0, 'no Retry, no session');
+  await f.tick(); assert.equal(f.sub().stage, 'done'); assert.deepEqual(f.cleaned, ['api']);
+  // With a check in the plan, the green re-run sends it to verify like any green run.
+  const g = fixture(t); await atPr(g, plan([spec('api', [], { check: 'helm list shows auth in prod' })]));
+  const gWorld = { onCommit: [pushRun({ conclusion: 'failure' })], contains: () => false };
+  ghOver(g, gWorld);
+  g.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await g.tick(); await g.tick();
+  assert.match(g.sub().error, /Post-merge run failed/);
+  gWorld.onCommit = [pushRun({ attempt: 2, conclusion: 'success' })]; await poll(g);
+  assert.equal(g.sub().error, null); assert.equal(g.last().run.phase, 'verify');
+});
+
+test('a failed run on the merge commit is cleared by a later run that contains the merge and passes', async (t) => {
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], later: [], contains: (head) => head === 'next' };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  world.later = [pushRun({ databaseId: 11, headSha: 'next', status: 'in_progress', conclusion: '' })]; await poll(f);
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'a successor still running is not a verdict on a red run');
+  world.later = [pushRun({ databaseId: 11, headSha: 'next', conclusion: 'success' })]; await poll(f);
+  assert.equal(f.sub().error, null);
+  assert.deepEqual(f.sub().deploymentResult.runs[0], { workflow: 'Deploy', runId: 11, url: 'https://github.example.com/run', status: 'passing', conclusion: 'success', supersedes: 10, commit: 'next' });
+  assert.deepEqual(f.sub().deployed.checks, ['Post-merge runs passed']); assert.equal(f.sub().stage, 'cleanup');
+});
+
+test('a red post-merge run Retry never saw still waits on Accept red or recover when nothing passes after it', async (t) => {
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], later: [pushRun({ databaseId: 11, headSha: 'sibling', conclusion: 'success' })], contains: () => false };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  await poll(f); await poll(f);
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'a green run on a commit without the merge clears nothing');
+  assert.equal(f.sub().deployed, undefined);
+  acceptRed(f, 'api', 'unrelated'); await f.tick();
+  assert.deepEqual(f.sub().deployed.checks, ['Post-merge run accepted red: unrelated']);
+});
+
 test('Accept red on an open PR merges the pinned head instead of repairing it; a new push is judged afresh', async (t) => {
   const f = fixture(t); f.store.settings({ maxRepairs: 0 }); await atPr(f);
   f.setPr({ checkStatus: 'failing', checks: [{ name: 'e2e', state: 'FAILURE' }] }); await f.tick();
@@ -2301,6 +2368,48 @@ test('a cancelled post-merge run is judged by the later run on the same branch t
   gh.run = async (_bin, args) => args.includes('--commit') ? JSON.stringify([cancelled, { ...cancelled, databaseId: 20, workflowName: 'Deploy', conclusion: 'success' }])
     : args[0] === 'run' ? '[]' : 'ahead';
   assert.equal((await gh.deployment(sub)).status, 'pending', 'an unreplaced cancellation holds back a green sibling');
+});
+
+test('a failed post-merge run is judged by the NEWEST completed later run that contains the merge', async () => {
+  const sub = { repo: '/repo', pr: { mergeCommit: 'merged', base: 'main' } };
+  const base = { headBranch: 'main', event: 'push', status: 'completed', attempt: 1, workflowName: 'Build' };
+  const failed = { ...base, databaseId: 10, headSha: 'merged', conclusion: 'failure' };
+  const red = { ...base, databaseId: 11, headSha: 'next', conclusion: 'failure' };
+  const green = { ...base, databaseId: 12, headSha: 'after', conclusion: 'success' };
+  const running = { ...base, databaseId: 13, headSha: 'latest', status: 'in_progress', conclusion: '' };
+  let later = [];
+  const gh = new JobGithub(async (_bin, args) => args.includes('--commit') ? JSON.stringify([failed])
+    : args[0] === 'run' ? JSON.stringify(later) : 'ahead');
+  assert.equal((await gh.deployment(sub)).status, 'failing', 'nothing after it: still red');
+  later = [red, green, running];
+  let result = await gh.deployment(sub);
+  assert.equal(result.status, 'passing', 'a later red run is not the last word when a newer one passed');
+  assert.equal(result.runs[0].runId, 12); assert.equal(result.runs[0].supersedes, 10); assert.equal(result.runs[0].commit, 'after');
+  later = [green, { ...red, databaseId: 14 }];
+  result = await gh.deployment(sub);
+  assert.equal(result.status, 'failing', 'passed then failed is red: the newest completed run decides');
+  assert.equal(result.runs[0].runId, 14);
+  later = [red, { ...green, databaseId: 15, conclusion: 'cancelled' }];
+  assert.equal((await gh.deployment(sub)).runs[0].runId, 11, 'a cancelled successor is skipped for the one before it');
+});
+
+test('a later run on a commit that does not contain the merge never supersedes a failed or cancelled one', async () => {
+  const sub = { repo: '/repo', pr: { mergeCommit: 'merged', base: 'main' } };
+  const base = { headBranch: 'main', event: 'push', status: 'completed', attempt: 1, workflowName: 'Build' };
+  const sibling = { ...base, databaseId: 12, headSha: 'sibling', conclusion: 'success' };
+  const compared = [];
+  let onCommit = [{ ...base, databaseId: 10, headSha: 'merged', conclusion: 'failure' }];
+  const gh = new JobGithub(async (_bin, args) => {
+    if (args.includes('--commit')) return JSON.stringify(onCommit);
+    if (args[0] === 'run') return JSON.stringify([sibling]);
+    compared.push(args[1]); return 'diverged';
+  });
+  let result = await gh.deployment(sub);
+  assert.equal(result.status, 'failing'); assert.equal(result.runs[0].runId, 10); assert.equal(result.runs[0].supersedes, undefined);
+  assert.deepEqual(compared, ['repos/{owner}/{repo}/compare/merged...sibling'], 'containment was asked, and said no');
+  onCommit = [{ ...base, databaseId: 10, headSha: 'merged', conclusion: 'cancelled' }];
+  result = await gh.deployment(sub);
+  assert.equal(result.status, 'pending'); assert.equal(result.runs[0].status, 'cancelled');
 });
 
 // --- Changing the plan of a running job ---
