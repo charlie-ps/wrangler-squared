@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound } from './jobs.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml } from './job-plates.js';
@@ -9,12 +9,12 @@ import { holdSkies, mountSkies, releaseSkies, spinTo } from './job-skylines.js';
 import { THEMES, themeOf, optionsOf, applyTheme, setCurrentTheme } from './themes.js';
 import { mountThemePicker } from './theme-picker.js';
 import { mountForming, dropForming, formingClock, formingMs } from './job-forming.js';
-import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
+import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, jobNeedsYou } from './job-state.js';
 
 // The board's filter rail: what each shows, and the one an empty view explains.
 const FILTERS = [
   ['all', 'In flight', (job) => job.stage !== 'done'],
-  ['needs', 'Needs you', (job, needs) => needs.has(job)],
+  ['needs', 'Needs you', jobNeedsYou],
   ['ideas', 'Ideas', (job) => ideaOpen(job)],
   ['running', 'Running', (job) => jobState(job) === 'running'],
   ['backlog', 'Backlog', (job) => job.stage === 'backlog'],
@@ -450,7 +450,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   function render() {
     const cards = jobCards(data.jobs);
-    const needs = new Set(cards.filter((c) => jobNeedsReview(c.job, c.sub)).map((c) => c.job));
     // A run parked on its drafts holds no slot (server/job-store.js holdsSlot).
     const active = data.jobs.flatMap((j) => j.runs).filter((r) => !r.stopped && !(r.parkedAt && !r.mailedAt)).length;
     const paused = !!data.settings.paused;
@@ -470,14 +469,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     pause.setAttribute('aria-label', pause.title);
     pause.setAttribute('aria-pressed', String(paused));
     for (const [key, , test] of FILTERS) {
-      const b = q(`[data-filter="${key}"]`), n = data.jobs.filter((j) => test(j, needs)).length;
+      const b = q(`[data-filter="${key}"]`), n = data.jobs.filter((j) => test(j)).length;
       b.setAttribute('aria-pressed', String(key === filter));
       b.querySelector('.jobs-rail-n').textContent = n || '';
       b.querySelector('.jobs-rail-n').classList.toggle('ask', key === 'needs' && n > 0);
     }
     assignScenes(data.jobs, scenes);
     const test = FILTERS.find(([key]) => key === filter)[2];
-    const jobs = sortJobs(data.jobs.filter((j) => test(j, needs)));
+    const jobs = sortJobs(data.jobs.filter((j) => test(j)));
     const empty = !data.jobs.length ? 'Start with an outcome.<br>Wrangler will shape the work.' : filter === 'needs' ? 'Nothing needs you right now.' : filter === 'ideas' ? 'No ideas being talked through.' : 'No jobs here.';
     const t = applyViewTheme(), art = t.plateArt(optionsOf(data.settings, t));
     root.dataset.plateArt = art;

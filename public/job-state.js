@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber, worktreeKept } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber, worktreeKept, promptsWaiting } from './jobs.js';
 
 // The one state vocabulary every surface draws: a tone (the colour, see the
 // .tone-* rules in jobs.css), a glyph and a short name. Every stage, run status,
@@ -58,6 +58,9 @@ export function jobState(job) {
   return STATE_ORDER.find((s) => states.includes(s));
 }
 
+// A job needs you exactly when its plate draws an ask (job-plates.js plateAsk): the rail
+// badge and the Needs you tab count jobs by this, so both match the cards on the board.
+export const jobNeedsYou = (job) => !!job.error || promptsWaiting(job).length > 0 || ['needs', 'failing'].includes(jobState(job));
 export const leadSub = (job, state = jobState(job)) => job.subJobs.find((s) => subState(job, s) === state) || null;
 const redChecks = (sub) => (sub.pr?.checks || []).filter((c) => ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT'].includes(c.state)).length;
 // A few words for what a sub-job is waiting for, where its state is one a human

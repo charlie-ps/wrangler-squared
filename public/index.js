@@ -1,5 +1,5 @@
 import { initJobsView } from './jobs-view.js';
-import { jobCards, jobNeedsReview } from './jobs.js';
+import { jobNeedsYou } from './job-state.js';
 import { diffReturnTarget } from './diff-return.js';
 import { createIntro } from './intro.js';
 import { createUpdates } from './updates.js';
@@ -194,7 +194,7 @@ export default {
         // from any view. Counted here rather than inside badge() because this
         // is the only place the graph is handed to us, and core reads the badge
         // in the same syncHosts pass that has just called update.
-        needsMe = jobCards(graph.jobs.jobs).filter((c) => jobNeedsReview(c.job, c.sub)).length;
+        needsMe = graph.jobs.jobs.filter(jobNeedsYou).length;
         if (!view) return;
         view.update(graph.jobs);
       },

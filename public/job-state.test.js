@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
+import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, jobNeedsYou } from './job-state.js';
 import { plateHtml } from './job-plates.js';
 import { jobStatus } from './jobs.js';
 
@@ -130,6 +130,24 @@ test('a cancelled job whose cleanup kept a worktree needs the human until Retry 
   assert.equal(jobState(finished), 'dropped'); assert.equal(jobLabel(finished), 'Cancelled');
   const dropped = job({ subJobs: [kept, sub('b')] });
   assert.equal(jobState(dropped), 'needs', 'a sub-job dropped from a live job surfaces the same way'); assert.equal(jobLabel(dropped), 'Worktree kept');
+});
+
+test('a job needs you exactly when its plate asks, once however many of its steps wait', () => {
+  const review = (id) => sub(id, { kind: 'session', stage: 'review', result: { checks: [] } });
+  const cases = [
+    ['two steps waiting', job({ subJobs: [review('a'), review('b')] }), true],
+    ['plan ready', job({ stage: 'planning', plan: { subJobs: [sub('a')] } }), true],
+    ['red step', job({ subJobs: [sub('a', { error: 'blocked' })] }), true],
+    ['prompt waiting on a paused job', job({ paused: true, subJobs: [sub('a')], runs: [run('a', { status: 'needs-you', sessionId: 'card' })] }), true],
+    ['cancelled, cleaning up a red step', job({ cancelledAt: 1, subJobs: [sub('a', { stage: 'cleanup', cancelledAt: 1, error: 'cleanup failed' })] }), false],
+    ['finished with a red step', job({ stage: 'done', subJobs: [sub('a', { stage: 'done', error: 'cleanup failed' })] }), false],
+    ['step held by a replan', job({ replan: { at: 1 }, subJobs: [review('a')], runs: [run(null, { phase: 'planning' })] }), false],
+    ['running', job({ subJobs: [sub('a')], runs: [run('a')] }), false],
+  ];
+  for (const [name, j, expected] of cases) {
+    assert.equal(jobNeedsYou(j), expected, name);
+    assert.equal(/\bstubbed\b/.test(plateHtml(j, 0)), expected, `${name}: the plate agrees`);
+  }
 });
 
 test('the board orders jobs newest first by creation, whatever their live state', () => {
