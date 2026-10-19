@@ -3,12 +3,13 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { runFile } from './job-github.js';
-import { jobPrompt, placeholderBranch } from './job-prompts.js';
+import { jobPrompt, placeholderBranch, helperPrompt } from './job-prompts.js';
 import { removeWorktree, gitRepoRoot, stderrLine } from './git.js';
 import { updateMainCheckout, resolvePrompt, caughtUp } from './job-main.js';
 import { targetOf } from './jobs-schema.js';
 import { checkoutsDir } from './data-dir.js';
 import { ensureInbox } from './job-evidence.js';
+import { helperCwd } from './job-helper.js';
 
 // The one module that touches sessions — and therefore the one that had to be
 // REWRITTEN for the extension port rather than copied. In core (agent-wrangler
@@ -343,6 +344,21 @@ export class JobRuntime {
       model: job.model || undefined,
       effort: job.effort || undefined,
       intent: resolvePrompt(notice, resolution),
+      taskId: job.taskId || undefined,
+    });
+    return sessionId;
+  }
+
+  // Ask an agent: a plain session like resolveMain's, briefed with the step and
+  // the job, in the checkout helperCwd picks ('' is a fresh scratch workspace).
+  async spawnHelper(job, sub) {
+    const cwd = helperCwd(job, sub);
+    const { sessionId } = await this.host.sessions.spawn({
+      cwd,
+      agent: job.agent,
+      model: job.model || undefined,
+      effort: job.effort || undefined,
+      intent: helperPrompt(job, sub, cwd),
       taskId: job.taskId || undefined,
     });
     return sessionId;

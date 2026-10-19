@@ -242,6 +242,17 @@ text as public as the rest of this repo.
   A notice nothing is retrying or resolving (`job-state.js mainWaiting`) is a Needs you ask
   beside the stage roll-up, never part of it: `jobNeedsYou`, `jobLabel` ("Local main behind",
   even on a Delivered job) and `plateAsk` all read it, below any step's own ask.
+- **Ask an agent opens the human's own session about a step, never a step** (`server/job-helper.js`).
+  Every step's dialog has the button, at any stage and on a cancelled job. `ask-helper` queues
+  `{id, at, sessionId: null}` on `sub.helpers` (refused while one is queued: that is the double-click
+  guard) and marks a waiting human task `doing` unless a replan holds it; the runner's `tendHelpers`
+  spawns it inside the tick, like `tendMain`, so no `pendingLaunch` is in flight: a plain session (no
+  worktree, no PR automation; the job's agent/model/effort and task) in `helperCwd` (the step's checkout,
+  else a prerequisite PR's, else `''`, a scratch workspace; never a worktree), briefed by
+  `job-prompts.js helperPrompt`. A failed spawn is `error` on that entry, which frees the button. Its id is
+  kept OUT of `sub.sessions` (cleanup archives those; Open session and Review code read the last) and
+  `job.runs` (`runForSession` would hand it job_report, the worker skill and the job's sandbox). What it
+  finds comes back only through the step's Add idea box; it never edits the plan.
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one

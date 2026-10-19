@@ -12,6 +12,7 @@ import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
 import { resolutionsFor, resolutionLabel } from './job-main.js';
+import { queueHelper } from './job-helper.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
 import { forwardsOnly } from './job-actions.js';
@@ -301,7 +302,7 @@ export class JobStore {
       if (action === 'cancel-job') { cancelJob(j, Date.now()); return; }
       // Retry and Discard are what is left to do on a cancelled job: a refused
       // cleanup (a worktree with work not on GitHub) is still the human's to clear.
-      if (j.cancelledAt && !['retry', 'discard-worktree', 'retry-main', 'dismiss-main', 'resolve-main'].includes(action)) throw new Error('Job was cancelled');
+      if (j.cancelledAt && !['retry', 'discard-worktree', 'retry-main', 'dismiss-main', 'resolve-main', 'ask-helper'].includes(action)) throw new Error('Job was cancelled');
       // A pending plan change freezes the job where it stands: a sub-job that
       // moves on under the planner (approved, merged, marked done) is no longer
       // the job the proposal was written against.
@@ -352,6 +353,14 @@ export class JobStore {
           notice.resolveError = null;
           record(j, null, 'resolve-main', null, `Asked an agent to ${resolutionLabel(payload.resolution).toLowerCase()} in ${notice.path}`);
         }
+        return;
+      }
+      // Ask an agent (job-helper.js): any step, any stage, a cancelled job too;
+      // the runner's tick starts the session.
+      if (action === 'ask-helper') {
+        if (!s) throw new Error('Sub-job not found');
+        const { started } = queueHelper(j, s, Date.now());
+        record(j, s, 'ask-helper', null, `Asked an agent to help with ${quoted(s.title)}${started ? ', and started it' : ''}`);
         return;
       }
       if (action === 'pause') { j.paused = true; return; }

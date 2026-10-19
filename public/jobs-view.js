@@ -740,6 +740,13 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const [aria, heading, placeholder] = NOTE_REACH[reach];
     return `<span class="job-split job-approve-split">${button}<details class="job-split-more job-approve-more" data-keep="approve-note" ${openMore.has('approve-note') ? 'open' : ''}><summary aria-label="${aria}" title="${aria}">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>${heading}<textarea data-approve-note maxlength="2000" rows="3" placeholder="${placeholder}"></textarea></label><button type="button" data-action="${action}" data-with-note>${ICONS.check}${label} with note</button></div></details></span>`;
   };
+  // Ask an agent: the human's own sessions about this step (server/job-helper.js),
+  // newest last. A queued one is the only state that holds the button.
+  const helperQueued = (sub) => (sub.helpers || []).some((h) => !h.sessionId && !h.error);
+  const askHelperHtml = (sub) => helperQueued(sub)
+    ? `<button type="button" data-ask-helper disabled title="An agent session is starting for this step">${ICONS.spin}Starting an agent</button>`
+    : `<button type="button" data-ask-helper title="Start your own agent session, briefed with this step and the job, to investigate or help. It never changes the step or the plan: send what it finds with Add idea.">${ICONS.robot}Ask an agent</button>`;
+  const helpersHtml = (sub) => sub.helpers?.length ? `<h3>Helper sessions</h3><ul class="job-helpers">${sub.helpers.map((h, i) => `<li>${h.sessionId ? ICONS.robot : h.error ? ICONS.x : ICONS.spin}<span>Helper ${i + 1} · ${h.sessionId ? `started ${esc(when(h.at))}` : h.error ? `could not start: ${esc(h.error)}` : 'starting'}</span>${h.sessionId ? `<button type="button" data-helper-session="${esc(h.sessionId)}">${ICONS.terminal}${onBoard(h.sessionId) ? 'Open' : 'Restore'}</button>` : ''}</li>`).join('')}</ul>` : '';
   const approvalNoteFor = (sub) => sub.approvalNote ? `<h3>Context for later steps</h3><p class="job-approval-note">${esc(sub.approvalNote)}</p>` : '';
   // What a whole-job cancel did and what it left: the sub-job nodes say Dropped
   // one by one, this is the sentence that says why all of them do.
@@ -1270,10 +1277,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       ${workflows.length ? `<h4>What runs on merge <small>${workflows.filter((w) => w.triggers).length} of ${workflows.length}</small></h4><ul class="job-checks">${workflows.map((w) => `<li class="${w.triggers ? 'passed' : ''}">${w.triggers ? '✓' : '○'} ${esc(w.name)} <small>${esc(w.reason)}</small></li>`).join('')}</ul>` : ''}
       ${sub.repairs.length ? `<h4>Changes after failed checks</h4>${sub.repairs.map((r, i) => `<div class="job-repair"><b>Repair ${i + 1}</b>${receiptHtml(r.changes)}<details><summary>Re-verified</summary>${receiptHtml(r.checks)}</details></div>`).join('')}` : ''}`;
     const detailsOpen = openMore.has('details');
+    actions += askHelperHtml(sub);
     if (!isWriteSub(sub)) actions += `<button type="button" class="job-details-toggle" data-details-toggle aria-expanded="${detailsOpen}">${ICONS.doc}Details</button>`;
     return `${appbar(sub.title, chips, kicker, line)}${depsHtml(job, sub)}
       ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub)}
-      ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}
+      ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}${helpersHtml(sub)}
       ${reviewing ? changeBoxHtml(job, sub) : ''}${actions.trim() ? `<div class="job-actions tone-${STATES[state].tone}">${actions}</div>` : ''}${reviewing ? '' : changeBoxHtml(job, sub)}
       ${isWriteSub(sub) ? '' : `<div class="job-details-body" ${detailsOpen ? '' : 'hidden'}>${details}</div>`}`;
   }
@@ -1515,6 +1523,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       };
     });
     bind('#job-session', () => { dialog.close(); onSession(sub.sessions.at(-1)); });
+    bind('[data-ask-helper]', (e) => { e.currentTarget.disabled = true; action('ask-helper', {}, sub.id); });
+    dialog.querySelectorAll('[data-helper-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.helperSession); });
     // Reviewing the code is a round trip out to the board's diff panel, so hand over
     // where the reader came FROM as well as what to show — index.js re-opens this
     // same detail via openDetail once the panel closes. Every run of a sub-job
@@ -1749,8 +1759,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }
       return;
     }
-    // A Retry's or a fix's outcome lands on a later tick, in the notice it was pressed in.
-    if (['retry-main', 'dismiss-main', 'resolve-main'].includes(msg?.action)) return;
+    // A Retry's, a fix's or a helper's outcome lands on a later tick, in the dialog it was pressed in.
+    if (['retry-main', 'dismiss-main', 'resolve-main', 'ask-helper'].includes(msg?.action)) return;
     // A New idea that is planning opens on its conversation once the snapshot has it.
     if (msg?.event === 'job-created' && msg.idea && msg.started) { openOnCreate = msg.jobId; if (data.jobs.some((j) => j.id === msg.jobId)) { openOnCreate = null; openDetail(msg.jobId); } return; }
     // A reply stays in its conversation for the next tick. A created job closes the dialog it was pressed in,

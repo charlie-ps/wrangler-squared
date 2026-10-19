@@ -3067,3 +3067,69 @@ test('Dismiss forgets a checkout notice and records it; a failed Retry keeps it 
   assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
   assert.match(f.store.get(f.job.id).moves.at(-1).detail, /Left \/home\/me\/repo as it was/);
 });
+
+test('Ask an agent queues one helper per press, the tick spawns it as a plain session briefed with the step, and it is never a step', async (t) => {
+  const f = fixture(t);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-helper-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  await f.approve(plan([spec('api', [], { repo: dir })]));
+  await f.tick();
+  f.store.update(f.job.id, (j) => { j.subJobs[0].pr = { url: PR_URL, head: 'h', base: 'main', checkStatus: 'pending' }; });
+  const before = f.store.get(f.job.id);
+  const spawned = [];
+  const real = new JobRuntime({ host: { sessions: { spawn: async (o) => { spawned.push(o); return { sessionId: `s_help${spawned.length}` }; } } } });
+  f.runtime.spawnHelper = (...a) => real.spawnHelper(...a);
+
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  assert.throws(() => f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' }), /already starting/, 'a second press before the tick is refused');
+  await f.tick();
+  assert.equal(spawned.length, 1);
+  const [s] = spawned;
+  assert.equal(s.cwd, dir, 'the step\'s own checkout');
+  assert.equal(s.worktree, undefined); assert.equal(s.addDirs, undefined);
+  assert.match(s.intent, /This is the human's own session and they drive it/);
+  assert.match(s.intent, /"title": "Deliver api"/);
+  assert.match(s.intent, new RegExp(`Pull request: ${PR_URL}`));
+  assert.doesNotMatch(s.intent, /runId/);
+  let job = f.store.get(f.job.id);
+  const sub = job.subJobs[0];
+  assert.deepEqual(sub.helpers.map((h) => h.sessionId), ['s_help1']);
+  assert.deepEqual(sub.sessions, before.subJobs[0].sessions, 'not one of the step\'s sessions: cleanup would archive it');
+  assert.equal(job.runs.length, before.runs.length, 'no run, so no job_report, worker skill or sandbox');
+  assert.match(job.moves.at(-1).detail, /Asked an agent to help with “Deliver api”/);
+
+  await f.tick();
+  assert.equal(spawned.length, 1, 'one session per press');
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).subJobs[0].helpers.map((h) => h.sessionId), ['s_help1', 's_help2'], 'a step may have several over time');
+  assert.deepEqual(new JobStore(f.store.file).get(f.job.id).subJobs[0].helpers, f.store.get(f.job.id).subJobs[0].helpers, 'kept across a restart');
+
+  f.store.action(f.job.id, 'cancel-job');
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  await f.tick();
+  assert.equal(spawned.length, 3, 'a cancelled job can still be looked into');
+  assert.throws(() => f.store.action(f.job.id, 'ask-helper', { subJobId: 'nope' }), /Sub-job not found/);
+});
+
+test('a human task\'s helper marks it in progress; a helper that cannot start says why and frees the button', async (t) => {
+  const f = fixture(t);
+  await f.approve(plan([humanSpec('vendor')]));
+  await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().state], ['human', 'queued']);
+  f.runtime.spawnHelper = async () => { throw new Error('no such agent'); };
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'vendor' });
+  let sub = f.store.get(f.job.id).subJobs[0];
+  assert.equal(sub.state, 'doing');
+  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /help with “Do vendor yourself”, and started it/);
+  await f.tick();
+  sub = f.store.get(f.job.id).subJobs[0];
+  assert.equal(sub.helpers[0].error, 'no such agent');
+  assert.equal(sub.helpers[0].sessionId, null);
+  assert.equal(f.store.get(f.job.id).error ?? null, null, 'the job is not blocked by it');
+  f.runtime.spawnHelper = async () => 's_ok';
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'vendor' });
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).subJobs[0].helpers.map((h) => h.sessionId), [null, 's_ok']);
+  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /help with “Do vendor yourself”$/, 'already in progress');
+});
