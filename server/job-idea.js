@@ -13,7 +13,6 @@ export const isIdea = (job) => !!job?.idea;
 // Still talking: nothing is planned yet and no plan change has taken over.
 export const inConversation = (job) => isIdea(job) && job.stage === 'planning' && !job.plan && !job.replan && !job.cancelledAt;
 export const ideaThread = (job) => job?.idea?.thread || [];
-export const parkedIdeaRun = (job) => job.runs.find((r) => !r.stopped && !r.subJobId && r.parkedFor === 'idea') || null;
 export const unsentIdea = (job) => ideaThread(job).filter((m) => m.from === 'human' && !m.sentAt);
 // Only the newest message can carry the live suggestion: anything said after it
 // replaces it until the planner answers.

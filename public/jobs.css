@@ -361,7 +361,6 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-create-props select { width:calc(100% + 6px); min-width:0; margin-left:-6px; padding:4px 6px; border-color:transparent; background:transparent; font-size:13px; cursor:pointer; }
 .job-create-props select:hover,.job-create-props select:focus-visible { border-color:var(--border); background:var(--field-bg); }
 .job-create-props input[name=newTaskName] { width:100%; padding:5px 8px; font-size:13px; }
-.job-prop-split { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
 .job-dialog .job-toggle { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0; padding:0; font-size:13px; cursor:pointer; }
 .job-prop:has(>.job-toggle) { gap:10px; }
 .job-create-foot { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; padding:12px 18px 12px 28px; border-top:1px solid var(--border-muted); }
@@ -749,7 +748,7 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
    exposes none. Fixed to the viewport but parented to the view's host, so it is
    hidden along with it whenever another view is on screen. */
 .jobs-toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:40; max-width:min(520px,90vw); padding:10px 16px; background:var(--surface); color:var(--fg); border:1px solid var(--border); border-radius:12px; box-shadow:0 4px 16px var(--shadow); font-family:var(--font); font-size:13px; }
-@media(max-width:700px) { #jobs { padding:18px 12px 84px; } .jobs-toolbar { margin-left:0; } .job-dialog { padding:20px; width:95vw; border-radius:20px; } .job-form-row { flex-direction:column; gap:0; } }
+@media(max-width:700px) { #jobs { padding:18px 12px 84px; } .job-dialog { padding:20px; width:95vw; border-radius:20px; } .job-form-row { flex-direction:column; gap:0; } }
 @media(prefers-reduced-motion:reduce) { .job-spin { animation:none; } .job-card,.job-node-tile,.job-seg::after { transition:none; } .job-card:hover { transform:none; } }
 /* A proposed plan change: what approving does to each sub-job, as a tag under its node and a line below. */
 .job-replan-ask { white-space:pre-wrap; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
@@ -837,7 +836,6 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .intro-figure .job-node-state .icon { font-size:14px; color:inherit; }
 .intro-figure .job-node-title { font-size:15px; }
 .intro-figure .job-node .job-status { font-size:13px; }
-.intro-start { align-self:flex-start; }
 /* Welcome: the live job, stacked full width under the heading. */
 .intro-value { padding:22px 26px 18px; }
 .intro-goal { display:flex; align-items:center; gap:14px; padding:14px 18px; border-radius:18px; background:var(--cb); transition:background .3s; }
