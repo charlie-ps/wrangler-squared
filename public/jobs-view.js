@@ -25,6 +25,7 @@ import { imageSources, sourceToFrame } from './clipboard-images.js';
 import { mountModelPicker } from './model-picker.js';
 import { mountSandbox } from './job-sandbox.js';
 import { whatsNewHtml } from './updates.js';
+import { tabsHtml, panelHtml, bindTabs } from './settings-tabs.js';
 import { createIdeaCorner } from './idea-corner.js';
 import { createRedrawHold, keepScrollX } from './redraw-hold.js';
 import { historyHtml } from './job-thread.js';
@@ -32,6 +33,9 @@ import { runningChipHtml, stoppedHtml } from './job-running.js';
 import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, shotBoxHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
 // Mirrors server/jobs-schema.js MAX_SHOW.
 const MAX_SHOW = 8;
+// Automation settings' tabs (settings-tabs.js), in the order the row draws them.
+export const SETTINGS_TABS = [{ id: 'general', label: 'General' }, { id: 'automation', label: 'Automation' }, { id: 'review', label: 'Review defaults' }, { id: 'appearance', label: 'Appearance' }, { id: 'updates', label: 'What’s new' }];
+export const SETTINGS_TAB_KEY = 'settingsTab';
 const checkTone = (state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED', 'passing'].includes(state) ? 'passed' : ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'failing'].includes(state) ? 'failed' : '';
 const checkMark = (state) => checkTone(state) === 'passed' ? '✓' : checkTone(state) === 'failed' ? '×' : '○';
 const link = (url, title) => /^https:\/\/github\.com\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(title)} ↗</a>` : esc(title);
@@ -330,7 +334,7 @@ export function primaryAction(dialog) {
 }
 
 const MAX_ASK_IMAGES = 4;
-export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, updates = null, toast = () => {} }) {
+export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, updates = null, storage = null, toast = () => {} }) {
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, maxReplans: 2, deploymentStaleMinutes: 30 } };
@@ -1656,9 +1660,23 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     e.preventDefault(); openDetail(node.getAttribute('data-job'), node.getAttribute('data-sub'));
   };
   q('#jobs-intro-open').onclick = () => onIntro();
+  // The last tab lives in the client api's per-viewer storage (null in a test).
+  const settingsTab = () => { try { return storage?.get(SETTINGS_TAB_KEY) || 'general'; } catch { return 'general'; } };
   q('#jobs-settings').onclick = () => {
     selected = null; planDraft = null;
-    show(`<h2>Automation settings</h2><form id="job-settings-form"><label>CI repairs per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to the planner this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label><label>Deploy wait (min)<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label><label title="A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…">IDE<input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label><label class="job-toggle job-settings-main" title="Once a PR lands on the default branch, fast-forward your own checkout of it. A checkout with work of its own is left alone and the job tells you, with fixes an agent can make.">Keep local main updated<input type="checkbox" class="job-switch" name="updateMain" ${data.settings.updateMain === false ? '' : 'checked'}></label><fieldset class="job-prop job-settings-theme" id="job-theme-pick"><legend>Theme</legend></fieldset><fieldset class="job-prop job-settings-review"><legend>Defaults for new jobs</legend>${reviewPointsHtml(reviewDefaultsOf(data.settings), { warn: true })}</fieldset><div class="job-actions"><button class="primary" title="These limits apply across all jobs. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.">Save settings</button><button type="button" id="job-settings-intro">${ICONS.info}How Jobs works</button></div></form>${whatsNewHtml(updates?.list() || [])}`);
+    const tab = settingsTab();
+    const section = (title, body, note = '') => `<section class="job-settings-section"><h3>${title}</h3>${note ? `<p>${note}</p>` : ''}${body}</section>`;
+    const panels = {
+      general: section('Editor', `<label title="A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…">IDE<input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label>`, 'Review code’s “In IDE” opens a step’s worktree in this app.')
+        + section('Local checkout', '<label class="job-toggle job-settings-main" title="Once a PR lands on the default branch, fast-forward your own checkout of it. A checkout with work of its own is left alone and the job tells you, with fixes an agent can make.">Keep local main updated<input type="checkbox" class="job-switch" name="updateMain" ' + (data.settings.updateMain === false ? '' : 'checked') + '></label>'),
+      automation: section('Repairs and replans', `<label>CI repairs per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to the planner this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label>`, 'These limits apply across all jobs.')
+        + section('Deployments', `<label>Deploy wait (min)<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label>`, 'How long a merge may go without any deployment run before the job asks you.'),
+      review: `<fieldset class="job-prop job-settings-review"><legend>Defaults for new jobs</legend>${reviewPointsHtml(reviewDefaultsOf(data.settings), { warn: true })}</fieldset>`,
+      appearance: '<fieldset class="job-prop job-settings-theme" id="job-theme-pick"><legend>Theme</legend></fieldset>',
+      updates: whatsNewHtml(updates?.list() || []),
+    };
+    show(`<h2>Automation settings</h2>${tabsHtml('job-settings', SETTINGS_TABS, tab)}<form id="job-settings-form">${SETTINGS_TABS.map((t) => panelHtml('job-settings', t.id, tab, panels[t.id])).join('')}<div class="job-actions"><button class="primary" title="Saves every tab. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.">Save settings</button><button type="button" id="job-settings-intro">${ICONS.info}How Jobs works</button></div></form>`);
+    bindTabs(dialog, { onSelect: (id) => { try { storage?.set(SETTINGS_TAB_KEY, id); } catch {} } });
     const settingsForm = dialog.querySelector('form'); bindReviewPoints(settingsForm);
     themePicker?.dispose();
     themePicker = mountThemePicker(dialog.querySelector('#job-theme-pick'), {

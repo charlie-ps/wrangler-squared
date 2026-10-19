@@ -178,6 +178,7 @@ export default {
           onDiff: (sid, from) => reviewDiff(api, sid, from),
           onIntro: () => intro.open(0),
           updates,
+          storage: api.storage,
           toast,
         });
         if (newJobOnMount) { newJobOnMount = false; view.newJob(); }
