@@ -2918,3 +2918,16 @@ test('the job dialog stays open on a notice\'s Retry, showing its outcome on the
   f.data.jobs[0] = { ...job, mainNotices: [] }; f.view.update(f.data);
   assert.equal(f.q('.job-main-notice'), null, 'cleared once the checkout caught up');
 });
+
+test('one card that cannot be drawn is logged and skipped, the others and the needs-you badge stay', (t) => {
+  const f = fixture(t);
+  const logged = [], prev = console.error;
+  console.error = (...a) => logged.push(a); t.after(() => { console.error = prev; });
+  const broken = { ...f.data.jobs[0], id: 'broken', stage: 'active', subJobs: [{ ...sub('a'), stage: 'implementation' }] };
+  Object.defineProperty(broken, 'title', { get() { throw new TypeError("Cannot read properties of undefined (reading 'stage')"); }, enumerable: true });
+  f.data.jobs.push(broken);
+  assert.doesNotThrow(() => f.view.update(f.data));
+  assert.deepEqual([...document.querySelectorAll('.job-plate')].map((b) => b.dataset.board), ['job1']);
+  assert.ok(logged.some((a) => a.includes('broken')));
+  assert.equal(f.q('[data-filter="needs"] .jobs-rail-n').textContent, '1', 'the needs-you count survives');
+});

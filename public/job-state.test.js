@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
+import { plateHtml } from './job-plates.js';
+import { jobStatus } from './jobs.js';
 
 const sub = (id, over = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after: [], brief: 'b', sessions: [], repairs: [], stage: 'implementation', ...over });
 const job = (over = {}) => ({ id: 'j', title: 'Job', intent: 'x', repos: [], stage: 'active', plan: null, subJobs: [], runs: [], moves: [], reviewMerge: true, ...over });
@@ -137,4 +139,43 @@ test('the board orders jobs newest first by creation, whatever their live state'
   const legacy = job({ id: 'legacy', createdAt: undefined });
   const legacy2 = job({ id: 'legacy2', createdAt: undefined });
   assert.deepEqual(sortJobs([legacy, quiet, legacy2, broken, fine]).map((j) => j.id), ['fine', 'broken', 'quiet', 'legacy2', 'legacy']);
+});
+
+test('a job label never throws when the roll-up state has no sub-job behind it', () => {
+  const dropped = sub('a', { cancelledAt: 1, stage: 'cleanup' });
+  assert.equal(jobState(job({ subJobs: [dropped] })), 'queued');
+  assert.equal(jobLabel(job({ subJobs: [dropped] })), 'Queued', 'every sub-job dropped');
+  assert.equal(leadSub(job({ subJobs: [dropped] })), null);
+  assert.equal(jobLabel(job({ paused: true, subJobs: [dropped] })), 'Paused');
+});
+
+test('a job held by a replan labels itself whatever the replan is', () => {
+  const waiting = sub('a', { kind: 'session' });
+  const done = sub('a', { kind: 'session', stage: 'done' });
+  const red = { sub: 'a', auto: true, n: 1 };
+  const proposal = { plan: { subJobs: [] } };
+  for (const [replan, state, label] of [
+    [{}, 'running', 'Re-planning'],
+    [{ proposal }, 'needs', 'Plan change ready'],
+    [{ red }, 'running', 'Fixing'],
+    [{ red, proposal }, 'needs', null],
+  ]) {
+    const j = job({ subJobs: [waiting], replan });
+    assert.equal(jobState(j), state);
+    assert.doesNotThrow(() => jobLabel(j));
+    if (label) assert.equal(jobLabel(j), label);
+  }
+  const fixReady = job({ subJobs: [done], replan: { red, proposal } });
+  assert.equal(jobState(fixReady), 'needs');
+  assert.equal(leadSub(fixReady), null);
+  assert.equal(jobLabel(fixReady), jobStatus(fixReady, null).text, 'a red triage proposal with no step of its own falls back to the job status');
+});
+
+test('approving a session step while a red triage proposal is open moves the step to done and still labels the job', () => {
+  const approved = sub('a', { kind: 'session', stage: 'done' });
+  const later = sub('b', { kind: 'session', after: ['a'], stage: undefined });
+  const j = job({ subJobs: [approved, later], replan: { red: { sub: 'a', auto: true, n: 1 }, proposal: { plan: { subJobs: [] } } } });
+  assert.equal(jobState(j), 'needs');
+  assert.doesNotThrow(() => jobLabel(j));
+  assert.doesNotThrow(() => plateHtml(j, 'sonnet'));
 });

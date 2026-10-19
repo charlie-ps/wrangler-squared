@@ -471,7 +471,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     for (const [id, f] of forming) if (now - f.start > f.ms) { forming.delete(id); dropForming(id); }
     ideasShown = ideas;
     const boards = q('#jobs-boards');
-    const html = jobs.map((j) => plateHtml(j, scenes.get(j.id), art, { forming: forming.get(j.id)?.stage })).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
+    const html = jobs.map((j) => {
+      try { return plateHtml(j, scenes.get(j.id), art, { forming: forming.get(j.id)?.stage }); } catch (e) { console.error('jobs: card', j.id, 'failed to draw', e); return ''; }
+    }).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
     if (html !== boardHtml) {
       boardHtml = html;
       const scrolls = keepScrollX(boards);
