@@ -24,6 +24,7 @@ import { mountModelPicker } from './model-picker.js';
 import { mountSandbox } from './job-sandbox.js';
 import { whatsNewHtml } from './updates.js';
 import { createIdeaCorner } from './idea-corner.js';
+import { createRedrawHold, keepScrollX } from './redraw-hold.js';
 import { historyHtml } from './job-thread.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
 import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, shotBoxHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
@@ -390,8 +391,16 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   root.appendChild(idea.el);
   const q = (s) => root.querySelector(s);
   mountMastSky(q('.jobs-mast-sky'));
+  // The markup last put on the board and in the detail (with the job it drew): a tick
+  // that would draw the same again leaves the DOM, and so a selection or scroll, alone.
+  // Anything that changes that DOM by hand forgets it, so the next tick redraws.
+  let boardHtml = null, detailShown = null;
+  const hold = createRedrawHold(() => [q('#jobs-boards'), dialog]);
   function update(snapshot) {
     data = snapshot || data;
+    hold.run(refresh);
+  }
+  function refresh() {
     const job = data.jobs.find((j) => j.id === flags.jobId);
     if (flags.pending && job && youReview(job, flags.pending.field) === flags.pending.you) flags.pending = null;
     // A plan approved from the footer (Plan switched to Auto) leaves review: the
@@ -443,14 +452,21 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     }
     for (const [id, f] of forming) if (now - f.start > f.ms) { forming.delete(id); dropForming(id); }
     ideasShown = ideas;
-    holdSkies(q('#jobs-boards'));
-    q('#jobs-boards').innerHTML = jobs.map((j) => plateHtml(j, scenes.get(j.id), art, { forming: forming.get(j.id)?.stage })).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
-    mountSkies(q('#jobs-boards'));
-    // Keyed to when each started, so a redraw mid-transition picks it up at the same instant; a
-    // render after it drops the cloud, which is clear by then.
-    for (const art of q('#jobs-boards').querySelectorAll('.job-plate-art.forming')) {
-      const id = art.closest('[data-board]').dataset.board;
-      mountForming(art, id, forming.get(id));
+    const boards = q('#jobs-boards');
+    const html = jobs.map((j) => plateHtml(j, scenes.get(j.id), art, { forming: forming.get(j.id)?.stage })).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
+    if (html !== boardHtml) {
+      boardHtml = html;
+      const scrolls = keepScrollX(boards);
+      holdSkies(boards);
+      boards.innerHTML = html;
+      mountSkies(boards);
+      scrolls();
+      // Keyed to when each started, so a redraw mid-transition picks it up at the same instant; a
+      // render after it drops the cloud, which is clear by then.
+      for (const art of boards.querySelectorAll('.job-plate-art.forming')) {
+        const id = art.closest('[data-board]').dataset.board;
+        mountForming(art, id, forming.get(id));
+      }
     }
     if (starting.length) setTimeout(() => { if (root.isConnected) render(); }, Math.max(...starting.map((id) => forming.get(id).ms)) + 50);
     hydrateEvidence(q('#jobs-boards'), evidence, send);
@@ -482,6 +498,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     }
   }
   function show(html) {
+    detailShown = null;
     dialog.innerHTML = `<button class="job-dialog-close" aria-label="Close" title="Close">${ICONS.x}</button>${html}`;
     dialog.querySelector('.job-dialog-close').onclick = () => dialog.close();
     dialog.querySelectorAll('details[data-keep]').forEach((d) => d.ontoggle = () => { if (d.open) openMore.add(d.dataset.keep); else openMore.delete(d.dataset.keep); });
@@ -660,7 +677,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   function copyPath(button) {
     const code = button.parentElement.querySelector('code');
     const select = () => { const range = document.createRange(); range.selectNodeContents(code); const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(range); };
-    const done = () => { button.lastChild.textContent = 'Copied'; };
+    const done = () => { button.lastChild.textContent = 'Copied'; detailShown = null; };
     const clipboard = globalThis.navigator?.clipboard;
     if (clipboard?.writeText) clipboard.writeText(button.dataset.copyPath).then(done, select); else select();
   }
@@ -1299,11 +1316,17 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const viewing = sub && proofView && proofItems(sub).length > proofView.i && !isWriteSub(sub);
     if (!viewing) proofView = null;
     flags.painting = true;
-    const scrolled = dialog.scrollTop;
+    const html = viewing ? proofViewerHtml(job, sub, proofView, evidence, { branch: sub.worktree?.branch, ask: sub.stage === 'review' }) : sub ? subDetail(job, sub) : jobDetail(job);
+    // Its handlers close over `job`, so the same markup is kept only for the same job.
+    const drawn = { html, job: JSON.stringify(job) };
+    if (dialog.open && detailShown?.html === drawn.html && detailShown.job === drawn.job) { flags.painting = false; return; }
+    const scrolled = dialog.scrollTop, scrolls = keepScrollX(dialog);
     holdSkies(dialog);
-    show(viewing ? proofViewerHtml(job, sub, proofView, evidence, { branch: sub.worktree?.branch, ask: sub.stage === 'review' }) : sub ? subDetail(job, sub) : jobDetail(job));
+    show(html);
+    detailShown = drawn;
     mountSkies(dialog);
     dialog.scrollTop = scrolled;
+    scrolls();
     flags.painting = false;
     if (viewing) { wireProofViewer(job, sub); return; }
     if (!sub && inConversation(job)) wireIdea(job);
@@ -1345,8 +1368,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
     dialog.querySelectorAll('.job-run-pop').forEach((d) => d.addEventListener('toggle', fitRunning));
     fitRunning();
-    dialog.querySelectorAll('[data-running-stop]').forEach((b) => b.onclick = () => { b.disabled = true; runLogs.delete(sub.id); action('stop-running'); });
-    dialog.querySelectorAll('[data-running-restart]').forEach((b) => b.onclick = () => { b.disabled = true; action('restart-running', b.dataset.runningRestart ? { name: b.dataset.runningRestart } : {}); });
+    dialog.querySelectorAll('[data-running-stop]').forEach((b) => b.onclick = () => { b.disabled = true; detailShown = null; runLogs.delete(sub.id); action('stop-running'); });
+    dialog.querySelectorAll('[data-running-restart]').forEach((b) => b.onclick = () => { b.disabled = true; detailShown = null; action('restart-running', b.dataset.runningRestart ? { name: b.dataset.runningRestart } : {}); });
     dialog.querySelectorAll('[data-running-logs]').forEach((b) => b.onclick = () => {
       if (runLogs.get(sub.id)?.name === b.dataset.runningLogs) { runLogs.delete(sub.id); renderDetail(); return; }
       send({ type: 'job-running-logs', id: job.id, subJobId: sub.id, name: b.dataset.runningLogs });
@@ -1524,7 +1547,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const chip = e.target.closest('[data-place]'); if (chip) return openPlacePop(chip);
     const go = e.target.closest('[data-ask]');
     // One click per decision: a sent one disables the stub until the next tick redraws it.
-    if (go) { if (['merge', 'approve-write', 'skip-write'].includes(go.dataset.ask)) go.parentElement.querySelectorAll('button').forEach((b) => { b.disabled = true; }); return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask, go.dataset.session); }
+    if (go) { if (['merge', 'approve-write', 'skip-write'].includes(go.dataset.ask)) { go.parentElement.querySelectorAll('button').forEach((b) => { b.disabled = true; }); boardHtml = null; } return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask, go.dataset.session); }
     const el = e.target.closest('[data-job]'); if (el) return openDetail(el.getAttribute('data-job'), el.getAttribute('data-sub'));
     // Anywhere else on a plate (the sky, the gaps between chips) opens the job, as the title does.
     const plate = e.target.closest('.job-plate'); if (plate && !e.target.closest('a,button')) openDetail(plate.dataset.board, '');

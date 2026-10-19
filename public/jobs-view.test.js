@@ -2811,3 +2811,27 @@ test('a forward reads as the quote the session will be told, pinned to its round
   assert.match(html, /Not enough &lt;b&gt;spacing&lt;\/b&gt;/, 'the words are escaped');
   assert.doesNotMatch(threadHtml(job, { ...sub, thread: [{ ...sub.thread[0], via: undefined }] }), /job-msg-via/);
 });
+
+test('a tick that changes nothing leaves the board and detail DOM alone, and a selection holds a changed one until cleared', (t) => {
+  const f = fixture(t);
+  const plate = f.q('[data-board="job1"]');
+  f.view.update(structuredClone(f.data));
+  assert.equal(f.q('[data-board="job1"]'), plate, 'same markup, same nodes');
+  f.data.jobs[0] = { ...f.data.jobs[0], stage: 'running', plan: null, subJobs: [{ ...sub('api'), stage: 'implementing' }] };
+  f.view.update(structuredClone(f.data));
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const heading = f.q('#job-dialog h2');
+  assert.ok(heading, 'the detail is open');
+  f.view.update(structuredClone(f.data));
+  assert.equal(f.q('#job-dialog h2'), heading, 'an unchanged detail is not redrawn');
+  const range = document.createRange(); range.selectNodeContents(heading);
+  document.getSelection().removeAllRanges(); document.getSelection().addRange(range);
+  f.data.jobs[0] = { ...f.data.jobs[0], title: 'Sign-in, renamed' };
+  f.view.update(structuredClone(f.data));
+  assert.equal(f.q('#job-dialog h2'), heading, 'held while text is selected');
+  assert.equal(document.getSelection().toString().length > 0, true);
+  document.getSelection().removeAllRanges();
+  document.dispatchEvent(f.event('selectionchange'));
+  assert.notEqual(f.q('#job-dialog h2'), heading, 'redrawn once the selection is gone');
+  assert.match(f.q('[data-board="job1"]').textContent, /renamed/, 'the board caught up too');
+});
