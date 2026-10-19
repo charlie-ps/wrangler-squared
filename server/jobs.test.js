@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { JobStore, migrateJobs, MERGE_IS_DELIVERY } from './job-store.js';
 import { JobRunner, IDLE_RECEIPT_GRACE_MS } from './job-runner.js';
 import { JobRuntime, CleanupRefused } from './job-runtime.js';
@@ -16,6 +18,8 @@ import { changeView } from './job-change.js';
 import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 
+const execFileP = promisify(execFile);
+const execGit = (cwd, args) => execFileP('git', ['-C', cwd, ...args]).then((r) => r.stdout.trim());
 const input = { title: 'Reliable sign-in', intent: 'Customers can sign in reliably', repos: ['/repo'], reviewMerge: true };
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', after, brief: `Implement ${id}`, ...extra });
 const sessionSpec = (id, after = []) => ({ id, kind: 'session', title: `Run ${id}`, storyId: 'story', after, brief: `Do ${id} on this machine` });
@@ -2768,4 +2772,109 @@ test('a PR may land on its own base; an old plan has none, and no other kind may
   assert.equal(planSchema.parse(plan({ repo: '/repo', base: ' release/2.x ' })).subJobs[0].base, 'release/2.x');
   assert.throws(() => planSchema.parse(plan({ repo: '/repo', base: '-D' })), /branch name/);
   assert.throws(() => planSchema.parse(plan({ kind: 'session', base: 'next' })), /only a PR lands on a branch/);
+});
+
+test('an unpushed commit on local main leaves merged sub-jobs done and one notice for the checkout', async (t) => {
+  const git = (cwd, ...args) => execGit(cwd, args);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-main-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const origin = path.join(dir, 'origin.git'), repo = path.join(dir, 'repo'), other = path.join(dir, 'other');
+  await execFileP('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+  await execFileP('git', ['clone', '-q', origin, repo]);
+  const commit = async (cwd, file, message) => { fs.writeFileSync(path.join(cwd, file), `${message}\n`); await git(cwd, 'add', file); await git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', message); };
+  await commit(repo, 'README.md', 'Initial');
+  await git(repo, 'push', '-q', 'origin', 'HEAD:main');
+  await execFileP('git', ['clone', '-q', origin, other]);
+  // Two PRs land on origin while another session has a commit of its own on local main.
+  for (const n of [1, 2]) { await commit(other, `pr${n}.js`, `Merged PR ${n}`); await git(other, 'push', '-q', 'origin', 'HEAD:main'); }
+  await commit(repo, 'local.js', 'Unpushed work from another session');
+  const localHead = await git(repo, 'rev-parse', 'HEAD');
+
+  const f = fixture(t); await f.approve(plan([spec('api', [], { repo }), spec('web', [], { repo })])); f.alive.clear(); await f.tick();
+  assert.equal(settingsSchema.parse(f.store.data.settings).updateMain, true, 'on by default, for every job');
+  const spawned = [];
+  const real = new JobRuntime({ host: { sessions: { get: () => null, spawn: async (o) => { spawned.push(o); return { sessionId: 's_fix' }; } } } });
+  f.runtime.cleanup = (j, s, o) => real.cleanup(j, { ...s, worktree: null }, o);
+  for (const k of ['retryMain', 'resolveMain', 'mainCaughtUp']) f.runtime[k] = (...a) => real[k](...a);
+  for (const id of ['api', 'web']) {
+    markDone(f, id, 'Merged');
+    f.store.update(f.job.id, (j) => { j.subJobs.find((s) => s.id === id).pr = { url: `${PR_URL}${id}`, head: 'h', base: 'main' }; });
+  }
+  await f.tick();
+  const job = f.store.get(f.job.id);
+  assert.deepEqual(job.subJobs.map((s) => [s.id, s.stage, s.state, s.error || null]), [['api', 'done', 'done', null], ['web', 'done', 'done', null]], 'the update never blocks a sub-job');
+  assert.equal(job.mainNotices.length, 1, 'one checkout, one notice');
+  const [notice] = job.mainNotices;
+  assert.equal(notice.path, fs.realpathSync(repo));
+  assert.equal(notice.reason, 'diverged');
+  assert.deepEqual(notice.subs, ['api', 'web']);
+  assert.deepEqual(notice.localOnly.map((c) => c.subject), ['Unpushed work from another session']);
+  assert.deepEqual(notice.incoming.map((c) => c.subject), ['Merged PR 2', 'Merged PR 1']);
+  assert.equal(await git(repo, 'rev-parse', 'HEAD'), localHead, 'the human\'s commit is never moved');
+  assert.deepEqual(new JobStore(f.store.file).get(f.job.id).mainNotices, job.mainNotices, 'kept across a restart');
+  assert.deepEqual(notice.resolutions.map((r) => r.id), ['rebase', 'branch'], 'stashing cannot reconcile commits, so it is not offered');
+
+  // A resolution button: refused unless offered, then spawned on the next tick in the checkout.
+  assert.throws(() => f.store.action(f.job.id, 'resolve-main', { path: notice.path, resolution: 'stash' }), /does not apply/);
+  f.store.action(f.job.id, 'resolve-main', { path: notice.path, resolution: 'rebase' });
+  assert.throws(() => f.store.action(f.job.id, 'resolve-main', { path: notice.path, resolution: 'branch' }), /already working/);
+  await f.tick();
+  assert.equal(spawned.length, 1);
+  const [s] = spawned;
+  assert.equal(s.cwd, notice.path);
+  assert.equal(s.worktree, undefined, 'the human\'s own checkout, not a worktree');
+  assert.match(s.intent, /The human chose one fix: Rebase & push\. Do exactly that/);
+  assert.match(s.intent, /git rebase --autostash origin\/main/);
+  assert.match(s.intent, /Local commits not on origin \(1\):\n {2}- [0-9a-f]{12} "Unpushed work from another session"/);
+  assert.match(s.intent, /New on origin\/main \(2\):/);
+  assert.equal(f.store.get(f.job.id).mainNotices[0].resolving.sessionId, 's_fix');
+  await f.tick();
+  assert.equal(spawned.length, 1, 'one session per press');
+  assert.equal(f.store.get(f.job.id).mainNotices.length, 1, 'kept while main is still behind');
+
+  // The session does its one fix; the next tick sees main level with origin and clears the notice.
+  await git(repo, 'pull', '-q', '--rebase', 'origin', 'main');
+  await git(repo, 'push', '-q', 'origin', 'main');
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-main', { path: notice.path }), /no longer needs updating/);
+
+  // Retry, once the human has fixed it by hand, clears it too.
+  await git(other, 'pull', '-q', 'origin', 'main');
+  await commit(other, 'pr3.js', 'Merged PR 3'); await git(other, 'push', '-q', 'origin', 'HEAD:main');
+  fs.writeFileSync(path.join(repo, 'README.md'), 'edited\n');
+  const stuck = await real.retryMain(notice);
+  assert.equal(stuck.reason, 'dirty');
+  f.store.update(f.job.id, (j) => { j.mainNotices = [{ ...stuck, subs: ['api'], at: 1, retrying: false, resolutions: [{ id: 'stash' }] }]; });
+  await git(repo, 'checkout', '--', 'README.md');
+  f.store.action(f.job.id, 'retry-main', { path: notice.path });
+  assert.equal(f.store.get(f.job.id).mainNotices[0].retrying, true);
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+});
+
+test('a resolution session that cannot start says why and offers the buttons again', async (t) => {
+  const f = fixture(t);
+  f.store.update(f.job.id, (j) => { j.mainNotices = [{ path: '/home/me/repo', base: 'main', reason: 'dirty', dirty: [{ path: 'a.js', change: 'modified' }], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 2, subs: ['api'], at: 1, retrying: false, resolutions: [{ id: 'stash' }] }]; });
+  f.runtime.resolveMain = async () => { throw new Error('no such directory'); };
+  f.store.action(f.job.id, 'resolve-main', { path: '/home/me/repo', resolution: 'stash' });
+  await f.tick();
+  const [n] = f.store.get(f.job.id).mainNotices;
+  assert.equal(n.resolving, null);
+  assert.equal(n.resolveError, 'no such directory');
+  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /Asked an agent to stash & update in \/home\/me\/repo/);
+});
+
+test('Dismiss forgets a checkout notice and records it; a failed Retry keeps it with the new state', async (t) => {
+  const f = fixture(t);
+  const notice = { path: '/home/me/repo', base: 'main', reason: 'dirty', dirty: [{ path: 'a.js', change: 'modified' }], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 0, subs: ['api'], at: 1, retrying: false };
+  f.store.update(f.job.id, (j) => { j.mainNotices = [notice]; });
+  f.runtime.retryMain = async (n) => ({ ...n, reason: 'diverged', localCount: 1, localOnly: [{ sha: 'abc', subject: 'Local' }] });
+  f.store.action(f.job.id, 'retry-main', { path: notice.path });
+  await f.tick();
+  const [kept] = f.store.get(f.job.id).mainNotices;
+  assert.equal(kept.reason, 'diverged'); assert.equal(kept.retrying, false); assert.deepEqual(kept.subs, ['api']);
+  f.store.action(f.job.id, 'dismiss-main', { path: notice.path });
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /Left \/home\/me\/repo as it was/);
 });

@@ -9,6 +9,7 @@ import { dropSub } from './job-sub-ops.js';
 import { draftsDecidedMail, threadMail, ideaMail } from './job-prompts.js';
 import { inConversation, unsentIdea } from './job-idea.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
+import { noteMain } from './job-main.js';
 import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps, stopSandbox } from './job-running.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
@@ -41,11 +42,36 @@ export class JobRunner {
       for (const job of this.store.data.jobs) {
         try {
           await this.sweepRunning(job.id);
+          await this.tendMain(job.id);
           await this.settle(job.id);
           await this.advance(job.id);
         } catch (e) { this.store.update(job.id, (j) => { j.error = shortError(e); }); }
       }
     } finally { this.busy = false; if (before !== this.store.data) await this.onChange(); }
+  }
+  // The human's buttons on a "Local main not updated" notice (job-main.js): Retry
+  // runs the update again; a resolution spawns its session here, in the tick, so
+  // no launch's pendingLaunch is in flight; and a notice whose session has brought
+  // the branch level with origin clears itself. Runs on a finished or paused job
+  // too: it touches only the human's checkout.
+  async tendMain(id) {
+    const same = (j, path) => j.mainNotices?.find((n) => n.path === path);
+    for (const notice of this.store.get(id).mainNotices || []) {
+      if (notice.retrying) {
+        const result = await this.runtime.retryMain(notice);
+        this.store.update(id, (j) => { if (same(j, notice.path)?.retrying) noteMain(j, notice.path, null, result, this.now()); });
+      } else if (notice.resolving && !notice.resolving.sessionId) {
+        let sessionId = null, error = null;
+        try { sessionId = await this.runtime.resolveMain(this.store.get(id), notice, notice.resolving.id); } catch (e) { error = shortError(e); }
+        this.store.update(id, (j) => {
+          const n = same(j, notice.path);
+          if (n?.resolving && !n.resolving.sessionId) n.resolving = error ? null : { ...n.resolving, sessionId };
+          if (n && error) n.resolveError = error;
+        });
+      } else if (notice.resolving && await this.runtime.mainCaughtUp(notice)) {
+        this.store.update(id, (j) => { if (same(j, notice.path)?.resolving) noteMain(j, notice.path, null, { ok: true }, this.now()); });
+      }
+    }
   }
   // What an agent left running for the human to try (job-running.js). A preview
   // is probed while its review is open, written only when up/down flips (the
@@ -376,8 +402,8 @@ export class JobRunner {
             this.patchSub(id, sub.id, (s) => { s.error = `Post-merge run failed: ${failed || 'unknown workflow'}`; });
           }
         } else if (sub.stage === 'cleanup') {
-          await this.runtime.cleanup(job, sub);
-          this.patchSub(id, sub.id, (s) => { s.stage = 'done'; s.state = s.cancelledAt ? 'cancelled' : 'done'; s.cleanupRefusal = null; s.discard = null; });
+          const { main } = (await this.runtime.cleanup(job, sub, { updateMain: settingsSchema.parse(this.store.data.settings ?? {}).updateMain })) || {};
+          this.patchSub(id, sub.id, (s, j) => { if (main) noteMain(j, main.path, s.id, main.result, this.now()); s.stage = 'done'; s.state = s.cancelledAt ? 'cancelled' : 'done'; s.cleanupRefusal = null; s.discard = null; });
         }
       } catch (e) {
         this.patchSub(id, sub.id, (s) => {

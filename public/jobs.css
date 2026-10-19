@@ -293,6 +293,7 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .job-dialog a { color:var(--blue-fg); text-decoration:none; }
 .job-dialog input:not([type=checkbox],[type=radio]),.job-dialog textarea,.job-dialog select { font:inherit; background:var(--field-bg); color:var(--fg); border:1px solid var(--border); border-radius:8px; padding:8px; box-sizing:border-box; }
 .job-dialog form>label,.job-form-row>label { display:flex; flex-direction:column; gap:7px; font-size:12px; margin:14px 0; }
+.job-dialog form>label.job-settings-main { flex-direction:row; align-items:center; justify-content:space-between; margin:16px 0; }
 .job-dialog textarea { width:100%; resize:vertical; }
 .job-dialog label small { color:var(--fg-muted); }
 .job-dialog fieldset { border:1px solid var(--border-muted); border-radius:12px; margin:16px 0; padding:12px; font-size:12px; }
@@ -691,6 +692,15 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 /* A proposed plan change: what approving does to each sub-job, as a tag under its node and a line below. */
 .job-replan-ask { white-space:pre-wrap; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
 .job-replan-ask b { margin-right:6px; }
+.job-main-notice { margin:12px 0; padding:12px 14px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius:10px; background:color-mix(in srgb, var(--warn) 9%, var(--surface)); }
+.job-main-notice h3 { display:flex; align-items:baseline; gap:8px; white-space:nowrap; margin:0 0 6px; font-size:14px; color:var(--warn-fg); }
+.job-main-notice h3 small { min-width:0; margin-left:auto; white-space:normal; overflow-wrap:anywhere; text-align:right; font-weight:normal; color:var(--fg-muted); }
+.job-main-notice h3 svg { align-self:center; flex:none; }
+.job-main-notice p { margin:0 0 8px; }
+.job-main-notice .job-actions { margin:10px 0 0; flex-wrap:wrap; }
+.job-main-agent { display:flex; align-items:center; gap:6px; }
+.job-main-agent svg { flex:none; width:15px; height:15px; }
+.job-main-error { color:var(--red-fg); }
 .job-mark { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; padding:1px 8px; border-radius:8px; color:var(--fg-muted); background:var(--surface-2); }
 .job-mark-added .job-mark,li.job-mark-added { color:var(--st-ok-fg); }
 .job-mark-added .job-mark { background:color-mix(in srgb, var(--st-ok) 15%, var(--surface)); }

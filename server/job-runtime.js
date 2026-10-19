@@ -5,6 +5,7 @@ import path from 'node:path';
 import { runFile } from './job-github.js';
 import { jobPrompt, placeholderBranch } from './job-prompts.js';
 import { removeWorktree, gitRepoRoot } from './git.js';
+import { updateMainCheckout, resolvePrompt, caughtUp } from './job-main.js';
 import { targetOf } from './jobs-schema.js';
 import { checkoutsDir } from './data-dir.js';
 import { ensureInbox } from './job-evidence.js';
@@ -297,7 +298,7 @@ export class JobRuntime {
     return this.host.sessions.bill(sid, liveSessionId);
   }
 
-  async cleanup(job, sub) {
+  async cleanup(job, sub, { updateMain = false } = {}) {
     // Backstop for a session bound to a run that never settled cleanly (an
     // interrupted claim, a restart mid-launch): normally stop() already archived.
     for (const sid of sub.sessions || []) {
@@ -309,15 +310,46 @@ export class JobRuntime {
     // was pushed (the PR head) or never left the base it was cut from.
     if (sub.worktree) await this.cleanupWorktree(sub.worktree, sub.pr?.head || sub.worktree.cleanupHead, { mergedHead: sub.pr?.head, base: sub.pr?.base || targetOf(job, sub), discard: sub.discard });
     if (sub.worktree && sub.pr && !sub.cancelledAt) await this.deleteRemoteBranch(sub.worktree, sub.pr.head);
-    if (job.updateMain && !sub.cancelledAt && sub.pr && await this.landedOnDefault(job, sub)) {
-      const root = await gitRepoRoot(expandRepo(sub.repo));
-      if (!root) throw new Error('Cannot resolve main checkout');
-      const dirty = await this.run('git', ['status', '--porcelain'], root);
-      const branch = await this.run('git', ['branch', '--show-current'], root);
-      if (dirty || branch !== sub.pr.base) throw new Error('Main checkout has local changes or is on another branch; update it manually, then retry');
-      await this.run('git', ['fetch', 'origin'], root);
-      await this.run('git', ['merge', '--ff-only', `refs/remotes/origin/${sub.pr.base}`], root);
+    if (updateMain && !sub.cancelledAt && sub.pr) return { main: await this.updateMain(job, sub) };
+    return {};
+  }
+
+  // Never throws: a checkout it cannot bring up to date is a notice for the human
+  // (job-main.js), not a red sub-job. Null when there was nothing to do.
+  async updateMain(job, sub) {
+    const repo = expandRepo(sub.repo);
+    try {
+      if (!(await this.landedOnDefault(job, sub))) return null;
+    } catch (e) {
+      return { path: repo, result: { path: repo, base: sub.pr.base, reason: 'failed', error: `Could not read the default branch: ${String(e?.message || e).split('\n')[0]}` } };
     }
+    const root = await gitRepoRoot(repo);
+    if (!root) return { path: repo, result: { path: repo, base: sub.pr.base, reason: 'failed', error: 'Cannot resolve the main checkout' } };
+    return { path: root, result: await updateMainCheckout(this.run, root, sub.pr.base) };
+  }
+
+  // The human's Retry on a notice: the same update, for that checkout alone.
+  async retryMain(notice) {
+    return updateMainCheckout(this.run, notice.path, notice.base);
+  }
+
+  // A resolution button: a plain session in the human's checkout (no worktree,
+  // no PR automation) briefed with that one fix. Spawned from the runner's tick,
+  // never beside a launch, so the onBeforeDispatch hook finds no pendingLaunch.
+  async resolveMain(job, notice, resolution) {
+    const { sessionId } = await this.host.sessions.spawn({
+      cwd: notice.path,
+      agent: job.agent,
+      model: job.model || undefined,
+      effort: job.effort || undefined,
+      intent: resolvePrompt(notice, resolution),
+      taskId: job.taskId || undefined,
+    });
+    return sessionId;
+  }
+
+  async mainCaughtUp(notice) {
+    return caughtUp(this.run, notice.path, notice.base);
   }
 
   // Fast-forwarding main is for work that landed on the default branch: a PR

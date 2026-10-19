@@ -690,19 +690,20 @@ test('new idea is a brief beside a property sidebar, and the brief is the descri
   assert.equal(brief.querySelector('details'), null, 'no folded planning guidance or repository hints');
   assert.deepEqual([...brief.querySelectorAll('textarea')].map((e) => e.name), ['intent']);
   assert.equal(form.elements.repos, undefined); assert.equal(form.elements.planningPrompt, undefined);
-  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Sandbox', 'Images', 'After delivery']);
+  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Sandbox', 'Images']);
   assert.deepEqual([...brief.querySelectorAll('legend')].map((l) => l.textContent), ['Review checkpoints']);
-  for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'shareImages', 'updateMain']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
+  for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'shareImages']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
   for (const name of ['reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites', 'reviewRed']) assert.ok(brief.contains(form.querySelector(`[name="${name}"]`)), `${name} is a tile under the brief`);
   assert.ok(props.querySelector('#job-pick').querySelector('.pick-ticket') && props.querySelector('#job-pick .pick-meter'), 'the picker is a ticket with an effort meter in the sidebar');
   assert.deepEqual([...brief.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].checked, r.querySelector('.job-review-name').title, r.querySelector('small')]),
     [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts', null], ['reviewCode', 'Local verification', true, 'You see each PR working locally (screenshots, live service, diff) before it’s committed', null], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass', null], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done', null], ['reviewWrites', 'Writes', false, 'Each write is made by its session, with a receipt', null], ['reviewRed', 'Red steps', true, 'Wrangler proposes a fix for a red step and waits for you to decide', null]]);
   assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('span').title]),
-    [['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, '']]);
+    [['shareImages', true, 'every session on the job sees them, not just planning']]);
+  assert.equal(form.elements.updateMain, undefined, 'keeping local main updated is a global setting, not a job\'s');
   assert.equal(form.querySelector('.job-create-foot').textContent, 'Start planningAdd to backlog');
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent[0], { type: 'job-create', idea: true, start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true, sandbox: 'auto', writableDirs: [], updateMain: false, images: [], shareImages: true, taskId: null } });
+  assert.deepEqual(f.sent[0], { type: 'job-create', idea: true, start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true, sandbox: 'auto', writableDirs: [], images: [], shareImages: true, taskId: null } });
 });
 
 test('new jobs need only an outcome and leave repositories to planning', (t) => {
@@ -754,8 +755,10 @@ test('global concurrency, pause and repair limits are explicit controls, and no 
   f.q('#jobs-pause').click(); assert.equal(f.sent[1].patch.paused, true);
   f.q('#jobs-settings').click(); const form = f.q('#job-settings-form');
   assert.equal(form.elements.maxRunMinutes, undefined, 'a step ends with a receipt or an idle session, not a timeout');
+  assert.equal(form.elements.updateMain.checked, true, 'Keep local main updated is on until switched off');
+  assert.match(form.elements.updateMain.closest('label').textContent, /^Keep local main updated/);
   form.elements.maxRepairs.value = '1'; form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, maxReplans: 2, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA', plateArt: 'quiet', backdrop: 'sky', reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
+  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, maxReplans: 2, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA', updateMain: true, plateArt: 'quiet', backdrop: 'sky', reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
 });
 
 test('the Jobs view draws over its own sky unless the Wrangler background is chosen, which persists through settings', (t) => {
@@ -2847,4 +2850,52 @@ test('a tick that changes nothing leaves the board and detail DOM alone, and a s
   document.dispatchEvent(f.event('selectionchange'));
   assert.notEqual(f.q('#job-dialog h2'), heading, 'redrawn once the selection is gone');
   assert.match(f.q('[data-board="job1"]').textContent, /renamed/, 'the board caught up too');
+});
+
+test('a checkout the fast-forward left alone is a notice on the job panel with its fixes, Retry and Dismiss', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'done';
+  job.subJobs = [{ ...sub('api'), stage: 'done', state: 'done' }, { ...sub('web'), stage: 'done', state: 'done' }];
+  job.mainNotices = [{ path: '/repo', base: 'main', reason: 'diverged', subs: ['api', 'web'], at: 1, retrying: false, dirty: [], dirtyCount: 0,
+    localOnly: [{ sha: 'abc12345ffff', subject: '<b>Unpushed</b> work' }], localCount: 1,
+    incoming: [{ sha: 'def45678aaaa', subject: 'Merged PR 2' }, { sha: '0123456789ab', subject: 'Merged PR 1' }], incomingCount: 2,
+    resolutions: [{ id: 'rebase', label: 'Rebase & push', title: 'Replay them' }, { id: 'branch', label: 'Move commits to a branch', title: 'Keep them' }] }];
+  f.view.update(f.data);
+  f.view.openDetail('job1');
+  assert.deepEqual([...f.q('.job-main-notice .job-actions').querySelectorAll('button')].map((b) => [b.textContent, b.className]),
+    [['Rebase & push', 'primary'], ['Move commits to a branch', ''], ['Retry', ''], ['Dismiss', '']]);
+  f.q('[data-main-resolve="branch"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'resolve-main', path: '/repo', resolution: 'branch' });
+  const text = () => f.q('.job-main-notice').textContent;
+  assert.match(text(), /Local main not updated/);
+  assert.match(text(), /commits origin\/main does not, so it cannot fast-forward/);
+  assert.match(text(), /1 local commit not on origin/); assert.match(text(), /<b>Unpushed<\/b> work/, 'commit subjects are text, not markup');
+  assert.match(text(), /2 new on origin\/main/); assert.match(text(), /Merged PR 1/);
+  f.q('[data-main-retry]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'retry-main', path: '/repo' });
+  f.q('[data-main-dismiss]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'dismiss-main', path: '/repo' });
+  job.mainNotices[0] = { ...job.mainNotices[0], retrying: true }; f.view.update(f.data); f.view.openDetail('job1');
+  assert.equal(f.q('[data-main-retry]').disabled, true);
+
+  // A pressed fix: starting, then a session to open, and no second fix meanwhile.
+  job.mainNotices[0] = { ...job.mainNotices[0], retrying: false, resolving: { id: 'branch', at: 2, sessionId: null } }; f.view.update(f.data); f.view.openDetail('job1');
+  assert.match(f.q('.job-main-agent').textContent, /Starting an agent: Move commits to a branch\. This clears once local main matches origin/);
+  assert.equal(f.q('[data-main-resolve]'), null); assert.equal(f.q('[data-main-session]'), null);
+  job.mainNotices[0].resolving.sessionId = 's_fix'; f.view.update(f.data); f.view.openDetail('job1');
+  assert.match(f.q('.job-main-agent').textContent, /An agent is working on it: Move commits to a branch/);
+  f.q('[data-main-session]').click();
+  assert.deepEqual(f.sessions, ['s_fix']); assert.equal(f.q('#job-dialog').open, false);
+  job.mainNotices[0] = { ...job.mainNotices[0], resolving: null, resolveError: 'no such <dir>' }; f.view.update(f.data); f.view.openDetail('job1');
+  assert.equal(f.q('.job-main-error').textContent, 'Could not start the agent: no such <dir>');
+  assert.ok(f.q('[data-main-resolve="rebase"]'), 'the fixes are offered again');
+});
+
+test('the job dialog stays open on a notice\'s Retry, showing its outcome on the next tick', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'done';
+  job.mainNotices = [{ path: '/repo', base: 'main', reason: 'dirty', subs: [], at: 1, retrying: true, dirty: [{ path: 'a.js', change: 'modified' }], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 0 }];
+  f.view.update(f.data); f.view.openDetail('job1');
+  f.view.created({ event: 'job-action-complete', jobId: 'job1', action: 'retry-main' });
+  assert.equal(f.q('#job-dialog').open, true);
+  f.data.jobs[0] = { ...job, mainNotices: [] }; f.view.update(f.data);
+  assert.equal(f.q('.job-main-notice'), null, 'cleared once the checkout caught up');
 });

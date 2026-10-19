@@ -10,6 +10,7 @@ import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
+import { resolutionsFor, resolutionLabel } from './job-main.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
 import { forwardsOnly } from './job-actions.js';
@@ -294,7 +295,7 @@ export class JobStore {
       if (action === 'cancel-job') { cancelJob(j, Date.now()); return; }
       // Retry and Discard are what is left to do on a cancelled job: a refused
       // cleanup (a worktree with work not on GitHub) is still the human's to clear.
-      if (j.cancelledAt && !['retry', 'discard-worktree'].includes(action)) throw new Error('Job was cancelled');
+      if (j.cancelledAt && !['retry', 'discard-worktree', 'retry-main', 'dismiss-main', 'resolve-main'].includes(action)) throw new Error('Job was cancelled');
       // A pending plan change freezes the job where it stands: a sub-job that
       // moves on under the planner (approved, merged, marked done) is no longer
       // the job the proposal was written against.
@@ -330,6 +331,21 @@ export class JobStore {
       if (action === 'accept-idea') {
         approve(j, acceptIdea(j, payload.messageId, Date.now()));
         record(j, null, 'accept-idea', null, `Created the job from the planner's suggestion: ${quoted(j.title)}`);
+        return;
+      }
+      if (['retry-main', 'dismiss-main', 'resolve-main'].includes(action)) {
+        const notice = j.mainNotices?.find((n) => n.path === payload.path);
+        if (!notice) throw new Error('That checkout no longer needs updating');
+        if (action === 'retry-main') notice.retrying = true;
+        else if (action === 'dismiss-main') { j.mainNotices = j.mainNotices.filter((n) => n !== notice); record(j, null, 'dismiss-main', null, `Left ${notice.path} as it was`); }
+        else {
+          // One session per checkout at a time, and only a fix this notice offers.
+          if (notice.resolving) throw new Error('A session is already working on that checkout');
+          if (!resolutionsFor(notice).some((r) => r.id === payload.resolution)) throw new Error('That fix does not apply to this checkout');
+          notice.resolving = { id: payload.resolution, at: Date.now(), sessionId: null };
+          notice.resolveError = null;
+          record(j, null, 'resolve-main', null, `Asked an agent to ${resolutionLabel(payload.resolution).toLowerCase()} in ${notice.path}`);
+        }
         return;
       }
       if (action === 'pause') { j.paused = true; return; }

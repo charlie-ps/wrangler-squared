@@ -217,6 +217,17 @@ feature).
   The board gets bytes only as `job-evidence` frames (thumbnails via `sips`), cached
   in `public/job-proof.js`. A sub-job with `show` items reports `ready` even with
   Code on Auto (`leavesUncommitted`), so the proof is kept.
+- **Fast-forward main never blocks a sub-job** (`server/job-main.js`). The global
+  `settings.updateMain` ("Keep local main updated", on by default; a job's old `updateMain` is
+  ignored) is handed to cleanup by the runner, and the update returns, never throws: a clean
+  checkout on the base merges `--ff-only`, one on another branch gets `git fetch origin
+  <base>:<base>`, and a dirty or diverged one (or any git error) becomes a notice in
+  `job.mainNotices`, one per checkout path (`noteMain` merges sub-jobs and clears it on a later
+  success). Each notice offers the fixes `resolutionsFor` allows (rebase & push, move commits to a
+  branch, stash & update). `retry-main` and `resolve-main` only flag it; the runner's `tendMain`
+  acts on the next tick, finished or paused jobs included: it spawns the fix's session (a plain
+  one in the checkout, briefed by `resolvePrompt` with only that fix) inside the tick so no
+  `pendingLaunch` is in flight, then clears the notice once local `<base>` equals origin's.
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one

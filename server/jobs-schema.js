@@ -403,7 +403,7 @@ export const jobInputSchema = z.object({
   // (an integration branch for multi-PR work). Absent on a job saved before it,
   // and then everything keeps targeting the default.
   base: branchName.optional(),
-  updateMain: z.boolean().default(false), taskId: z.string().nullable().default(null),
+  taskId: z.string().nullable().default(null),
   // Names of images the job keeps in the host's per-extension store (`images:keep`),
   // already staged by the client's `api.images.stage`. `shareImages` decides whether
   // sub-job sessions get them too; planning always does.
@@ -429,6 +429,9 @@ export const settingsSchema = z.object({
   // (`open -na <ideApp> --args <path>`, server/handlers.js). An app NAME, not a
   // command: nothing typed here ever reaches a shell.
   ideApp: z.string().trim().min(1).max(120).default('IntelliJ IDEA'),
+  // Fast-forward the human's checkout of the default branch once a PR lands
+  // (job-main.js). It never blocks a sub-job, so it is on unless switched off.
+  updateMain: z.boolean().default(true),
   // What the board's plates are drawn over: each job's skyline or its launch-page
   // scene (public/job-plates.js PLATE_ART). A hover mode, 'peek', was dropped and
   // reads as the skyline.
