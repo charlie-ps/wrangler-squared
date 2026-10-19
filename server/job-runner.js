@@ -9,10 +9,25 @@ import { dropSub } from './job-sub-ops.js';
 import { draftsDecidedMail, threadMail, ideaMail } from './job-prompts.js';
 import { inConversation, unsentIdea } from './job-idea.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
+import { noteMain } from './job-main.js';
 import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps, stopSandbox } from './job-running.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
+// A failed post-merge run is red but still watched, more slowly: a re-run that
+// passes, or a later run containing the merge that does, clears it and the
+// sub-job climbs on as a green one would, with nobody pressing Retry. Read from
+// the error, not the last result: a re-run in flight reads pending meanwhile.
+// The watch backs off with the red's age (`redSince`) and ends after
+// RED_WATCH_MS, so one nobody acts on stops costing GitHub calls; Retry clears
+// the error, and the next failing poll stamps a fresh `redSince`.
+const POST_MERGE_FAILED = 'Post-merge run failed';
+const RED_POLL_MS = [[30 * 60000, 120000], [2 * 3600000, 300000], [Infinity, 900000]];
+const RED_WATCH_MS = 6 * 3600000;
+const redAge = (sub, now) => sub.error?.startsWith(POST_MERGE_FAILED) && sub.redSince ? now - sub.redSince : 0;
+const redPollMs = (sub, now) => RED_POLL_MS.find(([upTo]) => redAge(sub, now) < upTo)[1];
+const postMergeRed = (sub, now) => sub.stage === 'deployment' && !sub.recoveredBy && !!sub.error?.startsWith(POST_MERGE_FAILED)
+  && redAge(sub, now) < RED_WATCH_MS;
 export const acceptedRedLine = (sub) => `Post-merge run accepted red${sub.acceptedRed?.note ? `: ${sub.acceptedRed.note}` : ''}`;
 // Which red step a planning run was sent after: counted against that step's tries.
 const redStamp = (job) => job.replan?.red && !job.replan.red.human ? { red: { sub: job.replan.red.sub } } : undefined;
@@ -41,11 +56,36 @@ export class JobRunner {
       for (const job of this.store.data.jobs) {
         try {
           await this.sweepRunning(job.id);
+          await this.tendMain(job.id);
           await this.settle(job.id);
           await this.advance(job.id);
         } catch (e) { this.store.update(job.id, (j) => { j.error = shortError(e); }); }
       }
     } finally { this.busy = false; if (before !== this.store.data) await this.onChange(); }
+  }
+  // The human's buttons on a "Local main not updated" notice (job-main.js): Retry
+  // runs the update again; a resolution spawns its session here, in the tick, so
+  // no launch's pendingLaunch is in flight; and a notice whose session has brought
+  // the branch level with origin clears itself. Runs on a finished or paused job
+  // too: it touches only the human's checkout.
+  async tendMain(id) {
+    const same = (j, path) => j.mainNotices?.find((n) => n.path === path);
+    for (const notice of this.store.get(id).mainNotices || []) {
+      if (notice.retrying) {
+        const result = await this.runtime.retryMain(notice);
+        this.store.update(id, (j) => { if (same(j, notice.path)?.retrying) noteMain(j, notice.path, null, result, this.now()); });
+      } else if (notice.resolving && !notice.resolving.sessionId) {
+        let sessionId = null, error = null;
+        try { sessionId = await this.runtime.resolveMain(this.store.get(id), notice, notice.resolving.id); } catch (e) { error = shortError(e); }
+        this.store.update(id, (j) => {
+          const n = same(j, notice.path);
+          if (n?.resolving && !n.resolving.sessionId) n.resolving = error ? null : { ...n.resolving, sessionId };
+          if (n && error) n.resolveError = error;
+        });
+      } else if (notice.resolving && await this.runtime.mainCaughtUp(notice)) {
+        this.store.update(id, (j) => { if (same(j, notice.path)?.resolving) noteMain(j, notice.path, null, { ok: true }, this.now()); });
+      }
+    }
   }
   // What an agent left running for the human to try (job-running.js). A preview
   // is probed while its review is open, written only when up/down flips (the
@@ -232,7 +272,9 @@ export class JobRunner {
     if (job.cancelledAt && job.stage !== 'active') { if (!job.runs.some(runnable)) await this.finish(id); return; }
     if (job.stage === 'planning' && !job.plan && !activeFor(job)) { await this.launch(job, null, 'planning'); return; }
     if (inConversation(job)) {
-      const run = job.runs.find((r) => runnable(r) && r.parkedFor === 'idea' && r.parkedAt && !r.mailedAt);
+      // Parked or still mid-turn: a message written while the planner works is
+      // mailed now, or a plan reported before its next reply would never see it.
+      const run = job.runs.find((r) => runnable(r) && r.phase === 'planning' && !r.subJobId && r.sessionId);
       if (run && unsentIdea(job).length) await this.deliverIdea(id, run);
       return;
     }
@@ -248,7 +290,7 @@ export class JobRunner {
       if (!this.allowed(id) || job.error) return;
       let sub = job.subJobs.find((s) => s.id === initial.id);
       if (activeFor(job, sub)) continue;
-      if (sub.error) continue;
+      if (sub.error && !postMergeRed(sub, this.now())) continue;
       try {
         if (sub.stage === 'session') {
           // A session starts once its milestone (`on`) and its prerequisites
@@ -345,7 +387,7 @@ export class JobRunner {
           const result = await this.github.deployment(sub);
           const staleMs = this.store.data.settings.deploymentStaleMinutes * 60000;
           this.patchSub(id, sub.id, (s) => {
-            s.deploymentResult = result; s.observationError = null; s.nextPollAt = this.now() + 30000;
+            s.deploymentResult = result; s.observationError = null; s.nextPollAt = this.now() + (result.status === 'failing' || s.error ? redPollMs(s, this.now()) : 30000);
             // NOTHING running this long after the merge means the workflows said
             // this push deploys and GitHub disagrees — nothing triggered, or
             // everything that did was skipped, or a cancelled run that no later
@@ -369,15 +411,19 @@ export class JobRunner {
           // says which colour it was.
           const accepted = result.status === 'failing' && !!sub.acceptedRed && sub.acceptedRed.ref === sub.pr?.mergeCommit;
           if (result.status === 'passing' || accepted) {
+            if (sub.error) { this.patchSub(id, sub.id, (s) => { s.error = null; s.blocked = null; s.redSince = null; }); job = this.store.get(id); sub = job.subJobs.find((s) => s.id === sub.id); }
             if (sub.check) await this.launch(job, sub, 'verify');
             else this.patchSub(id, sub.id, (s) => { s.deployed = { at: this.now(), checks: [accepted ? acceptedRedLine(s) : 'Post-merge runs passed'], commit: s.pr?.mergeCommit }; s.stage = 'cleanup'; s.state = 'queued'; });
           } else if (result.status === 'failing') {
             const failed = result.runs.filter((r) => r.status === 'failing').map((r) => r.workflow).join(', ');
-            this.patchSub(id, sub.id, (s) => { s.error = `Post-merge run failed: ${failed || 'unknown workflow'}`; });
+            this.patchSub(id, sub.id, (s) => {
+              if (!s.error?.startsWith(POST_MERGE_FAILED) || !s.redSince) s.redSince = this.now();
+              s.error = `${POST_MERGE_FAILED}: ${failed || 'unknown workflow'}`;
+            });
           }
         } else if (sub.stage === 'cleanup') {
-          await this.runtime.cleanup(job, sub);
-          this.patchSub(id, sub.id, (s) => { s.stage = 'done'; s.state = s.cancelledAt ? 'cancelled' : 'done'; s.cleanupRefusal = null; s.discard = null; });
+          const { main } = (await this.runtime.cleanup(job, sub, { updateMain: settingsSchema.parse(this.store.data.settings ?? {}).updateMain })) || {};
+          this.patchSub(id, sub.id, (s, j) => { if (main) noteMain(j, main.path, s.id, main.result, this.now()); s.stage = 'done'; s.state = s.cancelledAt ? 'cancelled' : 'done'; s.cleanupRefusal = null; s.discard = null; });
         }
       } catch (e) {
         this.patchSub(id, sub.id, (s) => {
@@ -452,7 +498,7 @@ export class JobRunner {
     const job = this.store.get(id);
     const batch = unsentIdea(job);
     try {
-      await this.runtime.resumeWithMail(run, ideaMail(job, run, batch));
+      await this.runtime.resumeWithMail(run, ideaMail(job, run, batch, { busy: !(run.parkedAt && !run.mailedAt) }));
       const now = this.now();
       this.patchRun(id, run.id, (r) => { r.mailedAt = now; r.idleSince = null; });
       this.store.update(id, (j) => { for (const m of j.idea.thread) if (batch.some((b) => b.id === m.id)) m.sentAt = now; j.idea.error = null; });

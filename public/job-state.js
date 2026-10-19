@@ -104,6 +104,7 @@ export function jobLabel(job) {
   if (state === 'needs' && replanProposed(job) && !job.replan.red) return 'Plan change ready';
   if (state === 'running' && replanPending(job) && !replanProposed(job)) return job.replan.red ? 'Fixing' : 'Re-planning';
   const peers = job.subJobs.filter((s) => subState(job, s) === state);
+  if (!peers.length) return jobStatus(job, null).text;
   return `${subLabel(job, peers[0])}${peers.length > 1 ? ` +${peers.length - 1}` : ''}`;
 }
 export const sortJobs = (jobs) => jobs.map((job, i) => [job, job.createdAt ?? 0, i]).sort((a, b) => b[1] - a[1] || b[2] - a[2]).map(([job]) => job);

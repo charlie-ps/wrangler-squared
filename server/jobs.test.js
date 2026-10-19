@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { JobStore, migrateJobs, MERGE_IS_DELIVERY } from './job-store.js';
 import { JobRunner, IDLE_RECEIPT_GRACE_MS } from './job-runner.js';
 import { JobRuntime, CleanupRefused } from './job-runtime.js';
@@ -16,6 +18,8 @@ import { changeView } from './job-change.js';
 import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 
+const execFileP = promisify(execFile);
+const execGit = (cwd, args) => execFileP('git', ['-C', cwd, ...args]).then((r) => r.stdout.trim());
 const input = { title: 'Reliable sign-in', intent: 'Customers can sign in reliably', repos: ['/repo'], reviewMerge: true };
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', after, brief: `Implement ${id}`, ...extra });
 const sessionSpec = (id, after = []) => ({ id, kind: 'session', title: `Run ${id}`, storyId: 'story', after, brief: `Do ${id} on this machine` });
@@ -143,14 +147,33 @@ test('usualPick persists across restart, merges like any setting, and is validat
   assert.equal(f.store.snapshot().settings.usualPick.model, 'opus', 'a rejected patch changes nothing');
 });
 
-test('backdrop defaults to the sky, persists the Wrangler background across restart, and rejects anything else', (t) => {
+test('theme defaults to Wrangler, persists across restart, keeps Space\'s plate art per theme, and rejects an unknown one', (t) => {
   const f = fixture(t);
-  assert.equal(f.store.snapshot().settings.backdrop, 'sky');
-  f.store.settings({ backdrop: 'wrangler' }); f.store.settings({ concurrency: 3 });
-  assert.equal(new JobStore(f.store.file).snapshot().settings.backdrop, 'wrangler');
-  assert.throws(() => f.store.settings({ backdrop: 'nebula' }));
-  const { backdrop, ...old } = f.store.snapshot().settings;
-  assert.equal(settingsSchema.parse(old).backdrop, 'sky', 'settings saved before it existed parse to the sky');
+  assert.equal(f.store.snapshot().settings.theme, 'wrangler');
+  assert.deepEqual(f.store.snapshot().settings.themeOptions, { space: { plateArt: 'quiet' } });
+  f.store.settings({ themeOptions: { space: { plateArt: 'full' } } }); f.store.settings({ theme: 'space' });
+  const back = new JobStore(f.store.file).snapshot().settings;
+  assert.equal(back.theme, 'space'); assert.equal(back.themeOptions.space.plateArt, 'full', 'an option saved while another theme was on is kept');
+  assert.throws(() => f.store.settings({ theme: 'nebula' }));
+  assert.throws(() => f.store.settings({ themeOptions: { space: { plateArt: 'peek' } } }), 'the old hover mode is only read from old settings');
+  assert.equal(f.store.snapshot().settings.theme, 'space', 'a rejected patch changes nothing');
+});
+
+test('settings saved before themes open in the theme they had: a Wrangler backdrop is the Wrangler theme, anything else Space', (t) => {
+  const parse = (s) => { const { theme, themeOptions } = settingsSchema.parse(s); return { theme, themeOptions }; };
+  assert.deepEqual(parse({ backdrop: 'wrangler' }), { theme: 'wrangler', themeOptions: { space: { plateArt: 'quiet' } } });
+  assert.deepEqual(parse({ backdrop: 'sky', plateArt: 'full' }), { theme: 'space', themeOptions: { space: { plateArt: 'full' } } });
+  assert.deepEqual(parse({ plateArt: 'peek' }), { theme: 'space', themeOptions: { space: { plateArt: 'quiet' } } }, 'the dropped hover mode reads as the skyline');
+  assert.deepEqual(parse({}), { theme: 'wrangler', themeOptions: { space: { plateArt: 'quiet' } } }, 'settings from no earlier version get the default');
+  assert.equal(parse({ backdrop: 'wrangler', theme: 'space' }).theme, 'space', 'a saved theme wins over a stale backdrop');
+  const parsed = settingsSchema.parse({ backdrop: 'wrangler', plateArt: 'full' });
+  assert.equal('backdrop' in parsed || 'plateArt' in parsed, false, 'the old keys are dropped');
+  // The store reads jobs.json as written, so the board gets the theme before anything is saved again.
+  const f = fixture(t);
+  fs.writeFileSync(f.store.file, JSON.stringify({ version: 5, settings: { concurrency: 3, backdrop: 'wrangler', plateArt: 'full' }, jobs: [] }));
+  const loaded = new JobStore(f.store.file).snapshot().settings;
+  assert.equal(loaded.theme, 'wrangler'); assert.deepEqual(loaded.themeOptions, { space: { plateArt: 'full' } });
+  assert.equal(loaded.backdrop, undefined); assert.equal(loaded.concurrency, 3);
 });
 
 // --- Migration (version 1 -> 2) ---
@@ -445,7 +468,7 @@ test('a code review switch counts from the next gate: waiting diffs stay until r
   let job = f.store.get(f.job.id);
   assert.equal(job.reviewCode, false);
   assert.deepEqual([job.subJobs[0].stage, job.subJobs[0].state], ['review', 'verified'], 'a diff already waiting is not let through unasked');
-  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['set-review', null, 'Switched Code to Auto']]);
+  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['set-review', null, 'Switched Local verification to Auto']]);
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('web'));
   assert.equal(f.sub(1).state, 'approved', 'the run kept its uncommitted prompt; its receipt is approved as it lands');
   assert.ok(f.sub(1).ready.approvedAt);
@@ -640,6 +663,111 @@ test('a failing post-merge run names the workflow and creates no second job', as
   assert.equal(f.sub().stage, 'deployment');
   assert.equal(f.store.snapshot().jobs.length, 1, 'the fix is a move on this job, never a recovery job');
   assert.equal(f.sub().deployed, undefined);
+});
+
+// The runner's deployment poll on a real JobGithub over a fake `gh`: `onCommit`
+// is what `gh run list --commit merge1` prints, `later` the workflow's later runs
+// on the branch, `contains(head)` whether that head's commit contains the merge.
+function ghOver(f, world) {
+  const gh = new JobGithub(async (_bin, args) => {
+    if (args.includes('--commit')) return JSON.stringify(world.onCommit);
+    if (args[0] === 'run') return JSON.stringify(world.later || []);
+    return world.contains(args[1].split('...')[1]) ? 'ahead' : 'diverged';
+  });
+  f.github.deployment = (sub) => gh.deployment(sub);
+}
+const pushRun = (over) => ({ headBranch: 'main', event: 'push', workflowName: 'Deploy', status: 'completed', attempt: 1, databaseId: 10, headSha: 'merge1', url: 'https://github.example.com/run', ...over });
+// A red sub-job is polled every two minutes; two ticks always reach the next poll.
+const poll = async (f) => { await f.tick(); await f.tick(); };
+
+test('a failed post-merge run stays red but watched, and a re-run attempt that passes reaches deployed without Retry', async (t) => {
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], contains: () => false };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick();
+  await f.tick();
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  assert.equal(f.sub().nextPollAt - f.clockNow(), 120000, 'a red deployment is polled, more slowly');
+  world.onCommit = [pushRun({ attempt: 2, status: 'in_progress', conclusion: '' })]; await poll(f);
+  assert.equal(f.sub().deploymentResult.status, 'pending');
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'the failure stays on the board while the re-run is in flight');
+  world.onCommit = [pushRun({ attempt: 2, conclusion: 'success' })]; await poll(f);
+  const sub = f.sub();
+  assert.equal(sub.error, null); assert.deepEqual(sub.deployed.checks, ['Post-merge runs passed']); assert.equal(sub.deployed.commit, 'merge1');
+  assert.equal(f.launched.filter((w) => w.sub?.id === 'api' && w.run.phase !== 'implementation').length, 0, 'no Retry, no session');
+  await f.tick(); assert.equal(f.sub().stage, 'done'); assert.deepEqual(f.cleaned, ['api']);
+  // With a check in the plan, the green re-run sends it to verify like any green run.
+  const g = fixture(t); await atPr(g, plan([spec('api', [], { check: 'helm list shows auth in prod' })]));
+  const gWorld = { onCommit: [pushRun({ conclusion: 'failure' })], contains: () => false };
+  ghOver(g, gWorld);
+  g.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await g.tick(); await g.tick();
+  assert.match(g.sub().error, /Post-merge run failed/);
+  gWorld.onCommit = [pushRun({ attempt: 2, conclusion: 'success' })]; await poll(g);
+  assert.equal(g.sub().error, null); assert.equal(g.last().run.phase, 'verify');
+});
+
+test('a failed run on the merge commit is cleared by a later run that contains the merge and passes', async (t) => {
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], later: [], contains: (head) => head === 'next' };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  world.later = [pushRun({ databaseId: 11, headSha: 'next', status: 'in_progress', conclusion: '' })]; await poll(f);
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'a successor still running is not a verdict on a red run');
+  world.later = [pushRun({ databaseId: 11, headSha: 'next', conclusion: 'success' })]; await poll(f);
+  assert.equal(f.sub().error, null);
+  assert.deepEqual(f.sub().deploymentResult.runs[0], { workflow: 'Deploy', runId: 11, url: 'https://github.example.com/run', status: 'passing', conclusion: 'success', supersedes: 10, commit: 'next' });
+  assert.deepEqual(f.sub().deployed.checks, ['Post-merge runs passed']); assert.equal(f.sub().stage, 'cleanup');
+});
+
+test('a red post-merge run Retry never saw still waits on Accept red or recover when nothing passes after it', async (t) => {
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], later: [pushRun({ databaseId: 11, headSha: 'sibling', conclusion: 'success' })], contains: () => false };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  await poll(f); await poll(f);
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'a green run on a commit without the merge clears nothing');
+  assert.equal(f.sub().deployed, undefined);
+  acceptRed(f, 'api', 'unrelated'); await f.tick();
+  assert.deepEqual(f.sub().deployed.checks, ['Post-merge run accepted red: unrelated']);
+});
+
+test('a red post-merge run nobody acts on is polled at 2, then 5, then 15 minutes, and not at all after six hours until Retry', async (t) => {
+  const f = fixture(t); await atPr(f);
+  ghOver(f, { onCommit: [pushRun({ conclusion: 'failure' })], later: [], contains: () => false });
+  const polled = []; const deployment = f.github.deployment;
+  f.github.deployment = (sub) => { polled.push(f.clockNow()); return deployment(sub); };
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  const since = f.sub().redSince;
+  assert.equal(since, f.clockNow()); assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  while (f.clockNow() - since < 7 * 3600000) await f.tick();
+  const gaps = polled.slice(1).map((at, i) => [at - since, at - polled[i]]);
+  const gapAt = (from, to) => [...new Set(gaps.filter(([age]) => age > from && age <= to).map(([, gap]) => Math.ceil(gap / 60000)))];
+  assert.deepEqual(gapAt(0, 30 * 60000), [3], 'first half hour: every 2 minutes (the next 61s tick after)');
+  assert.deepEqual(gapAt(31 * 60000, 2 * 3600000), [6], 'to two hours: every 5 minutes');
+  assert.deepEqual(gapAt(2.5 * 3600000, 6 * 3600000), [16], 'to six hours: every 15 minutes');
+  assert.ok(polled.every((at) => at - since < 6 * 3600000), 'nothing after six hours');
+  assert.ok(polled.length < 60, `${polled.length} polls over seven hours, bounded`);
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'still red on the board');
+  const before = polled.length;
+  f.store.action(f.job.id, 'retry', { subJobId: 'api' }); await f.tick();
+  assert.equal(polled.length, before + 1, 'Retry watches it again'); assert.equal(f.sub().redSince, f.clockNow(), 'from a fresh start');
+  assert.equal(f.sub().nextPollAt - f.clockNow(), 120000);
+});
+
+test('a green run on a revert of the merge still contains it, so it reads as deployed: run evidence, not liveness', async (t) => {
+  // Pinned on purpose: `deployed` means a run that built the merge passed. A
+  // revert after it is a later change somebody chose, which no run can tell
+  // apart from a fix by containment alone.
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], later: [], contains: (head) => head === 'revert1' };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  world.later = [pushRun({ databaseId: 11, headSha: 'revert1', conclusion: 'success' })]; await poll(f);
+  assert.equal(f.sub().error, null);
+  assert.equal(f.sub().deploymentResult.runs[0].commit, 'revert1');
+  assert.deepEqual(f.sub().deployed.checks, ['Post-merge runs passed']);
 });
 
 test('Accept red on an open PR merges the pinned head instead of repairing it; a new push is judged afresh', async (t) => {
@@ -2303,6 +2431,48 @@ test('a cancelled post-merge run is judged by the later run on the same branch t
   assert.equal((await gh.deployment(sub)).status, 'pending', 'an unreplaced cancellation holds back a green sibling');
 });
 
+test('a failed post-merge run is judged by the NEWEST completed later run that contains the merge', async () => {
+  const sub = { repo: '/repo', pr: { mergeCommit: 'merged', base: 'main' } };
+  const base = { headBranch: 'main', event: 'push', status: 'completed', attempt: 1, workflowName: 'Build' };
+  const failed = { ...base, databaseId: 10, headSha: 'merged', conclusion: 'failure' };
+  const red = { ...base, databaseId: 11, headSha: 'next', conclusion: 'failure' };
+  const green = { ...base, databaseId: 12, headSha: 'after', conclusion: 'success' };
+  const running = { ...base, databaseId: 13, headSha: 'latest', status: 'in_progress', conclusion: '' };
+  let later = [];
+  const gh = new JobGithub(async (_bin, args) => args.includes('--commit') ? JSON.stringify([failed])
+    : args[0] === 'run' ? JSON.stringify(later) : 'ahead');
+  assert.equal((await gh.deployment(sub)).status, 'failing', 'nothing after it: still red');
+  later = [red, green, running];
+  let result = await gh.deployment(sub);
+  assert.equal(result.status, 'passing', 'a later red run is not the last word when a newer one passed');
+  assert.equal(result.runs[0].runId, 12); assert.equal(result.runs[0].supersedes, 10); assert.equal(result.runs[0].commit, 'after');
+  later = [green, { ...red, databaseId: 14 }];
+  result = await gh.deployment(sub);
+  assert.equal(result.status, 'failing', 'passed then failed is red: the newest completed run decides');
+  assert.equal(result.runs[0].runId, 14);
+  later = [red, { ...green, databaseId: 15, conclusion: 'cancelled' }];
+  assert.equal((await gh.deployment(sub)).runs[0].runId, 11, 'a cancelled successor is skipped for the one before it');
+});
+
+test('a later run on a commit that does not contain the merge never supersedes a failed or cancelled one', async () => {
+  const sub = { repo: '/repo', pr: { mergeCommit: 'merged', base: 'main' } };
+  const base = { headBranch: 'main', event: 'push', status: 'completed', attempt: 1, workflowName: 'Build' };
+  const sibling = { ...base, databaseId: 12, headSha: 'sibling', conclusion: 'success' };
+  const compared = [];
+  let onCommit = [{ ...base, databaseId: 10, headSha: 'merged', conclusion: 'failure' }];
+  const gh = new JobGithub(async (_bin, args) => {
+    if (args.includes('--commit')) return JSON.stringify(onCommit);
+    if (args[0] === 'run') return JSON.stringify([sibling]);
+    compared.push(args[1]); return 'diverged';
+  });
+  let result = await gh.deployment(sub);
+  assert.equal(result.status, 'failing'); assert.equal(result.runs[0].runId, 10); assert.equal(result.runs[0].supersedes, undefined);
+  assert.deepEqual(compared, ['repos/{owner}/{repo}/compare/merged...sibling'], 'containment was asked, and said no');
+  onCommit = [{ ...base, databaseId: 10, headSha: 'merged', conclusion: 'cancelled' }];
+  result = await gh.deployment(sub);
+  assert.equal(result.status, 'pending'); assert.equal(result.runs[0].status, 'cancelled');
+});
+
 // --- Changing the plan of a running job ---
 
 test('a running job takes a plan change as a proposal: frozen work is locked, removed work is cancelled, new work held until approval', async (t) => {
@@ -2768,4 +2938,109 @@ test('a PR may land on its own base; an old plan has none, and no other kind may
   assert.equal(planSchema.parse(plan({ repo: '/repo', base: ' release/2.x ' })).subJobs[0].base, 'release/2.x');
   assert.throws(() => planSchema.parse(plan({ repo: '/repo', base: '-D' })), /branch name/);
   assert.throws(() => planSchema.parse(plan({ kind: 'session', base: 'next' })), /only a PR lands on a branch/);
+});
+
+test('an unpushed commit on local main leaves merged sub-jobs done and one notice for the checkout', async (t) => {
+  const git = (cwd, ...args) => execGit(cwd, args);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-main-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const origin = path.join(dir, 'origin.git'), repo = path.join(dir, 'repo'), other = path.join(dir, 'other');
+  await execFileP('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+  await execFileP('git', ['clone', '-q', origin, repo]);
+  const commit = async (cwd, file, message) => { fs.writeFileSync(path.join(cwd, file), `${message}\n`); await git(cwd, 'add', file); await git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', message); };
+  await commit(repo, 'README.md', 'Initial');
+  await git(repo, 'push', '-q', 'origin', 'HEAD:main');
+  await execFileP('git', ['clone', '-q', origin, other]);
+  // Two PRs land on origin while another session has a commit of its own on local main.
+  for (const n of [1, 2]) { await commit(other, `pr${n}.js`, `Merged PR ${n}`); await git(other, 'push', '-q', 'origin', 'HEAD:main'); }
+  await commit(repo, 'local.js', 'Unpushed work from another session');
+  const localHead = await git(repo, 'rev-parse', 'HEAD');
+
+  const f = fixture(t); await f.approve(plan([spec('api', [], { repo }), spec('web', [], { repo })])); f.alive.clear(); await f.tick();
+  assert.equal(settingsSchema.parse(f.store.data.settings).updateMain, true, 'on by default, for every job');
+  const spawned = [];
+  const real = new JobRuntime({ host: { sessions: { get: () => null, spawn: async (o) => { spawned.push(o); return { sessionId: 's_fix' }; } } } });
+  f.runtime.cleanup = (j, s, o) => real.cleanup(j, { ...s, worktree: null }, o);
+  for (const k of ['retryMain', 'resolveMain', 'mainCaughtUp']) f.runtime[k] = (...a) => real[k](...a);
+  for (const id of ['api', 'web']) {
+    markDone(f, id, 'Merged');
+    f.store.update(f.job.id, (j) => { j.subJobs.find((s) => s.id === id).pr = { url: `${PR_URL}${id}`, head: 'h', base: 'main' }; });
+  }
+  await f.tick();
+  const job = f.store.get(f.job.id);
+  assert.deepEqual(job.subJobs.map((s) => [s.id, s.stage, s.state, s.error || null]), [['api', 'done', 'done', null], ['web', 'done', 'done', null]], 'the update never blocks a sub-job');
+  assert.equal(job.mainNotices.length, 1, 'one checkout, one notice');
+  const [notice] = job.mainNotices;
+  assert.equal(notice.path, fs.realpathSync(repo));
+  assert.equal(notice.reason, 'diverged');
+  assert.deepEqual(notice.subs, ['api', 'web']);
+  assert.deepEqual(notice.localOnly.map((c) => c.subject), ['Unpushed work from another session']);
+  assert.deepEqual(notice.incoming.map((c) => c.subject), ['Merged PR 2', 'Merged PR 1']);
+  assert.equal(await git(repo, 'rev-parse', 'HEAD'), localHead, 'the human\'s commit is never moved');
+  assert.deepEqual(new JobStore(f.store.file).get(f.job.id).mainNotices, job.mainNotices, 'kept across a restart');
+  assert.deepEqual(notice.resolutions.map((r) => r.id), ['rebase', 'branch'], 'stashing cannot reconcile commits, so it is not offered');
+
+  // A resolution button: refused unless offered, then spawned on the next tick in the checkout.
+  assert.throws(() => f.store.action(f.job.id, 'resolve-main', { path: notice.path, resolution: 'stash' }), /does not apply/);
+  f.store.action(f.job.id, 'resolve-main', { path: notice.path, resolution: 'rebase' });
+  assert.throws(() => f.store.action(f.job.id, 'resolve-main', { path: notice.path, resolution: 'branch' }), /already working/);
+  await f.tick();
+  assert.equal(spawned.length, 1);
+  const [s] = spawned;
+  assert.equal(s.cwd, notice.path);
+  assert.equal(s.worktree, undefined, 'the human\'s own checkout, not a worktree');
+  assert.match(s.intent, /The human chose one fix: Rebase & push\. Do exactly that/);
+  assert.match(s.intent, /git rebase --autostash origin\/main/);
+  assert.match(s.intent, /Local commits not on origin \(1\):\n {2}- [0-9a-f]{12} "Unpushed work from another session"/);
+  assert.match(s.intent, /New on origin\/main \(2\):/);
+  assert.equal(f.store.get(f.job.id).mainNotices[0].resolving.sessionId, 's_fix');
+  await f.tick();
+  assert.equal(spawned.length, 1, 'one session per press');
+  assert.equal(f.store.get(f.job.id).mainNotices.length, 1, 'kept while main is still behind');
+
+  // The session does its one fix; the next tick sees main level with origin and clears the notice.
+  await git(repo, 'pull', '-q', '--rebase', 'origin', 'main');
+  await git(repo, 'push', '-q', 'origin', 'main');
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-main', { path: notice.path }), /no longer needs updating/);
+
+  // Retry, once the human has fixed it by hand, clears it too.
+  await git(other, 'pull', '-q', 'origin', 'main');
+  await commit(other, 'pr3.js', 'Merged PR 3'); await git(other, 'push', '-q', 'origin', 'HEAD:main');
+  fs.writeFileSync(path.join(repo, 'README.md'), 'edited\n');
+  const stuck = await real.retryMain(notice);
+  assert.equal(stuck.reason, 'dirty');
+  f.store.update(f.job.id, (j) => { j.mainNotices = [{ ...stuck, subs: ['api'], at: 1, retrying: false, resolutions: [{ id: 'stash' }] }]; });
+  await git(repo, 'checkout', '--', 'README.md');
+  f.store.action(f.job.id, 'retry-main', { path: notice.path });
+  assert.equal(f.store.get(f.job.id).mainNotices[0].retrying, true);
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+});
+
+test('a resolution session that cannot start says why and offers the buttons again', async (t) => {
+  const f = fixture(t);
+  f.store.update(f.job.id, (j) => { j.mainNotices = [{ path: '/home/me/repo', base: 'main', reason: 'dirty', dirty: [{ path: 'a.js', change: 'modified' }], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 2, subs: ['api'], at: 1, retrying: false, resolutions: [{ id: 'stash' }] }]; });
+  f.runtime.resolveMain = async () => { throw new Error('no such directory'); };
+  f.store.action(f.job.id, 'resolve-main', { path: '/home/me/repo', resolution: 'stash' });
+  await f.tick();
+  const [n] = f.store.get(f.job.id).mainNotices;
+  assert.equal(n.resolving, null);
+  assert.equal(n.resolveError, 'no such directory');
+  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /Asked an agent to stash & update in \/home\/me\/repo/);
+});
+
+test('Dismiss forgets a checkout notice and records it; a failed Retry keeps it with the new state', async (t) => {
+  const f = fixture(t);
+  const notice = { path: '/home/me/repo', base: 'main', reason: 'dirty', dirty: [{ path: 'a.js', change: 'modified' }], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 0, subs: ['api'], at: 1, retrying: false };
+  f.store.update(f.job.id, (j) => { j.mainNotices = [notice]; });
+  f.runtime.retryMain = async (n) => ({ ...n, reason: 'diverged', localCount: 1, localOnly: [{ sha: 'abc', subject: 'Local' }] });
+  f.store.action(f.job.id, 'retry-main', { path: notice.path });
+  await f.tick();
+  const [kept] = f.store.get(f.job.id).mainNotices;
+  assert.equal(kept.reason, 'diverged'); assert.equal(kept.retrying, false); assert.deepEqual(kept.subs, ['api']);
+  f.store.action(f.job.id, 'dismiss-main', { path: notice.path });
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /Left \/home\/me\/repo as it was/);
 });

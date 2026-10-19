@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { DATA_DIR } from './data-dir.js';
 import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
 import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode, checkText, unansweredShow } from './jobs-schema.js';
+import { migrateTheme } from '../public/theme-ids.js';
 import { adoptEvidence } from './job-evidence.js';
 import { parkedReadyRun, askAgent } from './job-parked.js';
 import { setRunning, owe, runningOf } from './job-running.js';
@@ -10,7 +11,8 @@ import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
-import { plannerReply, humanReply, acceptIdea, unsentIdea } from './job-idea.js';
+import { resolutionsFor, resolutionLabel } from './job-main.js';
+import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
 import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
@@ -93,7 +95,7 @@ function cancelJob(j, now) {
 // Writes is only the default: a write's own `review` (true or false) beats it
 // (`writeReviewed`), so only writes without one are released, and a session
 // already drafting under it lands its drafts approved (job-writes.js applyDrafts).
-export const REVIEW_POINTS = { reviewPlan: 'Plan', reviewCode: 'Code', reviewMerge: 'Merge', reviewSessions: 'Session results', reviewWrites: 'Writes', reviewRed: 'Red steps' };
+export const REVIEW_POINTS = { reviewPlan: 'Plan', reviewCode: 'Local verification', reviewMerge: 'Merge', reviewSessions: 'Session results', reviewWrites: 'Writes', reviewRed: 'Red steps' };
 const checkpointWord = (field, you) => field === 'reviewRed' ? (you ? 'You decide' : 'Wrangler replans') : you ? 'You review' : 'Auto';
 const flagOf = (j, field) => field === 'reviewCode' ? reviewCode(j) : field === 'reviewMerge' || field === 'reviewWrites' ? !!j[field] : j[field] ?? true;
 function releaseWaiting(j, field, { plan, revision }, now) {
@@ -206,6 +208,8 @@ export function migrateJobs(raw) {
   const data = structuredClone(raw);
   data.version = CURRENT_VERSION;
   if (data.settings) drop(data.settings, 'maxRunMinutes');
+  // The board reads settings as stored, so a saved `backdrop` becomes its theme here, not only on the next save.
+  if (data.settings) data.settings = migrateTheme(data.settings);
   for (const job of data.jobs) {
     // `reviewCode` is kept: a version-1 job's flag meant the same thing — the
     // human reads the diff before it is committed — and the field is back.
@@ -294,7 +298,7 @@ export class JobStore {
       if (action === 'cancel-job') { cancelJob(j, Date.now()); return; }
       // Retry and Discard are what is left to do on a cancelled job: a refused
       // cleanup (a worktree with work not on GitHub) is still the human's to clear.
-      if (j.cancelledAt && !['retry', 'discard-worktree'].includes(action)) throw new Error('Job was cancelled');
+      if (j.cancelledAt && !['retry', 'discard-worktree', 'retry-main', 'dismiss-main', 'resolve-main'].includes(action)) throw new Error('Job was cancelled');
       // A pending plan change freezes the job where it stands: a sub-job that
       // moves on under the planner (approved, merged, marked done) is no longer
       // the job the proposal was written against.
@@ -326,10 +330,25 @@ export class JobStore {
       // New idea's conversation (job-idea.js): the human's answer to the planner, and
       // the press that turns its suggestion into the job's plan. That press is the plan
       // approval, so Plan review never asks again for the plan just accepted.
-      if (action === 'idea-reply') { humanReply(j, payload.text, Date.now()); return; }
+      if (action === 'idea-reply') { humanReply(j, payload.text, Date.now(), payload.attachments); return; }
       if (action === 'accept-idea') {
         approve(j, acceptIdea(j, payload.messageId, Date.now()));
         record(j, null, 'accept-idea', null, `Created the job from the planner's suggestion: ${quoted(j.title)}`);
+        return;
+      }
+      if (['retry-main', 'dismiss-main', 'resolve-main'].includes(action)) {
+        const notice = j.mainNotices?.find((n) => n.path === payload.path);
+        if (!notice) throw new Error('That checkout no longer needs updating');
+        if (action === 'retry-main') notice.retrying = true;
+        else if (action === 'dismiss-main') { j.mainNotices = j.mainNotices.filter((n) => n !== notice); record(j, null, 'dismiss-main', null, `Left ${notice.path} as it was`); }
+        else {
+          // One session per checkout at a time, and only a fix this notice offers.
+          if (notice.resolving) throw new Error('A session is already working on that checkout');
+          if (!resolutionsFor(notice).some((r) => r.id === payload.resolution)) throw new Error('That fix does not apply to this checkout');
+          notice.resolving = { id: payload.resolution, at: Date.now(), sessionId: null };
+          notice.resolveError = null;
+          record(j, null, 'resolve-main', null, `Asked an agent to ${resolutionLabel(payload.resolution).toLowerCase()} in ${notice.path}`);
+        }
         return;
       }
       if (action === 'pause') { j.paused = true; return; }
@@ -549,6 +568,9 @@ export class JobStore {
         if (r.phase === 'planning') { if (!j.cancelledAt) plannerReply(j, r, report, Date.now()); return; }
         return this._reply(j, r, s, report);
       }
+      // A plan would end the conversation past words the planner has not been sent
+      // yet; the runner mails them on its next tick (job-runner.js deliverIdea).
+      if (report.kind === 'plan' && r.phase === 'planning' && inConversation(j) && unsentIdea(j).length) throw new Error('The human wrote again while you were working and it is on its way to you by mail: read your mail, then reply or report the plan');
       const parked = r.parkedFor === 'ready' && r.parkedAt && !r.mailedAt;
       if (parked && report.kind === 'ready' && JSON.stringify(r.readyReport) === JSON.stringify(report)) return;
       if (parked && report.kind !== 'blocked') throw new Error('You already reported ready; wait for mail from the human');

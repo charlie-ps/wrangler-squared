@@ -15,8 +15,13 @@ import { _resetForTests, runnerFor } from './jobs.js';
 import { looksLikeQuestion } from './job-parked.js';
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png body')]);
+// As the real façade: read() sees only the kept store, keep() copies a staged paste into it.
 function hostFor(t, f, images = {}) {
-  const host = { stores: { jobs: f.store }, sessions: { get: () => null }, images: { read: (n) => images[n] || null, remove: (n) => { delete images[n]; } },
+  // As the real host (paste-store.js): `images` is the STAGING dir, which read()
+  // never sees; keep() copies a staged name into the extension's own store.
+  const kept = {};
+  const host = { stores: { jobs: f.store }, sessions: { get: () => null }, kept,
+    images: { keep: (n) => { if (!images[n]) return false; kept[n] = images[n]; return true; }, read: (n) => kept[n] || null, remove: (n) => { delete kept[n]; } },
     rebuilds: 0, broadcasts: [], log: () => {}, rebuild: async () => { host.rebuilds++; }, broadcast: (p) => host.broadcasts.push(p) };
   _resetForTests(); t.after(_resetForTests);
   runnerFor(host).tick = async () => {};
@@ -263,9 +268,29 @@ test('pasted images go to the evidence folder and the session is mailed their pa
   const [m] = f.sub().thread;
   assert.equal(m.images.length, 1); assert.match(m.images[0].file, /^ask-.*-1\.png$/);
   assert.ok(fs.existsSync(path.join(roundDir(f.job.id, 'api', 1), m.images[0].file)));
-  assert.deepEqual(Object.keys(images), [], 'the staged copy is released');
+  assert.deepEqual(Object.keys(host.kept), [], 'the kept copy is released once it is beside the round');
   const text = threadMail(f.store.get(f.job.id), f.run(), f.sub(), [m]);
   assert.ok(text.includes(path.join(roundDir(f.job.id, 'api', 1), m.images[0].file)));
+});
+
+test('an image that cannot be kept refuses the idea out loud, so nothing the human saw is quietly dropped', async (t) => {
+  const f = fixture(t); await f.start(); await f.ready();
+  const host = hostFor(t, f, {});
+  const view = changeView(f.store.get(f.job.id), f.sub());
+  await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: view.at, ref: view.ref, text: 'See attached', images: ['gone.png'] }, host);
+  assert.deepEqual(host.broadcasts.at(-1), { event: 'job-action-failed', jobId: f.job.id, action: 'request-change', subJobId: 'api', error: 'An attached image could not be kept. Attach it again.' });
+  assert.equal(f.store.get(f.job.id).replan, undefined, 'the planner is not handed an idea missing its picture');
+  assert.equal(fs.existsSync(roundDir(f.job.id, 'api', 1)) && fs.readdirSync(roundDir(f.job.id, 'api', 1)).some((n) => n.startsWith('ask-')), false);
+});
+
+test('a pasted WebP is kept like any other picture', async (t) => {
+  const f = fixture(t); await f.start(); await f.ready();
+  const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.from([8, 0, 0, 0]), Buffer.from('WEBPVP8 ')]);
+  const host = hostFor(t, f, { 'pasted.webp': { mime: 'image/webp', bytes: webp } });
+  const view = changeView(f.store.get(f.job.id), f.sub());
+  await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: view.at, ref: view.ref, text: 'See attached', images: ['pasted.webp'] }, host);
+  assert.equal(host.broadcasts.at(-1).event, 'job-action-complete');
+  assert.deepEqual(fs.readdirSync(roundDir(f.job.id, 'api', 1)).filter((n) => n.startsWith('ask-')).map((n) => path.extname(n)), ['.webp']);
 });
 
 test('an idea for the planner keeps its pasted images too, and hands the planner their paths in the words', async (t) => {
@@ -281,7 +306,7 @@ test('an idea for the planner keeps its pasted images too, and hands the planner
   assert.ok(job.replan.feedback.startsWith('Split web in two\n(Pasted images, read them: '));
   assert.ok(job.replan.feedback.includes(JSON.stringify(path.join(ideasDir(f.job.id), file))));
   assert.equal(job.moves.at(-1).note, 'Split web in two', 'the history keeps the words, not the paths');
-  assert.deepEqual(Object.keys(images), [], 'the staged copy is released');
+  assert.deepEqual(Object.keys(host.kept), [], 'the kept copy is released');
 });
 
 test('a plan change that reworks the sub-job ends the parked session and starts a new one', async (t) => {

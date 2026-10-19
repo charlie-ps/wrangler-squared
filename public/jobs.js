@@ -53,8 +53,8 @@ const several = (n, one, many) => n === 1 ? one : `${n} ${many}`;
 export const CHECKPOINTS = [
   { field: 'reviewPlan', icon: 'doc', name: 'Plan', unit: 'plan', you: 'You approve the plan before any ticket, PR or session starts', auto: 'Work starts as soon as the plan is drafted',
     wait: () => 'The plan is waiting for your approval.', yes: () => 'Approve the plan and start', done: () => 'Plan approved, work starting' },
-  { field: 'reviewCode', icon: 'code', name: 'Code', unit: 'PR', you: 'You see each PR working and read its diff before it’s committed', auto: 'The agent commits and opens the PR without a diff review',
-    wait: (n) => `${several(n, 'A diff is', 'diffs are')} waiting for your review.`, yes: (n) => `Commit and open ${several(n, 'the PR', 'PRs')}`, done: (n) => `${several(n, 'The diff is', 'diffs are')} being committed and opened as PRs` },
+  { field: 'reviewCode', icon: 'code', name: 'Local verification', unit: 'PR', you: 'You see each PR working locally (screenshots, live service, diff) before it’s committed', auto: 'The agent commits and opens the PR without you seeing it run',
+    wait: (n) => `${several(n, 'A PR is', 'PRs are')} working locally and waiting for you to verify ${n === 1 ? 'it' : 'them'}.`, yes: (n) => `Commit and open ${several(n, 'the PR', 'PRs')}`, done: (n) => `${several(n, 'The diff is', 'diffs are')} being committed and opened as PRs` },
   { field: 'reviewMerge', icon: 'merge', name: 'Merge', unit: 'PR', you: 'You approve each PR once its checks pass', auto: 'PRs merge once checks pass, unless a reviewer leaves blocking comments',
     wait: (n) => `${several(n, 'A PR has', 'PRs have')} passing checks and ${n === 1 ? 'is' : 'are'} waiting for Approve merge.`, yes: (n) => `Merge ${several(n, 'the PR', 'PRs')}`, done: (n) => `${several(n, 'The PR merges', 'PRs merge')} on the next poll, unless a reviewer leaves blocking comments` },
   { field: 'reviewSessions', icon: 'robot', name: 'Session results', unit: 'session receipt', you: 'You approve each session’s receipt before it counts as done', auto: 'A session counts as done once it reports',
@@ -282,6 +282,13 @@ export const cancelledDependencies = (job, sub) => [...(triggerDropped(job, sub)
 // session or human task once it reached done.
 export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : dep.stage === 'done' && !dep.cancelledAt;
 export const pendingDependencies = (job, sub) => sub.after.map((id) => job.subJobs.find((s) => s.id === id)).filter((d) => !dependencySatisfied(d));
+// Mirrors server/job-prompts.js upstreamOf from the other end: an approval note
+// is read only by an agent step that has this one in its transitive `after`.
+export const noteReaders = (job, sub) => {
+  const byId = new Map(job.subJobs.map((s) => [s.id, s]));
+  const reaches = (s, seen = new Set()) => (s?.after || []).some((id) => id === sub.id || (!seen.has(id) && seen.add(id) && reaches(byId.get(id), seen)));
+  return job.subJobs.filter((s) => s.id !== sub.id && !s.cancelledAt && !isWriteSub(s) && !isHumanSub(s) && reaches(s));
+};
 // A session parked on its ready receipt (server/job-parked.js) is only waiting on
 // the human, so it is not a running step until a message to it is in flight.
 const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null) && !(r.parkedFor === 'ready' && !sub?.answering) && !(r.parkedFor === 'idea' && ideaStage(job) !== 'thinking'));

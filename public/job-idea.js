@@ -58,7 +58,11 @@ export function suggestionHtml(job, msg, state = 'live') {
     <div class="job-launch-fine"><span>${fine}</span>${state === 'live' ? '<button type="button" class="job-launch-refine" data-idea-refine>Keep refining</button>' : ''}</div></div>`;
 }
 
-const humanHtml = (text, at, extra = '') => `<div class="job-sent ${extra}"><div class="job-sent-bubble"><span>${esc(text)}</span></div><span class="job-sent-meta">You${at ? ` · ${esc(time(at))}` : ''}</span></div>`;
+const humanHtml = (text, at, extra = '', pics = '') => `<div class="job-sent ${extra}"><div class="job-sent-bubble">${pics}<span>${esc(text)}</span></div><span class="job-sent-meta">You${at ? ` · ${esc(time(at))}` : ''}</span></div>`;
+// A sent message's pictures are kept server-side: placeholders the dialog fills from
+// a job-images frame (jobs-view.js hydrateStrips), as the job's own strip is.
+const keptPics = (job, m) => m.images?.length ? `<div class="job-image-strip job-sent-strip" data-strip="${esc(job.id)}">${m.images.map((i, n) => `<button type="button" class="job-image-thumb" data-image="${esc(`idea:${i.file}`)}" aria-label="Enlarge image ${n + 1}"><span class="job-image-num">${n + 1}</span></button>`).join('')}</div>` : '';
+const pendingPics = (urls = []) => urls.length ? `<span class="job-sent-imgs">${urls.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
 const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh ? ' fresh' : ''}" data-msg="${esc(m.id)}"><span class="job-idea-orb" aria-hidden="true"></span><div><div class="job-idea-who">Planner<time>${esc(time(m.at))}</time></div><div class="job-idea-body chat-prose">${markdownHtml(m.text)}</div>${launch}</div></div>`;
 
 // `pending` is the reply this tab just sent, drawn until the thread holds it; `firing`
@@ -68,19 +72,23 @@ export function ideaThreadHtml(job, { pending = null, firing = null, fresh = () 
   const thread = ideaThread(job), live = liveSuggestion(job);
   const rows = [humanHtml(job.intent, job.createdAt)];
   for (const m of thread) {
-    if (m.from === 'human') { rows.push(humanHtml(m.text, m.at)); continue; }
+    if (m.from === 'human') { rows.push(humanHtml(m.text, m.at, '', keptPics(job, m))); continue; }
     const state = !m.suggest ? null : m.acceptedAt || firing?.state === 'sent' && firing.id === m.id ? 'done' : firing?.id === m.id ? 'firing' : m === live ? 'live' : 'stale';
     rows.push(plannerHtml(job, m, state ? suggestionHtml(job, m, state) : '', fresh(m.id)));
   }
   const held = pending && !thread.some((m) => m.from === 'human' && m.text === pending.text && m.at >= pending.at - 60000);
-  if (held) rows.push(humanHtml(pending.text, pending.at, `fresh ${pending.state === 'failed' ? 'failed' : 'sending'}`));
+  if (held) rows.push(humanHtml(pending.text, pending.at, `fresh ${pending.state === 'failed' ? 'failed' : 'sending'}`, pendingPics(pending.images)));
   if (ideaStage(job) === 'thinking' || held && pending.state !== 'failed') rows.push(`<div class="job-idea-thinking"><span class="job-idea-orb small" aria-hidden="true"></span><span class="job-idea-shine">${thread.length ? 'Planner is thinking…' : 'Planner is reading the idea…'}</span></div>`);
   return `<div class="job-idea-thread" aria-live="polite">${rows.join('')}</div>`;
 }
 
-export function ideaComposerHtml(draft = '') {
+// `tray` is the change box's own picture tray (jobs-view.js askTrayHtml), so a
+// screenshot pastes, drops and attaches here as it does on a step.
+export function ideaComposerHtml(draft = '', tray = '') {
   return `<div class="job-change job-idea-composer is-open" data-idea-composer>
-    <div class="job-change-row"><span class="job-change-to" title="Who hears it"><span class="job-idea-orb small" aria-hidden="true"></span>To planner</span><textarea rows="1" maxlength="8000" placeholder="Reply, or ask for a change to the suggestion…" aria-label="Reply to the planner">${esc(draft)}</textarea><button type="button" class="job-change-go" data-idea-send aria-label="Send to the planner" title="Send (↵)" ${draft.trim() ? '' : 'disabled'}>${ICONS.send}</button></div>
+    <ul class="job-change-tray" ${tray ? '' : 'hidden'}>${tray}</ul>
+    <div class="job-change-row"><span class="job-change-to" title="Who hears it"><span class="job-idea-orb small" aria-hidden="true"></span>To planner</span><textarea rows="1" maxlength="8000" placeholder="Reply, or ask for a change to the suggestion…" aria-label="Reply to the planner">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-idea-send aria-label="Send to the planner" title="Send (↵)" ${draft.trim() ? '' : 'disabled'}>${ICONS.send}</button></div>
+    <p class="job-change-error" role="alert" hidden></p>
     <div class="job-change-foot"><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 }
 
@@ -94,11 +102,11 @@ export const TITLE_FADE_MS = 1100;
 // The whole dialog body for an idea still being talked through. `cost` and `actions`
 // are the job dialog's own (price chip, Cancel), passed in.
 // `titled`: ms since the title replaced the loader while the two still cross-fade, else false.
-export function ideaViewHtml(job, { cost = '', actions = '', error = '', pending = null, firing = null, fresh, draft = '', titled = false } = {}) {
+export function ideaViewHtml(job, { cost = '', actions = '', error = '', pending = null, firing = null, fresh, draft = '', tray = '', titled = false } = {}) {
   const stage = ideaStage(job) || 'thinking';
   const title = job.titlePending ? `<h2 class="pending" aria-busy="true">${titleLoaderHtml()}</h2>` : titled !== false ? `<h2 class="titled" style="--fade-at:-${titled}ms"><span>${esc(job.title)}</span>${fadingLoader}</h2>` : `<h2>${esc(job.title)}</h2>`;
   return `<div class="job-idea">
     <header class="job-idea-band" data-spin="24">${inflowHtml(job.id, STAGE_SKY[stage] ?? 0)}<div>${title}</div>${cost}</header>${error}
     ${ideaThreadHtml(job, { pending, firing, fresh })}
-    <div class="job-idea-dock">${ideaComposerHtml(draft)}${actions ? `<div class="job-actions">${actions}</div>` : ''}</div></div>`;
+    <div class="job-idea-dock">${ideaComposerHtml(draft, tray)}${actions ? `<div class="job-actions">${actions}</div>` : ''}</div></div>`;
 }

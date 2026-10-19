@@ -217,6 +217,17 @@ feature).
   The board gets bytes only as `job-evidence` frames (thumbnails via `sips`), cached
   in `public/job-proof.js`. A sub-job with `show` items reports `ready` even with
   Code on Auto (`leavesUncommitted`), so the proof is kept.
+- **Fast-forward main never blocks a sub-job** (`server/job-main.js`). The global
+  `settings.updateMain` ("Keep local main updated", on by default; a job's old `updateMain` is
+  ignored) is handed to cleanup by the runner, and the update returns, never throws: a clean
+  checkout on the base merges `--ff-only`, one on another branch gets `git fetch origin
+  <base>:<base>`, and a dirty or diverged one (or any git error) becomes a notice in
+  `job.mainNotices`, one per checkout path (`noteMain` merges sub-jobs and clears it on a later
+  success). Each notice offers the fixes `resolutionsFor` allows (rebase & push, move commits to a
+  branch, stash & update). `retry-main` and `resolve-main` only flag it; the runner's `tendMain`
+  acts on the next tick, finished or paused jobs included: it spawns the fix's session (a plain
+  one in the checkout, briefed by `resolvePrompt` with only that fix) inside the tick so no
+  `pendingLaunch` is in flight, then clears the notice once local `<base>` equals origin's.
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one
@@ -227,6 +238,19 @@ feature).
   "Launches" line (`public/job-sandbox.js`) mirrors `CODEX_POLICY`, so change
   them together.
 - **New job's model picker is `public/model-picker.js` over `public/model-plates.js`.** It owns no form state: it reports `{ agent, model, effort }` through `onChange` into hidden inputs, so `form.onsubmit` and the `job-create` payload are untouched, and creating a job saves `settings.usualPick`. `describe()` must never invent a version from an alias (gap 18 in `docs/PORTING.md`). A galaxy plate is exactly one rAF loop, stopped by `dispose()`/re-render; art colours are fixed, chrome is board variables, except Claude's cabinet and ticket, whose launch-page near-black/ivory follows core's `body.light`. Each Claude plate declares its own noise filters (`fx()`), so plates never share an SVG id.
+- **A theme is one `public/themes.js` entry, one `[data-theme="<id>"]` block of `--jt-*` tokens in
+  `jobs.css` and its id in `public/theme-ids.js`** (which the server schema also reads, and whose
+  `migrateTheme` turns a saved `backdrop`/top-level `plateArt` into `theme`/`themeOptions`, so a board
+  from before themes keeps Space; anything else gets `DEFAULT_THEME`, Wrangler).
+  `themes.test.js` holds every block to Space's token set, so never style a theme by excluding another
+  (`:not([data-theme…])`) or read a `--jt-*` token Space does not set. `applyViewTheme` stamps
+  `data-theme` (and `data-scheme="dark"` for a forced-dark theme) on `#jobs` and every dialog on
+  `<body>`; a theme's `mount` is its only live art, so a theme without one runs no animation loop.
+  Theme-only options live in `settings.themeOptions[id]` and must be listed in the server schema.
+  The picker (`public/theme-picker.js`) saves each choice at once; Save settings never sends the theme.
+  A theme draws no picture of its own: the picker shows the real masthead and plates in its tokens
+  (`public/theme-preview.js`), with the plates' buttons and links turned to spans (`inert`), since the
+  picker's own buttons wrap them.
 - **What's new is `public/updates.js`'s `UPDATES`, oldest first.** A bigger release appends `{ id, date, title, body }` (our own copy; optional `icon`, `tone`, `figure`, `anim`); every unseen one opens in one run, oldest first, and closing it records them all under `updatesSeen`. A first-run reader gets the intro instead, and closing that counts every current update seen, so an id must never be reused.
 - **Client modules import their leaves RELATIVELY** (`./util.js`, `./icons.js`,
   vendored) rather than from the board by absolute URL, so the same files load

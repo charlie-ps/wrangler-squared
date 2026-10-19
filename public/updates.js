@@ -3,6 +3,7 @@ import { SHOTS, proofFigure, runningBar } from './figs.js';
 import { plateHtml } from './job-plates.js';
 import { ideaThreadHtml } from './job-idea.js';
 import { mountSkies, releaseSkies } from './job-skylines.js';
+import { applyTheme } from './themes.js';
 
 // What's new: a splash for each bigger release, shown once per browser, and the
 // list Automation settings reads to show any of them again. Seen ids live in the
@@ -34,7 +35,7 @@ const DESIGN = scenes([
 ]);
 function designFigure(phase) {
   const f = DESIGN[phase];
-  const mock = [['warn', 'Plan', true], ['warn', 'Code', true], ['idle', 'Merge', false], ['idle', 'Writes', false]]
+  const mock = [['warn', 'Plan', true], ['warn', 'Local verification', true], ['idle', 'Merge', false], ['idle', 'Writes', false]]
     .map(([t, n, on]) => `<div class="wn-art-cp tone-${t}"><i></i><span>${n}</span><span class="wn-art-tg${on ? ' on' : ''}"></span></div>`).join('');
   const body = f.view === 'live' ? `<div class="wn-art-title wn-fade">Checkpoint buttons</div><div class="wn-art-mock wn-fade">${mock}</div>`
     : f.view === 'draft' ? '<div class="wn-art-sk" style="width:55%"></div><div class="wn-art-sk"></div><div class="wn-art-sk" style="width:80%"></div><div class="wn-art-sk" style="width:65%"></div>' : '';
@@ -422,6 +423,7 @@ export function createUpdates({ storage, updates = UPDATES }) {
     at = 0;
     phase = list[0].anim && still() ? list[0].anim.still ?? 0 : 0;
     render();
+    applyTheme(dialog);
     if (!dialog.open) dialog.showModal();
     return true;
   }

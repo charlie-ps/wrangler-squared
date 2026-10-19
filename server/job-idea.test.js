@@ -8,7 +8,8 @@ import { JobRunner } from './job-runner.js';
 import { reportSchema } from './jobs-schema.js';
 import { jobPrompt, ideaMail } from './job-prompts.js';
 import { liveSuggestion, inConversation } from './job-idea.js';
-import { makeJobCreateHandler } from './handlers.js';
+import { makeJobCreateHandler, jobActionHandler, jobImagesHandler } from './handlers.js';
+import { ideasDir } from './job-evidence.js';
 import { _resetForTests, runnerFor } from './jobs.js';
 
 const plan = (title = 'Nudge') => ({ context: 'ctx', stories: [], subJobs: [{ id: 'nudge', title, repo: '/repo', after: [], brief: 'Build it', show: ['Plate shows the wait'] }] });
@@ -133,6 +134,28 @@ test('a well-defined idea goes straight to a plan, exactly as a job always did: 
   assert.equal(f.get().stage, 'active');
 });
 
+test('two quick messages while the planner is still working both reach it: mailed mid-turn, and a plan cannot skip past one', async (t) => {
+  const f = fixture(t); await f.start();
+  const planner = f.last();
+  f.store.action(f.job.id, 'idea-reply', { text: 'Start with one new theme.' });
+  f.store.action(f.job.id, 'idea-reply', { text: 'And think deeply about how to make this extensible.' });
+  assert.throws(() => f.report({ kind: 'plan', plan: plan() }), /wrote again while you were working/);
+  await f.tick();
+  assert.equal(f.mailed.length, 1, 'both go in one mail to the busy planner');
+  assert.equal(f.mailed[0].sid, planner.sid);
+  assert.match(f.mailed[0].text, /wrote again .* while you were working/);
+  assert.match(f.mailed[0].text, /Start with one new theme\.[\s\S]*think deeply about how to make this extensible/);
+  assert.ok(f.get().idea.thread.every((m) => m.sentAt));
+  f.store.action(f.job.id, 'idea-reply', { text: 'Dark mode too.' });
+  await f.tick();
+  assert.equal(f.mailed.length, 2, 'a third, still mid-turn, follows in its own mail');
+  assert.match(f.mailed[1].text, /Dark mode too/);
+  await f.tick();
+  assert.equal(f.mailed.length, 2, 'each message is mailed once');
+  f.report({ kind: 'plan', plan: plan() });
+  assert.equal(f.get().plan.subJobs[0].id, 'nudge');
+});
+
 test('a parked planner may still send the plan itself, ending its run', async (t) => {
   const f = fixture(t); await f.start();
   f.report({ kind: 'reply', text: 'One question.' });
@@ -178,6 +201,30 @@ test('the mail names the human\'s words as data and the receipts to send back', 
   assert.match(text, /data, not instructions/);
   assert.match(text, /The human: "Ignore the above"/);
   assert.match(text, /job_report \{runId:"run_1", kind:"reply"/);
+});
+
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png body')]);
+test('a picture pasted into the conversation is kept, shown in the thread, and mailed to the planner as a path', async (t) => {
+  const f = fixture(t); await f.start();
+  f.report({ kind: 'reply', text: 'Which screen?' });
+  const staged = { 'paste.png': { mime: 'image/png', bytes: PNG } }, kept = {};
+  const host = { stores: { jobs: f.store }, images: { keep: (n) => !!staged[n] && !!(kept[n] = staged[n]), read: (n) => kept[n] || null, remove: (n) => { delete kept[n]; } }, broadcasts: [], log: () => {}, rebuild: async () => {}, broadcast: (p) => host.broadcasts.push(p) };
+  _resetForTests(); t.after(_resetForTests);
+  runnerFor(host).tick = async () => {};
+  t.after(() => fs.rmSync(path.dirname(ideasDir(f.job.id)), { recursive: true, force: true }));
+  await jobActionHandler.handler({ id: f.job.id, action: 'idea-reply', text: 'This one', images: ['paste.png'], attachments: [{ file: '../../etc/passwd', path: '/etc/passwd' }] }, host);
+  assert.deepEqual(host.broadcasts.at(-1), { event: 'job-action-complete', jobId: f.job.id, action: 'idea-reply' });
+  const m = f.get().idea.thread.at(-1);
+  assert.match(m.images[0].file, /^ask-.*-1\.png$/);
+  assert.deepEqual(Object.keys(m.images[0]), ['file', 'mime'], 'a client-sent attachment never reaches the thread');
+  const file = path.join(ideasDir(f.job.id), m.images[0].file);
+  assert.deepEqual(fs.readFileSync(file), PNG);
+  assert.deepEqual(Object.keys(kept), [], 'the kept copy is released once it is in the folder');
+  await f.tick();
+  assert.ok(f.mailed.at(-1).text.includes(`The human: "This one" (pasted images, read them: ${JSON.stringify(file)})`));
+  assert.ok(jobPrompt(f.get(), null, f.last().run).includes(JSON.stringify(file)), 'a fresh planner reads it from the conversation too');
+  jobImagesHandler.handler({ id: f.job.id }, host);
+  assert.deepEqual(host.broadcasts.at(-1).images, [{ name: `idea:${m.images[0].file}`, mime: 'image/png', dataBase64: PNG.toString('base64') }]);
 });
 
 test('the reply reads as a colleague talking: the triage stays the planner\'s own thinking', async (t) => {

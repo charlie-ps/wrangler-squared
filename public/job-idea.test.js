@@ -17,19 +17,19 @@ const ideaJob = (thread = [], runs = [parked()]) => ({ id: 'idea1', title: 'Nudg
   subJobs: [], runs, moves: [], revision: 3, createdAt: 1, reviewPlan: true, idea: { thread } });
 const asked = { id: 'm1', at: 2, from: 'planner', text: 'Two choices change the work:\n\n1. Which wait counts?\n2. Where should the nudge land?' };
 
-function fixture(t, jobs) {
+function fixture(t, jobs, { stageImage = async () => ({ name: 'x' }) } = {}) {
   const window = new Window({ url: 'http://localhost:7878' });
   const prevDoc = globalThis.document, prevFormData = globalThis.FormData, prevCSS = globalThis.CSS;
   globalThis.document = window.document; globalThis.FormData = window.FormData; globalThis.CSS = { escape: (v) => String(v) };
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
-  const sent = [];
-  const view = initJobsView({ send: (m) => sent.push(structuredClone(m)), stageImage: async () => ({ name: 'x' }), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [] }], onSession: () => {}, onDiff: () => {}, onBoard: () => true });
+  const sent = [], toasts = [];
+  const view = initJobsView({ toast: (m) => toasts.push(m), send: (m) => sent.push(structuredClone(m)), stageImage: (b) => stageImage(b), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [] }], onSession: () => {}, onDiff: () => {}, onBoard: () => true });
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; globalThis.CSS = prevCSS; await window.happyDOM.close(); });
   const data = { jobs, settings: { concurrency: 2, maxRepairs: 2 } };
   view.update(data);
   const q = (s) => document.querySelector(s);
   const key = (el, k, extra = {}) => el.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...extra }));
-  return { window, view, data, sent, q, key };
+  return { window, view, data, sent, toasts, q, key };
 }
 
 test('New idea replaces New job: the button, the form, and a create that asks the planner to triage', (t) => {
@@ -86,6 +86,52 @@ test('a vague idea is its conversation: the planner\'s reply, escaped, and Enter
   assert.equal([...f.q('#job-dialog').querySelectorAll('.job-sent-bubble')].filter((b) => b.textContent === 'Green and unmerged for a day.').length, 1, 'never twice once the thread has it');
 });
 
+test('a screenshot pasted into the idea\'s reply box waits in its tray, holds Send until it lands, and stays in the thread once sent', async (t) => {
+  let release;
+  const f = fixture(t, [ideaJob([asked])], { stageImage: () => new Promise((r) => { release = () => r({ name: 'paste-1700000000000-cccc3333.png' }); }) });
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const box = f.q('[data-idea-composer]'), text = box.querySelector('textarea');
+  assert.ok(box.querySelector('.job-change-attach input[type="file"]'), 'a picture can be picked as well as pasted or dropped');
+  const e = new f.window.Event('paste', { bubbles: true, cancelable: true }); e.clipboardData = { files: [new f.window.File(['x'], 'Screenshot.png', { type: 'image/png' })], items: [], types: ['Files'], getData: () => '' };
+  text.dispatchEvent(e);
+  assert.equal(e.defaultPrevented, true);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(box.querySelectorAll('.job-change-tray li.uploading').length, 1);
+  assert.equal(box.querySelector('[data-idea-send]').disabled, true, 'not while it is still travelling');
+  f.view.update(f.data);
+  assert.equal(f.q('[data-idea-composer]'), box, 'a tick leaves a box holding only a picture alone');
+  text.value = 'Like this, but lighter'; text.dispatchEvent(new f.window.Event('input'));
+  assert.equal(box.querySelector('[data-idea-send]').disabled, true);
+  f.key(text, 'Enter');
+  assert.equal(f.sent.filter((m) => m.action === 'idea-reply').length, 0, 'Enter waits for it too');
+  release(); await new Promise((r) => setTimeout(r, 0));
+  assert.equal(box.querySelector('[data-idea-send]').disabled, false);
+  f.key(text, 'Enter');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'idea-reply', text: 'Like this, but lighter', images: ['paste-1700000000000-cccc3333.png'] });
+  assert.equal([...f.q('#job-dialog').querySelectorAll('.job-sent-imgs img')].length, 1, 'the picture rides up into the bubble');
+  assert.equal(f.q('[data-idea-composer] .job-change-tray').hidden, true, 'the tray empties once sent');
+  f.data.jobs[0].idea.thread.push({ id: 'm2', at: Date.now(), from: 'human', text: 'Like this, but lighter', images: [{ file: 'ask-abc-1.png', mime: 'image/png' }], sentAt: null });
+  f.view.update(f.data);
+  const strip = f.q('#job-dialog .job-sent-strip');
+  assert.equal(strip.querySelector('[data-image]').dataset.image, 'idea:ask-abc-1.png');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-images', id: 'idea1' }, 'the kept copy is asked for');
+  f.view.images({ jobId: 'idea1', images: [{ name: 'idea:ask-abc-1.png', mime: 'image/png', dataBase64: 'cG5n' }] });
+  assert.equal(f.q('#job-dialog .job-sent-strip img').src, 'data:image/png;base64,cG5n');
+});
+
+test('a picture that fails to upload says so rather than vanishing', async (t) => {
+  const f = fixture(t, [ideaJob([asked])], { stageImage: async () => { throw new Error('too big'); } });
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const text = f.q('[data-idea-composer] textarea');
+  const e = new f.window.Event('paste', { bubbles: true, cancelable: true }); e.clipboardData = { files: [new f.window.File(['x'], 'Screenshot.png', { type: 'image/png' })], items: [], types: ['Files'], getData: () => '' };
+  text.dispatchEvent(e);
+  await new Promise((r) => setTimeout(r, 0)); await new Promise((r) => setTimeout(r, 0));
+  assert.ok(f.q('[data-idea-composer] .job-image.failed'), 'the failed picture stays in the tray');
+  assert.match(f.q('[data-idea-composer] .job-change-error').textContent, /Couldn’t attach this image: too big/);
+  text.value = 'See this'; text.dispatchEvent(new f.window.Event('input'));
+  assert.equal(f.q('[data-idea-send]').disabled, true, 'Send waits until it is retried or removed');
+});
+
 test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos, and the hole that creates it', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = fixture(t, [ideaJob([asked, { id: 'm2', at: 3, from: 'human', text: 'Plate first', sentAt: 3 }, { id: 'm3', at: 4, from: 'planner', text: 'That is enough to plan.', suggest }])]);
@@ -105,15 +151,39 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3' });
   assert.ok(f.q('.job-launch').classList.contains('done'));
   f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
-  assert.ok(f.q('#job-dialog').open, 'the dialog stays for the job');
+  assert.equal(f.q('#job-dialog').open, false, 'the dialog closes onto the board, where the job forms');
   const subJobs = suggest.plan.subJobs.map((s) => ({ sessions: [], repairs: [], ...s, stage: 'queued' }));
   Object.assign(f.data.jobs[0], { title: suggest.title, plan: suggest.plan, stage: 'active', approvedAt: 5, subJobs, runs: [parked({ stopped: true })] });
   f.data.jobs[0].idea.thread[2].acceptedAt = 5;
   f.view.update(f.data);
+  f.q('[data-board="idea1"] .job-plate-open').click();
   assert.equal(f.q('#job-dialog .job-idea'), null, 'the job takes over');
   assert.equal(f.q('#job-dialog [data-action="approve-plan"]'), null, 'creating it approved the plan: nothing to approve again');
   assert.ok(f.q('#job-dialog details[data-keep="idea"] .job-launch.done'), 'the conversation is folded under the job');
   assert.notEqual(f.q('[data-board="idea1"] .job-status').textContent, 'Plan ready');
+});
+
+test('a refused Create job leaves the dialog open and stops flaring', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }])]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  f.q('[data-accept-idea]').click();
+  t.mock.timers.tick(900);
+  f.view.ideaFailed({ event: 'job-action-failed', jobId: 'idea1', action: 'accept-idea', error: 'Suggestion moved' });
+  assert.ok(f.q('#job-dialog').open);
+  assert.ok(f.q('.job-launch').classList.contains('live'), 'pressable again');
+});
+
+test('a Create job confirmed after the human opened another job leaves that job open', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const other = { ...ideaJob([asked]), id: 'idea2' };
+  const f = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]), other]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  f.q('[data-accept-idea]').click();
+  t.mock.timers.tick(900);
+  f.view.openDetail('idea2');
+  f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
+  assert.ok(f.q('#job-dialog').open);
 });
 
 test('a suggestion something newer was said after is stale and cannot be pressed', (t) => {
@@ -176,6 +246,8 @@ test('an accepted idea becomes a job plate, forming its black hole from the clou
   t.after(() => { globalThis.matchMedia = prevMatch; });
   const idea = ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]);
   const f = fixture(t, [idea]);
+  // The collapse is Space's: a theme with no plate art has no cloud or hole to form.
+  f.data.settings.theme = 'space'; f.view.update(f.data);
   assert.ok(f.q('[data-board="idea1"]').classList.contains('idea'));
   Object.assign(f.data.jobs[0], { plan: suggest.plan, title: suggest.title, runs: [{ ...parked(), stopped: true }] });
   f.data.jobs[0].idea.thread[0].acceptedAt = 5;
