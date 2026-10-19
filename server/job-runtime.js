@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { runFile } from './job-github.js';
 import { jobPrompt, placeholderBranch } from './job-prompts.js';
-import { removeWorktree, gitRepoRoot } from './git.js';
+import { removeWorktree, gitRepoRoot, stderrLine } from './git.js';
 import { updateMainCheckout, resolvePrompt, caughtUp } from './job-main.js';
 import { targetOf } from './jobs-schema.js';
 import { checkoutsDir } from './data-dir.js';
@@ -389,13 +389,23 @@ export class JobRuntime {
   async cleanupWorktree(wt, expectedHead, { mergedHead, base, discard, tree = true } = {}) {
     if (!expectedHead && !discard) throw new Error('Cannot clean up without the verified branch head');
     const ref = `refs/heads/${wt.branch}`;
-    let head = null;
+    // The branch value the tree's inspection answered for, so the ref is
+    // compared again below only if it says something the tree did not.
+    let covered = null;
     if (fs.existsSync(wt.path)) {
-      const branch = await this.run('git', ['symbolic-ref', 'HEAD'], wt.path);
-      if (branch !== ref) throw new Error('Worktree has changed since verification; preserve it for review');
-      head = await this.run('git', ['rev-parse', 'HEAD'], wt.path);
+      const head = await this.run('git', ['rev-parse', 'HEAD'], wt.path).catch((e) => {
+        const why = stderrLine(e) || 'no HEAD';
+        throw new CleanupRefused(`Worktree at ${wt.path} could not be read by git (${why}); preserve it for review`, { path: wt.path, branch: wt.branch, head: null,
+          cause: 'unreadable', error: why, pinned: false, commits: [], commitCount: 0, files: [], fileCount: 0 });
+      });
+      // `-q` exits 1 quietly on a detached HEAD (a rebase stopped part-way, a
+      // checkout of a commit): that is a refusal with its Discard, not a crash.
+      const branch = await this.run('git', ['symbolic-ref', '-q', 'HEAD'], wt.path).catch(() => '');
+      if (branch && branch !== ref) throw new Error('Worktree has changed since verification; preserve it for review');
+      const detached = branch ? null : { state: await this.inProgress(wt.path), branchHead: await this.run('git', ['for-each-ref', '--format=%(objectname)', ref], wt.repoRoot) };
       const status = tree ? await this.run('git', ['status', '--porcelain=v2', '-z', '--untracked-files=all'], wt.path) : '';
-      const discarded = await this.assertDisposable(wt, { head, status, files: parseStatus(status) }, expectedHead, { mergedHead, base, discard });
+      const discarded = await this.assertDisposable(wt, { head, status, files: parseStatus(status), detached }, expectedHead, { mergedHead, base, discard });
+      covered = detached ? detached.branchHead : head;
       // Only a matched Discard forces: otherwise git itself refuses a tree that
       // gained work after the inspection above (a planning tree is scratch).
       // Git also refuses any tree holding a submodule unforced, so for that one
@@ -412,7 +422,7 @@ export class JobRuntime {
     if (trees.split('\n').includes(`branch ${ref}`)) throw new Error('Branch is in use by another worktree');
     const existing = await this.run('git', ['for-each-ref', '--format=%(objectname)', ref], wt.repoRoot);
     if (!existing) return;
-    if (existing !== head) await this.assertDisposable(wt, { head: existing, status: '', files: [] }, expectedHead, { mergedHead, base, discard });
+    if (existing !== covered) await this.assertDisposable(wt, { head: existing, status: '', files: [] }, expectedHead, { mergedHead, base, discard });
     await this.run('git', ['update-ref', '-d', ref, existing], wt.repoRoot);
   }
 
@@ -421,27 +431,43 @@ export class JobRuntime {
   // covers everything the refusal listed — the raw status (staged blob ids and
   // modes included), the files' contents, every lost commit and whether origin
   // could be confirmed — so a Discard never deletes more than the human saw.
-  async assertDisposable(wt, { head, status, files }, expectedHead, { mergedHead, base, discard }) {
-    if (!discard && !files.length && head === expectedHead) return false;
+  // A detached tree is never disposable unasked: whatever it was doing (a rebase
+  // stopped part-way) is the human's to see, so it is refused even with nothing
+  // to lose, and its pin also covers the branch ref it left behind, whose
+  // commits are compared alongside the detached head's.
+  async assertDisposable(wt, { head, status, files, detached = null }, expectedHead, { mergedHead, base, discard }) {
+    if (!discard && !detached && !files.length && head === expectedHead) return false;
+    const tips = [head, detached?.branchHead].filter(Boolean);
     // At the verified head, or behind the merged one, there is nothing to
     // compare, so a dirty tree is refused (with its Discard) even when origin's
     // default branch is unknowable.
-    const retained = head === expectedHead || (!!mergedHead && await this.isMergedAncestor(head, mergedHead, wt.repoRoot));
+    const retained = !detached && (head === expectedHead || (!!mergedHead && await this.isMergedAncestor(head, mergedHead, wt.repoRoot)));
     const target = retained ? base || null : base || await this.defaultBranch(wt.repoRoot);
-    const { commits, stale } = retained ? { commits: [], stale: false } : await this.unmergedCommits(wt.repoRoot, head, target);
+    const { commits, stale } = retained ? { commits: [], stale: false } : await this.unmergedCommits(wt.repoRoot, tips, target);
     // Nothing to lose is disposable whatever the pin: a human who saved their
     // work after looking is not asked to Discard a clean tree again.
-    if (!files.length && !commits.length && !stale) return false;
+    if (!detached && !files.length && !commits.length && !stale) return false;
     const content = contentPin(wt.path, files);
     const fingerprint = crypto.createHash('sha256')
-      .update([head, status, content.digest, target, stale, ...commits.map((c) => `${c.sha}:${c.pushed}`)].join('\0')).digest('hex').slice(0, 16);
+      .update([head, status, content.digest, target, stale, detached ? `detached:${detached.state}:${detached.branchHead}` : '', ...commits.map((c) => `${c.sha}:${c.pushed}`)].join('\0')).digest('hex').slice(0, 16);
     if (discard && content.pinned && discard.head === head && discard.fingerprint === fingerprint) return true;
     const lost = [commits.length && `${plural(commits.length, 'commit')} not on origin/${target}`, files.length && plural(files.length, 'uncommitted file'),
       stale && `origin/${target} could not be confirmed on origin`].filter(Boolean).join(', ');
-    const message = discard ? `Worktree changed after you chose to discard it (${lost}); review it again`
-      : `Worktree has work that would be lost (${lost}); preserve it for review`;
+    const cause = detached && `Worktree at ${wt.path} is on a detached HEAD${detached.state ? ` with a ${detached.state} in progress` : ''}, not on ${wt.branch}`;
+    const message = discard ? `Worktree changed after you chose to discard it (${[cause, lost].filter(Boolean).join('; ')}); review it again`
+      : cause ? `${cause}${lost ? ` (${lost})` : ''}; preserve it for review` : `Worktree has work that would be lost (${lost}); preserve it for review`;
     throw new CleanupRefused(message, { path: wt.path, branch: wt.branch, base: target, head, fingerprint, pinned: content.pinned, stale,
+      ...(detached && { cause: 'detached', state: detached.state, branchHead: detached.branchHead || null }),
       commits: commits.slice(0, LOSS_LIST_CAP), commitCount: commits.length, files: files.slice(0, LOSS_LIST_CAP), fileCount: files.length });
+  }
+
+  // The operation a detached tree was left in the middle of, read from its own
+  // git dir (a linked worktree keeps these apart from the main checkout's).
+  async inProgress(dir) {
+    const gitDir = await this.run('git', ['rev-parse', '--absolute-git-dir'], dir).catch(() => '');
+    if (!gitDir) return null;
+    return [['rebase-merge', 'rebase'], ['rebase-apply', 'rebase'], ['MERGE_HEAD', 'merge'], ['CHERRY_PICK_HEAD', 'cherry-pick'], ['REVERT_HEAD', 'revert'], ['BISECT_LOG', 'bisect']]
+      .find(([file]) => fs.existsSync(path.join(gitDir, file)))?.[1] || null;
   }
 
   // Commits on `head` that origin's `target` branch does not have. The branch
@@ -451,14 +477,15 @@ export class JobRuntime {
   // stale empty list is never taken as "nothing to lose". Each commit says
   // whether some origin branch carries it: pushed work survives a local delete,
   // but is not on the branch that ships.
-  async unmergedCommits(repoRoot, head, target) {
+  async unmergedCommits(repoRoot, heads, target) {
+    const tips = [heads].flat();
     const tracking = `refs/remotes/origin/${target}`;
     const stale = await this.run('git', ['fetch', 'origin', `+refs/heads/${target}:${tracking}`], repoRoot).then(() => false, () => true);
     const known = await this.run('git', ['rev-parse', '--verify', '--quiet', tracking], repoRoot).then(Boolean, () => false);
     if (!known) return { commits: [], stale: true };
-    const log = await this.run('git', ['log', '--format=%H%x09%s', head, '--not', tracking], repoRoot);
+    const log = await this.run('git', ['log', '--format=%H%x09%s', ...tips, '--not', tracking], repoRoot);
     if (!log) return { commits: [], stale };
-    const unpushed = new Set((await this.run('git', ['rev-list', head, '--not', '--remotes=origin'], repoRoot)).split('\n').filter(Boolean));
+    const unpushed = new Set((await this.run('git', ['rev-list', ...tips, '--not', '--remotes=origin'], repoRoot)).split('\n').filter(Boolean));
     return { stale, commits: log.split('\n').map((line) => {
       const [sha, ...subject] = line.split('\t');
       return { sha, subject: subject.join('\t'), pushed: !unpushed.has(sha) };

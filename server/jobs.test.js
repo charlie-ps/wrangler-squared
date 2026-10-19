@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { JobStore, migrateJobs, MERGE_IS_DELIVERY } from './job-store.js';
-import { JobRunner, IDLE_RECEIPT_GRACE_MS } from './job-runner.js';
+import { JobRunner, IDLE_RECEIPT_GRACE_MS, shortError } from './job-runner.js';
 import { JobRuntime, CleanupRefused } from './job-runtime.js';
 import { jobPrompt } from './job-prompts.js';
 import { JobGithub, prSummary } from './job-github.js';
@@ -1120,6 +1120,16 @@ test('a Discard the disk no longer matches is spent: the fresh refusal replaces 
   refusal = { ...refusal, head: 'h3', pinned: false };
   await f.tick();
   assert.throws(() => f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'h3', fingerprint: 'fp1' }), /cannot be pinned/);
+});
+
+test('a failed git command in cleanup shows git\'s own reason on the board, not just the command line', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api')]));
+  dropIt(f, 'api');
+  const failure = await promisify(execFile)('git', ['symbolic-ref', 'HEAD'], { cwd: process.env.AW_DATA_DIR }).catch((e) => e);
+  f.runtime.cleanup = async () => { throw failure; };
+  await f.tick();
+  assert.equal(f.sub().error, 'Command failed: git symbolic-ref HEAD: fatal: not a git repository (or any of the parent directories): .git');
+  assert.equal(shortError(new Error('Plain\nsecond line')), 'Plain', 'an error with no stderr keeps its first line');
 });
 
 test('cancelling before there are sub-jobs stops the planner quietly, ignores its late plan and finishes without launching anything', async (t) => {

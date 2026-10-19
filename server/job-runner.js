@@ -10,8 +10,12 @@ import { draftsDecidedMail, threadMail, ideaMail } from './job-prompts.js';
 import { inConversation, unsentIdea } from './job-idea.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
 import { noteMain } from './job-main.js';
+import { stderrLine } from './git.js';
 import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps, stopSandbox } from './job-running.js';
-const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
+export const shortError = (e) => {
+  const first = String(e?.message || e).split('\n')[0], why = stderrLine(e);
+  return (why && !first.includes(why) ? `${first}: ${why}` : first).slice(0, 240);
+};
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
 // A failed post-merge run is red but still watched, more slowly: a re-run that

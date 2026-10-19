@@ -292,10 +292,12 @@ export function authorityText(job, plan) {
 const plural = (n) => n === 1 ? '' : 's';
 const andMore = (shown, total) => total > shown ? `<li><small>and ${total - shown} more</small></li>` : '';
 export function lossHtml(r) {
-  return `${r.commitCount ? `<h4>${r.commitCount} commit${plural(r.commitCount)} not on origin/${esc(r.base)}</h4><ul class="job-checks job-loss">${r.commits.map((c) => `<li><code>${esc(c.sha.slice(0, 8))}</code> ${esc(c.subject)} <small>${c.pushed ? 'on a branch on origin' : 'not pushed'}</small></li>`).join('')}${andMore(r.commits.length, r.commitCount)}</ul>` : ''}
+  return `${r.cause === 'detached' ? `<p>The worktree is on a detached HEAD at <code>${esc(String(r.head).slice(0, 8))}</code>${r.state ? `, with a ${esc(r.state)} in progress` : ''}, not on <code>${esc(r.branch)}</code>${r.branchHead ? ` (at <code>${esc(r.branchHead.slice(0, 8))}</code>)` : ''}.</p>` : ''}
+    ${r.cause === 'unreadable' ? `<p>Git could not read the worktree: <code>${esc(r.error || '')}</code></p>` : ''}
+    ${r.commitCount ? `<h4>${r.commitCount} commit${plural(r.commitCount)} not on origin/${esc(r.base)}</h4><ul class="job-checks job-loss">${r.commits.map((c) => `<li><code>${esc(c.sha.slice(0, 8))}</code> ${esc(c.subject)} <small>${c.pushed ? 'on a branch on origin' : 'not pushed'}</small></li>`).join('')}${andMore(r.commits.length, r.commitCount)}</ul>` : ''}
     ${r.fileCount ? `<h4>${r.fileCount} uncommitted file${plural(r.fileCount)}</h4><ul class="job-checks job-loss">${r.files.map((f) => `<li><code>${esc(f.path)}</code> <small>${esc(f.change)}</small></li>`).join('')}${andMore(r.files.length, r.fileCount)}</ul>` : ''}
     ${r.stale ? `<p>Origin could not be reached, so whether origin/${esc(r.base)} still has this branch’s commits is unconfirmed.</p>` : ''}
-    ${!r.commitCount && !r.fileCount && !r.stale ? `<p>Branch <code>${esc(r.branch)}</code> at ${esc(String(r.head).slice(0, 8))}.</p>` : ''}`;
+    ${!r.cause && !r.commitCount && !r.fileCount && !r.stale ? `<p>Branch <code>${esc(r.branch)}</code> at ${esc(String(r.head).slice(0, 8))}.</p>` : ''}`;
 }
 // A checkout the fast-forward left alone (server/job-main.js): what is in the way,
 // what origin has that it lacks, a button per fix an agent can make, Retry and Dismiss.
@@ -315,7 +317,7 @@ export function mainNoticeHtml(job) {
     ${n.resolveError ? `<p class="job-main-error">Could not start the agent: ${esc(n.resolveError)}</p>` : ''}
     <div class="job-actions">${n.resolving?.sessionId ? `<button class="primary" data-main-session="${esc(n.resolving.sessionId)}">${ICONS.terminal}Open session</button>` : ''}${n.resolving ? '' : (n.resolutions || []).map((r, i) => `<button ${i ? '' : 'class="primary"'} data-main-resolve="${esc(r.id)}" title="${esc(r.title)}. Starts an agent in this checkout that does only this.">${ICONS.robot}${esc(r.label)}</button>`).join('')}<button ${n.resolving || n.resolutions?.length ? '' : 'class="primary"'} data-main-retry ${n.retrying ? 'disabled' : ''} title="Try the update again, after you have fixed it yourself">${n.retrying ? ICONS.spin : ICONS.wrench}${n.retrying ? 'Retrying' : 'Retry'}</button><button data-main-dismiss title="Leave this checkout as it is and forget this notice">${ICONS.x}Dismiss</button></div></section>`).join('');
 }
-const refusalHtml = (sub) => sub.cleanupRefusal && !sub.discard ? `<h3>Kept for you <small>Cleanup would lose this</small></h3>${lossHtml(sub.cleanupRefusal)}<p class="job-authority">Save anything you want from <code>${esc(tildify(sub.cleanupRefusal.path || sub.worktree?.path || ''))}</code>, then Retry${sub.cleanupRefusal.pinned === false ? '. It holds a submodule or too much to pin a Discard to what you see here, so clear it by hand' : '; or Discard anyway to delete the worktree and its local branch as listed here'}.</p>` : '';
+const refusalHtml = (sub) => sub.cleanupRefusal && !sub.discard ? `<h3>Kept for you <small>Cleanup would lose this</small></h3>${lossHtml(sub.cleanupRefusal)}<p class="job-authority">Save anything you want from <code>${esc(tildify(sub.cleanupRefusal.path || sub.worktree?.path || ''))}</code>, then Retry${sub.cleanupRefusal.cause === 'unreadable' ? '. Git cannot read it, so there is nothing to pin a Discard to; repair or clear it by hand' : sub.cleanupRefusal.pinned === false ? '. It holds a submodule or too much to pin a Discard to what you see here, so clear it by hand' : '; or Discard anyway to delete the worktree and its local branch as listed here'}.</p>` : '';
 
 // The board's own Cmd/Ctrl+Enter handlers only reach the elements they own, and
 // this dialog hangs off <body> outside every one of them, so the chord is matched
