@@ -156,6 +156,22 @@ test('two quick messages while the planner is still working both reach it: maile
   assert.equal(f.get().plan.subJobs[0].id, 'nudge');
 });
 
+test('a reply written before the second message reaches the busy planner is refused, and accepted once it is mailed', async (t) => {
+  const f = fixture(t); await f.start();
+  const planner = f.last();
+  f.store.action(f.job.id, 'idea-reply', { text: 'Start with one new theme.' });
+  f.store.action(f.job.id, 'idea-reply', { text: 'And think deeply about how to make this extensible.' });
+  assert.throws(() => f.report({ kind: 'reply', text: 'Which theme first?' }), /wrote again while you were working[\s\S]*read your mail/);
+  assert.equal(f.get().idea.thread.filter((m) => m.from === 'planner').length, 0, 'the refused reply leaves no trace');
+  assert.equal(f.run(planner).parkedFor ?? null, null);
+  await f.tick();
+  assert.equal(f.mailed.length, 1);
+  assert.match(f.mailed[0].text, /Start with one new theme\.[\s\S]*think deeply about how to make this extensible/);
+  f.report({ kind: 'reply', text: 'One theme now, with a registry so more can be added. Which first?' });
+  assert.equal(f.get().idea.thread.at(-1).from, 'planner');
+  assert.equal(f.run(planner).parkedFor, 'idea');
+});
+
 test('a parked planner may still send the plan itself, ending its run', async (t) => {
   const f = fixture(t); await f.start();
   f.report({ kind: 'reply', text: 'One question.' });
