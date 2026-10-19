@@ -3012,7 +3012,7 @@ test('an unpushed commit on local main leaves merged sub-jobs done and one notic
   assert.equal(f.store.get(f.job.id).mainNotices.length, 1, 'kept while main is still behind');
 
   // The session does its one fix; the next tick sees main level with origin and clears the notice.
-  await git(repo, 'pull', '-q', '--rebase', 'origin', 'main');
+  await git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'pull', '-q', '--rebase', 'origin', 'main');
   await git(repo, 'push', '-q', 'origin', 'main');
   await f.tick();
   assert.deepEqual(f.store.get(f.job.id).mainNotices, []);

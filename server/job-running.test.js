@@ -140,7 +140,7 @@ test('a stop runs under a seatbelt that writes only the worktree, the proof inbo
   const sandbox = stopSandbox(job, sub);
   const real = (p) => fs.realpathSync(p);
   assert.deepEqual(sandbox.writable.slice(0, 3), [real(wt), real(inbox), real(extra)], 'a folder missing on this machine is dropped');
-  assert.ok(sandbox.writable.includes(real(os.tmpdir())) && sandbox.writable.includes('/private/tmp'));
+  assert.ok(sandbox.writable.includes(real(os.tmpdir())) && sandbox.writable.includes(real('/tmp')));
   const deps = fakeDeps();
   const { results } = await teardown([DB], { cwd: wt, sandbox, deps });
   const [{ bin, args, cwd }] = deps.calls.runs;
