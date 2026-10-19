@@ -1644,8 +1644,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     }
     // A New idea that is planning opens on its conversation once the snapshot has it.
     if (msg?.event === 'job-created' && msg.idea && msg.started) { openOnCreate = msg.jobId; if (data.jobs.some((j) => j.id === msg.jobId)) { openOnCreate = null; openDetail(msg.jobId); } return; }
-    // The conversation stays where it is: the next tick shows the reply, or the plan the suggestion became.
-    if (['idea-reply', 'accept-idea'].includes(msg?.action)) { if (msg.action === 'idea-reply' && ideaSent?.jobId === msg.jobId) ideaSent.state = 'sent'; return; }
+    // A reply stays in its conversation for the next tick. A created job closes the dialog it was pressed in,
+    // so the board's forming animation plays in view; one the human has since navigated away from is left alone.
+    if (msg?.action === 'idea-reply') { if (ideaSent?.jobId === msg.jobId) ideaSent.state = 'sent'; return; }
+    if (msg?.action === 'accept-idea') { if (ideaFiring?.jobId === msg.jobId && ideaFiring.state === 'sent' && dialog.open && selected?.jobId === msg.jobId) dialog.close(); return; }
     // An idea stays on screen as its bubble: the tick is the confirmation, not a closed dialog.
     if (msg?.action === 'request-change' && askSent?.state === 'sending' && msg.jobId === askSent.jobId && (msg.subJobId ?? null) === askSent.subId) { askSent.state = 'sent'; askSent.at = Date.now(); if (dialog.open) renderDetail(); return; }
     if (dialog.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;

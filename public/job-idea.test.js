@@ -105,15 +105,39 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3' });
   assert.ok(f.q('.job-launch').classList.contains('done'));
   f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
-  assert.ok(f.q('#job-dialog').open, 'the dialog stays for the job');
+  assert.equal(f.q('#job-dialog').open, false, 'the dialog closes onto the board, where the job forms');
   const subJobs = suggest.plan.subJobs.map((s) => ({ sessions: [], repairs: [], ...s, stage: 'queued' }));
   Object.assign(f.data.jobs[0], { title: suggest.title, plan: suggest.plan, stage: 'active', approvedAt: 5, subJobs, runs: [parked({ stopped: true })] });
   f.data.jobs[0].idea.thread[2].acceptedAt = 5;
   f.view.update(f.data);
+  f.q('[data-board="idea1"] .job-plate-open').click();
   assert.equal(f.q('#job-dialog .job-idea'), null, 'the job takes over');
   assert.equal(f.q('#job-dialog [data-action="approve-plan"]'), null, 'creating it approved the plan: nothing to approve again');
   assert.ok(f.q('#job-dialog details[data-keep="idea"] .job-launch.done'), 'the conversation is folded under the job');
   assert.notEqual(f.q('[data-board="idea1"] .job-status').textContent, 'Plan ready');
+});
+
+test('a refused Create job leaves the dialog open and stops flaring', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }])]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  f.q('[data-accept-idea]').click();
+  t.mock.timers.tick(900);
+  f.view.ideaFailed({ event: 'job-action-failed', jobId: 'idea1', action: 'accept-idea', error: 'Suggestion moved' });
+  assert.ok(f.q('#job-dialog').open);
+  assert.ok(f.q('.job-launch').classList.contains('live'), 'pressable again');
+});
+
+test('a Create job confirmed after the human opened another job leaves that job open', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const other = { ...ideaJob([asked]), id: 'idea2' };
+  const f = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]), other]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  f.q('[data-accept-idea]').click();
+  t.mock.timers.tick(900);
+  f.view.openDetail('idea2');
+  f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
+  assert.ok(f.q('#job-dialog').open);
 });
 
 test('a suggestion something newer was said after is stale and cannot be pressed', (t) => {
