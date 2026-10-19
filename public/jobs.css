@@ -83,7 +83,8 @@
   --jt-art-bg:radial-gradient(circle, var(--border-muted) 1px, transparent 1.3px) 0 0 / 14px 14px, color-mix(in srgb, var(--surface-2) 55%, var(--surface)); --jt-art-rule:1px solid var(--border-muted);
   --jt-ink:var(--fg-muted); --jt-ink-run:var(--blue-fg); --jt-ink-needs:var(--snooze-fg); --jt-ink-bad:var(--red-fg); --jt-ink-ok:var(--green-fg); --jt-ink-pause:var(--purple); --jt-ink-hollow:var(--surface);
   --jt-flourish:none; --jt-sky:none; --jt-halo:none; --jt-motion:paused;
-  --jt-cab-bg:var(--surface); --jt-cab-ink:var(--fg);
+  /* A custom board style may make --surface see-through (glass over its wallpaper); the cabinet covers the form. */
+  --jt-cab-bg:rgb(from var(--surface) r g b / 1); --jt-cab-ink:var(--fg);
 }
 /* The only text drawn straight on the view's ground. */
 #jobs .jobs-empty { color:color-mix(in srgb, var(--jt-ivory) 62%, transparent); }
