@@ -445,7 +445,7 @@ test('a code review switch counts from the next gate: waiting diffs stay until r
   let job = f.store.get(f.job.id);
   assert.equal(job.reviewCode, false);
   assert.deepEqual([job.subJobs[0].stage, job.subJobs[0].state], ['review', 'verified'], 'a diff already waiting is not let through unasked');
-  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['set-review', null, 'Switched Code to Auto']]);
+  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['set-review', null, 'Switched Local verification to Auto']]);
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('web'));
   assert.equal(f.sub(1).state, 'approved', 'the run kept its uncommitted prompt; its receipt is approved as it lands');
   assert.ok(f.sub(1).ready.approvedAt);

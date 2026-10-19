@@ -506,7 +506,7 @@ test('the footer checkpoints are buttons: a switch counts from the next gate, ke
   job.subJobs = [{ ...sub('api'), stage: 'implementation' }];
   f.view.update(f.data); f.view.openDetail('job1');
   const code = () => footerButton(f, 'reviewCode');
-  assert.deepEqual([code().tagName, code().type, code().getAttribute('aria-pressed'), code().getAttribute('aria-label')], ['BUTTON', 'button', 'true', 'Code: You review. Switch to Auto']);
+  assert.deepEqual([code().tagName, code().type, code().getAttribute('aria-pressed'), code().getAttribute('aria-label')], ['BUTTON', 'button', 'true', 'Local verification: You review. Switch to Auto']);
   assert.equal(f.q('.job-detail-footer .job-flags').getAttribute('role'), 'group');
   assert.equal(footerButton(f, 'reviewPlan').getAttribute('aria-disabled'), 'true');
   assert.match(footerButton(f, 'reviewPlan').getAttribute('aria-label'), /^Plan: You review\. The plan is already approved/);
@@ -514,23 +514,23 @@ test('the footer checkpoints are buttons: a switch counts from the next gate, ke
   footerButton(f, 'reviewPlan').click();
   assert.equal(f.sent.length, before, 'a locked checkpoint sends nothing');
   code().dispatchEvent(new f.window.Event('pointerenter'));
-  assert.match(footerHint(f), /Code: You review You see each PR working and read its diff before it’s committed\. Click for Auto\./);
+  assert.match(footerHint(f), /Local verification: You review You see each PR working locally \(screenshots, live service, diff\) before it’s committed\. Click for Auto\./);
   code().click();
   assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: false });
   assert.deepEqual([code().className, code().getAttribute('aria-pressed'), code().getAttribute('aria-busy')], ['job-flag auto', 'false', 'true'], 'shown at once, busy until the job confirms it');
-  assert.match(footerHint(f), /Code: Auto From the next PR on\. Undo/);
+  assert.match(footerHint(f), /Local verification: Auto From the next PR on\. Undo/);
   f.view.created({ event: 'job-action-complete', jobId: 'job1', action: 'set-review' });
   assert.equal(f.q('#job-dialog').open, true, 'the switch was made here, so the dialog stays');
   job.reviewCode = false; f.view.update(f.data);
   assert.equal(code().getAttribute('aria-busy'), null);
-  assert.equal(code().getAttribute('aria-label'), 'Code: Auto. Switch to You review');
+  assert.equal(code().getAttribute('aria-label'), 'Local verification: Auto. Switch to You review');
   f.q('[data-review-undo]').click();
   assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: true });
-  assert.match(footerHint(f), /Code: You review Switched back\./);
+  assert.match(footerHint(f), /Local verification: You review Switched back\./);
   assert.equal(f.q('[data-review-undo]'), null, 'Undo is for one step');
   f.view.reviewFailed({ event: 'job-action-failed', jobId: 'job1', action: 'set-review', field: 'reviewCode', error: 'Job was cancelled' });
   assert.equal(code().getAttribute('aria-pressed'), 'false', 'a refusal snaps back to what the job says');
-  assert.match(footerHint(f), /Code: Auto Job was cancelled/);
+  assert.match(footerHint(f), /Local verification: Auto Job was cancelled/);
 });
 
 test('switching to Auto while work waits at the checkpoint asks first, and only then releases it', (t) => {
@@ -541,7 +541,7 @@ test('switching to Auto while work waits at the checkpoint asks first, and only 
   footerButton(f, 'reviewCode').click();
   assert.equal(f.sent.length, before, 'nothing is sent before the human confirms');
   const confirm = () => f.q('#job-review-confirm');
-  assert.match(confirm().textContent, /Switch Code to Auto\?2 diffs are waiting for your review\. Auto lets them through now/);
+  assert.match(confirm().textContent, /Switch Local verification to Auto\?2 PRs are working locally and waiting for you to verify them\. Auto lets them through now/);
   assert.equal(confirm().querySelector('button.primary').textContent, 'Commit and open 2 PRs');
   f.view.update(f.data);
   assert.ok(confirm(), 'a graph tick leaves the question open');
@@ -551,7 +551,7 @@ test('switching to Auto while work waits at the checkpoint asks first, and only 
   footerButton(f, 'reviewCode').click();
   confirm().dispatchEvent(f.event('submit'));
   assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: false, release: true });
-  assert.match(footerHint(f), /Code: Auto 2 diffs are being committed and opened as PRs\. Released work can’t be pulled back\./);
+  assert.match(footerHint(f), /Local verification: Auto 2 diffs are being committed and opened as PRs\. Released work can’t be pulled back\./);
   assert.equal(f.q('[data-review-undo]'), null, 'released work has no Undo');
 });
 
@@ -582,7 +582,7 @@ test('the Plan checkpoint can be set to Auto in the new-job form, and is a flag 
   assert.equal(plan().title, 'Plan: You review. You approve the plan before any ticket, PR or session starts');
   assert.ok(plan().classList.contains('you') && plan().querySelector('.job-flag-badge'), 'filled amber with the hand badge');
   assert.deepEqual([...document.querySelectorAll('.job-detail-footer .job-flag')].map((e) => [e.getAttribute('aria-label').split('.')[0], e.className]),
-    [['Plan: You review', 'job-flag you'], ['Code: You review', 'job-flag you'], ['Merge: You review', 'job-flag you'], ['Red steps: You decide', 'job-flag you']], 'no session sub-jobs, so no Session results flag');
+    [['Plan: You review', 'job-flag you'], ['Local verification: You review', 'job-flag you'], ['Merge: You review', 'job-flag you'], ['Red steps: You decide', 'job-flag you']], 'no session sub-jobs, so no Session results flag');
   f.q('#job-dialog').close();
   job.reviewPlan = false; job.reviewMerge = false; f.view.update(f.data);
   f.q('.job-plate-open[data-job=\"job1\"]').click();
@@ -683,7 +683,7 @@ test('new idea is a brief beside a property sidebar, and the brief is the descri
   for (const name of ['reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites', 'reviewRed']) assert.ok(brief.contains(form.querySelector(`[name="${name}"]`)), `${name} is a tile under the brief`);
   assert.ok(props.querySelector('#job-pick').querySelector('.pick-ticket') && props.querySelector('#job-pick .pick-meter'), 'the picker is a ticket with an effort meter in the sidebar');
   assert.deepEqual([...brief.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].checked, r.querySelector('.job-review-name').title, r.querySelector('small')]),
-    [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts', null], ['reviewCode', 'Code', true, 'You see each PR working and read its diff before it’s committed', null], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass', null], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done', null], ['reviewWrites', 'Writes', false, 'Each write is made by its session, with a receipt', null], ['reviewRed', 'Red steps', true, 'Wrangler proposes a fix for a red step and waits for you to decide', null]]);
+    [['reviewPlan', 'Plan', true, 'You approve the plan before any ticket, PR or session starts', null], ['reviewCode', 'Local verification', true, 'You see each PR working locally (screenshots, live service, diff) before it’s committed', null], ['reviewMerge', 'Merge', true, 'You approve each PR once its checks pass', null], ['reviewSessions', 'Session results', true, 'You approve each session’s receipt before it counts as done', null], ['reviewWrites', 'Writes', false, 'Each write is made by its session, with a receipt', null], ['reviewRed', 'Red steps', true, 'Wrangler proposes a fix for a red step and waits for you to decide', null]]);
   assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('span').title]),
     [['shareImages', true, 'every session on the job sees them, not just planning'], ['updateMain', false, '']]);
   assert.equal(form.querySelector('.job-create-foot').textContent, 'Start planningAdd to backlog');

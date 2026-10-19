@@ -209,7 +209,7 @@ export const INTRO_STEPS = [
     figure: (reviews, phase) => seeFigure(phase) },
   { tab: 'Reviews',
     title: 'You choose where a job stops for you.',
-    body: `<p>Every job has six checkpoints: the plan, the code, the merge, session results, writes to other places, and red steps. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself, so a Plan on Auto starts as soon as it is drafted. For red steps you choose <b>You decide</b> or <b>Wrangler replans</b>.</p><p>New idea starts from the defaults in <b>Automation settings</b>, where all but Writes start on You review. To stop everything at once, press <b>Pause</b> in the Jobs header.</p>`,
+    body: `<p>Every job has six checkpoints: the plan, local verification, the merge, session results, writes to other places, and red steps. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself, so a Plan on Auto starts as soon as it is drafted. For red steps you choose <b>You decide</b> or <b>Wrangler replans</b>.</p><p>New idea starts from the defaults in <b>Automation settings</b>, where all but Writes start on You review. To stop everything at once, press <b>Pause</b> in the Jobs header.</p>`,
     figure: (reviews) => checkpointsFigure(reviews) },
   { tab: 'Writes',
     title: 'Tickets, designs and posts, kept up to date as the job runs.',

@@ -93,7 +93,7 @@ function cancelJob(j, now) {
 // Writes is only the default: a write's own `review` (true or false) beats it
 // (`writeReviewed`), so only writes without one are released, and a session
 // already drafting under it lands its drafts approved (job-writes.js applyDrafts).
-export const REVIEW_POINTS = { reviewPlan: 'Plan', reviewCode: 'Code', reviewMerge: 'Merge', reviewSessions: 'Session results', reviewWrites: 'Writes', reviewRed: 'Red steps' };
+export const REVIEW_POINTS = { reviewPlan: 'Plan', reviewCode: 'Local verification', reviewMerge: 'Merge', reviewSessions: 'Session results', reviewWrites: 'Writes', reviewRed: 'Red steps' };
 const checkpointWord = (field, you) => field === 'reviewRed' ? (you ? 'You decide' : 'Wrangler replans') : you ? 'You review' : 'Auto';
 const flagOf = (j, field) => field === 'reviewCode' ? reviewCode(j) : field === 'reviewMerge' || field === 'reviewWrites' ? !!j[field] : j[field] ?? true;
 function releaseWaiting(j, field, { plan, revision }, now) {
