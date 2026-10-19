@@ -194,7 +194,7 @@ const heading = (job, sub) => `${sub?.jiraKey ? `${sub.jiraKey} · ` : ''}${job.
 // for. The block is the whole memory a fresh session gets; it stays sub-job
 // scoped (a sibling PR's history is noise here) and capped, oldest dropped.
 export const HISTORY_MAX_LINES = 10;
-const HUMAN_VERBS = { 'request-change': 'requested changes', 'fix-here': 'requested changes', retry: 'retried', 'approve-code': 'approved the working tree', 'approve-session': 'approved the result', 'revise-session': 'requested changes' };
+const HUMAN_VERBS = { 'request-change': 'requested changes', 'fix-here': 'requested changes', retry: 'retried', 'approve-code': 'approved the working tree', 'approve-session': 'approved the result', 'revise-session': 'requested changes', 'helper-idea': 'sent an idea through a helper session' };
 // TODO(host-api agents:read): the core version pretty-printed this through the
 // agent adapter's `models` table; the browser half reads that list (api.agents,
 // 1.25) but the server half still cannot, so the raw values stand in.
@@ -448,8 +448,8 @@ export function jobPrompt(job, sub, run) {
 }
 
 // Ask an agent (job-helper.js): the human's own session about one step. It is no
-// step itself, so it is never told a runId, and what it finds comes back through
-// the step's Add idea box (the planner, then the human's approval), never by it.
+// step itself, so it is never told a runId, and what it finds comes back only through
+// send_step_idea, the step's Add idea box (the planner, then the human's approval).
 const KIND_NAMES = { pr: 'pull request', session: 'agent session', human: 'human task', write: 'write' };
 const helperStep = (sub) => Object.fromEntries(Object.entries({
   id: sub.id, kind: KIND_NAMES[sub.kind || 'pr'], title: sub.title, brief: sub.brief, why: sub.why, check: sub.check, show: sub.show,
@@ -463,7 +463,7 @@ export function helperPrompt(job, sub, cwd) {
   return lines(
     `The human opened you from one step of a Wrangler² job to help them with it: investigating, explaining, or walking through it with them (a PR review, say). This is the human's own session and they drive it. You are NOT a step of the job: there is no job_report for you to call, you never commit, push, merge or open a PR for this step, never mark anything done, and never change the job's plan.`,
     sub.worktree?.path ? `The step's worktree belongs to its own session, which may be working in it: read it freely, and change nothing there unless the human asks you to.` : '',
-    'If what you find should change the step or the plan, write it up for the human as a short note they can paste into the step\'s "Add idea" box on the board: that sends it to the job\'s planner, which proposes the change for the human to approve.',
+    'If what you find should change the step or the plan, and only when the human asks you to send it, call send_step_idea with the idea in plain words: it goes to the job\'s planner exactly as the step\'s "Add idea" box does, and the planner proposes the change for the human to approve. Never send one on your own initiative.',
     'Start by reading the step below (and its PR or worktree, if it has one), then tell the human in a few lines where it stands and ask what they want to look at.',
     '',
     `Job: ${JSON.stringify(job.title)}`,

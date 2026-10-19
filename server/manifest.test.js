@@ -25,7 +25,7 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   assert.ok(manifest.requires.includes('images:keep'));
   assert.ok(manifest.requires.includes('files:view'));
   assert.ok(declared.requires.includes('files:view'));
-  assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context', 'create_job']);
+  assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context', 'create_job', 'send_step_idea']);
   assert.deepEqual(Object.keys(manifest.session), ['onBeforeDispatch']);
   assert.equal(manifest.client, 'public/index.js');
   assert.equal(manifest.styles, 'public/jobs.css');

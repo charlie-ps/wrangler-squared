@@ -13,7 +13,7 @@ import { JobGithub, prSummary } from './job-github.js';
 import { normaliseComments, commentsBlockMerge } from './job-comments.js';
 import { jobCreateHandler, makeJobCreateHandler, jobActionHandler, jobSettingsHandler } from './handlers.js';
 import { _resetForTests, runnerFor } from './jobs.js';
-import { jobReportTool, getJobContextTool } from './tools.js';
+import { jobReportTool, getJobContextTool, sendStepIdeaTool } from './tools.js';
 import { changeView } from './job-change.js';
 import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
@@ -3132,4 +3132,46 @@ test('a human task\'s helper marks it in progress; a helper that cannot start sa
   await f.tick();
   assert.deepEqual(f.store.get(f.job.id).subJobs[0].helpers.map((h) => h.sessionId), [null, 's_ok']);
   assert.match(f.store.get(f.job.id).moves.at(-1).detail, /help with “Do vendor yourself”$/, 'already in progress');
+});
+
+test('a helper sends its idea through the step\'s own Add idea route, marked as the helper\'s; any other session is refused', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api')]));
+  f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api')); await f.tick();
+  f.runtime.spawnHelper = async () => 's_help';
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  await f.tick();
+  const host = fakeHost(f);
+  const send = (caller, text) => sendStepIdeaTool.handler({ host, caller }, { text });
+
+  for (const caller of [f.workerFor('api').sid, 's_stranger', undefined]) {
+    const res = await send(caller, 'Merge it now');
+    assert.equal(res.isError, true); assert.match(res.content[0].text, /Only a helper session opened from a step/);
+  }
+  assert.equal(f.store.get(f.job.id).replan ?? null, null, 'nothing reached the planner');
+  assert.equal(host.rebuilds, 0);
+
+  const res = await send('s_help', 'The retry loop never backs off: add a delay');
+  assert.equal(res.structuredContent.accepted, true);
+  let job = f.store.get(f.job.id);
+  assert.equal(job.replan.feedback, 'About “Deliver api” (api, review/verified): (Sent by the human\'s helper session on this step, at the human\'s request) The retry loop never backs off: add a delay');
+  assert.deepEqual(job.replan.source, { sub: 'api', at: 'code', ref: job.subJobs[0].ready.receiptId }, 'pinned to the step as it stands, like the box');
+  assert.deepEqual(job.subJobs[0].helpers[0].ideas.map((m) => m.text), ['The retry loop never backs off: add a delay']);
+  assert.deepEqual([job.moves.at(-1).move, job.moves.at(-1).subJobId, job.moves.at(-1).note], ['helper-idea', 'api', 'The retry loop never backs off: add a delay']);
+  assert.match(job.moves.at(-1).detail, /^A helper session sent the planner an idea about “Deliver api”$/);
+  assert.equal(host.rebuilds, 1);
+
+  await f.tick();
+  const planner = f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub);
+  assert.match(jobPrompt(f.store.get(f.job.id), null, planner.run), /helper session on this step/);
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('backoff', ['api'])]) }, planner);
+  job = f.store.get(f.job.id);
+  assert.ok(job.replan.proposal, 'the planner\'s proposal waits for the human as a typed idea\'s does');
+  assert.equal(job.subJobs[0].stage, 'review', 'the helper changed nothing itself');
+
+  const g = fixture(t); await g.approve(plan([spec('api')]));
+  g.report({ kind: 'ready', checks: ['Tests pass'] }, g.workerFor('api')); await g.tick();
+  g.store.action(g.job.id, 'request-change', { subJobId: 'api', at: 'code', ref: g.sub().ready.receiptId, text: 'Rename it', from: 'helper' });
+  assert.doesNotMatch(g.store.get(g.job.id).replan.feedback, /helper session/, 'the board cannot claim to be a helper');
+  g.store.update(g.job.id, (j) => { j.subJobs[0].helpers = [{ id: 'hp_1', at: 1, sessionId: 's_late' }]; j.subJobs[0].stage = 'done'; });
+  assert.match((await sendStepIdeaTool.handler({ host: fakeHost(g), caller: 's_late' }, { text: 'x' })).content[0].text, /Nothing is left to change here/);
 });

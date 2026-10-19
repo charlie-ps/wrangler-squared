@@ -10,9 +10,10 @@ import { setRunning, owe, runningOf } from './job-running.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
-import { requestChange } from './job-change.js';
+import { requestChange, CHANGE_TEXT_MAX } from './job-change.js';
 import { resolutionsFor, resolutionLabel } from './job-main.js';
-import { queueHelper } from './job-helper.js';
+import { queueHelper, helperFor } from './job-helper.js';
+import { changeView } from './job-actions.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
 import { forwardsOnly } from './job-actions.js';
@@ -311,7 +312,7 @@ export class JobStore {
       // The one way an idea comes in (job-change.js): to the step's own agent
       // when it has one, else the planner.
       if (action === 'request-change') {
-        const { detail } = requestChange(j, s, payload, { now: Date.now() });
+        const { detail } = requestChange(j, s, { ...payload, from: null }, { now: Date.now() });
         record(j, s, 'request-change', payload.text, detail);
         return;
       }
@@ -533,6 +534,21 @@ export class JobStore {
     if (!sub?.worktree) return false;
     this.update(job.id, (j) => { const s = j.subJobs.find((x) => x.id === sub.id); s.worktree = { ...s.worktree, branch }; });
     return true;
+  }
+  // A helper session's idea about the step it was opened from (send_step_idea in
+  // tools.js): the step's own Add idea box, pinned to the step as it stands now,
+  // marked as the helper's, and kept on its helper entry for the dialog to show.
+  helperIdea(sessionId, text) {
+    const hit = helperFor(this, sessionId);
+    if (!hit) throw new Error('Only a helper session opened from a step with Ask an agent can send an idea about it');
+    return this.update(hit.job.id, (j) => {
+      const s = j.subJobs.find((x) => x.id === hit.sub.id);
+      const view = changeView(j, s) || {};
+      const { detail } = requestChange(j, s, { at: view.at, ref: view.ref, text, from: 'helper' }, { now: Date.now() });
+      const said = String(text).trim().slice(0, CHANGE_TEXT_MAX);
+      (s.helpers.find((h) => h.sessionId === sessionId).ideas ||= []).push({ at: Date.now(), text: said });
+      record(j, s, 'helper-idea', said, detail);
+    });
   }
   // `meta.treeHash` is the working tree as the tool handler read it when a ready
   // receipt arrived (tools.js): the store is synchronous and takes no git.

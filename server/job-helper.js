@@ -22,6 +22,17 @@ export function queueHelper(job, sub, now) {
   return { started };
 }
 
+// The step a helper session was opened from, by its session id: the one caller
+// send_step_idea answers to (tools.js).
+export function helperFor(store, sessionId) {
+  if (!sessionId) return null;
+  for (const job of store.data.jobs) for (const sub of job.subJobs) {
+    const helper = sub.helpers?.find((h) => h.sessionId === sessionId);
+    if (helper) return { job, sub, helper };
+  }
+  return null;
+}
+
 const isDir = (dir) => { try { return fs.statSync(dir).isDirectory(); } catch { return false; } };
 // The step's own checkout, else a prerequisite PR's, else '' (the wrangler's
 // fresh scratch workspace). Never a worktree: a live worker may be writing there.

@@ -362,6 +362,7 @@ test('a helper is briefed as the human\'s own session with the step, its PR and 
   assert.match(p, /This is the human's own session and they drive it/);
   assert.match(p, /no job_report for you to call, you never commit, push, merge or open a PR for this step, never mark anything done, and never change the job's plan/);
   assert.match(p, /"Add idea" box/);
+  assert.match(p, /only when the human asks you to send it, call send_step_idea/);
   assert.match(p, /Job: "Sign-in"/); assert.match(p, /Goal: "Reliable sign-in"/); assert.match(p, /Context: "The sign-in service is Java/);
   assert.match(p, /"brief": "Retry the token exchange once"/);
   assert.match(p, /"state": "verified"/);

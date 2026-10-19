@@ -3088,3 +3088,17 @@ test('Ask an agent is on every step\'s dialog; pressed, it holds until the helpe
   f.q('[data-helper-session="s_help1"]').click();
   assert.deepEqual(f.sessions, ['s_help1']); assert.equal(f.q('#job-dialog').open, false);
 });
+
+test('what a helper sent the planner shows under it on the step, marked from the helper and escaped', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active'; job.revision = 3;
+  job.subJobs = [{ ...sub('api'), stage: 'pr', state: 'watching', pr: { url: 'https://github.com/acme/widgets/pull/12', head: 'h1', checkStatus: 'pending', checks: [] },
+    helpers: [{ id: 'hp_1', at: 1, sessionId: 's_help1', ideas: [{ at: 2, text: 'Back off between retries <script>x</script>' }] }, { id: 'hp_2', at: 3, sessionId: 's_help2' }] }];
+  f.view.update(f.data);
+  f.view.openDetail('job1', 'api');
+  const ideas = [...document.querySelectorAll('.job-helper-ideas li')];
+  assert.equal(ideas.length, 1);
+  assert.match(ideas[0].querySelector('.job-helper-from').textContent, /^From the helper · sent to the planner/);
+  assert.equal(ideas[0].querySelector('q').textContent, 'Back off between retries <script>x</script>');
+  assert.equal(document.querySelector('.job-helper-ideas script'), null);
+  assert.equal(document.querySelectorAll('.job-helpers > li')[1].querySelector('.job-helper-ideas'), null, 'a helper that sent nothing shows nothing');
+});

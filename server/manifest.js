@@ -43,7 +43,7 @@ export default {
   id: 'jobs',
   label: 'Wrangler²',
   description: 'Plan a goal into PRs (under Jira stories where the work has tickets), run each step as its own bounded agent session in a dedicated worktree, and gate the risky moments (plan, code, merge) on a human.',
-  help: 'Adds the Jobs view, the job_report and get_job_context tools for job steps, a create_job tool that lets any other agent session start a job, and the job-worker skill. Jobs and their history stay in jobs.json across toggles.',
+  help: 'Adds the Jobs view, the job_report and get_job_context tools for job steps, a create_job tool that lets any other agent session start a job, a send_step_idea tool a step\'s helper session sends its ideas through, and the job-worker skill. Jobs and their history stay in jobs.json across toggles.',
   author: 'Charlie Goldstraw',
   homepage: 'https://github.com/charlie-ps/wrangler-squared',
   defaultEnabled: true,

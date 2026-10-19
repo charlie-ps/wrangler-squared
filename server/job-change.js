@@ -19,11 +19,11 @@ export const CHANGE_TEXT_MAX = 8000;
 // (server/handlers.js prepare kept them on disk).
 const withImages = (idea, attachments) => attachments?.length ? `${idea}\n(Pasted images, read them: ${attachments.map((a) => JSON.stringify(a.path)).join(', ')})` : idea;
 
-export function requestChange(job, sub, { at, ref, text, attachments }, { now }) {
+export function requestChange(job, sub, { at, ref, text, attachments, from }, { now }) {
   const typed = String(text || '').trim().slice(0, CHANGE_TEXT_MAX);
   if (!typed) throw new Error('Explain the change you want');
   const files = (attachments || []).filter((a) => typeof a?.path === 'string');
-  const idea = withImages(typed, files);
+  const idea = withImages(from === 'helper' ? `(Sent by the human's helper session on this step, at the human's request) ${typed}` : typed, files);
   const view = changeView(job, sub);
   if (!view) throw new Error(sub ? 'Nothing is left to change here' : 'The job has nothing to change right now');
   if (view.at !== at || view.ref !== String(ref)) throw new Error('This changed since you looked. Review the latest version and ask again.');
@@ -43,11 +43,11 @@ export function requestChange(job, sub, { at, ref, text, attachments }, { now })
   if (sub && isDeclared(job, sub)) {
     const d = sub.red.declared;
     requestReplan(job, `About ${quoted(sub.title)} (${sub.id}), which was declared red: ${d.summary}${d.tried?.length ? `\nTried: ${d.tried.join(' | ')}` : ''}${d.ask ? `\nThe decision asked of the human: ${d.ask}` : ''}\nThe human says: ${idea}`, now, { sub: sub.id, auto: false, human: true }, { source, images });
-    return { detail: `Sent the declared red on ${quoted(sub.title)} back to the planner`, route: 'planner' };
+    return { detail: `${from === 'helper' ? 'A helper session sent' : 'Sent'} the declared red on ${quoted(sub.title)} back to the planner`, route: 'planner' };
   }
   // Anything else is a change of plan on a running job, even a word for one
   // step's open session: the planner proposes, the human approves. A step's idea
   // says where it came from.
   requestReplan(job, sub ? `About ${quoted(sub.title)} (${sub.id}, ${sub.stage}${sub.state ? `/${sub.state}` : ''}): ${idea}` : idea, now, null, { source, images });
-  return { detail: sub ? `Sent the planner an idea about ${quoted(sub.title)}` : 'Asked the planner to change the plan', route: 'planner' };
+  return { detail: sub ? `${from === 'helper' ? 'A helper session sent' : 'Sent'} the planner an idea about ${quoted(sub.title)}` : 'Asked the planner to change the plan', route: 'planner' };
 }

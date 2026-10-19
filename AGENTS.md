@@ -252,7 +252,12 @@ text as public as the rest of this repo.
   `job-prompts.js helperPrompt`. A failed spawn is `error` on that entry, which frees the button. Its id is
   kept OUT of `sub.sessions` (cleanup archives those; Open session and Review code read the last) and
   `job.runs` (`runForSession` would hand it job_report, the worker skill and the job's sandbox). What it
-  finds comes back only through the step's Add idea box; it never edits the plan.
+  finds comes back only through `send_step_idea` (`server/tools.js`), when the human asks: the store's
+  `helperIdea` resolves the caller against `sub.helpers[].sessionId` (anything else is refused) and runs
+  the step's own `requestChange`, pinned to `changeView` as it stands at the call, with `from: 'helper'`,
+  which marks the planner's words and the move (`helper-idea`). Only the server sets `from`: the board's
+  `request-change` overwrites it. The idea is kept on its entry (`helper.ideas`), drawn under that helper
+  in the step's dialog. It never edits the plan.
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one
