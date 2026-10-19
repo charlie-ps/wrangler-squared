@@ -11,7 +11,7 @@
 .tone-ok { --c:var(--st-ok); --c-fg:var(--st-ok-fg); }
 .tone-pause { --c:var(--st-pause); --c-fg:var(--st-pause-fg); }
 :is(.tone-idle,.tone-run,.tone-warn,.tone-bad,.tone-ok,.tone-pause) { --cb:color-mix(in srgb, var(--c) 15%, var(--surface)); --c-on:var(--surface); }
-#jobs .icon,.job-dialog .icon,.jobs-idea .icon { width:1em; height:1em; flex:none; vertical-align:-.14em; }
+#jobs .icon,.job-dialog .icon,.jobs-idea .icon,.theme-mini .icon { width:1em; height:1em; flex:none; vertical-align:-.14em; }
 @keyframes job-spin { to { transform:rotate(360deg); } }
 .job-spin { animation:job-spin 1.1s linear infinite; }
 
@@ -20,14 +20,22 @@
    --tile-bg/--card-bg); the plate art and the ink drawn into it are fixed colours. */
 /* Core's .ext-view host is the scroller and our mount wrapper (.ext-slot) is display:contents, so #jobs is a
    plain block there: min-height:100% makes it, and the sky painted on it, reach the bottom of the view. */
-#jobs { --jobs-serif:"Newsreader","Iowan Old Style",Georgia,serif; --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; flex:1; min-width:0; min-height:100%; box-sizing:border-box; overflow:auto; padding:22px 24px 84px; background:transparent; display:flex; flex-direction:column; gap:20px; }
+#jobs { --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; flex:1; min-width:0; min-height:100%; box-sizing:border-box; overflow:auto; padding:22px 24px 84px; background-color:var(--jt-view-color); background-image:var(--jt-view-image); background-size:var(--jt-view-size); display:flex; flex-direction:column; gap:20px; }
 #jobs.hidden { display:none; }
-/* Wrangler² sky, the default backdrop (settings `backdrop`): one static night in every host theme, so the
-   masthead and plates read as cut from it. Stars are one radial-gradient each, tiled at co-prime sizes so the
-   repeat never lines up; the amber corner echoes the masthead glare. `wrangler` keeps the host's wallpaper. */
-#jobs:not([data-backdrop="wrangler"]) {
-  background-color:#020306;
-  background-image:
+/* Themes (public/themes.js). Each [data-theme] block sets the --jt-* tokens the rest of this file reads,
+   on #jobs and on everything that wears a theme outside it: the dialogs on <body>, and the theme picker's
+   ticket, plates and cabinet. A new theme is one block here, one registry entry and its id. The tokens:
+   type (--jobs-serif and its weight and sizes), the view's ground, --jt-night/--jt-ivory (the ground and
+   ink of the masthead, an idea's band and the launch strip; scrims and tints are mixed from them), the
+   accent glow, radii, the plain plate's ground and ink, and switches for the flourishes, painted skies,
+   halos and pulses (a theme that turns them off runs no animation). */
+[data-theme="space"] {
+  --jobs-serif:"Newsreader","Iowan Old Style",Georgia,serif; --jt-display-weight:500; --jt-mast-size:48px; --jt-plate-title:21px; --jt-band-title:30px;
+  /* One static night in every host mode, so the masthead and plates read as cut from it. Stars are one
+     radial-gradient each, tiled at co-prime sizes so the repeat never lines up; the amber corner echoes
+     the masthead glare. */
+  --jt-view-color:#020306;
+  --jt-view-image:
     radial-gradient(0.8px at 59px 190px, rgba(232,236,255,.52), transparent),
     radial-gradient(1px at 14px 1px, rgba(232,236,255,.4), transparent),
     radial-gradient(0.9px at 39px 121px, rgba(232,236,255,.54), transparent),
@@ -46,14 +54,42 @@
     radial-gradient(65% 45% at 90% -4%, rgba(245,158,27,.16), transparent 70%),
     radial-gradient(55% 50% at 3% 100%, rgba(69,48,216,.16), transparent 72%),
     linear-gradient(180deg, #05070e 0%, #020306 55%, #05050b 100%);
-  background-size:211px 211px, 211px 211px, 211px 211px, 211px 211px, 211px 211px, 211px 211px, 211px 211px,
+  --jt-view-size:211px 211px, 211px 211px, 211px 211px, 211px 211px, 211px 211px, 211px 211px, 211px 211px,
     347px 347px, 347px 347px, 347px 347px, 347px 347px, 347px 347px, 563px 563px, 563px 563px, 563px 563px, auto, auto, auto;
+  --jt-night:#020306; --jt-ivory:#f4ede2; --jt-ivory-strong:#fff; --jt-glow:#ffba50;
+  --jt-title-shadow:0 2px 18px rgba(0,0,0,.6); --jt-ink-shadow:0 1px 10px #000; --jt-loader-glow:rgba(255,214,226,.15);
+  --jt-mast-min:176px; --jt-mast-pad:24px 22px 20px; --jt-mast-pad-narrow:96px 16px 16px; --jt-mast-rule:0;
+  --jt-pause-bg:rgba(60,20,119,.45); --jt-run-glow:0 0 6px #6f7cff;
+  --jt-cta-bg:#f4ede2; --jt-cta-fg:#05070c; --jt-cta-hover:#fff;
+  --jt-hover-mix:45%; --jt-hover-lift:none;
+  --jt-radius-mast:20px; --jt-radius-plate:18px; --jt-radius-dialog:28px; --jt-radius-pill:999px; --jt-dialog-line:0;
+  --jt-art-bg:#05070c; --jt-art-rule:0;
+  --jt-ink:#f4ede2; --jt-ink-run:#a9b8ff; --jt-ink-needs:#f7cd5f; --jt-ink-bad:#ff7b4f; --jt-ink-ok:#7fe0b0; --jt-ink-pause:#d0b0f5; --jt-ink-hollow:rgba(6,8,14,.4);
+  --jt-flourish:block; --jt-sky:block; --jt-halo:inline; --jt-motion:running;
+  --jt-cab-bg:#070a10 radial-gradient(ellipse at 25% 35%, #1a2340aa 0, transparent 55%); --jt-cab-ink:#eef0f6;
 }
-/* The only text drawn straight on the sky. */
-#jobs:not([data-backdrop="wrangler"]) .jobs-empty { color:rgba(244,237,226,.62); }
-/* White chrome on a night sky glares, so under the sky Jobs (and its dialogs, which live on <body>) wear the
-   board's DARK palette even on a light host: a copy of core's :root values for every token body.light remaps. */
-body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job-image-zoom,.job-shotbox) {
+/* Agent Wrangler's own look: the board's wallpaper, surfaces, system type and radii, in its light or dark
+   mode. Nothing is painted and nothing moves. */
+[data-theme="wrangler"] {
+  --jobs-serif:var(--font); --jt-display-weight:600; --jt-mast-size:26px; --jt-plate-title:16px; --jt-band-title:22px;
+  --jt-view-color:transparent; --jt-view-image:none; --jt-view-size:auto;
+  --jt-night:var(--surface); --jt-ivory:var(--fg); --jt-ivory-strong:var(--fg); --jt-glow:transparent;
+  --jt-title-shadow:none; --jt-ink-shadow:none; --jt-loader-glow:color-mix(in srgb, var(--fg) 15%, transparent);
+  --jt-mast-min:0; --jt-mast-pad:18px 18px 16px; --jt-mast-pad-narrow:18px 16px 16px; --jt-mast-rule:1px solid var(--border-muted);
+  --jt-pause-bg:color-mix(in srgb, var(--purple) 14%, transparent); --jt-run-glow:none;
+  --jt-cta-bg:var(--accent); --jt-cta-fg:var(--accent-fg); --jt-cta-hover:color-mix(in srgb, var(--accent) 85%, #fff);
+  --jt-hover-mix:85%; --jt-hover-lift:0 2px 4px color-mix(in srgb, var(--fg) 10%, transparent), 0 16px 32px -14px color-mix(in srgb, var(--fg) 40%, transparent);
+  --jt-radius-mast:10px; --jt-radius-plate:8px; --jt-radius-dialog:10px; --jt-radius-pill:6px; --jt-dialog-line:1px solid var(--border);
+  --jt-art-bg:radial-gradient(circle, var(--border-muted) 1px, transparent 1.3px) 0 0 / 14px 14px, color-mix(in srgb, var(--surface-2) 55%, var(--surface)); --jt-art-rule:1px solid var(--border-muted);
+  --jt-ink:var(--fg-muted); --jt-ink-run:var(--blue-fg); --jt-ink-needs:var(--snooze-fg); --jt-ink-bad:var(--red-fg); --jt-ink-ok:var(--green-fg); --jt-ink-pause:var(--purple); --jt-ink-hollow:var(--surface);
+  --jt-flourish:none; --jt-sky:none; --jt-halo:none; --jt-motion:paused;
+  --jt-cab-bg:var(--surface); --jt-cab-ink:var(--fg);
+}
+/* The only text drawn straight on the view's ground. */
+#jobs .jobs-empty { color:color-mix(in srgb, var(--jt-ivory) 62%, transparent); }
+/* A theme that forces dark (themes.js scheme:'dark') wears the board's DARK palette even on a light host:
+   white chrome on a night sky glares. A copy of core's :root values for every token body.light remaps. */
+body.light [data-scheme="dark"] {
   color-scheme:dark; color:var(--fg);
   --bg:#0d1117; --surface:#151b23; --surface-2:#1c2128;
   --fg:#f0f6fc; --fg-muted:#9198a1; --fg-subtle:#656c76;
@@ -67,48 +103,52 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
   --snooze:#d29922; --snooze-fg:#e3b341; --mail:#d29922; --mail-fg:#e3b341; --warn:#d29922; --warn-fg:#e3b341;
   --rt:#39c5cf; --rt-fg:#56d4dd; --bar-on:#0d1117; --overlay:rgba(0,0,0,0.6); --shadow:rgba(0,0,0,0.4);
 }
+/* A host-scheme theme's picture inside a forced-dark one (the Wrangler plate in Space's cabinet) wears the
+   board's light palette again: body keeps it under other names, since it is overridden all the way down. */
+body.light { --light-bg:var(--bg); --light-surface:var(--surface); --light-surface-2:var(--surface-2); --light-fg:var(--fg); --light-fg-muted:var(--fg-muted); --light-fg-subtle:var(--fg-subtle); --light-border:var(--border); --light-border-muted:var(--border-muted); --light-green:var(--green); --light-green-fg:var(--green-fg); --light-red:var(--red); --light-red-fg:var(--red-fg); --light-cyan:var(--cyan); --light-purple:var(--purple); --light-purple-fg:var(--purple-fg); --light-blue:var(--blue); --light-blue-fg:var(--blue-fg); --light-wf:var(--wf); --light-chrome:var(--chrome); --light-tile-bg:var(--tile-bg); --light-card-bg:var(--card-bg); --light-accent:var(--accent); --light-accent-fg:var(--accent-fg); --light-field-bg:var(--field-bg); --light-danger-bg:var(--danger-bg); --light-danger-border:var(--danger-border); --light-danger-strong:var(--danger-strong); --light-pill-needs-bg:var(--pill-needs-bg); --light-pill-working-bg:var(--pill-working-bg); --light-pill-idle-bg:var(--pill-idle-bg); --light-snooze:var(--snooze); --light-snooze-fg:var(--snooze-fg); --light-mail:var(--mail); --light-mail-fg:var(--mail-fg); --light-warn:var(--warn); --light-warn-fg:var(--warn-fg); --light-rt:var(--rt); --light-rt-fg:var(--rt-fg); --light-bar-on:var(--bar-on); --light-overlay:var(--overlay); --light-shadow:var(--shadow); }
+body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color:var(--fg); --bg:var(--light-bg); --surface:var(--light-surface); --surface-2:var(--light-surface-2); --fg:var(--light-fg); --fg-muted:var(--light-fg-muted); --fg-subtle:var(--light-fg-subtle); --border:var(--light-border); --border-muted:var(--light-border-muted); --green:var(--light-green); --green-fg:var(--light-green-fg); --red:var(--light-red); --red-fg:var(--light-red-fg); --cyan:var(--light-cyan); --purple:var(--light-purple); --purple-fg:var(--light-purple-fg); --blue:var(--light-blue); --blue-fg:var(--light-blue-fg); --wf:var(--light-wf); --chrome:var(--light-chrome); --tile-bg:var(--light-tile-bg); --card-bg:var(--light-card-bg); --accent:var(--light-accent); --accent-fg:var(--light-accent-fg); --field-bg:var(--light-field-bg); --danger-bg:var(--light-danger-bg); --danger-border:var(--light-danger-border); --danger-strong:var(--light-danger-strong); --pill-needs-bg:var(--light-pill-needs-bg); --pill-working-bg:var(--light-pill-working-bg); --pill-idle-bg:var(--light-pill-idle-bg); --snooze:var(--light-snooze); --snooze-fg:var(--light-snooze-fg); --mail:var(--light-mail); --mail-fg:var(--light-mail-fg); --warn:var(--light-warn); --warn-fg:var(--light-warn-fg); --rt:var(--light-rt); --rt-fg:var(--light-rt-fg); --bar-on:var(--light-bar-on); --overlay:var(--light-overlay); --shadow:var(--light-shadow); }
 .jobs-kicker { font-size:10px; font-weight:700; letter-spacing:.16em; color:var(--fg-muted); }
 /* The masthead is a wide plate: the glare of a Gargantua with no disc (job-skylines.js mountMastSky) behind
    the title and tools, which wear the plates' fixed ink; the rail below is board chrome. */
-.jobs-mast { display:grid; overflow:hidden; border-radius:20px; background:var(--card-bg); border:1px solid var(--border-muted); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); }
-.jobs-top { position:relative; isolation:isolate; display:flex; flex-wrap:wrap; align-items:flex-end; gap:14px 30px; min-height:176px; box-sizing:border-box; padding:24px 22px 20px; background:#020306; color:#f4ede2; }
+.jobs-mast { display:grid; overflow:hidden; border-radius:var(--jt-radius-mast); background:var(--card-bg); border:1px solid var(--border-muted); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); }
+.jobs-top { position:relative; isolation:isolate; display:flex; flex-wrap:wrap; align-items:flex-end; gap:14px 30px; min-height:var(--jt-mast-min); box-sizing:border-box; padding:var(--jt-mast-pad); background:var(--jt-night); color:var(--jt-ivory); border-bottom:var(--jt-mast-rule); }
 .jobs-mast-sky { position:absolute; inset:0; z-index:-2; width:100%; height:100%; display:block; }
-.jobs-top::after { content:""; position:absolute; inset:0; z-index:-1; pointer-events:none; background:linear-gradient(90deg, rgba(2,3,6,.78) 0%, rgba(2,3,6,.35) 45%, transparent 70%); }
-.jobs-mast .jobs-kicker { font:600 10.5px/1 var(--jobs-mono); letter-spacing:.22em; text-transform:uppercase; color:rgba(244,237,226,.66); }
-.jobs-mast h1 { margin:10px 0 0; font:500 48px/1 var(--jobs-serif); letter-spacing:-.02em; color:#f4ede2; text-shadow:0 2px 18px rgba(0,0,0,.6); }
-.jobs-telemetry { display:flex; flex-wrap:wrap; align-items:center; gap:8px 20px; padding-bottom:6px; font:400 12px var(--jobs-mono); color:rgba(244,237,226,.66); font-variant-numeric:tabular-nums; }
-.jobs-telemetry b { color:#fff; font-weight:500; }
+.jobs-top::after { content:""; position:absolute; inset:0; z-index:-1; pointer-events:none; background:linear-gradient(90deg, color-mix(in srgb, var(--jt-night) 78%, transparent) 0%, color-mix(in srgb, var(--jt-night) 35%, transparent) 45%, transparent 70%); }
+.jobs-mast .jobs-kicker { font:600 10.5px/1 var(--jobs-mono); letter-spacing:.22em; text-transform:uppercase; color:color-mix(in srgb, var(--jt-ivory) 66%, transparent); }
+.jobs-mast h1 { margin:10px 0 0; font:var(--jt-display-weight) var(--jt-mast-size)/1 var(--jobs-serif); letter-spacing:-.02em; color:var(--jt-ivory); text-shadow:var(--jt-title-shadow); }
+.jobs-telemetry { display:flex; flex-wrap:wrap; align-items:center; gap:8px 20px; padding-bottom:6px; font:400 12px var(--jobs-mono); color:color-mix(in srgb, var(--jt-ivory) 66%, transparent); font-variant-numeric:tabular-nums; }
+.jobs-telemetry b { color:var(--jt-ivory-strong); font-weight:500; }
 .jobs-telemetry span:empty { display:none; }
 .jobs-beacon { display:inline-flex; align-items:center; }
-.jobs-beacon::before { content:""; width:7px; height:7px; margin-right:9px; border-radius:50%; background:#7fe0b0; animation:jobs-beacon 2.4s infinite; }
-.jobs-paused .jobs-beacon::before { background:#d0b0f5; animation:none; }
-@keyframes jobs-beacon { 0% { box-shadow:0 0 0 0 rgba(127,224,176,.6); } 70%,100% { box-shadow:0 0 0 8px transparent; } }
+.jobs-beacon::before { content:""; width:7px; height:7px; margin-right:9px; border-radius:50%; background:var(--jt-ink-ok); animation:jobs-beacon 2.4s infinite; animation-play-state:var(--jt-motion); }
+.jobs-paused .jobs-beacon::before { background:var(--jt-ink-pause); animation:none; }
+@keyframes jobs-beacon { 0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--jt-ink-ok) 60%, transparent); } 70%,100% { box-shadow:0 0 0 8px transparent; } }
 .jobs-bays { display:inline-flex; gap:3px; align-items:center; }
-.jobs-bays i { width:4px; height:13px; border-radius:2px; background:rgba(244,237,226,.2); }
-.jobs-bays i.on { background:#a9b8ff; box-shadow:0 0 6px #6f7cff; }
-.jobs-paused .jobs-bays i.on { background:#d0b0f5; box-shadow:none; }
+.jobs-bays i { width:4px; height:13px; border-radius:2px; background:color-mix(in srgb, var(--jt-ivory) 20%, transparent); }
+.jobs-bays i.on { background:var(--jt-ink-run); box-shadow:var(--jt-run-glow); }
+.jobs-paused .jobs-bays i.on { background:var(--jt-ink-pause); box-shadow:none; }
 .jobs-tools { margin-left:auto; display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding-bottom:2px; }
-.jobs-ghost { display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 14px; border:1px solid rgba(244,237,226,.24); border-radius:999px; background:rgba(2,3,6,.42); color:rgba(244,237,226,.85); font:inherit; font-size:13px; cursor:pointer; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
-.jobs-ghost:hover { color:#fff; border-color:rgba(244,237,226,.5); }
-.jobs-ghost[aria-pressed="true"] { color:#d0b0f5; border-color:rgba(208,176,245,.6); background:rgba(60,20,119,.45); }
-#jobs .jobs-ghost input[type=number] { width:34px; padding:2px 0; border:0; background:transparent; color:#f4ede2; font:inherit; font-size:13px; font-variant-numeric:tabular-nums; }
-.jobs-icon { display:inline-grid; place-items:center; width:36px; height:36px; padding:0; border:0; border-radius:50%; background:transparent; color:rgba(244,237,226,.8); font-size:16px; cursor:pointer; }
-.jobs-icon:hover { color:#fff; background:rgba(244,237,226,.12); }
+.jobs-ghost { display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 14px; border:1px solid color-mix(in srgb, var(--jt-ivory) 24%, transparent); border-radius:var(--jt-radius-pill); background:color-mix(in srgb, var(--jt-night) 42%, transparent); color:color-mix(in srgb, var(--jt-ivory) 85%, transparent); font:inherit; font-size:13px; cursor:pointer; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+.jobs-ghost:hover { color:var(--jt-ivory-strong); border-color:color-mix(in srgb, var(--jt-ivory) 50%, transparent); }
+.jobs-ghost[aria-pressed="true"] { color:var(--jt-ink-pause); border-color:color-mix(in srgb, var(--jt-ink-pause) 60%, transparent); background:var(--jt-pause-bg); }
+#jobs .jobs-ghost input[type=number] { width:34px; padding:2px 0; border:0; background:transparent; color:var(--jt-ivory); font:inherit; font-size:13px; font-variant-numeric:tabular-nums; }
+.jobs-icon { display:inline-grid; place-items:center; width:36px; height:36px; padding:0; border:0; border-radius:50%; background:transparent; color:color-mix(in srgb, var(--jt-ivory) 80%, transparent); font-size:16px; cursor:pointer; }
+.jobs-icon:hover { color:var(--jt-ivory-strong); background:color-mix(in srgb, var(--jt-ivory) 12%, transparent); }
 /* Ignition ring: the plates' hover sweep, always turning round New job. Hover adds a second turn rather than
    shortening the first, whose phase would jump: --boost only plays while hovered and holds where it stops. */
 @property --boost { syntax:'<angle>'; inherits:false; initial-value:0deg; }
 @keyframes jobs-boost { to { --boost:360deg; } }
-.jobs-newjob { position:relative; isolation:isolate; display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 16px 0 12px; border:0; border-radius:999px; background:#f4ede2; color:#05070c; font:600 13px var(--font); cursor:pointer; box-shadow:0 0 22px rgba(255,186,80,.28); transition:box-shadow .3s; }
-.jobs-newjob::before { content:""; position:absolute; inset:-3px; border-radius:inherit; padding:2px; pointer-events:none; transition:opacity .3s;
+.jobs-newjob { position:relative; isolation:isolate; display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 16px 0 12px; border:0; border-radius:var(--jt-radius-pill); background:var(--jt-cta-bg); color:var(--jt-cta-fg); font:600 13px var(--font); cursor:pointer; box-shadow:0 0 22px color-mix(in srgb, var(--jt-glow) 28%, transparent); transition:box-shadow .3s; }
+.jobs-newjob::before { content:""; display:var(--jt-flourish); position:absolute; inset:-3px; border-radius:inherit; padding:2px; pointer-events:none; transition:opacity .3s;
   background:conic-gradient(from calc(var(--sweep) + var(--boost)), transparent 0 58%, rgba(245,158,27,.9) 78%, #fff 84%, transparent 88%);
   -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask:linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
   animation:gx-sweep 5s linear infinite, jobs-boost 1.6s linear infinite paused; }
-.jobs-newjob:hover { background:#fff; box-shadow:0 0 30px rgba(255,186,80,.5); }
+.jobs-newjob:hover { background:var(--jt-cta-hover); box-shadow:0 0 30px color-mix(in srgb, var(--jt-glow) 50%, transparent); }
 .jobs-newjob:hover::before { animation-play-state:running; }
 .jobs-paused .jobs-newjob::before { animation-play-state:paused; opacity:.4; }
 :is(.jobs-ghost,.jobs-icon,.jobs-newjob,.jobs-rail button):focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
 .jobs-rail { display:flex; flex-wrap:wrap; align-items:center; gap:6px 4px; padding:10px 14px 12px; }
-.jobs-rail button { display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 13px; border:0; border-radius:999px; background:none; color:var(--fg-muted); font:inherit; font-size:13px; cursor:pointer; }
+.jobs-rail button { display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 13px; border:0; border-radius:var(--jt-radius-pill); background:none; color:var(--fg-muted); font:inherit; font-size:13px; cursor:pointer; }
 .jobs-rail button:hover { color:var(--fg); }
 .jobs-rail button[aria-pressed="true"] { background:color-mix(in srgb, var(--st-run) 14%, transparent); color:var(--st-run-fg); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-run) 45%, transparent); }
 .jobs-rail-n { font:400 11px var(--jobs-mono); opacity:.7; font-variant-numeric:tabular-nums; }
@@ -116,11 +156,12 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .jobs-rail button[aria-pressed="true"] .jobs-rail-n.ask { background:var(--st-warn); color:var(--bar-on); }
 
 .jobs-plates { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr)); gap:22px; }
-.job-plate { --t:var(--c-fg); position:relative; cursor:pointer; display:flex; flex-direction:column; min-width:0; border-radius:18px; overflow:hidden; background:var(--card-bg); border:1px solid var(--border-muted); backdrop-filter:blur(14px) saturate(1.2); -webkit-backdrop-filter:blur(14px) saturate(1.2); transition:border-color .25s; }
-.job-plate:is(:hover,.hot) { border-color:color-mix(in srgb, var(--c) 45%, var(--border-muted)); }
+.job-plate { --t:var(--c-fg); position:relative; cursor:pointer; display:flex; flex-direction:column; min-width:0; border-radius:var(--jt-radius-plate); overflow:hidden; background:var(--card-bg); border:1px solid var(--border-muted); backdrop-filter:blur(14px) saturate(1.2); -webkit-backdrop-filter:blur(14px) saturate(1.2); transition:border-color .25s; }
+.job-plate:is(:hover,.hot) { border-color:color-mix(in srgb, var(--c) var(--jt-hover-mix), var(--border-muted)); box-shadow:var(--jt-hover-lift); }
 .job-plate:is(.tone-warn,.tone-bad) { border-color:color-mix(in srgb, var(--c) 50%, var(--border-muted)); }
+.job-plate:is(.tone-warn,.tone-bad):is(:hover,.hot) { border-color:color-mix(in srgb, var(--c) max(50%, var(--jt-hover-mix)), var(--border-muted)); }
 /* The quiet sky (job-skylines.js): canvases painted once, only transforms and opacity animate. */
-.gx { --k:1; position:absolute; inset:0; overflow:hidden; background:#020306; isolation:isolate; }
+.gx { --k:1; position:absolute; inset:0; display:var(--jt-sky); overflow:hidden; background:#020306; isolation:isolate; }
 .gx canvas { position:absolute; display:block; }
 .gx .l { position:absolute; inset:0; overflow:hidden; }
 .gx canvas.l { left:0; top:0; }
@@ -140,22 +181,22 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .gx.off *,.jobs-paused .gx *,.job-plate.paused .gx * { animation-play-state:paused !important; }
 /* Hover: no lift. The border lights with a sweep in the state colour while the hole spins up (job-skylines.js). */
 @property --sweep { syntax:'<angle>'; inherits:false; initial-value:0deg; }
-.job-plate::before { content:""; position:absolute; inset:0; z-index:3; pointer-events:none; border-radius:inherit; padding:1.5px; opacity:0; transition:opacity .35s; animation:gx-sweep 2.4s linear infinite paused;
+.job-plate::before { content:""; display:var(--jt-flourish); position:absolute; inset:0; z-index:3; pointer-events:none; border-radius:inherit; padding:1.5px; opacity:0; transition:opacity .35s; animation:gx-sweep 2.4s linear infinite paused;
   background:conic-gradient(from var(--sweep), transparent 0 62%, color-mix(in srgb, var(--c) 70%, transparent) 80%, #fff 84%, transparent 86%);
   -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask:linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
 /* Paused, not removed, off hover: removing it would snap --sweep to 0deg while the border fades. */
 .job-plate:is(:hover,.hot)::before { opacity:1; animation-play-state:running; }
 @keyframes gx-sweep { to { --sweep:360deg; } }
 /* Legibility over the glow: a dark halo under each label, no filter (the halos animate). */
-#jobs:not([data-plate-art="full"]) .job-plate-graph .lbl { paint-order:stroke; stroke:rgba(2,3,6,.85); stroke-width:2.4px; stroke-linejoin:round; }
-#jobs:not([data-plate-art="full"]) .job-plate-graph .edge { stroke-opacity:.55; }
+:is(#jobs,.theme-mini)[data-plate-art="quiet"] .job-plate-graph .lbl { paint-order:stroke; stroke:rgba(2,3,6,.85); stroke-width:2.4px; stroke-linejoin:round; }
+:is(#jobs,.theme-mini)[data-plate-art="quiet"] .job-plate-graph .edge { stroke-opacity:.55; }
 @media(prefers-reduced-motion:reduce) { .gx * { animation:none !important; } .job-plate::before { animation:none; } }
-.job-plate-art { position:relative; aspect-ratio:320 / 150; overflow:hidden; background:#05070c; border-radius:17px 17px 0 0; }
+.job-plate-art { position:relative; aspect-ratio:320 / 150; overflow:hidden; background:var(--jt-art-bg); border-bottom:var(--jt-art-rule); border-radius:calc(var(--jt-radius-plate) - 1px) calc(var(--jt-radius-plate) - 1px) 0 0; }
 .job-plate-art>svg { position:absolute; inset:0; width:100%; height:100%; display:block; }
 .job-plate-art .scrim { position:absolute; inset:0; pointer-events:none; background:linear-gradient(180deg, rgba(5,6,10,.42) 0%, rgba(5,6,10,0) 26%, rgba(5,6,10,0) 78%, rgba(5,6,10,.3) 100%); }
 .job-plate-art.ink-dark .scrim { background:linear-gradient(180deg, rgba(250,249,245,.5) 0%, rgba(250,249,245,0) 26%); }
-.job-plate-art::after { content:""; position:absolute; inset:0; pointer-events:none; opacity:0; background:radial-gradient(120% 70% at 50% 100%, rgba(255,170,110,.34), transparent 62%); }
-#jobs[data-plate-art="full"] .job-plate.running .job-plate-art::after { animation:jobs-breathe 4.6s ease-in-out infinite; }
+.job-plate-art::after { content:""; display:var(--jt-flourish); position:absolute; inset:0; pointer-events:none; opacity:0; background:radial-gradient(120% 70% at 50% 100%, rgba(255,170,110,.34), transparent 62%); }
+:is(#jobs,.theme-mini)[data-plate-art="full"] .job-plate.running .job-plate-art::after { animation:jobs-breathe 4.6s ease-in-out infinite; }
 @keyframes jobs-breathe { 50% { opacity:1; } }
 .job-plate:is(.paused) :is(.scene,.gx) { filter:grayscale(.85) brightness(.82); }
 .job-plate:is(.planned,.queued) .scene { filter:saturate(.7) brightness(.8); }
@@ -164,9 +205,12 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .job-plate-unplanned { position:absolute; inset:0; display:grid; place-items:center; font:500 9.5px var(--jobs-mono); letter-spacing:.2em; text-transform:uppercase; pointer-events:none; }
 :is(.job-plate-tag,.job-plate-unplanned).lt { color:rgba(244,237,226,.86); text-shadow:0 1px 6px rgba(0,0,0,.45); }
 :is(.job-plate-tag,.job-plate-unplanned).dk { color:rgba(27,26,23,.74); }
+:is(.job-plate-tag,.job-plate-unplanned).pl { color:var(--jt-ink); }
 /* The plan drawn into the sky. Ink follows the art behind it: light over the dark
    parts of a scene, dark over the light ones (job-plates.js inkFor). */
 .job-plate-graph .lt { --ink:#f4ede2; --ink-run:#a9b8ff; --ink-needs:#f7cd5f; --ink-bad:#ff7b4f; --ink-ok:#7fe0b0; --ink-pause:#d0b0f5; --ink-hollow:rgba(6,8,14,.4); }
+/* Plain art (a theme with none of its own): the theme's ink on the theme's ground. */
+.job-plate-graph .pl { --ink:var(--jt-ink); --ink-run:var(--jt-ink-run); --ink-needs:var(--jt-ink-needs); --ink-bad:var(--jt-ink-bad); --ink-ok:var(--jt-ink-ok); --ink-pause:var(--jt-ink-pause); --ink-hollow:var(--jt-ink-hollow); }
 .job-plate-graph .dk { --ink:#1b1a17; --ink-run:#3f55c4; --ink-needs:#9a6400; --ink-bad:#c23c18; --ink-ok:#2a734b; --ink-pause:#74499f; --ink-hollow:rgba(250,249,245,.55); }
 .job-plate-graph .edge { fill:none; stroke:var(--ink); stroke-opacity:.42; stroke-width:1; }
 .job-plate-graph .edge.deploy { stroke-dasharray:2 3; }
@@ -185,10 +229,10 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .job-plate-graph .dropped .core { stroke-dasharray:1.5 1.5; }
 .job-plate-graph .node[data-job]:is(:hover,:focus-visible) .core { stroke:var(--ink); stroke-opacity:1; stroke-width:2; }
 .job-plate-graph .lbl { font:600 7px var(--jobs-mono); letter-spacing:.08em; fill:var(--ink); fill-opacity:.88; pointer-events:none; }
-.job-plate-graph .halo { fill:none; stroke-width:1.2; transform-box:fill-box; transform-origin:center; animation:jobs-halo 2.2s ease-out infinite; }
+.job-plate-graph .halo { display:var(--jt-halo); fill:none; stroke-width:1.2; transform-box:fill-box; transform-origin:center; animation:jobs-halo 2.2s ease-out infinite; }
 .job-plate-graph .needs .halo { stroke:var(--ink-needs); animation-duration:3s; }
 .job-plate-graph .running .halo { stroke:var(--ink-run); }
-.job-plate-graph .failing { animation:jobs-flicker 1.6s steps(2) infinite; }
+.job-plate-graph .failing { animation:jobs-flicker 1.6s steps(2) infinite; animation-play-state:var(--jt-motion); }
 @keyframes jobs-halo { from { transform:scale(.6); opacity:.9; } to { transform:scale(2.4); opacity:0; } }
 @keyframes jobs-flicker { 50% { opacity:.35; } }
 .jobs-paused :is(.job-plate-graph .halo,.job-plate-graph .failing,.job-plate-art::after) { animation:none; }
@@ -196,7 +240,7 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .job-plate-body { display:grid; gap:7px; padding:14px 18px 16px; min-width:0; }
 .job-plate-where { display:flex; justify-content:space-between; gap:10px; font:400 11px var(--jobs-mono); color:var(--fg-muted); }
 .job-plate-cost { color:var(--fg); font-variant-numeric:tabular-nums; white-space:nowrap; }
-.job-plate-open { all:unset; cursor:pointer; font:500 21px/1.2 var(--jobs-serif); letter-spacing:-.01em; color:var(--fg); text-wrap:balance; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.job-plate-open { all:unset; cursor:pointer; font:var(--jt-display-weight) var(--jt-plate-title)/1.2 var(--jobs-serif); letter-spacing:-.01em; color:var(--fg); text-wrap:balance; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .job-plate-open::after { content:""; position:absolute; inset:0; }
 /* Core's global button:hover would tint the title; the whole plate is the target, so it stays plain. */
 .job-plate-open:hover { background:none; }
@@ -211,12 +255,13 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .job-plate-ask { display:inline-flex; align-items:center; gap:8px; flex:none; max-width:55%; color:var(--t); font-weight:600; font-size:13px; white-space:nowrap; }
 .job-plate-ask .job-status { overflow:hidden; text-overflow:ellipsis; }
 .job-plate-detail { flex:1; min-width:0; font:400 11px var(--jobs-mono); color:var(--fg-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.job-plate-go { flex:none; height:34px; padding:0 15px; border:0; border-radius:999px; background:var(--c); color:var(--bar-on); font:600 12.5px var(--font); cursor:pointer; transition:transform .15s, filter .15s; }
-.job-plate-go:hover { filter:brightness(1.08); }
+.job-plate-go { flex:none; height:34px; padding:0 15px; border:0; border-radius:var(--jt-radius-pill); background:var(--c); color:var(--bar-on); font:600 12.5px var(--font); cursor:pointer; transition:transform .15s, filter .15s; }
+/* Core's global button:hover (background:var(--border-muted)) outranks .job-plate-go and would blank its fill under white text. */
+.job-plate-go:hover { background:var(--c); filter:brightness(1.08); }
 .job-plate-go:active { transform:scale(.96); }
 .job-plate-go:disabled { opacity:.6; cursor:default; }
 .job-plate-go:focus-visible { outline:2px solid var(--c); outline-offset:2px; }
-.job-plate-alt { flex:none; height:34px; padding:0 10px; border:0; border-radius:999px; background:transparent; color:var(--fg-muted); font:600 12.5px var(--font); cursor:pointer; }
+.job-plate-alt { flex:none; height:34px; padding:0 10px; border:0; border-radius:var(--jt-radius-pill); background:transparent; color:var(--fg-muted); font:600 12.5px var(--font); cursor:pointer; }
 .job-plate-alt:hover { color:var(--fg); }
 .job-plate-alt:disabled { opacity:.6; cursor:default; }
 .job-plate-alt:focus-visible { outline:2px solid var(--c); outline-offset:2px; }
@@ -253,7 +298,7 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .job-plate-place.urgent { background:color-mix(in srgb, var(--c) 18%, transparent); color:var(--c-fg); }
 .job-plate-place i { width:6px; height:6px; flex:none; border-radius:50%; background:var(--c); }
 .job-plate-place-out { font-size:11px; opacity:.65; }
-@media(max-width:560px) { #jobs { padding:16px 16px 84px; } .jobs-mast h1 { font-size:34px; } .jobs-top { padding:96px 16px 16px; } .jobs-top::after { background:linear-gradient(0deg, rgba(2,3,6,.85) 0%, rgba(2,3,6,.4) 55%, transparent 80%); } .jobs-tools { margin-left:0; } .jobs-rail { padding:10px 8px 12px; } }
+@media(max-width:560px) { #jobs { padding:16px 16px 84px; } .jobs-mast h1 { font-size:min(34px, var(--jt-mast-size)); } .jobs-top { padding:var(--jt-mast-pad-narrow); } .jobs-top::after { background:linear-gradient(0deg, color-mix(in srgb, var(--jt-night) 85%, transparent) 0%, color-mix(in srgb, var(--jt-night) 40%, transparent) 55%, transparent 80%); } .jobs-tools { margin-left:0; } .jobs-rail { padding:10px 8px 12px; } }
 @media(prefers-reduced-motion:reduce) { .jobs-beacon::before,.jobs-newjob::before,.job-plate-graph .halo,.job-plate-graph .failing,.job-plate-art::after { animation:none !important; } .job-plate,.job-plate-go { transition:none; } }
 
 /* The intro's figures still draw the earlier tonal card and its progress segments. */
@@ -280,7 +325,7 @@ body.light:not(:has(#jobs[data-backdrop="wrangler"])) :is(#jobs,.job-dialog,.job
 .jobs-empty { padding:56px 20px; border:0; font:italic 400 22px/1.5 var(--jobs-serif, Georgia, serif); color:var(--fg-muted); }
 
 /* The dialog: a Material surface — app bar, assist chips, stepper, one FAB. */
-.job-dialog { position:fixed; inset:0; margin:auto; width:min(1600px,95vw); max-height:92vh; overflow:auto; scrollbar-width:thin; scrollbar-color:var(--border-muted) transparent; box-sizing:border-box; background:var(--surface); color:var(--fg); border:0; border-radius:28px; padding:24px 28px; box-shadow:0 20px 70px var(--shadow); font-family:var(--font); }
+.job-dialog { position:fixed; inset:0; margin:auto; width:min(1600px,95vw); max-height:92vh; overflow:auto; scrollbar-width:thin; scrollbar-color:var(--border-muted) transparent; box-sizing:border-box; background:var(--surface); color:var(--fg); border:var(--jt-dialog-line); border-radius:var(--jt-radius-dialog); padding:24px 28px; box-shadow:0 20px 70px var(--shadow); font-family:var(--font); }
 .job-dialog::backdrop { background:var(--overlay); backdrop-filter:blur(3px); }
 .job-dialog-close { position:absolute; z-index:1; top:16px; right:16px; width:40px; height:40px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:transparent; color:var(--fg-muted); font-size:20px; cursor:pointer; }
 .job-dialog-close:hover { background:var(--surface-2); }
@@ -867,14 +912,14 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .intro-inert { display:contents; }
 /* An idea on the mini board: a card drawn on its forming sky (job-skylines.js), like its
    plate, edged in amber while it waits on you. Its text sits on the art, so its ink is fixed. */
-.intro-mini-idea { position:relative; isolation:isolate; overflow:hidden; min-height:54px; box-sizing:border-box; background:#020306; transition:box-shadow .3s; }
+.intro-mini-idea { position:relative; isolation:isolate; overflow:hidden; min-height:54px; box-sizing:border-box; background:var(--jt-night); transition:box-shadow .3s; }
 .intro-mini-idea.tone-warn { box-shadow:inset 0 0 0 1.5px var(--c); }
 .intro-mini-sky { position:absolute; inset:0; z-index:-1; }
-.intro-mini-sky::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg, rgba(2,3,6,.55), transparent 65%); }
-.intro-mini-idea b { color:#f4ede2; }
-.intro-mini-idea small { color:rgba(244,237,226,.78); }
-.intro-mini-idea.tone-warn small { color:#f7cd5f; }
-.intro-mini-idea .job-idea-mark { color:#f4ede2; }
+.intro-mini-sky::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg, color-mix(in srgb, var(--jt-night) 55%, transparent), transparent 65%); }
+.intro-mini-idea b { color:var(--jt-ivory); }
+.intro-mini-idea small { color:color-mix(in srgb, var(--jt-ivory) 78%, transparent); }
+.intro-mini-idea.tone-warn small { color:var(--jt-ink-needs); }
+.intro-mini-idea .job-idea-mark { color:var(--jt-ivory); }
 /* New idea's chat: a fixed window, newest at the foot, the planner's own thread markup inside. */
 .intro-chat { height:330px; display:flex; flex-direction:column; justify-content:flex-end; gap:12px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 36px); mask-image:linear-gradient(180deg, transparent, #000 36px); }
 .intro-chat .job-idea-thread { flex:none; gap:12px; padding:0; }
@@ -951,11 +996,10 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
    effort meter in the sidebar, and a cabinet that opens over the brief column only.
    Chrome follows the board's variables; the plates keep their own fixed palettes.
    Claude's chrome is the near-black of the Opus and Sonnet launch pages on a dark
-   board and Haiku's ivory on a light one (core's body.light, and only under the Wrangler background:
-   the sky keeps Jobs dark). */
+   board and Haiku's ivory on a light one (core's body.light, unless the theme forces dark). */
 .job-create { position:relative; }
 .job-pick,.pick-cabinet { --c-ground:#141413; --c-raised:#201f1d; --c-line:#33322e; --c-ink:#f0eee6; --c-hover:#ffffff0a; --pick-night:#070a10; --pick-star:#eef0f6; --pick-star-soft:#8b93a7; --pick-sans:system-ui,-apple-system,"Segoe UI",sans-serif; --pick-serif:Georgia,"Iowan Old Style",serif; --pick-mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
-body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { --c-ground:#faf9f5; --c-raised:#f0eee6; --c-line:#e3e0d6; --c-ink:#141413; --c-hover:#1414130a; }
+body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { --c-ground:#faf9f5; --c-raised:#f0eee6; --c-line:#e3e0d6; --c-ink:#141413; --c-hover:#1414130a; }
 .pick-ticket { appearance:none; display:grid; width:100%; padding:0; border-radius:10px; overflow:hidden; text-align:left; cursor:pointer; color:inherit; font:inherit; transition:transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s; }
 .pick-ticket:hover { transform:translateY(-1px); box-shadow:0 8px 18px -12px var(--shadow); }
 .pick-ticket:focus-visible,.pick-bar:focus-visible,.pick-cell:focus-visible,.pick-tab:focus-visible,.pick-close:focus-visible,.pick-reset:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
@@ -1046,6 +1090,49 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .generic .pick-ids { border-top:1px solid var(--border-muted); }
 .generic .pick-cell:hover,.generic .pick-cell:focus-visible { background:var(--surface-2); }
 .generic .pick-cell[aria-checked=true] { box-shadow:0 0 0 1px var(--fg); }
+
+/* Automation settings' theme picker (theme-picker.js): the model picker's ticket and cabinet, on its .pick-*
+   layout. The ticket, each plate and the cabinet carry the theme they show (data-theme, and data-scheme when
+   it forces dark), so their colours are that theme's tokens whatever the dialog around them wears. */
+.job-settings-theme,.theme-cabinet { --pick-sans:system-ui,-apple-system,"Segoe UI",sans-serif; --pick-mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.job-dialog .job-settings-theme { padding:12px 12px 14px; }
+.theme-pick-row { display:grid; grid-template-columns:minmax(0,240px) minmax(0,1fr); gap:16px; align-items:start; }
+@media(max-width:560px) { .theme-pick-row { grid-template-columns:1fr; } }
+.theme-ticket { background:var(--jt-night); color:var(--jt-ivory); border:1px solid var(--border); }
+.theme-ticket .pick-tname { font:var(--jt-display-weight) 16px/1.2 var(--jobs-serif); letter-spacing:-.01em; }
+.theme-opts { display:grid; gap:6px; justify-items:start; }
+.theme-opts .pick-lab { width:auto; }
+.theme-segs { display:inline-flex; flex-wrap:wrap; gap:3px; }
+.theme-segs button { appearance:none; padding:4px 10px; border:0; border-radius:999px; background:none; box-shadow:inset 0 0 0 1px var(--border); color:var(--fg-muted); font:500 11.5px var(--font); cursor:pointer; }
+.theme-segs button:hover:not([aria-checked="true"]) { color:var(--fg); }
+.theme-segs button[aria-checked="true"] { background:var(--fg); color:var(--surface); box-shadow:none; }
+.theme-segs button:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+/* The cabinet covers the part of the dialog in view (theme-picker.js sets its top and height), which holds still. */
+.job-dialog.theme-cab-open { overflow:hidden; }
+.theme-cabinet { position:absolute; left:0; right:0; top:0; height:100%; z-index:6; box-sizing:border-box; display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; border-radius:inherit; background:var(--jt-cab-bg); color:var(--jt-cab-ink); box-shadow:inset 0 0 0 1px var(--border); animation:pick-open .38s cubic-bezier(.2,.8,.2,1); }
+.theme-cabinet .pick-head { gap:10px; padding:20px 22px 10px; }
+.theme-cabinet .pick-head b { font:var(--jt-display-weight) 17px var(--jobs-serif); }
+.theme-cabinet .pick-head small { font:400 11px var(--pick-mono); opacity:.6; }
+.theme-cabinet .pick-body { grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:22px; padding:6px 22px 22px; overflow:auto; }
+.theme-cabinet .pick-pname { font:var(--jt-display-weight) 30px/1.08 var(--jobs-serif); letter-spacing:-.02em; }
+.theme-cabinet .pick-pdesc { line-height:1.5; opacity:.85; }
+.theme-cabinet .pick-rows { font:400 13px var(--jobs-serif); }
+.theme-cabinet .pick-rows i { border-bottom-color:color-mix(in srgb, currentColor 22%, transparent); }
+.theme-cabinet .pick-tray { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.theme-cabinet .pick-cell { gap:6px; padding:6px; border-radius:9px; }
+.theme-cabinet .pick-cell:hover,.theme-cabinet .pick-cell:focus-visible { background:color-mix(in srgb, currentColor 10%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent); }
+.theme-cabinet .pick-cell[aria-checked=true] { box-shadow:inset 0 0 0 1px currentColor; }
+.theme-cabinet .pick-thumb { border-radius:6px; }
+.theme-cabinet .pick-tag { font:var(--jt-display-weight) 14px/1.25 var(--jobs-serif); }
+/* A theme's picture is the board itself, small (theme-preview.js): drawn at board width and zoomed to its box. */
+:is(.pick-band,.pick-art,.pick-thumb)>.theme-mini { inset:auto; left:0; top:0; height:auto; }
+.theme-mini { --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; box-sizing:border-box; display:flex; flex-direction:column; gap:18px; padding:18px; overflow:hidden; pointer-events:none; background-color:var(--jt-view-color); background-image:var(--jt-view-image); background-size:var(--jt-view-size); color:var(--fg); font-family:var(--font); text-align:left; }
+.theme-mini.band { padding:0; }
+.theme-mini.band .jobs-mast { flex:1; border:0; border-radius:0; }
+.theme-mini.thumb { padding:12px; }
+.theme-mini :is(.job-plate-go,.job-plate-alt) { display:inline-flex; align-items:center; }
+@media(max-width:560px) { .theme-cabinet .pick-body { grid-template-columns:1fr; } }
+@media(prefers-reduced-motion:reduce) { .theme-cabinet { animation:none; } .theme-ticket { transition:none; } }
 
 .plate-spin { transform-origin:0 0; animation:pick-spin var(--d,30s) linear infinite; }
 @keyframes pick-spin { to { transform:rotate(360deg); } }
@@ -1499,17 +1586,17 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
    suggests as a horizon strip whose event horizon is the button. Plate art and the ink on
    it are fixed colours; everything else is the board's variables. */
 .job-dialog:has(> .job-idea) { width:min(920px,95vw); padding:0; }
-.job-dialog:has(> .job-idea) > .job-dialog-close { z-index:3; color:rgba(244,237,226,.8); }
-.job-dialog:has(> .job-idea) > .job-dialog-close:hover { background:rgba(244,237,226,.12); }
-.job-idea { --jobs-serif:"Newsreader","Iowan Old Style",Georgia,serif; --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; display:flex; flex-direction:column; min-height:min(640px,88vh); }
-.job-idea-band { position:relative; isolation:isolate; flex:none; height:150px; display:flex; align-items:flex-end; padding:20px 26px 18px; background:#020306; color:#f4ede2; overflow:hidden; }
+.job-dialog:has(> .job-idea) > .job-dialog-close { z-index:3; color:color-mix(in srgb, var(--jt-ivory) 80%, transparent); }
+.job-dialog:has(> .job-idea) > .job-dialog-close:hover { background:color-mix(in srgb, var(--jt-ivory) 12%, transparent); }
+.job-idea { --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; display:flex; flex-direction:column; min-height:min(640px,88vh); }
+.job-idea-band { position:relative; isolation:isolate; flex:none; height:150px; display:flex; align-items:flex-end; padding:20px 26px 18px; background:var(--jt-night); color:var(--jt-ivory); border-bottom:var(--jt-mast-rule); overflow:hidden; }
 .job-idea-band .gx { z-index:-2; left:auto; width:min(100%,420px); -webkit-mask-image:linear-gradient(90deg, transparent, #000 45%); mask-image:linear-gradient(90deg, transparent, #000 45%); }
-.job-idea-band::after { content:""; position:absolute; inset:0; z-index:-1; pointer-events:none; background:linear-gradient(90deg, rgba(2,3,6,.82) 0%, rgba(2,3,6,.4) 50%, transparent 78%), linear-gradient(0deg, rgba(2,3,6,.6), transparent 60%); }
-.job-dialog .job-idea-band h2 { margin:8px 44px 0 0; max-width:24ch; font:500 30px/1.1 var(--jobs-serif); letter-spacing:-.015em; color:#f4ede2; text-shadow:0 2px 18px rgba(0,0,0,.6); }
+.job-idea-band::after { content:""; position:absolute; inset:0; z-index:-1; pointer-events:none; background:linear-gradient(90deg, color-mix(in srgb, var(--jt-night) 82%, transparent) 0%, color-mix(in srgb, var(--jt-night) 40%, transparent) 50%, transparent 78%), linear-gradient(0deg, color-mix(in srgb, var(--jt-night) 60%, transparent), transparent 60%); }
+.job-dialog .job-idea-band h2 { margin:8px 44px 0 0; max-width:24ch; font:var(--jt-display-weight) var(--jt-band-title)/1.1 var(--jobs-serif); letter-spacing:-.015em; color:var(--jt-ivory); text-shadow:var(--jt-title-shadow); }
 /* The title loader (job-idea.js titleLoaderHtml): two faint ivory bars set on the title's
    own line boxes (so the band never moves), a slow soft glow drifting through them. */
 .job-title-loader { display:grid; grid-auto-rows:1.1em; align-items:center; width:min(100%,20ch); }
-.job-title-loader i { display:block; height:.6em; border-radius:.3em; background:linear-gradient(100deg, rgba(244,237,226,.06) 0 35%, rgba(255,214,226,.15) 50%, rgba(244,237,226,.06) 65% 100%); background-size:300% 100%; animation:job-title-glow 3.6s ease-in-out infinite; }
+.job-title-loader i { display:block; height:.6em; border-radius:.3em; background:linear-gradient(100deg, color-mix(in srgb, var(--jt-ivory) 6%, transparent) 0 35%, var(--jt-loader-glow) 50%, color-mix(in srgb, var(--jt-ivory) 6%, transparent) 65% 100%); background-size:300% 100%; animation:job-title-glow 3.6s ease-in-out infinite; }
 .job-title-loader i + i { width:58%; animation-delay:.35s; }
 .job-title-loader.small { width:min(100%,16ch); grid-auto-rows:1.2em; }
 .job-title-loader.small i { background-image:linear-gradient(100deg, color-mix(in srgb, var(--fg) 7%, transparent) 0 35%, color-mix(in srgb, var(--fg) 15%, transparent) 50%, color-mix(in srgb, var(--fg) 7%, transparent) 65% 100%); }
@@ -1520,14 +1607,14 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 @keyframes job-title-glow { from { background-position:100% 0; } to { background-position:0 0; } }
 @keyframes job-title-in { from { opacity:0; filter:blur(6px); } }
 @keyframes job-title-out { to { opacity:0; filter:blur(4px); } }
-.job-idea-mark { display:inline-flex; align-items:center; gap:6px; color:#f4ede2; }
+.job-idea-mark { display:inline-flex; align-items:center; gap:6px; color:var(--jt-ivory); }
 .job-idea-mark::before { content:""; width:5px; height:5px; border-radius:50%; background:#ffc7d6; box-shadow:0 0 6px #f07fa8; }
 .gx.nb .infall { mix-blend-mode:screen; }
 .gx.nb .jets { mix-blend-mode:screen; animation:gx-glare calc(14s * var(--k)) ease-in-out infinite alternate; }
 .gx.nb .drift { animation:nb-drift calc(40s * var(--k)) ease-in-out infinite alternate; }
 @keyframes nb-drift { to { transform:scale(.9); opacity:.75; } }
 .job-idea-band > div { flex:1; min-width:0; }
-.job-idea-band .job-detail-cost { flex:none; margin-left:12px; border-color:rgba(244,237,226,.22); background:rgba(2,3,6,.45); color:#f4ede2; }
+.job-idea-band .job-detail-cost { flex:none; margin-left:12px; border-color:color-mix(in srgb, var(--jt-ivory) 22%, transparent); background:color-mix(in srgb, var(--jt-night) 45%, transparent); color:var(--jt-ivory); }
 .job-idea > .job-error { margin:12px 26px 0; }
 .job-idea-orb { position:relative; flex:none; display:inline-block; width:30px; height:30px; border-radius:50%; overflow:hidden; background:radial-gradient(circle at 50% 50%, #fff 0 6%, #ffd2c0 12%, #c0508f 34%, #2a0f4d 62%, #08031a 100%); box-shadow:0 0 0 1px color-mix(in srgb, var(--fg) 10%, transparent), 0 0 18px -4px #c0508f; }
 .job-idea-orb::after { content:""; position:absolute; inset:-30%; border-radius:50%; background:conic-gradient(from 0deg, transparent 0 30%, rgba(255,210,192,.45) 42%, transparent 55% 80%, rgba(47,196,192,.35) 90%, transparent); animation:gx-spin 9s linear infinite; mix-blend-mode:screen; }
@@ -1570,18 +1657,19 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-launch-steps li:first-child { border-top:0; }
 .job-launch-steps .job-kind { justify-self:center; font-size:13px; }
 .job-launch-steps small { font:11px var(--jobs-mono); color:var(--fg-subtle); white-space:nowrap; }
-.job-launch-go { all:unset; box-sizing:border-box; position:relative; isolation:isolate; display:flex; align-items:flex-end; justify-content:center; width:100%; height:92px; padding:0 18px 13px; overflow:hidden; background:#020306; color:#f4ede2; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.job-launch-go { all:unset; box-sizing:border-box; position:relative; isolation:isolate; display:flex; align-items:flex-end; justify-content:center; width:100%; height:92px; padding:0 18px 13px; overflow:hidden; background:var(--jt-night); color:var(--jt-ivory); cursor:pointer; -webkit-tap-highlight-color:transparent; }
 .job-launch-go:focus-visible { outline:2px solid var(--blue); outline-offset:-4px; }
+.job-launch-go:hover { background:var(--jt-night); }
 .job-launch-sky { position:absolute; z-index:-1; inset:0; transition:filter .6s ease; }
 .job-launch.live .job-launch-go:is(:hover,:focus-visible) .job-launch-sky { filter:saturate(1.8) brightness(1.12); }
 .job-launch.firing .job-launch-sky { filter:saturate(1.9) brightness(1.9); transition:filter .35s; }
 .job-launch-face { display:flex; align-items:center; gap:11px; min-width:0; }
-.job-launch-dot { display:grid; place-items:center; flex:none; width:30px; height:30px; border-radius:50%; background:#f4ede2; color:#05070c; box-shadow:0 0 20px rgba(255,186,80,.45); transition:background .3s, box-shadow .3s; }
+.job-launch-dot { display:grid; place-items:center; flex:none; width:30px; height:30px; border-radius:50%; background:var(--jt-cta-bg); color:var(--jt-cta-fg); box-shadow:0 0 20px color-mix(in srgb, var(--jt-glow) 45%, transparent); transition:background .3s, box-shadow .3s; }
 .job-launch-dot .icon { width:15px; height:15px; }
-.job-launch.live .job-launch-go:is(:hover,:focus-visible) .job-launch-dot { background:#fff; box-shadow:0 0 26px rgba(255,186,80,.7); }
+.job-launch.live .job-launch-go:is(:hover,:focus-visible) .job-launch-dot { background:var(--jt-cta-hover); box-shadow:0 0 26px color-mix(in srgb, var(--jt-glow) 70%, transparent); }
 .job-launch-label { display:grid; gap:4px; min-width:0; }
-.job-launch-label b { font:500 19px/1 var(--jobs-serif); letter-spacing:-.01em; text-shadow:0 1px 10px #000; }
-.job-launch-label small { overflow:hidden; font:400 10.5px var(--jobs-mono); color:rgba(244,237,226,.62); white-space:nowrap; text-overflow:ellipsis; }
+.job-launch-label b { font:var(--jt-display-weight) 19px/1 var(--jobs-serif); letter-spacing:-.01em; text-shadow:var(--jt-ink-shadow); }
+.job-launch-label small { overflow:hidden; font:400 10.5px var(--jobs-mono); color:color-mix(in srgb, var(--jt-ivory) 62%, transparent); white-space:nowrap; text-overflow:ellipsis; }
 .job-launch-fine { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; padding:9px 12px 9px 18px; border-top:1px solid var(--border-muted); font:400 11.5px/1.45 var(--jobs-mono); color:var(--fg-subtle); }
 .job-launch-fine>span { flex:1 1 220px; min-width:0; }
 .job-launch-fine b { font-weight:500; color:var(--fg-muted); }
@@ -1592,7 +1680,7 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-launch.stale { opacity:.45; transition:opacity .3s; }
 .job-launch.firing::before { animation-duration:1.4s; }
 .job-launch.done { border-color:color-mix(in srgb, var(--st-ok) 50%, var(--border-muted)); }
-.job-launch.done .job-launch-dot { background:#7fe0b0; box-shadow:0 0 20px rgba(127,224,176,.5); }
+.job-launch.done .job-launch-dot { background:var(--jt-ink-ok); box-shadow:0 0 20px color-mix(in srgb, var(--jt-ink-ok) 50%, transparent); }
 .job-idea-past .job-idea-thread { padding:4px 0 0; }
 .job-idea-past .job-launch-refine { display:none; }
 /* An idea on the board (job-plates.js ideaPlateHtml): a job's plate under a sky still

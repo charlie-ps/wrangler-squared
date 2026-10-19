@@ -3,6 +3,7 @@ import { SHOTS, proofFigure, runningBar } from './figs.js';
 import { plateHtml } from './job-plates.js';
 import { ideaThreadHtml } from './job-idea.js';
 import { mountSkies, releaseSkies } from './job-skylines.js';
+import { applyTheme } from './themes.js';
 
 // What's new: a splash for each bigger release, shown once per browser, and the
 // list Automation settings reads to show any of them again. Seen ids live in the
@@ -422,6 +423,7 @@ export function createUpdates({ storage, updates = UPDATES }) {
     at = 0;
     phase = list[0].anim && still() ? list[0].anim.still ?? 0 : 0;
     render();
+    applyTheme(dialog);
     if (!dialog.open) dialog.showModal();
     return true;
   }

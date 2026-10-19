@@ -100,7 +100,7 @@ test('code review is a stop before anything is committed: the card asks for a re
 });
 
 test('each job is its own card, and a delivered job only returns with Finished', (t) => {
-  const f = fixture(t); const [a] = f.data.jobs; a.stage = 'active';
+  const f = fixture(t); const [a] = f.data.jobs; a.stage = 'active'; f.data.settings.theme = 'space';
   a.subJobs = [{ ...sub('api'), stage: 'pr' }];
   const b = { ...structuredClone(a), id: 'job2', title: 'Checkout', subJobs: [{ ...sub('cart'), stage: 'pr', jiraKey: 'SHOP-7' }] };
   const done = { ...structuredClone(a), id: 'job3', title: 'Old work', stage: 'done', subJobs: [{ ...sub('legacy'), stage: 'done' }] };
@@ -758,23 +758,54 @@ test('global concurrency, pause and repair limits are explicit controls, and no 
   assert.equal(form.elements.updateMain.checked, true, 'Keep local main updated is on until switched off');
   assert.match(form.elements.updateMain.closest('label').textContent, /^Keep local main updated/);
   form.elements.maxRepairs.value = '1'; form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, maxReplans: 2, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA', updateMain: true, plateArt: 'quiet', backdrop: 'sky', reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
+  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, maxReplans: 2, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA', updateMain: true, reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
 });
 
-test('the Jobs view draws over its own sky unless the Wrangler background is chosen, which persists through settings', (t) => {
+test('the Jobs view wears the saved theme: Space forces dark and paints its masthead, Wrangler follows the board and paints nothing', (t) => {
+  const f = fixture(t), jobs = f.q('#jobs'), dialog = f.q('#job-dialog');
+  f.data.jobs[0].stage = 'active'; f.data.jobs[0].subJobs = [{ ...sub('api'), stage: 'implementation' }]; f.view.update(f.data);
+  assert.equal(jobs.dataset.theme, 'wrangler', 'settings with no theme open in Wrangler, the default');
+  f.data.settings.theme = 'space'; f.view.update(f.data);
+  assert.deepEqual([jobs.dataset.theme, jobs.dataset.scheme, dialog.dataset.theme, dialog.dataset.scheme], ['space', 'dark', 'space', 'dark']);
+  assert.ok(f.q('.jobs-top > canvas.jobs-mast-sky'), 'Space paints the masthead');
+  assert.ok(f.q('.job-plate-art .gx'), 'and a sky behind each plate');
+  f.data.settings.theme = 'wrangler'; f.view.update(f.data);
+  assert.deepEqual([jobs.dataset.theme, jobs.dataset.scheme, dialog.dataset.theme, dialog.dataset.scheme], ['wrangler', undefined, 'wrangler', undefined], 'Wrangler follows the board, on the dialog too');
+  assert.equal(f.q('.jobs-mast-sky'), null, 'switching away unmounts the masthead canvas');
+  assert.equal(f.q('.job-plate-art .gx, .job-plate-art canvas, .job-plate-art .scene'), null, 'plates draw the plan on the theme\'s ground, nothing painted');
+  assert.equal(jobs.dataset.plateArt, 'plain');
+  assert.ok(f.q('.job-plate-graph .node.pl'), 'in the theme\'s ink');
+  f.data.settings.theme = 'space'; f.data.settings.themeOptions = { space: { plateArt: 'full' } }; f.view.update(f.data);
+  assert.equal(f.q('.jobs-top').querySelectorAll('canvas.jobs-mast-sky').length, 1, 'switching back mounts it once');
+  assert.equal(jobs.dataset.plateArt, 'full', 'Space\'s plate art is its own option');
+  f.data.settings.theme = 'nebula'; f.view.update(f.data);
+  assert.equal(jobs.dataset.theme, 'wrangler', 'an unknown theme falls back to the default');
+});
+
+test('Automation settings picks the theme from a ticket and a cabinet, saving each choice at once', (t) => {
   const f = fixture(t), jobs = f.q('#jobs');
-  assert.equal(jobs.dataset.backdrop, 'sky', 'settings saved before the backdrop existed read as the sky');
-  f.q('#jobs-settings').click(); const form = f.q('#job-settings-form');
-  assert.deepEqual([...form.elements.backdrop.options].map((o) => [o.value, o.textContent]), [['sky', 'Wrangler² sky'], ['wrangler', 'Wrangler background']]);
-  assert.equal(form.elements.backdrop.value, 'sky');
-  form.elements.backdrop.value = 'wrangler'; form.dispatchEvent(f.event('submit'));
-  assert.equal(f.sent.at(-1).patch.backdrop, 'wrangler');
-  f.data.settings.backdrop = 'wrangler'; f.view.update(f.data);
-  assert.equal(jobs.dataset.backdrop, 'wrangler');
+  f.data.settings.theme = 'space'; f.view.update(f.data);
   f.q('#jobs-settings').click();
-  assert.equal(f.q('#job-settings-form').elements.backdrop.value, 'wrangler', 'the dialog opens on the saved choice');
-  f.data.settings.backdrop = 'nebula'; f.view.update(f.data);
-  assert.equal(jobs.dataset.backdrop, 'sky', 'an unknown value falls back to the sky');
+  const form = f.q('#job-settings-form');
+  assert.equal(form.elements.backdrop, undefined, 'no Background select'); assert.equal(form.elements.plateArt, undefined, 'no Plate art select');
+  const ticket = () => f.q('#job-theme-pick .theme-ticket');
+  assert.equal(ticket().dataset.theme, 'space'); assert.match(ticket().textContent, /Space/);
+  assert.deepEqual([...f.q('#job-theme-pick').querySelectorAll('[data-opt]')].map((b) => [b.textContent, b.getAttribute('aria-checked')]), [['Skylines', 'true'], ['Launch scenes', 'false']], 'Space\'s own option sits under its ticket');
+  f.q('[data-opt="full"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-settings', patch: { themeOptions: { space: { plateArt: 'full' } } } });
+  assert.equal(jobs.dataset.plateArt, 'full', 'applied before the snapshot confirms it');
+  ticket().click();
+  const cab = f.q('#job-dialog .theme-cabinet');
+  assert.deepEqual([...cab.querySelectorAll('.pick-cell')].map((c) => c.dataset.value), ['wrangler', 'space'], 'the default first');
+  assert.equal(document.activeElement, cab.querySelector('.pick-cell[data-value="space"]'));
+  cab.querySelector('.pick-cell[data-value="wrangler"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-settings', patch: { theme: 'wrangler' } });
+  assert.equal(f.q('.theme-cabinet'), null);
+  assert.equal(jobs.dataset.theme, 'wrangler'); assert.equal(f.q('#job-dialog').dataset.theme, 'wrangler', 'the dialog itself changes look');
+  assert.equal(ticket().dataset.theme, 'wrangler'); assert.equal(f.q('#job-theme-pick [data-opt]'), null, 'Wrangler has no options');
+  assert.equal(f.q('#job-dialog').open, true, 'the dialog stays open');
+  form.dispatchEvent(f.event('submit'));
+  assert.equal('theme' in f.sent.at(-1).patch || 'themeOptions' in f.sent.at(-1).patch, false, 'Save settings leaves the theme alone');
 });
 
 test('dependency waves, session waits and escaped titles remain compact', () => {

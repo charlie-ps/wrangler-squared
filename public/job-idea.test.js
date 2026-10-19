@@ -202,6 +202,8 @@ test('an accepted idea becomes a job plate, forming its black hole from the clou
   t.after(() => { globalThis.matchMedia = prevMatch; });
   const idea = ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]);
   const f = fixture(t, [idea]);
+  // The collapse is Space's: a theme with no plate art has no cloud or hole to form.
+  f.data.settings.theme = 'space'; f.view.update(f.data);
   assert.ok(f.q('[data-board="idea1"]').classList.contains('idea'));
   Object.assign(f.data.jobs[0], { plan: suggest.plan, title: suggest.title, runs: [{ ...parked(), stopped: true }] });
   f.data.jobs[0].idea.thread[0].acceptedAt = 5;

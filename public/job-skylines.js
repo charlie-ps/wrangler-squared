@@ -557,11 +557,14 @@ function paintGlare(c) {
   }
   x.globalCompositeOperation = 'source-over';
 }
+// Returns its unmount: a theme switch away from Space stops watching the canvas.
 export function mountMastSky(canvas) {
-  if (typeof ResizeObserver === 'undefined') return;
+  if (typeof ResizeObserver === 'undefined') return () => {};
   let size = '';
-  new ResizeObserver(() => {
+  const watch = new ResizeObserver(() => {
     const now = `${canvas.clientWidth}x${canvas.clientHeight}`;
     if (now !== size) { size = now; paintGlare(canvas); }
-  }).observe(canvas);
+  });
+  watch.observe(canvas);
+  return () => watch.disconnect();
 }

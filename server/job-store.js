@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { DATA_DIR } from './data-dir.js';
 import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
 import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode, checkText, unansweredShow } from './jobs-schema.js';
+import { migrateTheme } from '../public/theme-ids.js';
 import { adoptEvidence } from './job-evidence.js';
 import { parkedReadyRun, askAgent } from './job-parked.js';
 import { setRunning, owe, runningOf } from './job-running.js';
@@ -207,6 +208,8 @@ export function migrateJobs(raw) {
   const data = structuredClone(raw);
   data.version = CURRENT_VERSION;
   if (data.settings) drop(data.settings, 'maxRunMinutes');
+  // The board reads settings as stored, so a saved `backdrop` becomes its theme here, not only on the next save.
+  if (data.settings) data.settings = migrateTheme(data.settings);
   for (const job of data.jobs) {
     // `reviewCode` is kept: a version-1 job's flag meant the same thing — the
     // human reads the diff before it is committed — and the field is back.

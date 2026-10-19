@@ -4,6 +4,7 @@ import { CHECKPOINTS, checkpointFlagHtml, checkpointHint, checkpointToggleHtml }
 import { composer, proofFigure, runningBar } from './figs.js';
 import { ideaThreadHtml } from './job-idea.js';
 import { inflowHtml, holdSkies, mountSkies, releaseSkies } from './job-skylines.js';
+import { applyTheme } from './themes.js';
 
 // The "How Jobs works" walkthrough: shown once to every browser that has not
 // dismissed it (installed today or long ago), then only on request from the Jobs
@@ -317,6 +318,7 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
     INTRO_STEPS.forEach((s, i) => { phases[i] = reduce ? s.anim?.still ?? 0 : 0; });
     stop();
     render();
+    applyTheme(dialog);
     if (!dialog.open) dialog.showModal();
     relayout();
   }

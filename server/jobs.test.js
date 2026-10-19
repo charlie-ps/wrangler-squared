@@ -147,14 +147,33 @@ test('usualPick persists across restart, merges like any setting, and is validat
   assert.equal(f.store.snapshot().settings.usualPick.model, 'opus', 'a rejected patch changes nothing');
 });
 
-test('backdrop defaults to the sky, persists the Wrangler background across restart, and rejects anything else', (t) => {
+test('theme defaults to Wrangler, persists across restart, keeps Space\'s plate art per theme, and rejects an unknown one', (t) => {
   const f = fixture(t);
-  assert.equal(f.store.snapshot().settings.backdrop, 'sky');
-  f.store.settings({ backdrop: 'wrangler' }); f.store.settings({ concurrency: 3 });
-  assert.equal(new JobStore(f.store.file).snapshot().settings.backdrop, 'wrangler');
-  assert.throws(() => f.store.settings({ backdrop: 'nebula' }));
-  const { backdrop, ...old } = f.store.snapshot().settings;
-  assert.equal(settingsSchema.parse(old).backdrop, 'sky', 'settings saved before it existed parse to the sky');
+  assert.equal(f.store.snapshot().settings.theme, 'wrangler');
+  assert.deepEqual(f.store.snapshot().settings.themeOptions, { space: { plateArt: 'quiet' } });
+  f.store.settings({ themeOptions: { space: { plateArt: 'full' } } }); f.store.settings({ theme: 'space' });
+  const back = new JobStore(f.store.file).snapshot().settings;
+  assert.equal(back.theme, 'space'); assert.equal(back.themeOptions.space.plateArt, 'full', 'an option saved while another theme was on is kept');
+  assert.throws(() => f.store.settings({ theme: 'nebula' }));
+  assert.throws(() => f.store.settings({ themeOptions: { space: { plateArt: 'peek' } } }), 'the old hover mode is only read from old settings');
+  assert.equal(f.store.snapshot().settings.theme, 'space', 'a rejected patch changes nothing');
+});
+
+test('settings saved before themes open in the theme they had: a Wrangler backdrop is the Wrangler theme, anything else Space', (t) => {
+  const parse = (s) => { const { theme, themeOptions } = settingsSchema.parse(s); return { theme, themeOptions }; };
+  assert.deepEqual(parse({ backdrop: 'wrangler' }), { theme: 'wrangler', themeOptions: { space: { plateArt: 'quiet' } } });
+  assert.deepEqual(parse({ backdrop: 'sky', plateArt: 'full' }), { theme: 'space', themeOptions: { space: { plateArt: 'full' } } });
+  assert.deepEqual(parse({ plateArt: 'peek' }), { theme: 'space', themeOptions: { space: { plateArt: 'quiet' } } }, 'the dropped hover mode reads as the skyline');
+  assert.deepEqual(parse({}), { theme: 'wrangler', themeOptions: { space: { plateArt: 'quiet' } } }, 'settings from no earlier version get the default');
+  assert.equal(parse({ backdrop: 'wrangler', theme: 'space' }).theme, 'space', 'a saved theme wins over a stale backdrop');
+  const parsed = settingsSchema.parse({ backdrop: 'wrangler', plateArt: 'full' });
+  assert.equal('backdrop' in parsed || 'plateArt' in parsed, false, 'the old keys are dropped');
+  // The store reads jobs.json as written, so the board gets the theme before anything is saved again.
+  const f = fixture(t);
+  fs.writeFileSync(f.store.file, JSON.stringify({ version: 5, settings: { concurrency: 3, backdrop: 'wrangler', plateArt: 'full' }, jobs: [] }));
+  const loaded = new JobStore(f.store.file).snapshot().settings;
+  assert.equal(loaded.theme, 'wrangler'); assert.deepEqual(loaded.themeOptions, { space: { plateArt: 'full' } });
+  assert.equal(loaded.backdrop, undefined); assert.equal(loaded.concurrency, 3);
 });
 
 // --- Migration (version 1 -> 2) ---

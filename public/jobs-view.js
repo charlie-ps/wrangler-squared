@@ -3,9 +3,11 @@ import { ICONS } from './icons.js';
 import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaStage, ideaOpen, readyRun, reworkRound } from './jobs.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
-import { assignScenes, plateHtml, placePopHtml, PLATE_ART } from './job-plates.js';
+import { assignScenes, plateHtml, placePopHtml } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
-import { holdSkies, mountSkies, mountMastSky, releaseSkies, spinTo } from './job-skylines.js';
+import { holdSkies, mountSkies, releaseSkies, spinTo } from './job-skylines.js';
+import { THEMES, themeOf, optionsOf, applyTheme, setCurrentTheme } from './themes.js';
+import { mountThemePicker } from './theme-picker.js';
 import { mountForming, dropForming, formingClock, formingMs } from './job-forming.js';
 import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
 
@@ -30,9 +32,6 @@ import { runningChipHtml, stoppedHtml } from './job-running.js';
 import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, shotBoxHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
 // Mirrors server/jobs-schema.js MAX_SHOW.
 const MAX_SHOW = 8;
-// What #jobs is drawn over (settings `backdrop`); settings saved before it existed read as the sky.
-export const BACKDROPS = [['sky', 'Wrangler² sky'], ['wrangler', 'Wrangler background']];
-export const backdropOf = (settings) => settings?.backdrop === 'wrangler' ? 'wrangler' : 'sky';
 const checkTone = (state) => ['SUCCESS', 'NEUTRAL', 'SKIPPED', 'passing'].includes(state) ? 'passed' : ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'failing'].includes(state) ? 'failed' : '';
 const checkMark = (state) => checkTone(state) === 'passed' ? '✓' : checkTone(state) === 'failed' ? '×' : '○';
 const link = (url, title) => /^https:\/\/github\.com\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(title)} ↗</a>` : esc(title);
@@ -346,8 +345,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const commentsShown = new Set();
   // Each job's plate scene, kept for the life of the view.
   const scenes = new Map();
-  // The New job dialog's model picker while that dialog is open.
-  let picker = null;
+  // The New job dialog's model picker while that dialog is open, and Automation settings' theme picker.
+  let picker = null, themePicker = null;
+  // The theme #jobs is drawn in, and the unmount of its live art (themes.js mount).
+  let theme = null, unmountTheme = null;
   // Kept images by name, filled by `job-images` frames; asked once per job.
   const imageCache = new Map();
   // The proof a Code review step shows (job-proof.js): thumbnails and opened files by
@@ -399,7 +400,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const resetFlags = (jobId = null) => { flags = { jobId, hover: null, note: null, pending: null, confirm: null, inside: false, painting: false }; };
   resetFlags();
   const openTickets = new Set();
-  root.innerHTML = `<header class="jobs-mast"><div class="jobs-top"><canvas class="jobs-mast-sky" aria-hidden="true"></canvas><div><div class="jobs-kicker" id="jobs-date"></div><h1>Wrangler²</h1></div>
+  root.innerHTML = `<header class="jobs-mast"><div class="jobs-top"><div><div class="jobs-kicker" id="jobs-date"></div><h1>Wrangler²</h1></div>
       <div class="jobs-telemetry"><span class="jobs-beacon" id="jobs-active-count" aria-live="polite"></span><span class="jobs-bays" id="jobs-bays" aria-hidden="true"></span><span id="jobs-spend"></span><span id="jobs-delivered"></span></div>
       <div class="jobs-tools"><label class="jobs-ghost" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="8" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-ghost"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="jobs-newjob" id="job-new">${ICONS.plus}New idea</button></div></div>
       <nav class="jobs-rail" aria-label="Show jobs">${FILTERS.map(([key, label]) => `<button type="button" data-filter="${key}" aria-pressed="${key === filter}">${label}<span class="jobs-rail-n" ${key === 'needs' ? 'id="jobs-review-count"' : ''}></span></button>`).join('')}</nav></header>
@@ -408,7 +409,21 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const idea = createIdeaCorner({ send });
   root.appendChild(idea.el);
   const q = (s) => root.querySelector(s);
-  mountMastSky(q('.jobs-mast-sky'));
+  // #jobs and every dialog it opens on <body> wear the saved theme; switching swaps the live art.
+  function applyViewTheme() {
+    const t = themeOf(data.settings);
+    setCurrentTheme(t);
+    for (const el of [root, dialog, ...document.querySelectorAll('.jobs-intro, .jobs-update, .job-image-zoom, .job-shotbox')]) applyTheme(el, t);
+    if (t === theme) return t;
+    unmountTheme?.(); theme = t; unmountTheme = t.mount?.(root) || null;
+    return t;
+  }
+  // A theme choice applies at once, ahead of the snapshot that confirms it.
+  function saveSettings(patch) {
+    send({ type: 'job-settings', patch });
+    data = { ...data, settings: { ...data.settings, ...patch } };
+    render();
+  }
   // The markup last put on the board and in the detail (with the job it drew): a tick
   // that would draw the same again leaves the DOM, and so a selection or scroll, alone.
   // Anything that changes that DOM by hand forgets it, so the next tick redraws.
@@ -424,7 +439,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // A plan approved from the footer (Plan switched to Auto) leaves review: the
     // draft goes, so the detail follows the job instead of the frozen editor.
     if (planDraft && job && job.id === selected?.jobId && !selected.subId && job.stage !== 'planning') planDraft = null;
-    render(); picker?.agentsChanged(getAgents());
+    render(); picker?.agentsChanged(getAgents()); themePicker?.sync(themeOf(data.settings).id);
     if (openOnCreate && data.jobs.some((j) => j.id === openOnCreate)) { const id = openOnCreate; openOnCreate = null; openDetail(id); }
   }
   function render() {
@@ -458,10 +473,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const test = FILTERS.find(([key]) => key === filter)[2];
     const jobs = sortJobs(data.jobs.filter((j) => test(j, needs)));
     const empty = !data.jobs.length ? 'Start with an outcome.<br>Wrangler will shape the work.' : filter === 'needs' ? 'Nothing needs you right now.' : filter === 'ideas' ? 'No ideas being talked through.' : 'No jobs here.';
-    // Settings saved before `plateArt` existed lack it until the next save.
-    const art = PLATE_ART.includes(data.settings.plateArt) ? data.settings.plateArt : 'quiet';
+    const t = applyViewTheme(), art = t.plateArt(optionsOf(data.settings, t));
     root.dataset.plateArt = art;
-    root.dataset.backdrop = backdropOf(data.settings);
     // An idea that gained a plan since the last render forms the job it became (job-forming.js).
     const now = formingClock(), ideas = new Set(data.jobs.filter(ideaOpen).map((j) => j.id)), starting = [];
     for (const j of data.jobs) if (ideasShown.has(j.id) && !ideas.has(j.id) && j.plan && !j.cancelledAt) {
@@ -1320,6 +1333,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     shotBox = { jobId: selected.jobId, subId: selected.subId, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
     shotZoom = document.createElement('dialog');
     shotZoom.className = 'job-shotbox';
+    applyTheme(shotZoom);
     shotZoom.onkeydown = (e) => { const d = { ArrowLeft: -1, ArrowRight: 1 }[e.key]; if (d) { e.preventDefault(); stepShot(d); } };
     shotZoom.onclick = (e) => { if (e.target === shotZoom || e.target.classList.contains('job-shotbox-body')) shotZoom.close(); };
     shotZoom.addEventListener('close', () => {
@@ -1620,9 +1634,18 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   q('#jobs-intro-open').onclick = () => onIntro();
   q('#jobs-settings').onclick = () => {
     selected = null; planDraft = null;
-    show(`<h2>Automation settings</h2><form id="job-settings-form"><label>CI repairs per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to the planner this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label><label>Deploy wait (min)<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label><label title="A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…">IDE<input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label><label class="job-toggle job-settings-main" title="Once a PR lands on the default branch, fast-forward your own checkout of it. A checkout with work of its own is left alone and the job tells you, with fixes an agent can make.">Keep local main updated<input type="checkbox" class="job-switch" name="updateMain" ${data.settings.updateMain === false ? '' : 'checked'}></label><label title="What the Jobs view is drawn over">Background<select name="backdrop">${BACKDROPS.map(([v, l]) => `<option value="${v}" ${v === backdropOf(data.settings) ? 'selected' : ''}>${l}</option>`).join('')}</select></label><label title="What each job’s plate on the board is drawn over">Plate art<select name="plateArt">${[['quiet', 'Skylines'], ['full', 'Launch-page scenes']].map(([v, l]) => `<option value="${v}" ${v === (data.settings.plateArt === 'full' ? 'full' : 'quiet') ? 'selected' : ''}>${l}</option>`).join('')}</select></label><fieldset class="job-prop job-settings-review"><legend>Defaults for new jobs</legend>${reviewPointsHtml(reviewDefaultsOf(data.settings), { warn: true })}</fieldset><div class="job-actions"><button class="primary" title="These limits apply across all jobs. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.">Save settings</button><button type="button" id="job-settings-intro">${ICONS.info}How Jobs works</button></div></form>${whatsNewHtml(updates?.list() || [])}`);
+    show(`<h2>Automation settings</h2><form id="job-settings-form"><label>CI repairs per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to the planner this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label><label>Deploy wait (min)<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label><label title="A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…">IDE<input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label><label class="job-toggle job-settings-main" title="Once a PR lands on the default branch, fast-forward your own checkout of it. A checkout with work of its own is left alone and the job tells you, with fixes an agent can make.">Keep local main updated<input type="checkbox" class="job-switch" name="updateMain" ${data.settings.updateMain === false ? '' : 'checked'}></label><fieldset class="job-prop job-settings-theme" id="job-theme-pick"><legend>Theme</legend></fieldset><fieldset class="job-prop job-settings-review"><legend>Defaults for new jobs</legend>${reviewPointsHtml(reviewDefaultsOf(data.settings), { warn: true })}</fieldset><div class="job-actions"><button class="primary" title="These limits apply across all jobs. Waiting for pipelines, dependencies and reviews uses no agent slots. Pause prevents new steps; sessions already working finish their current step.">Save settings</button><button type="button" id="job-settings-intro">${ICONS.info}How Jobs works</button></div></form>${whatsNewHtml(updates?.list() || [])}`);
     const settingsForm = dialog.querySelector('form'); bindReviewPoints(settingsForm);
-    settingsForm.onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); send({ type: 'job-settings', patch: { maxRepairs: +f.get('maxRepairs'), maxReplans: +f.get('maxReplans'), deploymentStaleMinutes: +f.get('deploymentStaleMinutes'), ideApp: String(f.get('ideApp')).trim(), updateMain: f.has('updateMain'), plateArt: String(f.get('plateArt')), backdrop: String(f.get('backdrop')), reviewDefaults: reviewFlagsOf(f) } }); dialog.close(); };
+    themePicker?.dispose();
+    themePicker = mountThemePicker(dialog.querySelector('#job-theme-pick'), {
+      themes: THEMES, value: themeOf(data.settings).id, cover: dialog,
+      optionsOf: (t) => optionsOf(data.settings, t),
+      onChange: (id) => saveSettings({ theme: id }),
+      // Sent whole: settings(patch) merges shallowly, and each theme keeps its own.
+      onOption: (t, key, v) => saveSettings({ themeOptions: { ...data.settings.themeOptions, [t.id]: { ...optionsOf(data.settings, t), [key]: v } } }),
+    });
+    dialog.addEventListener('close', () => { themePicker?.dispose(); themePicker = null; }, { once: true });
+    settingsForm.onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); send({ type: 'job-settings', patch: { maxRepairs: +f.get('maxRepairs'), maxReplans: +f.get('maxReplans'), deploymentStaleMinutes: +f.get('deploymentStaleMinutes'), ideApp: String(f.get('ideApp')).trim(), updateMain: f.has('updateMain'), reviewDefaults: reviewFlagsOf(f) } }); dialog.close(); };
     dialog.querySelector('#job-settings-intro').onclick = () => { dialog.close(); onIntro(); };
     dialog.querySelector('.update-section').onclick = (e) => { const b = e.target.closest('[data-update-id]'); if (b) { dialog.close(); updates.open(b.dataset.updateId); } };
   };
