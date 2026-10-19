@@ -737,45 +737,62 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (!list.length) return '';
     return more('history', `${ICONS.wrench}History <small>${list.length}</small>`, `<ul class="job-move-log">${list.slice().reverse().map((m) => `<li><span>${esc(m.detail || m.move)}${m.note && NOTED_APPROVALS.has(m.move) ? `<q>${esc(m.note)}</q>` : ''}</span><small>${esc(when(m.at))}</small></li>`).join('')}</ul>`, 'job-moves-history');
   }
-  const askTrayHtml = () => askImages.map((i) => `<li class="job-image ${i.name ? '' : 'uploading'}"><img src="${esc(i.url)}" alt=""><button type="button" class="job-image-remove" data-ask-image="${i.id}" aria-label="Remove image" title="Remove">×</button></li>`).join('');
-  function clearAskImages() { for (const i of askImages) URL.revokeObjectURL(i.url); askImages = []; }
-  function clearAskSent() { for (const u of askSent?.images || []) URL.revokeObjectURL(u); askSent = null; }
+  // A picture that could not be attached stays in the tray, marked, until the
+  // human retries or removes it: one quietly gone was believed sent.
+  const askTrayHtml = () => askImages.map((i) => `<li class="job-image ${i.failed ? 'failed' : i.name ? '' : 'uploading'}"${i.failed ? ` title="${esc(i.failed)}"` : ''}>${i.url ? `<img src="${esc(i.url)}" alt="">` : ''}${i.failed ? `<button type="button" class="job-image-retry" data-ask-retry="${i.id}" ${i.blob ? '' : 'disabled'} aria-label="Couldn’t attach${i.blob ? ', retry' : ''}">${ICONS.x}<span>${i.blob ? 'Retry' : 'Failed'}</span></button>` : ''}<button type="button" class="job-image-remove" data-ask-image="${i.id}" aria-label="Remove image" title="Remove">×</button></li>`).join('');
+  const askErrorText = () => {
+    const bad = askImages.filter((i) => i.failed);
+    if (!bad.length) return '';
+    return `Couldn’t attach ${bad.length > 1 ? `${bad.length} images` : 'this image'}: ${bad[0].failed.replace(/\.$/, '')}. Retry or remove ${bad.length > 1 ? 'them' : 'it'} to send.`;
+  };
+  function clearAskImages() { for (const i of askImages) if (i.url) URL.revokeObjectURL(i.url); askImages = []; }
+  function clearAskSent() { for (const i of askSent?.items || []) if (i.url) URL.revokeObjectURL(i.url); askSent = null; }
   let askSeq = 0;
+  // Every box on screen, not the one a paste landed in: a redraw while an upload
+  // travels replaces that box, and its Send must still learn the upload landed.
+  const paintAskBoxes = () => dialog.querySelectorAll('.job-change:not([data-idea-composer])').forEach(paintAsk);
+  function syncAsk(box) {
+    const text = box.querySelector('textarea'), send = box.querySelector('[data-change-send]');
+    send.disabled = !text.value.trim() || askImages.some((i) => !i.name);
+    box.classList.toggle('has-text', !!text.value.trim()); box.classList.toggle('has-img', askImages.length > 0);
+    text.style.height = 'auto'; if (text.scrollHeight) text.style.height = `${Math.min(text.scrollHeight, 160)}px`;
+  }
+  function paintAsk(box) {
+    const tray = box.querySelector('.job-change-tray'), error = box.querySelector('.job-change-error');
+    tray.innerHTML = askTrayHtml(); tray.hidden = !askImages.length;
+    error.textContent = askErrorText(); error.hidden = !error.textContent;
+    tray.querySelectorAll('[data-ask-image]').forEach((b) => b.onclick = () => { const i = askImages.find((x) => String(x.id) === b.dataset.askImage); if (i?.url) URL.revokeObjectURL(i.url); askImages = askImages.filter((x) => x !== i); paintAskBoxes(); });
+    tray.querySelectorAll('[data-ask-retry]').forEach((b) => b.onclick = () => { const i = askImages.find((x) => String(x.id) === b.dataset.askRetry); if (i?.blob) stageAsk(i); });
+    syncAsk(box);
+  }
+  async function stageAsk(item) {
+    item.failed = null; paintAskBoxes();
+    try { item.name = (await stageImage(item.blob)).name; } catch (e) { item.failed = e?.message || 'The upload failed.'; }
+    paintAskBoxes();
+  }
   // Pasted, dropped or picked into an idea box: staged the moment it lands, sent
   // with the idea, and kept by the server (server/handlers.js prepare).
   function wireAskImages(box) {
-    const text = box.querySelector('textarea'), send = box.querySelector('[data-change-send]'), tray = box.querySelector('.job-change-tray'), file = box.querySelector('.job-change-attach input');
-    const sync = () => {
-      send.disabled = !text.value.trim() || askImages.some((i) => !i.name);
-      box.classList.toggle('has-text', !!text.value.trim()); box.classList.toggle('has-img', askImages.length > 0);
-      text.style.height = 'auto'; if (text.scrollHeight) text.style.height = `${Math.min(text.scrollHeight, 160)}px`;
-    };
-    const paint = () => {
-      tray.innerHTML = askTrayHtml(); tray.hidden = !askImages.length;
-      tray.querySelectorAll('[data-ask-image]').forEach((b) => b.onclick = () => { const i = askImages.find((x) => String(x.id) === b.dataset.askImage); if (i) URL.revokeObjectURL(i.url); askImages = askImages.filter((x) => x !== i); paint(); });
-      sync();
-    };
+    const text = box.querySelector('textarea'), file = box.querySelector('.job-change-attach input');
     const take = (dt, e) => {
       const { sources } = imageSources(dt);
       if (!sources.length) return;
       e?.preventDefault();
       for (const source of sources.slice(0, Math.max(0, MAX_ASK_IMAGES - askImages.length))) (async () => {
-        try {
-          const blob = blobOf(await frameOf(source));
-          const item = { id: ++askSeq, name: null, url: URL.createObjectURL(blob) };
-          askImages.push(item); paint();
-          try { item.name = (await stageImage(blob)).name; } catch { askImages = askImages.filter((x) => x !== item); URL.revokeObjectURL(item.url); }
-          paint();
-        } catch { /* an unreadable picture is simply not attached */ }
+        let blob = null;
+        try { blob = blobOf(await frameOf(source)); } catch { /* drawn as a failed tile below */ }
+        const item = { id: ++askSeq, name: null, blob, url: blob && URL.createObjectURL(blob), failed: blob ? null : 'That picture could not be read.' };
+        askImages.push(item);
+        if (blob) stageAsk(item); else paintAskBoxes();
       })();
     };
-    text.addEventListener('input', sync);
+    text.addEventListener('input', () => syncAsk(box));
     text.addEventListener('paste', (e) => take(e.clipboardData, e));
     box.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); box.classList.add('drag'); } });
     box.addEventListener('dragleave', (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove('drag'); });
     box.addEventListener('drop', (e) => { box.classList.remove('drag'); take(e.dataTransfer, e); });
     if (file) file.onchange = () => { take({ files: file.files }); file.value = ''; };
-    paint();
+    paintAsk(box);
   }
   // What was sent, above the box it came from: the words and pictures lift into a
   // bubble, and the line under it says who has it once the server took it. Once the
@@ -786,7 +803,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const s = askSent, fresh = s.drawn !== s.state; s.drawn = s.state;
     const pics = s.images.length ? `<span class="job-sent-imgs">${s.images.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
     const n = s.images.length ? ` with ${s.images.length} image${s.images.length > 1 ? 's' : ''}` : '';
-    const meta = s.state === 'failed' ? `<span class="job-sent-meta failed">${ICONS.x}Not sent: ${esc(s.error || 'refused')}. Your words are back in the box.</span>`
+    const meta = s.state === 'failed' ? `<span class="job-sent-meta failed">${ICONS.x}Not sent: ${esc(s.error || 'refused')}. Your words${s.hadImages ? ' and pictures' : ''} are back in the box.</span>`
       : s.state === 'sent' ? `<span class="job-sent-meta"><i class="job-sent-tick">${ICONS.check}</i>Sent to ${esc(s.to.toLowerCase())}${n} · ${esc(new Date(s.at).toLocaleTimeString(undefined, { timeStyle: 'short' }))}</span>`
       : `<span class="job-sent-meta"><span class="job-sent-sending">Sending to ${esc(s.to.toLowerCase())}…</span></span>`;
     return `<div class="job-sent ${s.state}${fresh ? ' fresh' : ''}" data-sent-state="${s.state}"><div class="job-sent-bubble">${pics}<span>${esc(s.text)}</span></div>${meta}</div>`;
@@ -807,6 +824,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const open = sub && subState(job, sub) === 'failing';
     return `${sent}<div class="job-change${open ? ' is-open' : ''}" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}" data-change-to="${esc(route.to)}">
       <ul class="job-change-tray" ${askImages.length ? '' : 'hidden'}>${askTrayHtml()}</ul>
+      <p class="job-change-error" role="alert" ${askErrorText() ? '' : 'hidden'}>${esc(askErrorText())}</p>
       <div class="job-change-row"><span class="job-change-to" title="Who hears it"><i>${esc(route.to[0])}</i>${esc(route.to)}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="Add idea for ${esc(route.to.toLowerCase())}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to.toLowerCase())}" title="Send (⌘↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
       <div class="job-change-foot"><kbd>⌘↵</kbd></div></div>`;
   }
@@ -1423,7 +1441,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         const images = askImages.map((i) => i.name).filter(Boolean);
         action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim(), ...(images.length ? { images } : {}) });
         clearAskSent();
-        askSent = { jobId: job.id, subId: sub?.id ?? null, text: text.value.trim(), images: askImages.map((i) => i.url), to: box.dataset.changeTo, at: Date.now(), state: 'sending' };
+        askSent = { jobId: job.id, subId: sub?.id ?? null, text: text.value.trim(), items: askImages, images: askImages.map((i) => i.url), to: box.dataset.changeTo, at: Date.now(), state: 'sending' };
         askImages = []; text.value = '';
         renderDetail();
       };
@@ -1665,7 +1683,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   function changeFailed(msg) {
     if (askSent?.state !== 'sending' || msg.jobId !== askSent.jobId || (msg.subJobId ?? null) !== askSent.subId) return false;
-    Object.assign(askSent, { state: 'failed', error: msg.error }); askDraft = { subId: askSent.subId ?? undefined, text: askSent.text };
+    // The pictures go back in the tray with the words: the bubble lets go of them.
+    const items = askSent.items || [];
+    askImages = [...items, ...askImages];
+    Object.assign(askSent, { state: 'failed', error: msg.error, hadImages: items.length > 0, items: [], images: [] }); askDraft = { subId: askSent.subId ?? undefined, text: askSent.text };
     if (dialog.open) renderDetail();
     askDraft = null;
     return true;

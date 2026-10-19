@@ -45,7 +45,7 @@ export const jobCreateHandler = makeJobCreateHandler();
 // sent under these names is discarded.
 export const ASK_IMAGES_MAX = 4;
 async function prepare(msg, host) {
-  const { treeHash: _t, attachments: _a, ...clean } = msg;
+  const { treeHash: _t, attachments: _a, refused: _r, ...clean } = msg;
   const job = host.stores.jobs.get(msg.id);
   const sub = job?.subJobs.find((s) => s.id === msg.subJobId);
   if (msg.action === 'approve-code' && sub?.ready?.treeHash && sub.worktree?.path) {
@@ -53,9 +53,13 @@ async function prepare(msg, host) {
   }
   if (msg.action === 'request-change' && Array.isArray(msg.images) && msg.images.length && job) {
     const names = msg.images.filter((n) => typeof n === 'string').slice(0, ASK_IMAGES_MAX);
-    const got = names.map((n) => host.images.read(n)).filter(Boolean);
-    const kept = keepAskImages({ jobId: job.id, subId: sub?.id, round: sub?.ready?.round, messageId: Date.now().toString(36), images: got });
+    // A board upload is only STAGED, and read() sees only this extension's kept
+    // store, so each is kept first. One that cannot be is refused, never dropped:
+    // the human saw it in the tray and believes it went.
+    const got = names.map((n) => (host.images.keep(n) ? host.images.read(n) : null));
     for (const n of names) host.images.remove(n);
+    const kept = got.every(Boolean) ? keepAskImages({ jobId: job.id, subId: sub?.id, round: sub?.ready?.round, messageId: Date.now().toString(36), images: got }) : [];
+    if (kept.length < names.length) return { ...clean, refused: 'An attached image could not be kept. Attach it again.' };
     return { ...clean, attachments: kept.map(({ file, mime, path }) => ({ file, mime, path })) };
   }
   return clean;
@@ -64,8 +68,9 @@ async function prepare(msg, host) {
 export const jobActionHandler = {
   type: 'job-action',
   async handler(raw, host) {
-    const msg = await prepare(raw, host);
+    const { refused, ...msg } = await prepare(raw, host);
     const ids = { jobId: msg.id, action: msg.action, ...(msg.subJobId ? { subJobId: msg.subJobId } : {}) };
+    if (refused) { host.broadcast({ event: 'job-action-failed', ...ids, error: refused }); return; }
     // A refusal goes out as a frame rather than a throw, which never reaches the
     // board: the footer's checkpoint buttons snap back and say why.
     try { host.stores.jobs.action(msg.id, msg.action, msg); } catch (e) {

@@ -2571,6 +2571,48 @@ test('a screenshot pasted into the Code review box is staged, held back from Sen
   assert.equal(f.q('#job-dialog .job-change-tray').hidden, true, 'the tray empties once sent');
 });
 
+test('an upload that fails stays in the tray, says it could not attach, holds Send back, and goes once a retry lands', async (t) => {
+  const f = fixture(t); parkedJob(f);
+  let fail = true; f.staging.stage = async () => { if (fail) throw new Error('Not connected to the wrangler — try again in a moment.'); return { name: 'paste-1700000000000-cccc3333.png' }; };
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const box = () => f.q('#job-dialog .job-change'), text = box().querySelector('textarea');
+  text.value = 'This hover is still illegible'; text.dispatchEvent(f.event('input'));
+  const e = f.event('paste'); e.clipboardData = { files: [new f.window.File(['x'], 'Screenshot.png', { type: 'image/png' })], items: [], types: ['Files'], getData: () => '' };
+  text.dispatchEvent(e);
+  await new Promise((r) => setTimeout(r, 0)); await new Promise((r) => setTimeout(r, 0));
+  const tile = box().querySelector('.job-change-tray li');
+  assert.ok(tile?.classList.contains('failed'), 'the picture is still there, marked');
+  assert.match(box().querySelector('.job-change-error').textContent, /Couldn’t attach this image: Not connected to the wrangler/);
+  assert.equal(box().querySelector('.job-change-error').hidden, false);
+  assert.equal(box().querySelector('[data-change-send]').disabled, true, 'Send would lose it');
+  fail = false; box().querySelector('[data-ask-retry]').click();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(box().querySelector('.job-change-tray li.failed'), null);
+  assert.equal(box().querySelector('.job-change-error').hidden, true);
+  box().querySelector('[data-change-send]').click();
+  assert.deepEqual(f.sent.at(-1).images, ['paste-1700000000000-cccc3333.png']);
+});
+
+test('an upload that lands after a redraw still frees the new box\'s Send, and a refused idea gives its pictures back', async (t) => {
+  const f = fixture(t); parkedJob(f);
+  let release; f.staging.stage = () => new Promise((r) => { release = () => r({ name: 'paste-1700000000000-dddd4444.png' }); });
+  f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const box = () => f.q('#job-dialog .job-change');
+  const e = f.event('paste'); e.clipboardData = { files: [new f.window.File(['x'], 'Screenshot.png', { type: 'image/png' })], items: [], types: ['Files'], getData: () => '' };
+  box().querySelector('textarea').dispatchEvent(e);
+  await new Promise((r) => setTimeout(r, 0));
+  f.view.update(f.data);
+  const text = box().querySelector('textarea'); text.value = 'Look at this'; text.dispatchEvent(f.event('input'));
+  assert.equal(box().querySelectorAll('.job-change-tray li.uploading').length, 1, 'the redraw keeps the picture');
+  release(); await new Promise((r) => setTimeout(r, 0));
+  assert.equal(box().querySelector('[data-change-send]').disabled, false);
+  box().querySelector('[data-change-send]').click();
+  assert.deepEqual(f.sent.at(-1).images, ['paste-1700000000000-dddd4444.png']);
+  f.view.changeFailed({ event: 'job-action-failed', jobId: 'job1', subJobId: 'api', action: 'request-change', error: 'An attached image could not be kept. Attach it again.' });
+  assert.equal(box().querySelectorAll('.job-change-tray li').length, 1, 'the picture is back in the tray');
+  assert.match(f.q('#job-dialog .job-sent').textContent, /Your words and pictures are back in the box/);
+});
+
 test('every idea box takes pictures: one dropped on the job\'s box is staged and goes with the idea to the planner', async (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('web'), stage: 'implementation', state: 'queued' }];

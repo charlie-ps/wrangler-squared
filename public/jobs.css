@@ -1440,6 +1440,13 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-change-tray .job-image.uploading img { opacity:.45; filter:blur(1px); }
 .job-change-tray .job-image.uploading::after { content:""; position:absolute; left:50%; top:50%; width:14px; height:14px; margin:-7px; border-radius:50%; border:2px solid var(--accent); border-right-color:transparent; animation:job-spin .8s linear infinite; }
 .job-change-tray .job-image-remove { top:3px; right:3px; width:18px; height:18px; line-height:18px; font-size:12px; }
+.job-change-tray .job-image.failed { border-color:var(--red); background:var(--danger-bg); }
+.job-change-tray .job-image.failed img { opacity:.35; filter:grayscale(1); }
+.job-image-retry { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; padding:0; border:0; background:none; color:var(--red-fg); font:600 10.5px/1.1 var(--font); cursor:pointer; }
+.job-image-retry:disabled { cursor:default; }
+.job-image-retry .icon { width:14px; height:14px; }
+.job-change .job-change-error { margin:0; padding:0 4px; font-size:11.5px; color:var(--red-fg); }
+.job-change .job-change-error[hidden] { display:none; }
 
 /* What the agent left running for the human to try (job-running.js). */
 .job-running { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:14px; padding:10px 12px; border-radius:14px; border:1px solid var(--border-muted); background:var(--surface-2); font-size:12.5px; }
