@@ -39,13 +39,15 @@ export function plannerReply(job, run, report, now) {
 }
 
 // The human's turn: delivered by mail when the planner is parked, or read from the
-// prompt by the next planning run when there is none (job-store.js claim).
-export function humanReply(job, text, now) {
+// prompt by the next planning run when there is none (job-store.js claim). Pasted
+// pictures are already kept (handlers.js prepare); the message names their files.
+export function humanReply(job, text, now, attachments = []) {
   const typed = String(text || '').trim().slice(0, IDEA_TEXT_MAX);
   if (!typed) throw new Error('Write a reply first');
   if (!inConversation(job)) throw new Error('This idea is no longer a conversation');
   const id = nextId(job, now);
-  job.idea.thread.push({ id, at: now, from: 'human', text: typed, sentAt: null });
+  const images = attachments.filter((a) => typeof a?.file === 'string').map(({ file, mime }) => ({ file, mime }));
+  job.idea.thread.push({ id, at: now, from: 'human', text: typed, ...(images.length ? { images } : {}), sentAt: null });
   return id;
 }
 

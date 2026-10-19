@@ -517,7 +517,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const chip = dialog.querySelector('.job-appbar .job-chip-state');
       if (chip) chip.outerHTML = stateChip(jobState(reviewed), jobLabel(reviewed));
     }
-    const typing = [...dialog.querySelectorAll('.job-change textarea, [data-approve-note]')].some((t) => t.value);
+    // A picture waiting in a box is as much a draft as words are.
+    const typing = askImages.length > 0 || [...dialog.querySelectorAll('.job-change textarea, [data-approve-note]')].some((t) => t.value);
     // An empty reply box with the cursor in it is someone reading the thread: it redraws, keeping the cursor.
     const composing = document.activeElement?.closest?.('[data-idea-composer]');
     const humanForm = dialog.querySelector('#job-human-form');
@@ -763,9 +764,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   let askSeq = 0;
   // Every box on screen, not the one a paste landed in: a redraw while an upload
   // travels replaces that box, and its Send must still learn the upload landed.
-  const paintAskBoxes = () => dialog.querySelectorAll('.job-change:not([data-idea-composer])').forEach(paintAsk);
+  const paintAskBoxes = () => dialog.querySelectorAll('.job-change').forEach(paintAsk);
   function syncAsk(box) {
-    const text = box.querySelector('textarea'), send = box.querySelector('[data-change-send]');
+    const text = box.querySelector('textarea'), send = box.querySelector('[data-change-send], [data-idea-send]');
     send.disabled = !text.value.trim() || askImages.some((i) => !i.name);
     box.classList.toggle('has-text', !!text.value.trim()); box.classList.toggle('has-img', askImages.length > 0);
     text.style.height = 'auto'; if (text.scrollHeight) text.style.height = `${Math.min(text.scrollHeight, 160)}px`;
@@ -887,7 +888,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         b.title = 'Enlarge';
         b.onclick = () => openZoom(img.src, `Image ${b.querySelector('.job-image-num').textContent}`);
       });
-      if (missing.length && !askedImages.has(strip.dataset.strip)) { askedImages.add(strip.dataset.strip); send({ type: 'job-images', id: strip.dataset.strip }); }
+      // Keyed by what is missing, so a picture a later idea message adds is asked for too.
+      const ask = `${strip.dataset.strip}|${missing.join('|')}`;
+      if (missing.length && !askedImages.has(ask)) { askedImages.add(ask); send({ type: 'job-images', id: strip.dataset.strip }); }
     });
   }
   // What the agent must show before the code is committed (server/jobs-schema.js show).
@@ -1057,7 +1060,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const actions = `${job.error ? `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>` : ''}<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel idea</button>`;
     // What was on screen when the dialog opened is not new; only what arrives after fades in.
     if (ideaSeen?.jobId !== job.id) for (const m of ideaThread(job)) ideaDrawn.add(m.id);
-    return ideaViewHtml(job, { cost, actions, error, pending: ideaSent?.jobId === job.id ? ideaSent : null, firing: ideaFiring?.jobId === job.id ? ideaFiring : null, fresh: freshMessage, titled: titledNow(job) });
+    return ideaViewHtml(job, { cost, actions, error, pending: ideaSent?.jobId === job.id ? ideaSent : null, firing: ideaFiring?.jobId === job.id ? ideaFiring : null, fresh: freshMessage, tray: askTrayHtml(), titled: titledNow(job) });
   }
   const conversationHtml = (job) => ideaThread(job).length ? more('idea', `${ICONS.note}Conversation <small>${ideaThread(job).length + 1}</small>`, ideaThreadHtml(job), 'job-idea-past') : '';
   function jobDetail(job) {
@@ -1295,20 +1298,21 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const n = ideaThread(job).length + (ideaSent?.jobId === job.id ? 1 : 0);
     if (ideaSeen?.jobId !== job.id || ideaSeen.n !== n) { dialog.scrollTop = dialog.scrollHeight; ideaSeen = { jobId: job.id, n }; }
     const box = dialog.querySelector('[data-idea-composer]'), text = box.querySelector('textarea'), go = box.querySelector('[data-idea-send]');
-    const sync = () => { go.disabled = !text.value.trim(); box.classList.toggle('has-text', !!text.value.trim()); text.style.height = 'auto'; if (text.scrollHeight) text.style.height = `${Math.min(text.scrollHeight, 160)}px`; };
+    // Send waits for every picture to finish uploading, as the change box's does.
     const sendReply = () => {
       const v = text.value.trim();
-      if (!v) return;
-      ideaSent = { jobId: job.id, text: v, at: Date.now(), state: 'sending' };
-      action('idea-reply', { text: v }, '');
-      text.value = '';
+      if (!v || go.disabled) return;
+      const images = askImages.map((i) => i.name).filter(Boolean);
+      ideaSent = { jobId: job.id, text: v, images: askImages.map((i) => i.url), at: Date.now(), state: 'sending' };
+      action('idea-reply', { text: v, ...(images.length ? { images } : {}) }, '');
+      askImages = []; text.value = '';
       renderDetail();
       dialog.querySelector('[data-idea-composer] textarea')?.focus();
     };
-    text.addEventListener('input', sync);
     text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !isPrimaryActionKey(e)) { e.preventDefault(); sendReply(); } });
     go.onclick = sendReply;
-    sync();
+    wireAskImages(box);
+    hydrateStrips();
     dialog.querySelectorAll('[data-idea-refine]').forEach((b) => b.onclick = () => text.focus());
     dialog.querySelectorAll('[data-accept-idea]').forEach((b) => b.onclick = () => {
       if (b.getAttribute('aria-disabled') === 'true' || ideaFiring) return;

@@ -15,6 +15,7 @@ import { _resetForTests, runnerFor } from './jobs.js';
 import { looksLikeQuestion } from './job-parked.js';
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png body')]);
+// As the real façade: read() sees only the kept store, keep() copies a staged paste into it.
 function hostFor(t, f, images = {}) {
   // As the real host (paste-store.js): `images` is the STAGING dir, which read()
   // never sees; keep() copies a staged name into the extension's own store.

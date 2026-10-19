@@ -112,6 +112,15 @@ export async function thumbnailOf({ jobId, subId, round, file, run = runFile }) 
   try { return { mime: 'image/jpeg', bytes: fs.readFileSync(out) }; } catch { return null; }
 }
 
+export function readIdeaImage({ jobId, file }) {
+  if (!evidenceName(file)) return null;
+  try {
+    const bytes = fs.readFileSync(path.join(ideasDir(jobId), file));
+    const kind = sniffKind(bytes);
+    return kind ? { mime: kind.mime, bytes } : null;
+  } catch { return null; }
+}
+
 export function readEvidence({ jobId, subId, round, file }) {
   if (!evidenceName(file) || !Number.isInteger(round) || round < 1) return null;
   try {

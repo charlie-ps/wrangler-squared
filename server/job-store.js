@@ -330,7 +330,7 @@ export class JobStore {
       // New idea's conversation (job-idea.js): the human's answer to the planner, and
       // the press that turns its suggestion into the job's plan. That press is the plan
       // approval, so Plan review never asks again for the plan just accepted.
-      if (action === 'idea-reply') { humanReply(j, payload.text, Date.now()); return; }
+      if (action === 'idea-reply') { humanReply(j, payload.text, Date.now(), payload.attachments); return; }
       if (action === 'accept-idea') {
         approve(j, acceptIdea(j, payload.messageId, Date.now()));
         record(j, null, 'accept-idea', null, `Created the job from the planner's suggestion: ${quoted(j.title)}`);
