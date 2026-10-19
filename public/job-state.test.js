@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, jobNeedsYou } from './job-state.js';
+import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, jobNeedsYou, mainWaiting } from './job-state.js';
 import { plateHtml } from './job-plates.js';
 import { jobStatus } from './jobs.js';
 
@@ -148,6 +148,25 @@ test('a job needs you exactly when its plate asks, once however many of its step
     assert.equal(jobNeedsYou(j), expected, name);
     assert.equal(/\bstubbed\b/.test(plateHtml(j, 0)), expected, `${name}: the plate agrees`);
   }
+});
+
+test('a local main left behind asks for you without moving the stage, until something is fixing it', () => {
+  const notice = (over = {}) => ({ path: '/repo', base: 'main', reason: 'dirty', subs: ['a'], at: 1, retrying: false, resolving: null, ...over });
+  const working = job({ subJobs: [sub('a', { stage: 'done' }), sub('b')], runs: [run('b')], mainNotices: [notice()] });
+  assert.equal(jobState(working), 'running', 'the roll-up is untouched'); assert.equal(subState(working, working.subJobs[1]), 'running', 'no step is held');
+  assert.equal(jobNeedsYou(working), true); assert.equal(jobLabel(working), 'Local main behind');
+  const plate = plateHtml(working, 0);
+  assert.match(plate, /\bstubbed\b/); assert.match(plate, /tone-warn/); assert.match(plate, /Local main behind/); assert.match(plate, /data-ask="open" data-job="j" data-sub=""/);
+  const delivered = job({ stage: 'done', subJobs: [sub('a', { stage: 'done' })], mainNotices: [notice({ base: 'trunk', path: '/other' }), notice()] });
+  assert.equal(jobState(delivered), 'done'); assert.equal(jobLabel(delivered), 'Local trunk behind', 'not Delivered while the notice is open');
+  assert.equal(jobNeedsYou(delivered), true); assert.match(plateHtml(delivered, 0), /\/other \+1/);
+  for (const [name, over] of [['retrying', { retrying: true }], ['resolving', { resolving: { id: 'stash', at: 2, sessionId: 's_fix' } }], ['starting a fix', { resolving: { id: 'stash', at: 2, sessionId: null } }]]) {
+    const j = job({ stage: 'done', subJobs: [sub('a', { stage: 'done' })], mainNotices: [notice(over)] });
+    assert.deepEqual(mainWaiting(j), [], name); assert.equal(jobNeedsYou(j), false, name); assert.equal(jobLabel(j), 'Delivered', name);
+    assert.doesNotMatch(plateHtml(j, 0), /\bstubbed\b/, `${name}: the plate agrees`);
+  }
+  const review = job({ subJobs: [sub('a', { kind: 'session', stage: 'review', result: { checks: [] } })], mainNotices: [notice()] });
+  assert.equal(jobLabel(review), 'Review result', 'a step waiting on you outranks the notice'); assert.doesNotMatch(plateHtml(review, 0), /Local main behind/);
 });
 
 test('the board orders jobs newest first by creation, whatever their live state', () => {

@@ -58,9 +58,12 @@ export function jobState(job) {
   return STATE_ORDER.find((s) => states.includes(s));
 }
 
+// A local checkout main could not be fast-forwarded (job-main.js), and nothing is fixing it yet:
+// an ask of its own beside the stage roll-up, which it never changes, so a finished job keeps it.
+export const mainWaiting = (job) => (job.mainNotices || []).filter((n) => !n.retrying && !n.resolving);
 // A job needs you exactly when its plate draws an ask (job-plates.js plateAsk): the rail
 // badge and the Needs you tab count jobs by this, so both match the cards on the board.
-export const jobNeedsYou = (job) => !!job.error || promptsWaiting(job).length > 0 || ['needs', 'failing'].includes(jobState(job));
+export const jobNeedsYou = (job) => !!job.error || promptsWaiting(job).length > 0 || ['needs', 'failing'].includes(jobState(job)) || mainWaiting(job).length > 0;
 export const leadSub = (job, state = jobState(job)) => job.subJobs.find((s) => subState(job, s) === state) || null;
 const redChecks = (sub) => (sub.pr?.checks || []).filter((c) => ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT'].includes(c.state)).length;
 // A few words for what a sub-job is waiting for, where its state is one a human
@@ -99,6 +102,7 @@ export function jobLabel(job) {
   const state = jobState(job);
   if (job.cancelledAt) return jobStatus(job, null).text;
   if (job.error) return 'Needs attention';
+  if (!['needs', 'failing'].includes(state) && mainWaiting(job).length) return `Local ${mainWaiting(job)[0].base} behind`;
   if (job.stage === 'backlog') return job.paused ? 'Paused' : 'Backlog';
   if (job.stage === 'planning' && state === 'needs' && job.plan && !runStatus(job, null)) return 'Plan ready';
   if (job.stage !== 'active') return jobStatus(job, null).text;

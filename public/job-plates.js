@@ -3,7 +3,7 @@ import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml, inflowHtml } from './job-skylines.js';
 import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, ideaStage, liveSuggestion, ideaOpen } from './jobs.js';
-import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub } from './job-state.js';
+import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, mainWaiting } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 import { runningDotHtml } from './job-running.js';
 import { titleLoaderHtml } from './job-idea.js';
@@ -192,7 +192,10 @@ export function plateAsk(job) {
     const [p] = prompts;
     return { tone, label: 'Prompt waiting', detail: `${promptWhere(job, p)}${prompts.length > 1 ? ` +${prompts.length - 1}` : ''}`, button: 'Answer', icon: ICONS.terminal, act: 'session', sub: p.sub?.id || '', session: p.sessionId };
   }
-  if (!['needs', 'failing'].includes(state)) return null;
+  if (!['needs', 'failing'].includes(state)) {
+    const [m, ...more] = mainWaiting(job);
+    return m ? { tone: 'warn', label: jobLabel(job), detail: `${tildify(m.path)}${more.length ? ` +${more.length}` : ''}`, button: 'Resolve', icon: ICONS.branch, act: 'open', sub: '' } : null;
+  }
   // An idea waiting on you: the planner's question, or the job it suggests.
   const idea = ideaStage(job);
   if (idea === 'suggested') { const { plan } = liveSuggestion(job).suggest; return { ...whole('Job suggested', 'Review', [kindCountLabel(plan.subJobs), repoLine({ plan })].filter(Boolean).join(' · ')), icon: ICONS.eye }; }

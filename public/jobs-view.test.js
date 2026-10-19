@@ -2999,6 +2999,19 @@ test('a checkout the fast-forward left alone is a notice on the job panel with i
   assert.ok(f.q('[data-main-resolve="rebase"]'), 'the fixes are offered again');
 });
 
+test('an open notice counts the finished job in Needs you, and a Stash & update under way takes it out', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'done';
+  job.subJobs = [{ ...sub('api'), stage: 'done', state: 'done' }];
+  job.mainNotices = [{ path: '/repo', base: 'main', reason: 'dirty', subs: ['api'], at: 1, retrying: false, dirty: [{ path: 'a.js', change: 'modified' }], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 0,
+    resolutions: [{ id: 'stash', label: 'Stash & update', title: 'Stash it' }] }];
+  f.view.update(f.data);
+  assert.equal(f.q('#jobs-review-count').textContent, '1');
+  f.q('[data-filter="needs"]').click();
+  assert.match(f.q('[data-board="job1"] .job-plate-stub').textContent, /Local main behind/, 'listed under Needs you');
+  job.mainNotices[0] = { ...job.mainNotices[0], resolving: { id: 'stash', at: 2, sessionId: 's_fix' } }; f.view.update(f.data);
+  assert.equal(f.q('[data-board="job1"]'), null); assert.notEqual(f.q('#jobs-review-count').textContent, '1');
+});
+
 test('the job dialog stays open on a notice\'s Retry, showing its outcome on the next tick', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'done';
   job.mainNotices = [{ path: '/repo', base: 'main', reason: 'dirty', subs: [], at: 1, retrying: true, dirty: [{ path: 'a.js', change: 'modified' }], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 0 }];
