@@ -1,5 +1,5 @@
 import { esc } from './util.js';
-import { describe, plateArt, plateThumb, startGalaxy, themeOf, dotFor, starfield, clearGlyphCache } from './model-plates.js';
+import { describe, weakModel, plateArt, plateThumb, startGalaxy, themeOf, dotFor, starfield, clearGlyphCache } from './model-plates.js';
 
 // New job's agent/model/effort picker: a ticket in the sidebar (the current
 // model's art and name), an inline effort meter under it, and a cabinet that
@@ -74,7 +74,7 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
       <div class="pick-meter"><span class="pick-lab">Effort</span>
         <div class="pick-bars" role="radiogroup" aria-label="Effort"><button type="button" class="pick-bar auto${e ? '' : ' on'}" role="radio" aria-checked="${!e}" data-effort="" title="Leave it to the agent" tabindex="${e ? -1 : 0}">AUTO</button>${bars}</div>
         <span class="pick-val">${esc(cur ? cur.label || cur.value : 'auto')}</span></div>
-      <div class="pick-usual">${usualHtml}</div>`;
+      <div class="pick-usual">${usualHtml}</div>${weakModel(a, m) ? `<div class="pick-weak" role="note" title="Wrangler² plans and reviews best on Opus 5.5, Fable 5.1, GPT-6 Astra or newer">Wrangler² performance will suffer with ${esc(d.short)}</div>` : ''}`;
     galaxies(el.querySelector('.pick-band'), d, level, 'ticket');
     onChange({ ...pick });
   }

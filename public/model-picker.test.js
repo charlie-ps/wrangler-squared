@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { initialPick, switchPick } from './model-picker.js';
-import { describe, startGalaxy, plateArt, plateThumb } from './model-plates.js';
+import { describe, weakModel, startGalaxy, plateArt, plateThumb } from './model-plates.js';
 
 const claude = { id: 'claude', label: 'Claude', efforts: ['low', 'high', 'max'].map((value) => ({ value })), models: [{ value: 'fable' }, { value: 'opus', default: true }, { value: 'sonnet' }] };
 const codex = { id: 'codex', label: 'Codex', efforts: ['low', 'high', 'max', 'ultra'].map((value) => ({ value })), models: [
@@ -97,6 +97,16 @@ test('an unknown agent gets index cards, and catalog strings are escaped in the 
   assert.ok(!svg.includes('"Pro"') && svg.includes('&quot;Pro&quot;'));
   const empty = d(claude, '', {}, []);
   assert.equal(empty.plate, 'card', 'an agent with no models still describes');
+});
+
+test('weakModel flags anything below Opus 5.5, Fable 5.1 or GPT-6 Astra, reading a bare opus or fable alias as current', () => {
+  const weak = (agent, value) => weakModel(agent, { value });
+  for (const v of ['opus', 'fable', 'opus[1m]', 'claude-opus-5-5', 'claude-opus-6', 'claude-opus-5-10', 'claude-fable-5-1', 'claude-fable-6[1m]']) assert.equal(weak(claude, v), false, v);
+  for (const v of ['sonnet', 'sonnet[1m]', 'haiku', 'opusplan', 'claude-opus-5', 'claude-opus-4-7', 'claude-fable-5', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001']) assert.equal(weak(claude, v), true, v);
+  for (const v of ['gpt-6-astra', 'gpt-6.1-astra', 'gpt-7-astra']) assert.equal(weak(codex, v), false, v);
+  for (const v of ['gpt-5.5-astra', 'gpt-6.1-sol', 'gpt-6-luna', 'gpt-6-terra', 'gpt-6']) assert.equal(weak(codex, v), true, v);
+  assert.equal(weak({ id: 'gemini', label: 'Gemini' }, 'gemini-3-pro'), true, 'an unknown agent warns');
+  assert.equal(weakModel(claude, { value: '' }), false, 'no pick, no warning');
 });
 
 test('initialPick opens on your usual while the catalog has it, else on the first agent’s default', () => {

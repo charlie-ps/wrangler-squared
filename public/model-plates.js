@@ -66,6 +66,16 @@ export function describe(agent, m, all = []) {
   return { name: own, short: own.replace(new RegExp(`^${String(agent.label || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'), '') || own, latin: v, desc: `${agent.label || agent.id} has no artwork here, so its models get index cards.`, plate: 'card', hue, family: '', version: '', resolved: '', seed: v, known: false };
 }
 
+// Below the frontier tier Wrangler² plans and reviews worse. A bare alias is
+// read as the family's current model, so 'opus' and 'fable' pass and 'sonnet' does not.
+const FRONTIER = { claude: { opus: '5.5', fable: '5.1' }, codex: { astra: '6' } };
+const atLeast = (v, min) => { const a = v.split('.').map(Number), b = min.split('.').map(Number); for (let i = 0; i < 2; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
+export function weakModel(agent, m) {
+  if (!agent || !m?.value) return false;
+  const d = describe(agent, m), min = FRONTIER[agent.id]?.[d.family];
+  return !min || (!!d.version && !atLeast(d.version, min));
+}
+
 export const themeOf = (a) => (a.id === 'claude' || a.id === 'codex' ? a.id : 'generic');
 export const DOTS = { claude: 'linear-gradient(180deg, #3f6fae 0 40%, #f39a4a 58%, #1a0f0e 66%)', codex: 'radial-gradient(circle, #fff 0, #c9d0ff 18%, #2a2f55 45%, #05070c 72%)' };
 export const dotFor = (id) => DOTS[id] || `hsl(${hash(id) % 360} 45% 50%)`;
