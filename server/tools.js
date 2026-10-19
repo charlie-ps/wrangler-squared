@@ -1,3 +1,4 @@
+import { allowFiles } from './job-files.js';
 import { z } from 'zod';
 import { isHumanSub, jobInputSchema, reportSchema } from './jobs-schema.js';
 import { runForSession } from './jobs.js';
@@ -46,6 +47,7 @@ export const jobReportTool = {
       // session is waiting for it. A tree git cannot read pins nothing.
       const meta = report.kind === 'ready' ? { treeHash: await treeOf(host, caller, runId) } : {};
       const job = host.stores.jobs.report(caller, runId, report, meta);
+      allowFiles(host, [job]);
       await host.rebuild();
       // Drafts leave the run open: the session ends its turn, but its work is
       // not done until the mail with the human's decision has been acted on.

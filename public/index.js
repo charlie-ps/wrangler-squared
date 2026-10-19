@@ -175,6 +175,8 @@ export default {
           // off it → "Restore session" and openSession resumes it first.
           onBoard: (sid) => sessions.some((s) => s.sessionId === sid),
           onSession: (sid) => api.openSession(sid),
+          files: api.files,
+          onOpenFile: (path) => api.openFile(path),
           onDiff: (sid, from) => reviewDiff(api, sid, from),
           onIntro: () => intro.open(0),
           updates,

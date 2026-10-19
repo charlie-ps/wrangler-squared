@@ -63,14 +63,21 @@ const placeBodyHtml = (p, states) => {
 };
 const placeTip = (plan, p, writes, states) => [`${PLACES[p.type].name} · ${p.name}${p.type === 'file' && p.url ? `\n${p.url}` : ''}`,
   ...writes.map((w, i) => `${STATES[states[i]].label}: ${writeAction(w)} (${writeWhen(plan, w)})`)].join('\n');
+// A host serving `api.files` (1.38) can open a path it knows how to show, so Open
+// sits beside Copy for those only; an older host, or any other file, keeps Copy.
+let canOpenFile = () => false;
+export const setFileOpener = (canOpen) => { canOpenFile = typeof canOpen === 'function' ? canOpen : () => false; };
+export function filePathHtml(path) {
+  let can = false;
+  try { can = !!canOpenFile(path); } catch { can = false; }
+  return `<div class="job-place-path"><code>${esc(path)}</code>${can ? `<button type="button" data-open-path="${esc(path)}" title="Open the file">${ICONS.link}Open</button>` : ''}<button type="button" data-copy-path="${esc(path)}" title="Copy the path">${ICONS.copy}Copy</button></div>`;
+}
 // The popover's header: the whole name, and Open ↗ once there is somewhere to
 // go. Only an http(s) link is ever an href, whoever reported it.
 function placeHeadHtml(p) {
   const href = p.type === 'file' ? null : webUrl(p.url);
   const head = `<header class="job-place-head">${PLACES[p.type].icon}<b title="${esc(p.name)}">${esc(p.name)}</b>${href ? `<a href="${esc(href)}" target="_blank" rel="noopener">Open ↗</a>` : p.exists ? '' : '<em>not made yet</em>'}</header>`;
-  // TODO(host-api file:reveal): the board is served over http and cannot follow
-  // file://, so a local file shows its path to copy rather than an Open link.
-  return p.type === 'file' && p.url ? `${head}<div class="job-place-path"><code>${esc(p.url)}</code><button type="button" data-copy-path="${esc(p.url)}" title="Copy the path">${ICONS.copy}Copy</button></div>` : head;
+  return p.type === 'file' && p.url ? `${head}${filePathHtml(p.url)}` : head;
 }
 
 // Each wave's column, top to bottom. A connector that skips waves reserves a

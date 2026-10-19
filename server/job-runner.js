@@ -1,3 +1,4 @@
+import { allowFiles } from './job-files.js';
 import { runnable, dependencySatisfied, dependenciesSatisfied, MERGE_IS_DELIVERY } from './job-store.js';
 import { summariseComments, commentsBlockMerge } from './job-comments.js';
 import { awaitsTicket, settingsSchema } from './jobs-schema.js';
@@ -47,7 +48,7 @@ export const IDLE_RECEIPT_GRACE_MS = 10 * 60 * 1000;
 export class JobRunner {
   constructor({ store, runtime, github, onChange = async () => {}, now = Date.now, summarise = summariseComments, statusOf = () => null, running = defaultDeps() }) {
     Object.assign(this, { store, runtime, github, onChange, now, summarise, statusOf, running });
-    this.busy = false;
+    this.busy = false; this.allowedFiles = new Set();
     this.triaging = new Map(); this.pending = new Set();
   }
   // Every in-flight comment triage has settled (tests; the poll never waits).
@@ -57,6 +58,7 @@ export class JobRunner {
     this.busy = true;
     const before = this.store.data;
     try {
+      allowFiles(this.runtime.host, this.store.data.jobs, this.allowedFiles);
       for (const job of this.store.data.jobs) {
         try {
           await this.sweepRunning(job.id);

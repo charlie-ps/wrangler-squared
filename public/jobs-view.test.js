@@ -12,14 +12,14 @@ const sub = (id, after = []) => ({ id, title: `Deliver ${id}`, repo: '/repo', st
 const plan = { context: 'Keys live in the vault; every service reads them at boot.', stories: [{ id: 'story', key: 'AUTH-1', title: 'Customers can sign in' }], subJobs: [sub('api'), sub('web', ['api'])] };
 const hint = (f) => f.q('#job-dialog .job-chip-state').title;
 const deploys = (summary = 'Deploys on merge · Deploy') => ({ head: 'head1', base: 'main', expected: true, workflows: [{ name: 'Deploy', file: 'deploy.yml', triggers: true, reason: 'runs on push' }], summary });
-function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }]) {
+function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], extra = {}) {
   const window = new Window({ url: 'http://localhost:7878' });
   const prevDoc = globalThis.document, prevFormData = globalThis.FormData;
   globalThis.document = window.document; globalThis.FormData = window.FormData;
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
   const staging = { stage: async () => ({ name: 'paste-1700000000000-aaaa1111.png' }) };
   const sent = [], usualSaves = [], sessions = [], diffs = [], diffContexts = [], onBoard = new Set();
-  const view = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => agents, onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s) });
+  const view = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => agents, onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s), ...extra });
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; await window.happyDOM.close(); });
   const job = { id: 'job1', title: 'Sign-in', intent: 'Reliable sign-in', repos: ['/repo'], stage: 'planning', plan, subJobs: [], runs: [], moves: [], revision: 2, reviewMerge: true };
   const data = { jobs: [structuredClone(job)], settings: { concurrency: 2, maxRepairs: 2 } };
@@ -1892,6 +1892,31 @@ test('a place that exists opens from its pill; a local file shows its path to co
   pill('k6').querySelector('[data-copy-path]').click(); await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual(copied, ['/Users/me/k6 report.html']);
   assert.equal(pill('k6').querySelector('[data-copy-path]').textContent, 'Copied');
+});
+
+test('a file place shows Open beside Copy only where the host can open it, and Open asks the host', async (t) => {
+  const opened = [];
+  const files = { canOpen: (p) => p.endsWith('.md') };
+  const f = fixture(t, undefined, { files, onOpenFile: async (p) => { opened.push(p); return { ok: true }; } });
+  placesJob(f, { k6: { stage: 'done', state: 'done', result: { outcome: 'written', url: '/Users/me/report.md', receiptId: 'r2', at: 2 } } });
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const pill = f.q('[data-node="k6"]').closest('details.job-place');
+  assert.equal(pill.querySelector('[data-open-path]').textContent.trim(), 'Open');
+  assert.ok(pill.querySelector('[data-copy-path]'), 'Copy stays beside it');
+  pill.querySelector('[data-open-path]').click(); await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(opened, ['/Users/me/report.md']);
+});
+
+test('a file the host cannot show, or a host without api.files, keeps path and Copy only', (t) => {
+  for (const extra of [{ files: { canOpen: (p) => p.endsWith('.md') } }, {}]) {
+    const f = fixture(t, undefined, extra);
+    placesJob(f, { k6: { stage: 'done', state: 'done', result: { outcome: 'written', url: '/Users/me/k6 report.html', receiptId: 'r2', at: 2 } } });
+    f.q('[data-board="job1"] .job-plate-open').click();
+    const pill = f.q('[data-node="k6"]').closest('details.job-place');
+    assert.equal(pill.querySelector('[data-open-path]'), null);
+    assert.equal(pill.querySelector('.job-place-path code').textContent, '/Users/me/k6 report.html');
+    assert.ok(pill.querySelector('[data-copy-path]'));
+  }
 });
 
 test('the plate carries one chip per place across the job, dots merged, an existing place a link above the plate, and a moon rather than a step for a write', (t) => {

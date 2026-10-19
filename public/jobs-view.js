@@ -2,7 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound } from './jobs.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml } from './job-idea.js';
-import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
+import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, releaseSkies, spinTo } from './job-skylines.js';
@@ -336,7 +336,8 @@ export function primaryAction(dialog) {
 }
 
 const MAX_ASK_IMAGES = 4;
-export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, updates = null, storage = null, toast = () => {} }) {
+export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, files = null, onOpenFile = null, updates = null, storage = null, toast = () => {} }) {
+  setFileOpener(files ? (path) => files.canOpen(path) : null);
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, maxReplans: 2, deploymentStaleMinutes: 30 } };
@@ -591,6 +592,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // A dependency change can move the node to another wave, so the stepper is
     // redrawn from the draft rather than patched; the changed checkbox keeps focus.
     graph.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
+    graph.querySelectorAll('[data-open-path]').forEach((b) => b.onclick = () => openPath(b));
     const redraw = () => { dialog.querySelector('.job-graph').outerHTML = planGraphHtml(planDraft, { editable: true, openDeps, openTickets, openShow, editing: writeEdit, reviewWrites: reviewDefault(), base: jobBase() }); wireGraph(); };
     graph.querySelectorAll('[data-dep]').forEach((e) => e.onchange = () => {
       const s = planDraft.subJobs[+e.dataset.dep]; s.after = e.checked ? [...s.after, e.value] : s.after.filter((d) => d !== e.value);
@@ -719,6 +721,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const done = () => { button.lastChild.textContent = 'Copied'; detailShown = null; };
     const clipboard = globalThis.navigator?.clipboard;
     if (clipboard?.writeText) clipboard.writeText(button.dataset.copyPath).then(done, select); else select();
+  }
+  async function openPath(button) {
+    let res;
+    try { res = await onOpenFile?.(button.dataset.openPath); } catch { res = null; }
+    if (!res?.ok) toast(res?.reason ? `Could not open the file: ${res.reason}` : 'Could not open the file');
   }
   const noteFor = (sub) => sub.note ? `<p class="job-note" title="Note for the next session">${ICONS.note}<span>${esc(sub.note)}</span></p>` : '';
   const NOTED_APPROVALS = new Set(['approve-session', 'approve-code']);
@@ -1125,12 +1132,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     ].filter(Boolean);
   }
   // Where the write goes, and where it ended up: an http(s) link opens, a file
-  // shows its path to copy (TODO(host-api file:reveal) in job-graph.js).
+  // shows its path to copy, and to open where the host can show it.
   function placeRowHtml(job, sub) {
     const p = placesOf({ ...job.plan, subJobs: job.subJobs }, job.subJobs.filter((w) => isWriteSub(w))).find((x) => x.writes.includes(sub));
     if (!p) return '';
     const href = p.type === 'file' ? null : webUrl(p.url);
-    const where = p.type === 'file' && p.url ? `<div class="job-place-path"><code>${esc(p.url)}</code><button type="button" data-copy-path="${esc(p.url)}" title="Copy the path">${ICONS.copy}Copy</button></div>`
+    const where = p.type === 'file' && p.url ? filePathHtml(p.url)
       : href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(p.name)} ↗</a>` : esc(p.name);
     return `<div><dt>${esc(PLACES[p.type].name)}</dt><dd>${where}</dd></div>`;
   }
@@ -1451,6 +1458,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
     dialog.querySelectorAll('[data-open-sub]').forEach((b) => b.onclick = () => openDetail(job.id, b.dataset.openSub));
     dialog.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
+    dialog.querySelectorAll('[data-open-path]').forEach((b) => b.onclick = () => openPath(b));
     dialog.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });
     wireGraph();

@@ -17,7 +17,7 @@
     "requires": [
       "sessions:read", "sessions:spawn", "sessions:archive", "sessions:bill", "sessions:wake",
       "mail:send", "tasks:read", "tasks:write",
-      "usage:read", "board:rebuild", "board:broadcast", "images:keep"
+      "usage:read", "board:rebuild", "board:broadcast", "images:keep", "files:view"
     ]
   },
   "dependencies": {

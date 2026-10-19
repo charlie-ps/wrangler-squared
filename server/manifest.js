@@ -53,9 +53,9 @@ export default {
   requires: [
     'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:bill', 'sessions:wake',
     'mail:send', 'tasks:read', 'tasks:write',
-    'usage:read', 'board:rebuild', 'board:broadcast', 'images:keep',
+    'usage:read', 'board:rebuild', 'board:broadcast', 'images:keep', 'files:view',
   ],
-  engines: { wranglerApi: '^1.31.0' },
+  engines: { wranglerApi: '^1.38.0' },
 
   // Instantiated once by the wrangler with `{ id, log }`; the file path is the
   // extension's own choice (server/data-dir.js).
