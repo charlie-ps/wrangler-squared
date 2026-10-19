@@ -258,7 +258,9 @@ export class JobRunner {
     if (job.cancelledAt && job.stage !== 'active') { if (!job.runs.some(runnable)) await this.finish(id); return; }
     if (job.stage === 'planning' && !job.plan && !activeFor(job)) { await this.launch(job, null, 'planning'); return; }
     if (inConversation(job)) {
-      const run = job.runs.find((r) => runnable(r) && r.parkedFor === 'idea' && r.parkedAt && !r.mailedAt);
+      // Parked or still mid-turn: a message written while the planner works is
+      // mailed now, or a plan reported before its next reply would never see it.
+      const run = job.runs.find((r) => runnable(r) && r.phase === 'planning' && !r.subJobId && r.sessionId);
       if (run && unsentIdea(job).length) await this.deliverIdea(id, run);
       return;
     }
@@ -478,7 +480,7 @@ export class JobRunner {
     const job = this.store.get(id);
     const batch = unsentIdea(job);
     try {
-      await this.runtime.resumeWithMail(run, ideaMail(job, run, batch));
+      await this.runtime.resumeWithMail(run, ideaMail(job, run, batch, { busy: !(run.parkedAt && !run.mailedAt) }));
       const now = this.now();
       this.patchRun(id, run.id, (r) => { r.mailedAt = now; r.idleSince = null; });
       this.store.update(id, (j) => { for (const m of j.idea.thread) if (batch.some((b) => b.id === m.id)) m.sentAt = now; j.idea.error = null; });

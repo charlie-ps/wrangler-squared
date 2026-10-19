@@ -133,6 +133,28 @@ test('a well-defined idea goes straight to a plan, exactly as a job always did: 
   assert.equal(f.get().stage, 'active');
 });
 
+test('two quick messages while the planner is still working both reach it: mailed mid-turn, and a plan cannot skip past one', async (t) => {
+  const f = fixture(t); await f.start();
+  const planner = f.last();
+  f.store.action(f.job.id, 'idea-reply', { text: 'Start with one new theme.' });
+  f.store.action(f.job.id, 'idea-reply', { text: 'And think deeply about how to make this extensible.' });
+  assert.throws(() => f.report({ kind: 'plan', plan: plan() }), /wrote again while you were working/);
+  await f.tick();
+  assert.equal(f.mailed.length, 1, 'both go in one mail to the busy planner');
+  assert.equal(f.mailed[0].sid, planner.sid);
+  assert.match(f.mailed[0].text, /wrote again .* while you were working/);
+  assert.match(f.mailed[0].text, /Start with one new theme\.[\s\S]*think deeply about how to make this extensible/);
+  assert.ok(f.get().idea.thread.every((m) => m.sentAt));
+  f.store.action(f.job.id, 'idea-reply', { text: 'Dark mode too.' });
+  await f.tick();
+  assert.equal(f.mailed.length, 2, 'a third, still mid-turn, follows in its own mail');
+  assert.match(f.mailed[1].text, /Dark mode too/);
+  await f.tick();
+  assert.equal(f.mailed.length, 2, 'each message is mailed once');
+  f.report({ kind: 'plan', plan: plan() });
+  assert.equal(f.get().plan.subJobs[0].id, 'nudge');
+});
+
 test('a parked planner may still send the plan itself, ending its run', async (t) => {
   const f = fixture(t); await f.start();
   f.report({ kind: 'reply', text: 'One question.' });

@@ -11,7 +11,7 @@ import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
 import { resolutionsFor, resolutionLabel } from './job-main.js';
-import { plannerReply, humanReply, acceptIdea, unsentIdea } from './job-idea.js';
+import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
 import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
@@ -565,6 +565,9 @@ export class JobStore {
         if (r.phase === 'planning') { if (!j.cancelledAt) plannerReply(j, r, report, Date.now()); return; }
         return this._reply(j, r, s, report);
       }
+      // A plan would end the conversation past words the planner has not been sent
+      // yet; the runner mails them on its next tick (job-runner.js deliverIdea).
+      if (report.kind === 'plan' && r.phase === 'planning' && inConversation(j) && unsentIdea(j).length) throw new Error('The human wrote again while you were working and it is on its way to you by mail: read your mail, then reply or report the plan');
       const parked = r.parkedFor === 'ready' && r.parkedAt && !r.mailedAt;
       if (parked && report.kind === 'ready' && JSON.stringify(r.readyReport) === JSON.stringify(report)) return;
       if (parked && report.kind !== 'blocked') throw new Error('You already reported ready; wait for mail from the human');
