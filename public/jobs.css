@@ -1483,9 +1483,11 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .job-plate-film + .job-plate-stub { margin-top:0; }
 
 /* The board's .chat-prose styles an agent's Markdown in either thread; the dialog's
-   own small muted paragraphs and h4 must not reach into it. */
-.job-dialog .chat-prose :is(p,h4) { font-size:inherit; color:inherit; }
-.job-dialog .chat-prose h4 { margin:1em 0 .4em; }
+   own paragraph and heading chrome must not reach into it. */
+.job-dialog .chat-prose p { font-size:inherit; color:inherit; }
+.job-dialog .chat-prose :is(h1,h2,h3,h4,h5,h6) { display:block; margin:1em 0 .4em; font-size:1em; font-weight:600; line-height:1.3; color:var(--fg); }
+.job-dialog .chat-prose h1 { font-size:1.5em; } .job-dialog .chat-prose h2 { font-size:1.3em; } .job-dialog .chat-prose h3 { font-size:1.15em; }
+.job-dialog .chat-prose > :first-child { margin-top:0; } .job-dialog .chat-prose > :last-child { margin-bottom:0; }
 
 /* The conversation under a Code review step (job-thread.js). */
 .job-thread { display:grid; margin-top:14px; border:1px solid var(--border-muted); border-radius:14px; overflow:hidden; }
@@ -1500,7 +1502,8 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .job-msg.agent .job-msg-who { color:var(--purple); }
 .job-msg.system { background:var(--surface-2); }
 .job-msg.system .job-msg-who, .job-msg.system .job-msg-text { color:var(--fg-muted); }
-.job-msg-text { color:var(--fg); overflow-wrap:anywhere; }
+.job-msg .job-msg-text { color:var(--fg); overflow-wrap:anywhere; }
+.job-msg p.job-msg-text { margin:0; white-space:pre-wrap; }
 .job-msg-via { display:inline-block; margin-top:4px; font-size:11px; color:var(--fg-muted); border:1px dashed var(--border-muted); border-radius:4px; padding:0 6px; }
 .job-msg time { display:flex; align-items:center; gap:3px; margin-top:2px; font-size:11px; color:var(--fg-subtle); }
 .job-msg-tick { display:inline-flex; color:var(--green-fg); }

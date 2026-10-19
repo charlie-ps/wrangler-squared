@@ -14,12 +14,15 @@ export const hasThread = (sub) => Array.isArray(sub?.thread) && sub.thread.lengt
 const clock = (at) => at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 const WHO = { human: 'You', agent: 'Session', system: 'Wrangler' };
 
+// An agent answers in Markdown; what the human typed is shown exactly as typed.
+const textHtml = (m) => m.from === 'agent' ? `<div class="job-msg-text chat-prose">${markdownHtml(m.text)}</div>` : `<p class="job-msg-text">${esc(m.text)}</p>`;
+
 function messageHtml(job, sub, m) {
   const files = [...(m.shots || []), ...(m.images || [])].map((x) => x.file);
   const attach = files.length ? `<div class="job-msg-att">${files.map((f, k) => shotButtonHtml(job, sub, m.round, f, k)).join('')}</div>` : '';
   const run = m.run ? `<pre class="job-msg-run"><i>$</i> ${esc(m.run.cmd)}\n${esc(m.run.out)}\n<b class="${m.run.exit === 0 ? 'ok' : 'bad'}">exit ${esc(m.run.exit)}</b></pre>` : '';
   const via = m.via === 'planner' ? '<span class="job-msg-via">via the planner</span>' : '';
-  return `<div class="job-msg ${esc(m.from)}"><span class="job-msg-who">${m.from === 'system' ? `Round ${esc(m.round)}` : WHO[m.from] || esc(m.from)}</span><div><div class="job-msg-text chat-prose">${markdownHtml(m.text)}</div><time>${m.from === 'human' && m.sentAt ? `<i class="job-msg-tick" title="Delivered to the session">${ICONS.check}</i>` : ''}${esc(clock(m.at))}</time>${run}${attach}${via}</div></div>`;
+  return `<div class="job-msg ${esc(m.from)}"><span class="job-msg-who">${m.from === 'system' ? `Round ${esc(m.round)}` : WHO[m.from] || esc(m.from)}</span><div>${textHtml(m)}<time>${m.from === 'human' && m.sentAt ? `<i class="job-msg-tick" title="Delivered to the session">${ICONS.check}</i>` : ''}${esc(clock(m.at))}</time>${run}${attach}${via}</div></div>`;
 }
 
 // Where the session stands: answering, waiting on your review, or gone.
