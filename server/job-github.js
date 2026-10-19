@@ -198,6 +198,9 @@ export class JobGithub {
   // pending on it; with nothing at all it stays `cancelled`, not failing — GitHub
   // may still queue the successor, and a hand-cancelled run is the human's call,
   // not a recovery job's. A failed run with nothing completed after it stays red.
+  // A green run on a revert of the merge contains it too and reads as deployed,
+  // by design: this is evidence a run that built the merge passed, not that the
+  // change is still live, and a revert is a later change somebody chose.
   async successor(sub, run, own = verdict(run)) {
     const fallback = run.conclusion === 'cancelled' ? { ...own, status: 'cancelled' } : own;
     if (!run.headBranch) return fallback;

@@ -709,6 +709,44 @@ test('a red post-merge run Retry never saw still waits on Accept red or recover 
   assert.deepEqual(f.sub().deployed.checks, ['Post-merge run accepted red: unrelated']);
 });
 
+test('a red post-merge run nobody acts on is polled at 2, then 5, then 15 minutes, and not at all after six hours until Retry', async (t) => {
+  const f = fixture(t); await atPr(f);
+  ghOver(f, { onCommit: [pushRun({ conclusion: 'failure' })], later: [], contains: () => false });
+  const polled = []; const deployment = f.github.deployment;
+  f.github.deployment = (sub) => { polled.push(f.clockNow()); return deployment(sub); };
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  const since = f.sub().redSince;
+  assert.equal(since, f.clockNow()); assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  while (f.clockNow() - since < 7 * 3600000) await f.tick();
+  const gaps = polled.slice(1).map((at, i) => [at - since, at - polled[i]]);
+  const gapAt = (from, to) => [...new Set(gaps.filter(([age]) => age > from && age <= to).map(([, gap]) => Math.ceil(gap / 60000)))];
+  assert.deepEqual(gapAt(0, 30 * 60000), [3], 'first half hour: every 2 minutes (the next 61s tick after)');
+  assert.deepEqual(gapAt(31 * 60000, 2 * 3600000), [6], 'to two hours: every 5 minutes');
+  assert.deepEqual(gapAt(2.5 * 3600000, 6 * 3600000), [16], 'to six hours: every 15 minutes');
+  assert.ok(polled.every((at) => at - since < 6 * 3600000), 'nothing after six hours');
+  assert.ok(polled.length < 60, `${polled.length} polls over seven hours, bounded`);
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'still red on the board');
+  const before = polled.length;
+  f.store.action(f.job.id, 'retry', { subJobId: 'api' }); await f.tick();
+  assert.equal(polled.length, before + 1, 'Retry watches it again'); assert.equal(f.sub().redSince, f.clockNow(), 'from a fresh start');
+  assert.equal(f.sub().nextPollAt - f.clockNow(), 120000);
+});
+
+test('a green run on a revert of the merge still contains it, so it reads as deployed: run evidence, not liveness', async (t) => {
+  // Pinned on purpose: `deployed` means a run that built the merge passed. A
+  // revert after it is a later change somebody chose, which no run can tell
+  // apart from a fix by containment alone.
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], later: [], contains: (head) => head === 'revert1' };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  world.later = [pushRun({ databaseId: 11, headSha: 'revert1', conclusion: 'success' })]; await poll(f);
+  assert.equal(f.sub().error, null);
+  assert.equal(f.sub().deploymentResult.runs[0].commit, 'revert1');
+  assert.deepEqual(f.sub().deployed.checks, ['Post-merge runs passed']);
+});
+
 test('Accept red on an open PR merges the pinned head instead of repairing it; a new push is judged afresh', async (t) => {
   const f = fixture(t); f.store.settings({ maxRepairs: 0 }); await atPr(f);
   f.setPr({ checkStatus: 'failing', checks: [{ name: 'e2e', state: 'FAILURE' }] }); await f.tick();
