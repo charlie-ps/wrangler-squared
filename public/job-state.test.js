@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, jobNeedsYou, mainWaiting } from './job-state.js';
+import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, placeJob, jobNeedsYou, mainWaiting } from './job-state.js';
 import { plateHtml } from './job-plates.js';
 import { jobStatus } from './jobs.js';
 
@@ -215,4 +215,23 @@ test('approving a session step while a red triage proposal is open moves the ste
   assert.equal(jobState(j), 'needs');
   assert.doesNotThrow(() => jobLabel(j));
   assert.doesNotThrow(() => plateHtml(j, 'sonnet'));
+});
+
+test('a moved plate keeps its rank between its neighbours, and a job made later still lands first', () => {
+  const a = job({ id: 'a', createdAt: 300 }), b = job({ id: 'b', createdAt: 200 }), c = job({ id: 'c', createdAt: 100 });
+  const shown = sortJobs([a, b, c]);
+  assert.equal(placeJob(shown, 'c', 'a'), 301, 'dropped before the first plate');
+  assert.equal(placeJob(shown, 'a', 'c', true), 99, 'dropped after the last');
+  assert.equal(placeJob(shown, 'a', 'c'), 150, 'dropped between b and c');
+  assert.equal(placeJob(shown, 'a', 'b'), null, 'dropped where it already is');
+  assert.equal(placeJob(shown, 'b', 'a', true), null);
+  assert.equal(placeJob(shown, 'a', 'a'), null);
+  assert.equal(placeJob(shown, 'a', 'gone'), null);
+  const moved = { ...a, rank: placeJob(shown, 'a', 'c') };
+  assert.deepEqual(sortJobs([moved, b, c]).map((j) => j.id), ['b', 'a', 'c']);
+  assert.deepEqual(sortJobs([moved, b, c, job({ id: 'new', createdAt: 400 })]).map((j) => j.id), ['new', 'b', 'a', 'c']);
+  // Within a filter only the neighbours shown count: b's place is between a and c, wherever d sits.
+  const d = job({ id: 'd', createdAt: 250 });
+  assert.equal(placeJob(sortJobs([a, c, b]).filter((j) => j.id !== 'd'), 'c', 'b'), 250);
+  assert.deepEqual(sortJobs([a, b, { ...c, rank: 250 }, d]).map((j) => j.id), ['a', 'd', 'c', 'b']);
 });

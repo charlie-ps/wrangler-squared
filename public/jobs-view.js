@@ -10,7 +10,7 @@ import { wireDeps, relight } from './job-deps.js';
 import { THEMES, themeOf, optionsOf, applyTheme, setCurrentTheme } from './themes.js';
 import { mountThemePicker } from './theme-picker.js';
 import { mountForming, dropForming, formingClock, formingMs } from './job-forming.js';
-import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, jobNeedsYou } from './job-state.js';
+import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, placeJob, jobNeedsYou } from './job-state.js';
 
 // The board's filter rail: what each shows, and the one an empty view explains.
 const FILTERS = [
@@ -450,8 +450,13 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // Anything that changes that DOM by hand forgets it, so the next tick redraws.
   let boardHtml = null, detailShown = null;
   const hold = createRedrawHold(() => [q('#jobs-boards'), dialog]);
+  // A plate moved on this board, by id, until a snapshot carries its new rank: a tick
+  // already on its way would otherwise put it back for a moment.
+  const moved = new Map();
+  let shown = [], dragging = null;
   function update(snapshot) {
     data = snapshot || data;
+    for (const [id, rank] of moved) { const j = data.jobs.find((x) => x.id === id); if (!j || j.rank === rank) moved.delete(id); }
     hold.run(refresh);
   }
   function refresh() {
@@ -491,7 +496,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     }
     assignScenes(data.jobs, scenes);
     const test = FILTERS.find(([key]) => key === filter)[2];
-    const jobs = sortJobs(data.jobs.filter((j) => test(j)));
+    const jobs = shown = sortJobs(data.jobs.filter((j) => test(j)).map((j) => (moved.has(j.id) ? { ...j, rank: moved.get(j.id) } : j)));
     const empty = !data.jobs.length ? 'Start with an outcome.<br>Wrangler will shape the work.' : filter === 'needs' ? 'Nothing needs you right now.' : filter === 'ideas' ? 'No ideas being talked through.' : 'No jobs here.';
     const t = applyViewTheme(), art = t.plateArt(optionsOf(data.settings, t));
     root.dataset.plateArt = art;
@@ -507,7 +512,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const html = jobs.map((j) => {
       try { return plateHtml(j, scenes.get(j.id), art, { forming: forming.get(j.id)?.stage }); } catch (e) { console.error('jobs: card', j.id, 'failed to draw', e); return ''; }
     }).join('') || `<div class="job-empty jobs-empty">${empty}</div>`;
-    if (html !== boardHtml) {
+    // A native drag ends if the plate it carries is replaced, so a tick waits for the drop.
+    if (html !== boardHtml && !dragging) {
       boardHtml = html;
       const scrolls = keepScrollX(boards);
       holdSkies(boards);
@@ -1694,7 +1700,72 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const at = e.clientX || e.clientY ? [e.clientX, e.clientY] : (() => { const r = plate.querySelector('.job-plate-open')?.getBoundingClientRect() || plate.getBoundingClientRect(); return [r.left, r.bottom]; })();
     closeMenu = mountJobMenu(root, jobMenuItems(job), at[0], at[1], (item) => pickMenu(job.id, item));
   };
+  // Dragging a plate reorders the board. Only the plate's own surface picks it up:
+  // `draggable` is set on the press, so a press on a control (or anything that opens
+  // something) never starts a drag. The title's hit area covers the whole plate, so
+  // only a press on its own text counts as the title's.
+  const boardsEl = q('#jobs-boards');
+  const onControl = (e) => {
+    const title = e.target.closest('.job-plate-open');
+    if (title) { const r = title.getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; }
+    return !!e.target.closest('a, button, input, textarea, select, summary, label, [role="button"], [data-place], [contenteditable]');
+  };
+  const clearDrop = () => boardsEl.querySelectorAll('.drop-before, .drop-after, .dragging').forEach((p) => p.classList.remove('drop-before', 'drop-after', 'dragging'));
+  function moveJob(id, targetId, after) {
+    const rank = placeJob(shown, id, targetId, after);
+    if (rank == null) return false;
+    moved.set(id, rank);
+    send({ type: 'job-action', id, action: 'reorder', rank });
+    render();
+    return true;
+  }
+  boardsEl.addEventListener('pointerdown', (e) => {
+    boardsEl.querySelectorAll('.job-plate[draggable]').forEach((p) => p.removeAttribute('draggable'));
+    const plate = e.target.closest?.('.job-plate');
+    if (plate && e.button === 0 && !onControl(e)) plate.draggable = true;
+  });
+  boardsEl.addEventListener('dragstart', (e) => {
+    const plate = e.target.closest?.('.job-plate[draggable]');
+    if (!plate) return;
+    dragging = { id: plate.dataset.board, target: null };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', plate.dataset.board);
+    plate.classList.add('dragging');
+  });
+  boardsEl.addEventListener('dragover', (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const plate = e.target.closest?.('.job-plate');
+    if (!plate) return;
+    // Back over its own place, a drop puts it nowhere new.
+    if (plate.dataset.board === dragging.id) {
+      if (dragging.target) { dragging.target = null; boardsEl.querySelectorAll('.drop-before, .drop-after').forEach((p) => p.classList.remove('drop-before', 'drop-after')); }
+      return;
+    }
+    const r = plate.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
+    if (dragging.target?.id === plate.dataset.board && dragging.target.after === after) return;
+    dragging.target = { id: plate.dataset.board, after };
+    boardsEl.querySelectorAll('.drop-before, .drop-after').forEach((p) => p.classList.remove('drop-before', 'drop-after'));
+    plate.classList.add(after ? 'drop-after' : 'drop-before');
+  });
+  boardsEl.addEventListener('drop', (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    const { id, target } = dragging;
+    dragging = null; clearDrop();
+    if (!target || !moveJob(id, target.id, target.after)) render();
+  });
+  boardsEl.addEventListener('dragend', () => { if (!dragging) return; dragging = null; clearDrop(); render(); });
   q('#jobs-boards').onkeydown = (e) => {
+    // Alt+Up/Down moves the focused plate one place, for a reader without a mouse.
+    const plate = e.altKey && ['ArrowUp', 'ArrowDown'].includes(e.key) && e.target.closest?.('.job-plate');
+    if (plate) {
+      e.preventDefault();
+      const id = plate.dataset.board, i = shown.findIndex((j) => j.id === id), next = shown[i + (e.key === 'ArrowUp' ? -1 : 1)];
+      if (next && moveJob(id, next.id, e.key === 'ArrowDown')) boardsEl.querySelector(`[data-board="${CSS.escape(id)}"] .job-plate-open`)?.focus();
+      return;
+    }
     const node = e.target.closest?.('g[data-job]');
     if (!node || !['Enter', ' '].includes(e.key)) return;
     e.preventDefault(); openDetail(node.getAttribute('data-job'), node.getAttribute('data-sub'));
@@ -1777,14 +1848,17 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     askDraft = null;
     return true;
   }
-  return { update, newJob: createJob, reviewFailed, changeFailed, ideaFailed, idea: idea.message, runningLog: (msg) => { if (msg.subJobId && msg.name) { runLogs.set(msg.subJobId, { name: msg.name, text: msg.text, truncated: msg.truncated, error: msg.error }); if (dialog.open && selected?.subId === msg.subJobId) renderDetail(); } }, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); if (shotZoom && !shotZoom.querySelector('.job-proof-full:not(.soft)')) paintShotBox(); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
+  function reorderFailed(msg) {
+    if (moved.delete(msg.jobId)) render();
+  }
+  return { update, newJob: createJob, reviewFailed, reorderFailed, changeFailed, ideaFailed, idea: idea.message, runningLog: (msg) => { if (msg.subJobId && msg.name) { runLogs.set(msg.subJobId, { name: msg.name, text: msg.text, truncated: msg.truncated, error: msg.error }); if (dialog.open && selected?.subId === msg.subJobId) renderDetail(); } }, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); if (shotZoom && !shotZoom.querySelector('.job-proof-full:not(.soft)')) paintShotBox(); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
     // A checkpoint switch keeps the dialog: the footer is where it was made.
     if (msg?.action === 'set-review') {
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }
       return;
     }
     // A Retry's, a fix's or a helper's outcome lands on a later tick, in the dialog it was pressed in.
-    if (['retry-main', 'dismiss-main', 'resolve-main', 'ask-helper'].includes(msg?.action)) return;
+    if (['retry-main', 'dismiss-main', 'resolve-main', 'ask-helper', 'reorder'].includes(msg?.action)) return;
     // A New idea that is planning opens on its conversation once the snapshot has it.
     if (msg?.event === 'job-created' && msg.idea && msg.started) { openOnCreate = msg.jobId; if (data.jobs.some((j) => j.id === msg.jobId)) { openOnCreate = null; openDetail(msg.jobId); } return; }
     // A reply stays in its conversation for the next tick. A created job closes the dialog it was pressed in,
