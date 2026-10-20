@@ -2,7 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT } from './jobs.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml } from './job-idea.js';
-import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener } from './job-graph.js';
+import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener, fieldName } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, askActs } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, releaseSkies, spinTo } from './job-skylines.js';
@@ -944,6 +944,22 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const list = job.subJobs.filter((s) => s.superseded && s.pr?.url);
     return list.length ? `<p class="job-superseded">${ICONS.stop}<span>Superseded by a plan change; ${list.length === 1 ? 'its PR is' : 'their PRs are'} left open on GitHub for you: ${list.map((s) => link(s.pr.url, `${s.title} #${prNumber(s)}`)).join(' · ')}</span></p>` : '';
   }
+  // What an edit did to each field, before → after: long text keeps the words both
+  // share and marks only the run that changed; a list says what it gains and loses.
+  function wordsDiffHtml(a = '', b = '') {
+    const x = String(a).split(/(\s+)/), y = String(b).split(/(\s+)/);
+    let i = 0, j = 0;
+    while (i < x.length && i < y.length && x[i] === y[i]) i++;
+    while (j < x.length - i && j < y.length - i && x[x.length - 1 - j] === y[y.length - 1 - j]) j++;
+    const mid = (w) => w.slice(i, w.length - j).join('');
+    return `${esc(x.slice(0, i).join(''))}${mid(x) ? `<del>${esc(mid(x))}</del>` : ''}${mid(y) ? `<ins>${esc(mid(y))}</ins>` : ''}${esc(x.slice(x.length - j).join(''))}`;
+  }
+  function editDiffHtml(was = {}, now = {}, fields, title) {
+    const list = (a = [], b = [], name = (v) => v) => [...b.filter((v) => !a.includes(v)).map((v) => `<ins>+ ${esc(name(v))}</ins>`), ...a.filter((v) => !b.includes(v)).map((v) => `<del>− ${esc(name(v))}</del>`)].join(' ') || 'reordered';
+    const row = (k) => k === 'after' ? list(was.after, now.after, title) : k === 'show' ? list(was.show, now.show)
+      : typeof (now[k] ?? was[k]) === 'string' || (now[k] ?? was[k]) == null ? wordsDiffHtml(was[k] ?? '', now[k] ?? '') : `<del>${esc(JSON.stringify(was[k] ?? null))}</del> <ins>${esc(JSON.stringify(now[k] ?? null))}</ins>`;
+    return `<dl class="job-edit-diff">${fields.map((k) => `<dt>${esc(fieldName(k))}</dt><dd>${row(k)}</dd>`).join('')}</dl>`;
+  }
   // The proposal laid over the live job (server/job-replan.js): every node in its
   // current state, labelled with what approving does to it, and the same in words.
   function proposalHtml(job) {
@@ -956,10 +972,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const markOf = (s) => acting.has(s.id) ? actionMark(acting.get(s.id)) : changes.frozen.includes(s.id) ? 'frozen' : changes.removed.includes(s.id) ? 'removed' : changes.added.includes(s.id) ? 'added' : changes.edited.some((e) => e.id === s.id) ? 'edited' : 'kept';
     const title = (id) => merged.subJobs.find((s) => s.id === id)?.title || id;
     const pr = (id) => { const s = liveSub(id); return s?.pr?.url ? ` · ${link(s.pr.url, `PR #${prNumber(s)}`)} stays open on GitHub` : ''; };
-    const items = [...changes.added.map((id) => `<li class="job-mark-added">New: ${esc(title(id))}</li>`),
-      ...changes.edited.map((e) => `<li class="job-mark-edited">Edited: ${esc(title(e.id))} <small>${esc(e.fields.join(', '))}</small></li>`),
-      ...changes.removed.map((id) => `<li class="job-mark-removed">Will be cancelled: ${esc(title(id))}${pr(id)}</li>`),
-      ...actions.map((a) => { const l = actionLine(a, merged); return `<li class="job-mark-act">${esc(l.text)} <small>${esc(l.detail)}</small><small class="pinned">${esc(pinLine(a.pin))}</small></li>`; })];
+    // Every row is kind | step, so titles line up whether or not the row opens.
+    const row = (kind, what) => `<span class="job-change-kind">${esc(kind)}</span><span class="job-change-what">${what}</span>`;
+    const items = [...changes.added.map((id) => `<li class="job-mark-added">${row('New', esc(title(id)))}</li>`),
+      ...changes.edited.map((e) => `<li class="job-mark-edited"><details><summary>${row('Edited', `${esc(title(e.id))} <small>${esc(e.fields.map(fieldName).join(', '))}</small>`)}</summary>${editDiffHtml(job.plan.subJobs.find((s) => s.id === e.id), merged.subJobs.find((s) => s.id === e.id), e.fields, title)}</details></li>`),
+      ...changes.removed.map((id) => `<li class="job-mark-removed">${row('Will be cancelled', `${esc(title(id))}${pr(id) ? ` <small>${pr(id).replace(/^ · /, '')}</small>` : ''}`)}</li>`),
+      ...actions.map((a) => { const l = actionLine(a, merged); const [kind, name] = l.text.split(/: (.*)/s); return `<li class="job-mark-act job-mark-${actionMark(a)}">${row(kind, `${esc(name)}${l.detail ? ` <small>${esc(l.detail)}</small>` : ''}${a.pin ? `<small class="pinned">${esc(pinLine(a.pin))}</small>` : ''}`)}</li>`; })];
     const d = proposal.diagnosis;
     const diagnosis = d ? `<div class="job-triage"><header>${ICONS.sparkle}<b>${proposal.escalation ? 'What Wrangler found' : 'Wrangler looked into it'}</b></header><p>${esc(d.summary)}</p>${d.evidence?.length ? `<ul>${d.evidence.map((e) => `<li><span>${esc(e.label)}</span>${esc(e.detail)}</li>`).join('')}</ul>` : ''}</div>` : '';
     const choose = options.length > 1 ? `<fieldset class="job-options"><legend>Options</legend>${options.map((o, i) => `<label class="job-option ${i === picked ? 'sel' : ''}"><input type="radio" name="opt" value="${i}" ${i === picked ? 'checked' : ''}><span><b>${esc(o.label || `Option ${i + 1}`)}${i === 0 ? '<span class="job-option-rec">Recommended</span>' : ''}</b>${o.why ? `<small>${esc(o.why)}</small>` : ''}</span></label>`).join('')}</fieldset>` : '';
@@ -967,7 +985,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const red = job.replan.red && !job.replan.red.human ? job.replan.red : null;
     const redSub = red && liveSub(red.sub);
     const asked = red ? `<p class="job-replan-ask"><b>${proposal.escalation ? 'Declared red' : 'Red step'}</b> ${esc(redSub?.title || red.sub)}${redSub?.error ? ` · ${esc(redSub.error)}` : ''}${proposal.escalation?.ask ? `<br><b>Needs you</b> ${esc(proposal.escalation.ask)}` : ''}</p>` : `<p class="job-replan-ask"><b>You asked</b> ${esc(job.replan.feedback)}</p>`;
-    return `${asked}${diagnosis}${choose}${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, openTickets, reviewWrites: job.reviewWrites, base: job.base })}
+    // The decision, and the two buttons that make it, head the proposal: nothing else on the dialog looks like this.
+    const blocked = job.runs.some((r) => !r.stopped && !r.subJobId);
+    const bar = `<section class="job-proposal-bar" aria-label="Plan change waiting for you"><div class="job-proposal-head"><span class="job-proposal-title">${ICONS.eye}<b>Plan change waiting for your decision</b></span><span class="job-proposal-hint">${blocked ? 'Wrangler is still planning; approve once it stops.' : 'Nothing new starts until you approve or discard it. Running steps carry on.'}</span></div>
+      <div class="job-actions job-proposal-cta tone-warn"><button class="primary" data-action="approve-replan" ${blocked ? 'disabled' : ''}>${ICONS.check}Approve change</button><button data-action="discard-replan">${ICONS.x}Discard</button></div>${asked}</section>`;
+    const count = (n, cls, label) => n ? `<span class="job-diff-key job-mark-${cls}"><b>${n}</b> ${label}</span>` : '';
+    const kept = merged.subJobs.filter((s) => ['kept', 'frozen'].includes(markOf(s))).length;
+    const legend = `<p class="job-diff-legend">${count(changes.added.length, 'added', 'new')}${count(changes.edited.length, 'edited', 'edited')}${count(changes.removed.length, 'removed', 'cancelled')}${count(actions.length, 'rework', actions.length === 1 ? 'action' : 'actions')}${count(kept, 'kept', 'unchanged')}<span class="job-diff-edges"><i class="added"></i>new link<i class="gone"></i>dropped link</span></p>`;
+    return `${bar}${diagnosis}${choose}${legend}${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, editsOf: (id) => changes.edited.find((e) => e.id === id)?.fields || [], was: job.plan, openTickets, reviewWrites: job.reviewWrites, base: job.base })}
       <ul class="job-replan-changes">${items.join('') || '<li>No sub-job changes</li>'}</ul>${planMoreHtml(job, merged)}`;
   }
   // The job dialog's one extended button: the single most urgent thing the job is
@@ -1126,10 +1151,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     else body = `<p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}`;
     if (job.error) fab = `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>`;
     else if (job.stage === 'backlog' && !job.cancelledAt) fab = `<button class="primary" data-action="start" title="${esc(hints[0])}">${ICONS.play}Start planning</button>`;
-    else if (replanProposed(job)) fab = `<button class="primary" data-action="approve-replan" title="${esc(hints.at(-1))}" ${job.runs.some((r) => !r.stopped && !r.subJobId) ? 'disabled' : ''}>${ICONS.check}Approve change</button>`;
+    else if (replanProposed(job)) fab = '';
     else if (job.stage === 'active') fab = leadFab(job);
     else if (!fab) fab = promptFab(job);
-    if (job.stage === 'active' && !job.cancelledAt) extra = replanProposed(job) ? `<button data-action="discard-replan">${ICONS.x}Discard</button>`
+    if (job.stage === 'active' && !job.cancelledAt) extra = replanProposed(job) ? ''
       : replanPending(job) ? `<button data-action="discard-replan" title="Stop re-planning and keep the plan as it is">${ICONS.x}Discard change</button>` : '';
     const tail = job.cancelledAt || job.stage === 'done' ? '' : `<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel job</button>`;
     const ask = changeBoxHtml(job, null);
