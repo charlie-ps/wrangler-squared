@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { JobRuntime, LAUNCH_GRACE_MS, CleanupRefused, parseStatus } from './job-runtime.js';
+import { JobRuntime, LAUNCH_GRACE_MS, CleanupRefused, parseStatus, queueFetches } from './job-runtime.js';
 import { DATA_DIR } from './data-dir.js';
 import { fakeHost } from './test-helpers.js';
 import { runFile } from './job-github.js';
@@ -43,6 +43,52 @@ function fakeRun({ head = '', remote = '', log = '', overrides = {} } = {}) {
   };
   return { calls, run };
 }
+
+test('fetches into one checkout run one after another; other commands and checkouts do not wait', async () => {
+  const log = [];
+  const gates = new Map();
+  const run = queueFetches((bin, args, cwd) => {
+    const name = `${args[0]} ${args[1] || ''} ${cwd}`.replace('  ', ' ');
+    log.push(`start ${name}`);
+    return new Promise((resolve, reject) => gates.set(name, () => { log.push(`end ${name}`); (args[1] === 'bad' ? reject(new Error('cannot lock ref')) : resolve('')); }));
+  });
+  const open = (name) => { gates.get(name)(); gates.delete(name); };
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+  const first = run('git', ['fetch', 'bad'], '/repo/a');
+  const second = run('git', ['fetch', 'origin'], '/repo/a/');
+  const other = run('git', ['fetch', 'origin'], '/repo/b');
+  const status = run('git', ['status'], '/repo/a');
+  await tick();
+  assert.deepEqual(log.sort(), ['start fetch bad /repo/a', 'start fetch origin /repo/b', 'start status /repo/a']);
+  log.length = 0;
+  open('fetch bad /repo/a');
+  await assert.rejects(first, /cannot lock ref/);
+  await tick();
+  assert.deepEqual(log, ['end fetch bad /repo/a', 'start fetch origin /repo/a/'], 'the second starts only once the first has ended, even after it failed');
+  for (const name of [...gates.keys()]) open(name);
+  await Promise.all([second, other, status]);
+});
+
+test('a runtime queues its own fetches: two launches into one repo never fetch at once', async () => {
+  let inFlight = 0;
+  let most = 0;
+  const run = async (bin, args) => {
+    if (bin === 'gh') return JSON.stringify({ defaultBranchRef: { name: 'main' } });
+    if (args[0] === 'fetch') {
+      most = Math.max(most, ++inFlight);
+      await new Promise((r) => setTimeout(r, 20));
+      inFlight--;
+    }
+    return 'base';
+  };
+  const spawned = [];
+  const runtime = new JobRuntime({ host: { sessions: { spawn: async (o) => { spawned.push(o.worktree); return { sessionId: `s${spawned.length}` }; } } } }, run);
+  const job = { id: 'job_1', agent: 'claude' };
+  const launch = (id) => runtime.launch(job, { id, repo: '/repo/a' }, { phase: 'implementation' }, () => {});
+  await Promise.all([launch('one'), launch('two')]);
+  assert.equal(most, 1);
+  assert.equal(spawned.length, 2);
+});
 
 test('stop archives the card, then refuses to release the slot while the session is still working', async () => {
   const { host, archived, sessions } = fakeHost();
