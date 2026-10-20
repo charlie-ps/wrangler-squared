@@ -620,6 +620,17 @@ export function storyLabel(story, stories = []) {
 export const receiptHtml = (checks = []) => `<ul class="job-receipt">${checks.map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul>`;
 // A session's milestone (`on`) orders it like `after`, so it is a wave past its trigger.
 export const edgesOf = (sub) => [...sub.after, ...(isSessionSub(sub) && sub.on && !sub.after.includes(sub.on.sub) ? [sub.on.sub] : [])];
+// Every step `id` waits on, directly or through another, as id → hops (1 is a
+// direct prerequisite; breadth-first, so a step reached both ways counts as 1).
+// Writes are not steps. `edges` lets a drawn graph walk its own connectors.
+export function prerequisitesOf(subs, id, edges = edgesOf) {
+  const byId = new Map(subs.filter((s) => !isWriteSub(s)).map((s) => [s.id, s])), hops = new Map(), queue = [[id, 0]];
+  while (queue.length) {
+    const [at, n] = queue.shift(), sub = byId.get(at);
+    for (const p of sub ? edges(sub) : []) if (p !== id && byId.has(p) && !hops.has(p)) { hops.set(p, n + 1); queue.push([p, n + 1]); }
+  }
+  return hops;
+}
 export function dependencyLevels(plan) {
   const levels = new Map();
   function level(sub, visiting = new Set()) {

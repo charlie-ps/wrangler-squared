@@ -117,7 +117,7 @@ function skyGraphHtml(job, scene, lvl, art) {
     const kind = !s.after.includes(id) ? 'on' : isPrSub(dep) ? 'deploy' : '';
     const lit = kind !== 'on' && live(job) && dependencySatisfied(dep) && stateSolid(stateOf(job, s));
     const pts = [[ax + 8, ay], ...(lane ? lane.cols.map((w) => [colX(w), rowY(lane.r) + lane.k * 3]) : []), [bx - 8, by]];
-    out.push(`<path class="edge ${kind} ${lit ? 'lit' : ''} ${ink((ax + bx) / 2, (ay + by) / 2)}" d="M${pts[0]} ${pts.slice(1).map((p, i) => curve(pts[i], p)).join(' ')}"/>`);
+    out.push(`<path class="edge ${kind} ${lit ? 'lit' : ''} ${ink((ax + bx) / 2, (ay + by) / 2)}" data-from="${esc(id)}" data-to="${esc(s.id)}" d="M${pts[0]} ${pts.slice(1).map((p, i) => curve(pts[i], p)).join(' ')}"/>`);
   }
   let floor = 0;
   const open = (s) => live(job) ? `data-job="${esc(job.id)}" data-sub="${esc(s.id)}" tabindex="0" role="button"` : '';
@@ -129,7 +129,7 @@ function skyGraphHtml(job, scene, lvl, art) {
     const halo = ['running', 'needs'].includes(state) ? `<circle class="halo" cx="${x}" cy="${y}" r="6"/>` : '';
     const tag = labels && k <= 2 ? `<text class="lbl ${ink(x, y + 15)}" x="${x}" y="${y + 17}" text-anchor="middle">${KIND_TAG[kind]}${n ? ` #${esc(n)}` : ''}</text>` : '';
     floor = Math.max(floor, y + 6, tag ? y + 20 : 0);
-    out.push(`<g class="node ${kind} ${stateSolid(state) ? state : 'hollow'} ${state} tone-${STATES[state].tone} ${ink(x, y)}" data-state="${state}" ${open(s)} aria-label="${esc(`${s.title}: ${line}`)}"><title>${esc(tip)}</title>${halo}${SHAPES[kind](x, y)}${tag}<circle cx="${x}" cy="${y}" r="13" fill="transparent"/></g>`);
+    out.push(`<g class="node ${kind} ${stateSolid(state) ? state : 'hollow'} ${state} tone-${STATES[state].tone} ${ink(x, y)}" data-state="${state}" data-node="${esc(s.id)}" ${open(s)} aria-label="${esc(`${s.title}: ${line}`)}"><title>${esc(tip)}</title>${halo}${SHAPES[kind](x, y)}${tag}<circle cx="${x}" cy="${y}" r="13" fill="transparent"/></g>`);
     const moons = writes.filter((w) => w.by === s.id);
     if (!moons.length) continue;
     const beside = !subs.some((o) => edgesOf(o).includes(s.id)), up = y - 14 >= 32;

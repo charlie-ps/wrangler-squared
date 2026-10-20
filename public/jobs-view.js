@@ -6,6 +6,7 @@ import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener } from './
 import { assignScenes, plateHtml, placePopHtml } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, releaseSkies, spinTo } from './job-skylines.js';
+import { wireDeps, relight } from './job-deps.js';
 import { THEMES, themeOf, optionsOf, applyTheme, setCurrentTheme } from './themes.js';
 import { mountThemePicker } from './theme-picker.js';
 import { mountForming, dropForming, formingClock, formingMs } from './job-forming.js';
@@ -340,6 +341,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   setFileOpener(files ? (path) => files.canOpen(path) : null);
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
+  wireDeps(root); wireDeps(dialog);
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, maxReplans: 2, deploymentStaleMinutes: 30 } };
   // Ideas on the board at the last render, and those forming into a job since (id → { start, ms, stage }):
   // `stage` is the idea's sky as last drawn, so the painted cloud is kept rather than drawn again.
@@ -499,6 +501,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       holdSkies(boards);
       boards.innerHTML = html;
       mountSkies(boards);
+      relight(boards);
       scrolls();
       // Keyed to when each started, so a redraw mid-transition picks it up at the same instant; a
       // render after it drops the cloud, which is clear by then.
@@ -631,6 +634,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
     observer?.observe(graph.querySelector('.job-graph-canvas'));
     layoutGraphEdges(graph);
+    relight(graph);
   }
   // A human's own write, made by the session they added it from: a Jira write
   // where the plan has stories (the first status past its start, or a PR-link

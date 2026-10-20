@@ -131,5 +131,5 @@ test('a plate stacks each column in the order and rows the expanded dialog untan
   assert.deepEqual(plateCols, dialogCols);
   const ys = new Map([...plate.values()].flat().map(([y, id]) => [id, y]));
   assert.equal(ys.get('e'), ys.get('a'), 'e takes the median row of its prerequisites, as in the dialog');
-  assert.match(svg, /<path class="edge [^"]*" d="M64,56 C[^"]*,70 160,70 C[^"]*"\/>/, 'the wave-skipping link follows its lane through the column it skips');
+  assert.match(svg, /<path class="edge [^"]*"[^>]* d="M64,56 C[^"]*,70 160,70 C[^"]*"\/>/, 'the wave-skipping link follows its lane through the column it skips');
 });
