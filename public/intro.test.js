@@ -53,6 +53,7 @@ test('Next, Back and the stepper walk the steps; only the current one is readabl
   assert.deepEqual(INTRO_STEPS.map((s) => s.tab), ['Welcome', 'Jobs', 'New idea', 'Sub-jobs', 'Needs you', 'Receipts', 'See it working', 'Reviews', 'Writes', 'Start']);
   assert.equal(p.q('.intro-count').textContent, `1 of ${INTRO_STEPS.length}`);
   assert.ok(p.q('[data-intro="back"]').hidden, 'no Back on the first step');
+  assert.deepEqual([...document.querySelectorAll('.intro-actions button')].map((b) => b.dataset.intro), ['skip', 'back', 'next'], 'Skip, then Back, then Next last, so Tab follows the wizard layout');
   assert.equal(document.querySelectorAll('.intro-panel:not([inert])').length, 1, 'every step is laid out, one is live');
   p.click('[data-intro="next"]');
   assert.match(p.title(), /splits the work/);

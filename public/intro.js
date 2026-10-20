@@ -248,7 +248,7 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
       <div class="job-appbar intro-appbar"><span class="jobs-kicker">WRANGLER<sup>2</sup> · A NEW WAY OF WORKING WITH AI</span><span class="intro-count"></span></div>
       <div class="job-progress intro-steps" role="tablist" aria-label="Intro steps"></div>
       <div class="intro-body"></div>
-      <div class="job-actions"><button class="primary" data-intro="next"></button><button data-intro="back">${ICONS.back}Back</button><button data-intro="skip">Skip intro</button></div>`;
+      <div class="job-actions intro-actions"><button data-intro="skip">Skip intro</button><button data-intro="back">${ICONS.back}Back</button><button class="primary" data-intro="next"></button></div>`;
     document.body.appendChild(dialog);
     const go = (i) => { at = Math.max(0, Math.min(INTRO_STEPS.length - 1, i)); render(); };
     dialog.querySelector('.job-dialog-close').onclick = () => dialog.close();

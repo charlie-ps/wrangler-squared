@@ -829,6 +829,10 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .jobs-intro .job-actions button { font-size:15px; }
 .jobs-intro .job-actions button.primary { padding:16px 24px; }
 .jobs-intro .job-actions button[hidden] { display:none; }
+/* A wizard's footer: Skip alone on the left, Back then Next on the right, in DOM order so Tab reads it the same way. */
+.jobs-intro .intro-actions { justify-content:flex-end; }
+.jobs-intro .intro-actions [data-intro="skip"] { margin-right:auto; }
+.jobs-intro .intro-actions button.primary { order:0; margin:0 0 0 6px; }
 .intro-figure { display:flex; flex-direction:column; gap:14px; padding:24px; background:var(--bg); border:1px solid var(--border-muted); border-radius:24px; font-size:15px; }
 .intro-figure .job-chips { margin:0; }
 .intro-figure .job-chip { font-size:13px; padding:6px 12px; }
