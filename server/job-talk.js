@@ -25,6 +25,8 @@ const nextId = (job, now) => `talk_${now.toString(36)}${talkOf(job).length.toStr
 export function say(job, entry, now) {
   const msg = { id: nextId(job, now), at: now, ...entry };
   (job.talk ||= []).push(msg);
+  // Anything more said in a dismissed conversation brings it back.
+  delete convoById(job, msg.convo)?.dismissedAt;
   if (job.talk.length > TALK_MAX) job.talk.splice(0, job.talk.length - TALK_MAX);
   return msg;
 }
@@ -119,6 +121,15 @@ export function noteProposal(job, proposal, now) {
     changes: changesOf(job, proposal), options: 1 + (proposal.alternatives?.length || 0), ...(red ? { red } : {}), ...(job.replan?.convo ? { convo: job.replan.convo } : {}),
     ...(job.replan?.source?.sub ? { sub: job.replan.source.sub } : red ? { sub: red } : {}) }, now);
   escalate(convoById(job, job.replan?.convo), now);
+}
+// Dismissed from the job and step views until anything more is said in it (say
+// clears it): the record and its messages stay, and so does what the wrangler
+// reads of it.
+export function dismissConvo(job, id, now) {
+  const convo = convoById(job, id);
+  if (!convo) throw new Error('That conversation has gone');
+  if (convo.pending) throw new Error('The wrangler is still answering it');
+  convo.dismissedAt = now;
 }
 // approved, discarded, or revised (a newer idea went into it).
 export function closeProposal(job, proposalId, outcome, now) {

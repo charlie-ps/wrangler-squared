@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun } from './jobs.js';
+import { convoCollapsed, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun } from './jobs.js';
 import { talkHtml } from './job-talk.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener, fieldName } from './job-graph.js';
@@ -391,6 +391,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // The idea last sent from this dialog, drawn as a bubble above its box until the
   // dialog moves on: `state` is sending, sent or failed (the job-action frames).
   let askSent = null;
+  // This viewer's open/closed choice per conversation, and the ones they wrote in
+  // here, for the view's lifetime (jobs.js convoCollapsed).
+  const convoOpen = new Map(), convoSent = new Set();
   const askedImages = new Set();
   // New idea's conversation: the reply this tab sent until the thread holds it, the
   // suggestion pressed here while its hole flares, how many messages were last drawn
@@ -906,11 +909,17 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       <div class="job-change-row"><span class="job-change-to" title="Who hears it"><i>${esc(route.mark || route.to[0])}</i>${esc(route.to)}${where ? `<small>${esc(where)}</small>` : ''}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="${convo ? 'Reply in this conversation' : `Add idea for ${esc(route.to.toLowerCase())}`}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to.toLowerCase())}" title="Send (↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
       <div class="job-change-foot"><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
   }
+  // A new conversation started from the foot box is known only once the thread
+  // holds the words that were sent.
+  function collapsedConvo(job, { convo, messages }) {
+    if (askSent && askSent.state !== 'failed' && !askSent.convo && messages.some((m) => m.from === 'human' && m.text === askSent.text && m.at >= askSent.at - 60000)) convoSent.add(convo.id);
+    return convoCollapsed(job, convo, { toggled: convoOpen.get(convo.id), sentHere: convoSent.has(convo.id) });
+  }
   function changeBoxHtml(job, sub) {
     const view = changeView(job, sub);
     // A step Wrangler is fixing is the wrangler's for now.
     const open = view && !(sub && redFixing(job, sub));
-    const talk = talkHtml(job, sub, open && view.at !== 'plan' ? (convo) => boxHtml(job, sub, view, convo) : null);
+    const talk = talkHtml(job, sub, open && view.at !== 'plan' ? (convo) => boxHtml(job, sub, view, convo) : null, (g) => collapsedConvo(job, g));
     return open ? `${talk}${boxHtml(job, sub, view, null)}` : talk + askSentHtml(job, sub);
   }
   // One control for reading the diff: Wrangler's own view, the desktop IDE in its menu.
@@ -1560,6 +1569,16 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     dialog.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
     dialog.querySelectorAll('[data-open-path]').forEach((b) => b.onclick = () => openPath(b));
     dialog.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
+    dialog.querySelectorAll('.job-talk-convo[data-convo]').forEach((c) => {
+      const id = c.dataset.convo;
+      c.querySelectorAll('[data-convo-toggle]').forEach((t) => t.onclick = (e) => {
+        if (e.target.closest('[data-convo-dismiss]')) return;
+        e.stopPropagation();
+        convoOpen.set(id, c.classList.contains('is-collapsed')); renderDetail();
+      });
+      const x = c.querySelector('[data-convo-dismiss]');
+      if (x) x.onclick = (e) => { e.stopPropagation(); if (pressBusy(x)) action('dismiss-convo', { convo: id }, null); };
+    });
     dialog.querySelectorAll('[data-talk-review]').forEach((b) => b.onclick = () => dialog.querySelector('.job-replan-ask')?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });
     wireGraph();
@@ -1574,6 +1593,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       send.onclick = () => {
         if (!text.value.trim() || send.disabled) return;
         const key = box.dataset.changeConvo || '', mine = askImages.filter((i) => i.box === key);
+        if (key) convoSent.add(key);
         const images = mine.map((i) => i.name).filter(Boolean);
         action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim(), ...(box.dataset.changeConvo ? { convo: box.dataset.changeConvo } : {}), ...(images.length ? { images } : {}) });
         clearAskSent();
@@ -1853,7 +1873,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       return;
     }
     // A Retry's, a fix's or a helper's outcome lands on a later tick, in the dialog it was pressed in.
-    if (['retry-main', 'dismiss-main', 'resolve-main', 'ask-helper'].includes(msg?.action)) return;
+    if (['retry-main', 'dismiss-main', 'resolve-main', 'ask-helper', 'dismiss-convo'].includes(msg?.action)) return;
     // A New idea that is planning opens on its conversation once the snapshot has it.
     if (msg?.event === 'job-created' && msg.idea && msg.started) { openOnCreate = msg.jobId; if (data.jobs.some((j) => j.id === msg.jobId)) { openOnCreate = null; openDetail(msg.jobId); } return; }
     // A reply stays in its conversation for the next tick. A created job closes the dialog it was pressed in,

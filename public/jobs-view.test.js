@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isChatSendKey, isPrimaryActionKey, primaryAction } from './jobs-view.js';
-import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
+import { convoCollapsed, CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml, plateAsk } from './job-plates.js';
@@ -1676,6 +1676,8 @@ test('several conversations at once: one section each, both answering, each with
   const convos = () => [...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo')];
   assert.match(f.q('#job-dialog .job-talk-head').textContent, /Conversations with the wrangler/);
   assert.deepEqual(convos().map((c) => c.querySelector('.job-talk-convo-head').textContent), ['Conversation 1Answering', 'Conversation 2on Deliver webEscalated']);
+  assert.deepEqual(convos().map((c) => c.classList.contains('is-collapsed')), [false, true], 'the answered one is a compact card');
+  convos()[1].querySelector('.job-talk-convo-head').click();
   assert.deepEqual(convos().map((c) => [c.querySelector('.job-change').dataset.changeConvo, c.querySelector('textarea').placeholder]),
     [['c1', 'Add to your question…'], ['c2', 'Reply in this conversation…']], 'a box in each, saying where its words go');
   const boxes = [...f.q('#job-dialog').querySelectorAll('.job-change')];
@@ -1718,6 +1720,77 @@ test('a question asked on a step stays on that step until the wrangler escalates
   assert.deepEqual(convos(), [['c2', 'Conversation 2Also on the job']]);
   f.view.openDetail('job1', 'api');
   assert.equal(f.q('#job-dialog .job-talk'), null, 'never on another step');
+});
+
+test('a conversation is collapsed unless it is live, this viewer wrote in it here, or they chose otherwise', () => {
+  const job = { runs: [], replan: null, convos: [{ id: 'c1', pending: null }, { id: 'c2', pending: { at: 1, asks: [] } }, { id: 'c3', pending: null }] };
+  const [done, asking, drawing] = job.convos;
+  job.replan = { convo: 'c3', proposal: null };
+  assert.equal(convoCollapsed(job, done), true);
+  assert.equal(convoCollapsed(job, asking), false, 'the human has just asked');
+  assert.equal(convoCollapsed(job, drawing), false, 'its proposal is being drawn');
+  assert.equal(convoCollapsed(job, done, { sentHere: true }), false, 'just written in from this view');
+  assert.equal(convoCollapsed(job, done, { toggled: true }), false);
+  assert.equal(convoCollapsed(job, asking, { toggled: false }), true, 'the viewer\'s choice outranks the rule');
+  assert.equal(convoCollapsed(job, null), false, 'a loose message has no card to collapse');
+  assert.equal(convoCollapsed({ ...job, cancelledAt: 1 }, asking), true, 'nothing is live on a cancelled job');
+});
+
+test('an older conversation is a compact card that opens and closes, stays as left across redraws, and can be dismissed', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'Will it be a dropdown?', convo: 'c1' },
+    { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Yes, a split button.\n\nLike **Review code**, with a caret.', convo: 'c1' },
+    { id: 't3', at: 3, from: 'human', text: 'What is left?', convo: 'c2' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }, { id: 'c2', at: 3, pending: { at: 3, asks: [{ messageId: 't3', feedback: 'x', sentAt: 3 }] } }];
+  job.runs = [{ id: 'a2', subJobId: null, phase: 'planning', stopped: false, ask: 't3', convo: 'c2' }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const card = (id) => f.q(`#job-dialog .job-talk-convo[data-convo="${id}"]`);
+  assert.ok(card('c1').classList.contains('is-collapsed'));
+  assert.equal(card('c1').querySelector('.job-talk-peek .job-sent-bubble').textContent, 'Will it be a dropdown?');
+  assert.match(card('c1').querySelector('.job-talk-peek .job-talk-msg .job-idea-body').textContent, /^Yes, a split button/);
+  assert.equal(card('c1').querySelector('.job-change'), null, 'no box until it is opened');
+  assert.ok(!card('c2').classList.contains('is-collapsed'), 'the one being answered is drawn whole');
+  assert.equal(card('c2').querySelector('[data-convo-dismiss]'), null, 'nor can it be dismissed');
+
+  card('c1').querySelector('.job-talk-peek').click();
+  assert.ok(!card('c1').classList.contains('is-collapsed'));
+  assert.equal(card('c1').querySelectorAll('[data-talk]').length, 2);
+  assert.ok(card('c1').querySelector('.job-change textarea'), 'its own box is back');
+  f.view.update(f.data);
+  assert.ok(!card('c1').classList.contains('is-collapsed'), 'a redraw keeps it open');
+  card('c1').querySelector('button[data-convo-toggle]').click();
+  assert.ok(card('c1').classList.contains('is-collapsed'), 'the caret closes it');
+  card('c1').querySelector('.job-talk-convo-head').click();
+  assert.ok(!card('c1').classList.contains('is-collapsed'), 'so does the header, both ways');
+
+  card('c1').querySelector('[data-convo-dismiss]').click();
+  assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).convo], ['dismiss-convo', 'c1']);
+  assert.ok(f.q('#job-dialog').open, 'the dialog stays');
+  job.convos[0].dismissedAt = 4;
+  f.view.update(f.data);
+  assert.equal(card('c1'), null, 'gone from the job');
+  delete job.convos[0].dismissedAt;
+  job.talk.push({ id: 't4', at: 5, from: 'human', text: 'One more thing', convo: 'c1' });
+  f.view.update(f.data);
+  assert.ok(card('c1'), 'back once anything more is said in it');
+});
+
+test('a conversation the human just wrote in from this view stays open once the answer lands', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [];
+  job.convos = [];
+  job.runs = [];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const box = f.q('#job-dialog .job-change[data-change-convo=""]'), text = box.querySelector('textarea');
+  text.value = 'What is left?'; text.dispatchEvent(f.event('input')); box.querySelector('[data-change-send]').click();
+  job.talk = [{ id: 't1', at: Date.now(), from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: Date.now(), from: 'wrangler', kind: 'answer', text: 'Only api.', convo: 'c1' }];
+  job.convos = [{ id: 'c1', at: Date.now(), pending: null }];
+  f.view.update(f.data);
+  assert.ok(!f.q('#job-dialog .job-talk-convo[data-convo="c1"]').classList.contains('is-collapsed'));
 });
 
 test('a change idea goes straight to a proposal card in the same thread, with its changes lined up and what became of it', (t) => {

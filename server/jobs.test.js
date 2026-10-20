@@ -15,6 +15,7 @@ import { jobCreateHandler, makeJobCreateHandler, jobActionHandler, jobSettingsHa
 import { _resetForTests, runnerFor } from './jobs.js';
 import { jobReportTool, getJobContextTool, sendStepIdeaTool } from './tools.js';
 import { changeView } from './job-change.js';
+import { convoDismissed } from '../public/jobs.js';
 import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 
@@ -3459,6 +3460,23 @@ test('a question asked on a step is that step\'s: its wrangler is told which, an
   change(f, 'api', 'Split this in two', f.store.get(f.job.id).convos[1].id); await f.tick();
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('api2'), spec('web')]) }, plannerOf(f));
   assert.ok(f.store.get(f.job.id).convos[1].escalatedAt, 'a plan change it proposes is the job\'s, so the job lists it');
+});
+
+test('a conversation is dismissed only once its wrangler has answered, and anything more said in it brings it back', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'What is left?'); await f.tick();
+  const id = f.store.get(f.job.id).convos[0].id;
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/);
+  f.report({ kind: 'reply', text: 'Only web.' }, plannerOf(f));
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  let job = f.store.get(f.job.id);
+  assert.ok(job.convos[0].dismissedAt);
+  assert.equal(convoDismissed(job.convos[0]), true);
+  assert.equal(job.talk.length, 2, 'its messages are kept');
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: 'convo_gone' }), /has gone/);
+  change(f, null, 'And docs?', id);
+  job = f.store.get(f.job.id);
+  assert.equal(convoDismissed(job.convos[0]), false, 'a new message brings it back');
 });
 
 test('a message sent before the wrangler replies reaches the same running session, not a new run', async (t) => {

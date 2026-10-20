@@ -9,8 +9,10 @@ import { proseHtml } from './job-idea.js';
 // it. Several can be answering at once, each with its own box under it; the box
 // below them all starts a new one. The job dialog shows all of them, a step's
 // dialog only what was said on that step: a conversation started there shows on
-// the job too only once its wrangler escalated it. Pure markup; jobs-view.js draws and
-// wires the boxes. Every word is escaped.
+// the job too only once its wrangler escalated it. One that is not live is a compact
+// card (the human's last words and the start of the reply) until opened; each can be
+// dismissed. Pure markup; jobs-view.js draws and wires the boxes and the toggles.
+// Every word is escaped.
 
 export const WRANGLER_NAME = 'The wrangler';
 const time = (at) => at ? new Date(at).toLocaleTimeString(undefined, { timeStyle: 'short' }) : '';
@@ -53,21 +55,37 @@ function workingHtml(job, convo) {
   return text ? `<div class="job-idea-thinking job-talk-working"><span class="job-idea-orb small" aria-hidden="true"></span><span class="job-idea-shine">${text}</span></div>` : '';
 }
 
-function groupHtml(job, { convo, messages }, sub, boxFor) {
+// A collapsed conversation: what the human last said and the start of what came
+// back to it (or the last word, when the human said nothing), clamped by CSS.
+function peekHtml(job, messages, onJob) {
+  const i = messages.findLastIndex((m) => m.from === 'human');
+  const reply = messages.slice(i + 1).find((m) => m.from !== 'human') || (i < 0 ? messages.at(-1) : null);
+  const said = (m) => m.kind === 'proposal' ? `<div class="job-idea-body"><p><b>${m.red ? 'Proposed a fix' : 'Proposed a change'}</b> · ${esc(cardState(job, m)[1])}${m.text ? ` — ${esc(m.text)}` : ''}</p></div>`
+    : `<div class="job-idea-body">${proseHtml(m.text)}</div>`;
+  return `<div class="job-talk-peek" data-convo-toggle title="Show the whole conversation">${i < 0 ? '' : humanHtml(job, messages[i], onJob)}${reply ? wranglerHtml(reply, said(reply), reply.kind === 'error' ? 'error' : '') : ''}</div>`;
+}
+
+function groupHtml(job, group, sub, boxFor, collapsed) {
+  const { convo, messages } = group;
   const onJob = !sub;
+  const shut = !!convo && !!collapsed?.(group);
   const step = onJob && convo?.sub ? job.subJobs.find((s) => s.id === convo.sub)?.title || convo.sub : '';
   const state = convo && askPending(job, convo) ? `<span class="job-talk-tag tone-working">${convoRunning(job, convo) ? 'Answering' : 'Queued'}</span>` : '';
   const raised = convo?.sub && convo.escalatedAt ? `<span class="job-talk-tag" title="The wrangler judged it the whole job's, so the job's list shows it too">${onJob ? 'Escalated' : 'Also on the job'}</span>` : '';
-  const head = `<header class="job-talk-convo-head"><b>${convo ? `Conversation ${convoNumber(job, convo)}` : 'From the wrangler'}</b>${step ? `<small>on ${esc(step)}</small>` : ''}${raised}${state}</header>`;
-  return `<div class="job-talk-convo" data-convo="${esc(convo?.id || '')}">${head}${messages.map((m) => messageHtml(job, m, onJob)).join('')}${workingHtml(job, convo)}${convo && boxFor ? boxFor(convo) : ''}</div>`;
+  // A pending one is still being answered: the server refuses to dismiss it.
+  const tools = convo && collapsed ? `<span class="job-talk-convo-tools"><button type="button" class="job-talk-convo-btn" data-convo-toggle aria-expanded="${!shut}" aria-label="${shut ? 'Expand' : 'Collapse'} conversation" title="${shut ? 'Expand' : 'Collapse'}">${ICONS.caret}</button>${askPending(job, convo) ? '' : `<button type="button" class="job-talk-convo-btn" data-convo-dismiss aria-label="Dismiss conversation" title="Dismiss: hidden until anything more is said in it">${ICONS.x}</button>`}</span>` : '';
+  const head = `<header class="job-talk-convo-head"${tools ? ' data-convo-toggle' : ''}><b>${convo ? `Conversation ${convoNumber(job, convo)}` : 'From the wrangler'}</b>${step ? `<small>on ${esc(step)}</small>` : ''}${raised}${state}${tools}</header>`;
+  const body = shut ? peekHtml(job, messages, onJob) : `${messages.map((m) => messageHtml(job, m, onJob)).join('')}${workingHtml(job, convo)}${convo && boxFor ? boxFor(convo) : ''}`;
+  return `<div class="job-talk-convo${shut ? ' is-collapsed' : ''}" data-convo="${esc(convo?.id || '')}">${head}${body}</div>`;
 }
 
 // `boxFor(convo)` draws that conversation's own box (jobs-view.js), or nothing
-// where the view takes no idea.
-export function talkHtml(job, sub = null, boxFor = null) {
+// where the view takes no idea; `collapsed({convo, messages})` says which are drawn
+// compact (jobs.js convoCollapsed), and without it every one is drawn whole.
+export function talkHtml(job, sub = null, boxFor = null, collapsed = null) {
   const groups = convoGroups(job, sub);
   const loose = groups.some((g) => !g.convo) ? '' : workingHtml(job, null);
   if (!groups.length && !loose) return '';
   const many = groups.filter((g) => g.convo).length > 1;
-  return `<section class="job-talk" aria-label="Conversations with the wrangler" aria-live="polite"><h4 class="job-talk-head">${ICONS.note}${many ? 'Conversations' : 'Conversation'} with the wrangler</h4>${groups.map((g) => groupHtml(job, g, sub, boxFor)).join('')}${loose}</section>`;
+  return `<section class="job-talk" aria-label="Conversations with the wrangler" aria-live="polite"><h4 class="job-talk-head">${ICONS.note}${many ? 'Conversations' : 'Conversation'} with the wrangler</h4>${groups.map((g) => groupHtml(job, g, sub, boxFor, collapsed)).join('')}${loose}</section>`;
 }

@@ -414,9 +414,11 @@ export function changeRoute(at, job = null, sub = null) {
 export const talkOf = (job) => job?.talk || [];
 export const convosOf = (job) => job?.convos || [];
 export const askPending = (job, convo = null) => !job?.cancelledAt && (convo ? !!convo.pending : convosOf(job).some((c) => c.pending));
+// Dismissed (server/job-talk.js dismissConvo) until anything more is said in it.
+export const convoDismissed = (convo) => !!convo?.dismissedAt;
 export function talkFor(job, sub) {
   const convo = (m) => m.convo ? convosOf(job).find((c) => c.id === m.convo) : null;
-  return talkOf(job).filter(sub ? (m) => m.sub === sub.id || convo(m)?.sub === sub.id : (m) => !convo(m)?.sub || convo(m).escalatedAt);
+  return talkOf(job).filter((m) => !convoDismissed(convo(m))).filter(sub ? (m) => m.sub === sub.id || convo(m)?.sub === sub.id : (m) => !convo(m)?.sub || convo(m).escalatedAt);
 }
 // The conversations a view shows, in the order they started, each with its
 // messages; a message from no conversation (a red step's card) is grouped apart.
@@ -431,6 +433,16 @@ export function convoGroups(job, sub) {
 }
 export const convoNumber = (job, convo) => convosOf(job).indexOf(convo) + 1;
 export const convoRunning = (job, convo) => job.runs.some((r) => !r.stopped && r.convo === convo.id);
+// Live while its wrangler has the human's words to answer, or a proposal of its is
+// being drawn or waits: drawn whole. Any other is a compact card until opened.
+export const convoLive = (job, convo) => askPending(job, convo) || (!!job.replan && !job.cancelledAt && job.replan.convo === convo.id);
+// `toggled` is what this viewer last chose for it, `sentHere` that they wrote in it
+// from this view; either outranks the rule.
+export function convoCollapsed(job, convo, { toggled, sentHere } = {}) {
+  if (!convo) return false;
+  if (toggled !== undefined) return !toggled;
+  return !(sentHere || convoLive(job, convo));
+}
 // A planning run that is a question's (an ask run) holds nothing and approves nothing.
 export const planningRun = (job) => job.runs.some((r) => !r.stopped && !r.subJobId && !r.ask);
 // What the human is looking at, and the exact thing in it, which Request changes

@@ -1885,3 +1885,19 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .job-talk-tag.tone-working { color:var(--st-warn-fg); background:color-mix(in srgb, var(--st-warn) 18%, transparent); }
 .job-talk-convo .job-talk-box { margin:0; }
 .job-change-to small { margin-left:6px; color:var(--fg-muted); font-weight:400; }
+/* A conversation that is not live is a compact card (job-talk.js peekHtml): the header, the human's
+   last words and the start of the reply, faded out; the header or the card opens it. */
+.job-talk-convo-head[data-convo-toggle] { cursor:pointer; }
+.job-talk-convo-tools { display:inline-flex; gap:2px; margin-left:auto; }
+.job-talk-convo-btn { display:inline-grid; place-items:center; width:24px; height:24px; padding:0; border:0; border-radius:6px; background:none; color:var(--fg-muted); cursor:pointer; }
+.job-talk-convo-btn:hover, .job-talk-convo-btn:focus-visible { color:var(--fg); background:var(--surface-2); }
+.job-talk-convo-btn .icon { width:14px; height:14px; transition:transform .15s; }
+.job-talk-convo:not(.is-collapsed) [data-convo-toggle].job-talk-convo-btn .icon { transform:rotate(180deg); }
+.job-talk-convo.is-collapsed { gap:8px; }
+.job-talk-peek { display:grid; gap:8px; cursor:pointer; }
+.job-talk-peek * { pointer-events:none; }
+.job-talk-peek .job-sent-bubble span { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.job-talk-peek .job-talk-msg .job-idea-body { color:var(--fg-muted); }
+.job-talk-peek .job-talk-msg .job-idea-body > :not(:first-child) { display:none; }
+.job-talk-peek .job-talk-msg .job-idea-body > :first-child { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; margin:0; }
+.job-talk-peek:hover .job-talk-msg .job-idea-body { box-shadow:inset 0 0 0 1px var(--border); }

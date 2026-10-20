@@ -17,7 +17,7 @@ import { limitStep, limitOf } from './job-budget.js';
 import { changeView } from './job-actions.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan, requestReplan } from './job-replan.js';
-import { answerAsk, answerReplan, askToReplan, askFailed, replanFailed, convoById, migrateTalk } from './job-talk.js';
+import { answerAsk, answerReplan, askToReplan, askFailed, replanFailed, convoById, migrateTalk, dismissConvo } from './job-talk.js';
 import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
@@ -317,7 +317,7 @@ export class JobStore {
       if (action === 'cancel-job') { cancelJob(j, Date.now()); return; }
       // Retry and Discard are what is left to do on a cancelled job: a refused
       // cleanup (a worktree with work not on GitHub) is still the human's to clear.
-      if (j.cancelledAt && !['retry', 'discard-worktree', 'retry-main', 'dismiss-main', 'resolve-main', 'ask-helper'].includes(action)) throw new Error('Job was cancelled');
+      if (j.cancelledAt && !['retry', 'discard-worktree', 'retry-main', 'dismiss-main', 'resolve-main', 'ask-helper', 'dismiss-convo'].includes(action)) throw new Error('Job was cancelled');
       // A waiting proposal freezes the sub-jobs it touches where they stand: one
       // that moves on under it (approved, merged, marked done) is no longer what
       // the proposal was written against. The rest of the job carries on.
@@ -330,6 +330,7 @@ export class JobStore {
         record(j, s, 'request-change', payload.text, detail);
         return;
       }
+      if (action === 'dismiss-convo') { dismissConvo(j, payload.convo, Date.now()); return; }
       // The preview the agent left running (job-running.js): Stop owes its teardown
       // to the runner's next tick; Restart mails the parked session to start it again.
       if (action === 'stop-running') {
