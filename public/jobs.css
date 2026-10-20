@@ -695,7 +695,7 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-mark-removed .job-node-title { text-decoration:line-through; color:var(--fg-muted); }
 .job-mark-frozen { opacity:.7; }
 .job-mark-accept-red .job-mark,.job-mark-recover .job-mark,.job-mark-mark-done .job-mark,.job-mark-mark-merged .job-mark { color:var(--wf); background:color-mix(in srgb, var(--wf) 16%, var(--surface)); font-weight:600; }
-.job-mark-rework .job-mark,.job-mark-forward .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
+.job-mark-rework .job-mark,.job-mark-forward .job-mark,.job-mark-retry .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
 li.job-mark-act { color:var(--wf); }
 li small.pinned { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg-subtle); margin-left:6px; }
 .job-triage { background:var(--surface-2); border-radius:12px; padding:12px 14px; display:grid; gap:8px; margin:0 0 14px; font-size:13px; }

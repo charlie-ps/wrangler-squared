@@ -166,8 +166,8 @@ feature).
   = {sub, auto, n}` and holds only that step and its dependants (`heldBy`, mirrored
   client-side as `heldByReplan`/`redScope`: use them, never `!job.replan`, for
   per-sub gates). The sixth checkpoint `reviewRed` (true = "You decide", the
-  default) only chooses whether the proposal waits; Accept red, Mark and Recover
-  are never applied automatically. A red is DECLARED by `declareRed` (tries used up,
+  default) only chooses whether the proposal waits; Accept red, Mark, Recover and
+  Retry are never applied automatically. A red is DECLARED by `declareRed` (tries used up,
   `escalate`, a planner that blocked or died, an empty proposal) and its
   `declared.ref` is `redRef` (error, head, merge commit, run count): a new
   failure, head or run un-declares it and a decision about the old one
@@ -175,9 +175,10 @@ feature).
   "go up one level" receipts. The board's states are `redFixing` (not counted in
   Needs you), `redFixReady` and `redDeclared` in `public/jobs.js`.
 - **A proposal can carry actions and up to three ranked options**
-  (`server/job-actions.js`, applied by `approveReplan`): `accept-red`, `mark`
+  (`server/job-actions.js`, applied by `approveReplan`): `accept-red`, `retry`, `mark`
   (merged/done, `evidence` required), `rework` and `recover {fix}` on a live
-  sub-job. The server stamps each with a pin (PR head, merge commit or stage) at
+  sub-job. The server stamps each with a pin (PR head, merge commit, stage or, for
+  a retry, the failure's `redRef`) at
   proposal time and `approve-replan` refuses if it moved; the planner never
   writes a pin (the schema is strict). Options are the receipt's own plan first,
   then `alternatives` (max 2), each merged and stamped when the receipt lands, so

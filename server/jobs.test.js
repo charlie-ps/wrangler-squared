@@ -2560,6 +2560,62 @@ test('a proposal with nothing to change declares the step red instead of waiting
   assert.deepEqual(job.moves.filter((m) => m.move === 'declare-red').length, 1);
 });
 
+// Two steps fetching in one checkout at once: the step never started, and a fresh
+// start is the whole fix.
+const LOCK = "Command failed: git fetch origin: error: cannot lock ref 'refs/remotes/origin/main': is at e1 but expected a5";
+async function lockedApi(t, flags = {}) {
+  const f = fixture(t); f.store.settings({ maxReplans: 2 });
+  f.store.update(f.job.id, (j) => Object.assign(j, flags));
+  const launch = f.runtime.launch; let race = true;
+  f.runtime.launch = async (j, s, r, prepared) => { if (s && race) { race = false; throw new Error(LOCK); } return launch(j, s, r, prepared); };
+  await f.approve(); await f.tick();
+  assert.equal(f.sub().error, LOCK);
+  return f;
+}
+
+test('a retry the wrangler suggests waits for the human even under Wrangler replans; approving it starts the step again', async (t) => {
+  const f = await lockedApi(t, { reviewRed: false });
+  const planner = plannerOf(f);
+  assert.deepEqual([planner.run.red, redJob(f).replan.red.auto], [{ sub: 'api' }, true]);
+  const prompt = jobPrompt(redJob(f), null, planner.run);
+  assert.match(prompt, /\{type:"retry",sub,note\?\} starts a RED step again as it is/);
+  assert.match(prompt, /accept-red, mark, recover and retry never do/);
+  assert.match(jobReportTool.description, /retry \(a red step started again as it is; always waits for the human\)/);
+  f.report({ kind: 'plan', plan: redJob(f).plan, diagnosis: { summary: 'Two steps fetched in the same checkout at once; the step never started.' }, actions: [{ type: 'retry', sub: 'api' }] }, planner);
+  let job = redJob(f);
+  assert.deepEqual(job.replan.proposal.actions, [{ type: 'retry', sub: 'api', pin: { at: 'red', ref: `${LOCK}|||1` } }]);
+  assert.equal(job.subJobs[0].error, LOCK, 'not restarted by itself');
+  assert.ok(!job.moves.some((m) => m.move === 'approve-replan'));
+  assert.deepEqual(job.subJobs[0].red.attempts.map((a) => a.outcome), ['proposed']);
+  await f.tick();
+  assert.equal(f.launched.filter((w) => w.sub?.id === 'api').length, 0, 'not started while it waits');
+
+  f.store.action(f.job.id, 'approve-replan', { proposalId: job.replan.proposal.id, option: 0 });
+  job = redJob(f);
+  assert.deepEqual([job.replan, job.subJobs[0].error, job.subJobs[0].stage, job.subJobs[0].state], [null, null, 'implementation', 'queued']);
+  assert.equal(job.moves.at(-1).detail, 'Retried “Deliver api”');
+  await f.tick();
+  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'implementation']);
+  assert.equal(redJob(f).subJobs[0].error, null);
+});
+
+test('a retry the wrangler suggested is refused once the step has failed differently', async (t) => {
+  const f = await lockedApi(t);
+  f.report({ kind: 'plan', plan: redJob(f).plan, diagnosis: { summary: 'A fetch race' }, actions: [{ type: 'retry', sub: 'api' }] }, plannerOf(f));
+  f.store.update(f.job.id, (j) => { j.subJobs[0].error = 'Command failed: git worktree add'; });
+  assert.throws(() => f.store.action(f.job.id, 'approve-replan', { proposalId: redJob(f).replan.proposal.id, option: 0 }), /has moved since this was proposed \(failure/);
+});
+
+test('the red replan prompt says an unchanged plan declares the step red, so its summary never talks about approving', async (t) => {
+  const f = await lockedApi(t);
+  const prompt = jobPrompt(redJob(f), null, plannerOf(f).run);
+  assert.match(prompt, /An unchanged plan with no actions changes nothing: it declares the step red to the human, and your diagnosis.summary is what they read on it, so say what you found and the decision they need, never what approving would do \(there is nothing to approve\)\./);
+  f.report({ kind: 'plan', plan: redJob(f).plan, diagnosis: { summary: 'Two fetches raced in the main checkout and one lost the ref lock. Retry the step: nothing in it needs to change.' } }, plannerOf(f));
+  const declared = redJob(f).subJobs[0].red.declared;
+  assert.doesNotMatch(declared.summary, /approv/i);
+  assert.equal(declared.ask, 'Decide how to carry on: send an idea in, accept the red, or retry');
+});
+
 test('out of tries, a step is declared red with every attempt listed; a declared red is not triaged again', async (t) => {
   const f = await redApi(t, { flags: { reviewRed: false }, settings: { maxReplans: 1 } }); await f.tick();
   f.report({ kind: 'plan', plan: redJob(f).plan, diagnosis: { summary: 'Raised the e2e timeout' }, actions: rework('Raise the timeout') }, f.last());

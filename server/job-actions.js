@@ -1,11 +1,12 @@
 import { isPrSub, isSessionSub, isWriteSub, isHumanSub } from './jobs-schema.js';
-import { reworkSub } from './job-sub-ops.js';
+import { reworkSub, retrySub } from './job-sub-ops.js';
+import { redRef } from './job-red.js';
 import { parkedReadyRun, askAgent } from './job-parked.js';
 
 // The things approving a proposal can do to a sub-job that are not edits to the
 // plan: forward the human's words to its open session, rework its code, accept
-// its red pipeline, mark where it stands, or make a fix PR the way a merged
-// sub-job recovers. Each claims something about the
+// its red pipeline, mark where it stands, start a red step again as it is, or
+// make a fix PR the way a merged sub-job recovers. Each claims something about the
 // outside world, so each is PINNED to the exact head, merge commit or stage it
 // was written against (`pinOf`), and approval is refused if that has moved
 // (`checkActions`). Pure over the job draft job-store.js is about to persist,
@@ -72,6 +73,12 @@ export function gateAction(job, action, plan) {
     if (!pin) throw new Error(`${name} has no red pipeline to accept${sub.pr?.dirty ? ' (merge conflicts cannot be overridden)' : ''}`);
     return { sub, pin };
   }
+  // The human's Retry, suggested: pinned to the failure it was written about
+  // (job-red.js redRef), so a new error, head or run since refuses it.
+  if (action.type === 'retry') {
+    if (!sub.error) throw new Error(`${name} is not red: nothing to retry`);
+    return { sub, pin: { at: 'red', ref: redRef(job, sub) } };
+  }
   if (action.type === 'recover') {
     if (!isPrSub(sub) || sub.stage !== 'deployment' || sub.recoveredBy || sub.deploymentResult?.status !== 'failing') throw new Error(`${name} has no failed post-merge run to recover from`);
     const fix = plan?.subJobs.find((s) => s.id === action.fix);
@@ -128,7 +135,7 @@ export function checkActions(job, actions = [], plan) {
     if (pin.at !== a.pin?.at || pin.ref !== a.pin?.ref) throw new Error(`${quoted(sub.title)} has moved since this was proposed (${PIN_NOUN[a.pin?.at] || 'state'} ${short(a.pin?.ref)} is now ${short(pin.ref)}). Ask again.`);
   }
 }
-const PIN_NOUN = { head: 'head', merge: 'merge commit', stage: 'stage', round: 'review' };
+const PIN_NOUN = { head: 'head', merge: 'merge commit', stage: 'stage', round: 'review', red: 'failure' };
 const short = (ref) => String(ref ?? 'none').slice(0, 9);
 
 // After the plan is installed (a recover's fix exists by now). Returns the
@@ -152,6 +159,9 @@ export function applyActions(job, actions = [], { now, images = [] }) {
       if (!merged) sub.mergeApprovedHead = a.pin.ref;
       sub.error = null; sub.blocked = null; sub.state = 'watching'; sub.nextPollAt = 0;
       lines.push({ sub, detail: merged ? `Accepted the red post-merge run on ${name}` : `Accepted the red checks on ${name}; merging as it stands` });
+    } else if (a.type === 'retry') {
+      retrySub(sub, a.note);
+      lines.push({ sub, detail: `Retried ${name}` });
     } else if (a.type === 'recover') {
       // The fix lands before the dependants, which already wait on this one: it
       // counts as deployed the moment its fix does (job-runner.js).

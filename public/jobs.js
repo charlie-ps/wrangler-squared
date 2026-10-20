@@ -360,11 +360,12 @@ export const proposalOptions = (proposal) => [proposal, ...(proposal?.alternativ
 // acts on carries `actionMark` in the graph (job-graph.js MARKS).
 export const actionMark = (a) => (a.type === 'mark' ? `mark-${a.position}` : a.type);
 const PIN_NOUN = { head: 'head', merge: 'merge', stage: 'stage' };
-export const pinLine = (pin) => !pin ? '' : pin.at === 'round' ? `to its open session · pinned to round ${pin.round || 1}` : `pinned to ${PIN_NOUN[pin.at] || pin.at} ${String(pin.ref ?? 'none').slice(0, 9)}`;
+export const pinLine = (pin) => !pin ? '' : pin.at === 'round' ? `to its open session · pinned to round ${pin.round || 1}` : pin.at === 'red' ? 'pinned to this failure' : `pinned to ${PIN_NOUN[pin.at] || pin.at} ${String(pin.ref ?? 'none').slice(0, 9)}`;
 export function actionLine(a, plan) {
   const title = (id) => plan.subJobs.find((s) => s.id === id)?.title || id;
   const name = title(a.sub);
   if (a.type === 'accept-red') return { text: `Accept red: ${name}`, detail: a.pin?.at === 'merge' ? 'count the merge as landed' : 'merge as it stands' };
+  if (a.type === 'retry') return { text: `Retry this step: ${name}`, detail: a.note || 'start it again as it is' };
   if (a.type === 'recover') return { text: `Recover: ${name}`, detail: `lands when “${title(a.fix)}” deploys` };
   if (a.type === 'mark') return { text: `Mark ${a.position === 'merged' ? 'merged' : 'done'}: ${name}`, detail: a.evidence || '' };
   if (a.type === 'forward') return { text: `Forward: ${name}`, detail: `“${a.note || ''}”` };

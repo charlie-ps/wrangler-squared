@@ -470,8 +470,8 @@ export const draftSchema = z.object({ id, text: commentSchema.optional(), title:
 // each acts on a live sub-job and is pinned by the server to the head, merge
 // commit, stage or review round it was written against. `evidence` is mandatory on a mark: the
 // PR or ticket that shows it is true. `fix` is the sub-job whose landing a
-// recover waits for.
-export const ACTION_TYPES = ['forward', 'rework', 'accept-red', 'mark', 'recover'];
+// recover waits for. A retry is the human's Retry, suggested: never automatic.
+export const ACTION_TYPES = ['forward', 'rework', 'accept-red', 'mark', 'recover', 'retry'];
 // A forward or rework note carries the human's own words, which run past one line.
 export const actionNoteSchema = z.string().trim().min(1).max(2000);
 export const actionSchema = z.object({ type: z.enum(ACTION_TYPES), sub: id, note: actionNoteSchema.optional(), position: z.enum(['merged', 'done']).optional(),
