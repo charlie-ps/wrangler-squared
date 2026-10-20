@@ -1462,6 +1462,7 @@ test('unsent words in the planner box grey the primary and hold the chord back f
   assert.equal(merge().disabled, false, 'a blank box does not count as a draft');
   chord(f, f.q('#job-dialog'));
   assert.equal(f.sent.at(-1).action, 'approve-merge');
+  release(merge());
   const before = f.sent.length;
   text.value = 'Rename the flag first'; text.dispatchEvent(f.event('input'));
   assert.equal(merge().disabled, true);
