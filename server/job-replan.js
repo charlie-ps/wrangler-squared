@@ -120,11 +120,12 @@ export function mergeReplan(job, proposal) {
 // add up, so a later one never drops an earlier one. `source` is the step and view
 // the latest idea was typed on (job-actions.js holds the step's actions to it);
 // `images` are every idea's pictures, for a forward to carry into a thread.
-// `running` is the ask run handing its question over as a change (job-talk.js).
+// `running` is the ask run handing its question over as a change, and `convo` the
+// conversation its card is drawn in (job-talk.js). Ask runs answer alongside it.
 export const REPLAN_FEEDBACK_MAX = 16000;
-export function requestReplan(job, feedback, now, red = null, { source = null, images = [], running = null } = {}) {
+export function requestReplan(job, feedback, now, red = null, { source = null, images = [], running = null, convo = null } = {}) {
   if (job.stage !== 'active') throw new Error('Only a running job has a plan to change');
-  if (job.runs.some((r) => !r.stopped && !r.subJobId && r.id !== running)) throw new Error('Wait for the wrangler to finish what it is doing');
+  if (job.runs.some((r) => !r.stopped && !r.subJobId && !r.ask && r.id !== running)) throw new Error('Wait for the wrangler to finish the plan change it is drawing');
   const text = String(feedback || '').trim().slice(0, 8000);
   if (!text) throw new Error('Explain the change you want');
   clearPlanningError(job);
@@ -135,6 +136,7 @@ export function requestReplan(job, feedback, now, red = null, { source = null, i
   job.replan = { feedback: asked, at: now, proposal: null, previous: prev?.proposal?.plan || prev?.previous || null,
     ...(actions.length ? { previousActions: actions } : prev?.proposal ? {} : prev?.previousActions ? { previousActions: prev.previousActions } : {}),
     ...(source || prev?.source ? { source: source || prev.source } : {}),
+    ...(convo || prev?.convo ? { convo: convo || prev.convo } : {}),
     ...(images.length || prev?.images?.length ? { images: [...(prev?.images || []), ...images] } : {}),
     ...(red ? { red } : prev?.red ? { red: { ...prev.red, auto: false, human: true } } : {}) };
 }
@@ -143,7 +145,7 @@ export function requestReplan(job, feedback, now, red = null, { source = null, i
 // whole job; once its replan is gone (discarded, approved or asked again), so is
 // the reason to hold it.
 function clearPlanningError(job) {
-  if (job.runs.filter((r) => !r.subJobId).at(-1)?.phase === 'planning') { job.error = null; job.blocked = null; }
+  if (job.runs.filter((r) => !r.subJobId && !r.ask).at(-1)?.phase === 'planning') { job.error = null; job.blocked = null; }
 }
 
 export function discardReplan(job) {

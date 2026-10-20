@@ -390,12 +390,26 @@ export function changeRoute(at, job = null, sub = null) {
   if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…', hint: 'About this step. A question is answered here; feedback goes to its open session and anything else into the plan, once you approve.' };
   return STEP;
 }
-// A running job's conversation with the wrangler (mirrors server/job-talk.js): the
-// whole of it on the job, a step's own messages on that step. `asking` is a
-// question it is still answering.
+// A running job's conversations with the wrangler (mirrors server/job-talk.js):
+// all of them on the job, a step's own messages on that step. A conversation is
+// pending while its wrangler has something of the human's left to answer.
 export const talkOf = (job) => job?.talk || [];
-export const askPending = (job) => !!job?.ask && !job.cancelledAt;
+export const convosOf = (job) => job?.convos || [];
+export const askPending = (job, convo = null) => !job?.cancelledAt && (convo ? !!convo.pending : convosOf(job).some((c) => c.pending));
 export const talkFor = (job, sub) => sub ? talkOf(job).filter((m) => m.sub === sub.id) : talkOf(job);
+// The conversations a view shows, in the order they started, each with its
+// messages; a message from no conversation (a red step's card) is grouped apart.
+export function convoGroups(job, sub) {
+  const groups = new Map();
+  for (const m of talkFor(job, sub)) {
+    const key = m.convo || '';
+    if (!groups.has(key)) groups.set(key, { convo: convosOf(job).find((c) => c.id === key) || null, messages: [] });
+    groups.get(key).messages.push(m);
+  }
+  return [...groups.values()];
+}
+export const convoNumber = (job, convo) => convosOf(job).indexOf(convo) + 1;
+export const convoRunning = (job, convo) => job.runs.some((r) => !r.stopped && r.convo === convo.id);
 // A planning run that is a question's (an ask run) holds nothing and approves nothing.
 export const planningRun = (job) => job.runs.some((r) => !r.stopped && !r.subJobId && !r.ask);
 export const changeHint = (at, job = null, sub = null) => changeRoute(at, job, sub).hint;

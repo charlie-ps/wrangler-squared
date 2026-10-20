@@ -1387,7 +1387,7 @@ test('Add idea on a running job asks the planner for a proposal; the sent idea s
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Re-planning');
   assert.equal(jobStatus(job, job.subJobs[1]).text, 'Held for the plan change');
   assert.match(f.q('.job-replan-ask').textContent, /Split web in two/);
-  assert.equal(f.q('.job-change'), null, 'one change at a time');
+  assert.ok(f.q('.job-change textarea'), 'a question can still be asked while the change is drawn');
   assert.equal(f.q('.job-sent .job-sent-bubble').textContent, 'Split web in two', 'what was sent stays where the box was');
   f.q('[data-action="discard-replan"]').click();
   assert.equal(f.sent.at(-1).action, 'discard-replan');
@@ -1396,9 +1396,9 @@ test('Add idea on a running job asks the planner for a proposal; the sent idea s
 test('the box is a conversation with the wrangler: a question and its answer in the thread, nothing held, and no proposal', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'done', deployed: { at: 1, checks: ['ok'] } }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
-  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'Why is <b>web</b> slow?', sub: 'web' }];
-  job.ask = { messageId: 't1', feedback: 'About web: Why is web slow?', at: 1, source: { sub: 'web', at: 'step', ref: 'implementation/queued' } };
-  job.runs = [{ id: 'ask1', subJobId: null, phase: 'planning', stopped: false, ask: 't1' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'Why is <b>web</b> slow?', sub: 'web', convo: 'c1' }];
+  job.convos = [{ id: 'c1', at: 1, sub: 'web', pending: { at: 1, asks: [{ messageId: 't1', feedback: 'About web: Why is web slow?', sentAt: 1 }], source: { sub: 'web', at: 'step', ref: 'implementation/queued' } } }];
+  job.runs = [{ id: 'ask1', subJobId: null, phase: 'planning', stopped: false, ask: 't1', convo: 'c1' }];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
   const thread = () => f.q('#job-dialog .job-talk');
@@ -1406,12 +1406,13 @@ test('the box is a conversation with the wrangler: a question and its answer in 
   assert.equal(thread().querySelector('.job-sent-bubble').innerHTML, '<span>Why is &lt;b&gt;web&lt;/b&gt; slow?</span>', 'the human\'s words, escaped');
   assert.match(thread().querySelector('.job-sent-meta').textContent, /You · on Deliver web/);
   assert.match(thread().querySelector('.job-talk-working').textContent, /The wrangler is looking into it…/);
-  assert.equal(f.q('#job-dialog .job-change'), null, 'one question at a time');
+  assert.equal(f.q('#job-dialog .job-change textarea').placeholder, 'Add to your question…', 'what is said before the reply goes to the same wrangler');
+  assert.equal(f.q('#job-dialog .job-change').dataset.changeConvo, 'c1');
   assert.equal(jobStatus(job, job.subJobs[1]).text === 'Held for the plan change', false, 'a question holds nothing');
   assert.equal(f.q('[data-action="approve-replan"]'), null);
 
-  job.talk.push({ id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'It waits on `api`:\n\n- tests\n- lint', sub: 'web' });
-  job.ask = null; job.runs = [];
+  job.talk.push({ id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'It waits on `api`:\n\n- tests\n- lint', sub: 'web', convo: 'c1' });
+  job.convos[0].pending = null; job.runs = [];
   f.view.update(f.data);
   const answer = thread().querySelector('.job-talk-msg');
   assert.match(answer.querySelector('.job-idea-who').textContent, /^The wrangler/);
@@ -1424,6 +1425,38 @@ test('the box is a conversation with the wrangler: a question and its answer in 
   assert.equal(f.q('#job-dialog .job-talk').querySelectorAll('[data-talk]').length, 2);
   f.view.openDetail('job1', 'api');
   assert.equal(f.q('#job-dialog .job-talk'), null, 'only on the step it was asked on');
+});
+
+test('several conversations at once: one section each, both answering, each with its own box, and a box below them that starts a new one', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
+  const pending = (id) => ({ at: 1, asks: [{ messageId: id, feedback: 'x', sentAt: 1 }] });
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'human', text: 'Why is web slow?', sub: 'web', convo: 'c2' },
+    { id: 't3', at: 3, from: 'wrangler', kind: 'answer', text: 'Web waits on api.', sub: 'web', convo: 'c2' }];
+  job.convos = [{ id: 'c1', at: 1, pending: pending('t1') }, { id: 'c2', at: 2, sub: 'web', pending: null }];
+  job.runs = [{ id: 'a1', subJobId: null, phase: 'planning', stopped: false, ask: 't1', convo: 'c1' }, { id: 'w1', subJobId: 'api', phase: 'implementation', stopped: false }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const convos = () => [...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo')];
+  assert.match(f.q('#job-dialog .job-talk-head').textContent, /Conversations with the wrangler/);
+  assert.deepEqual(convos().map((c) => c.querySelector('.job-talk-convo-head').textContent), ['Conversation 1Answering', 'Conversation 2on Deliver web']);
+  assert.deepEqual(convos().map((c) => [c.querySelector('.job-change').dataset.changeConvo, c.querySelector('textarea').placeholder]),
+    [['c1', 'Add to your question…'], ['c2', 'Reply in this conversation…']], 'a box in each, saying where its words go');
+  const boxes = [...f.q('#job-dialog').querySelectorAll('.job-change')];
+  assert.equal(boxes.length, 3);
+  assert.equal(boxes[2].dataset.changeConvo, '', 'the last box starts a new conversation');
+  assert.match(boxes[2].querySelector('.job-change-to').textContent, /New conversation/);
+  const say = (box, words) => { const text = box.querySelector('textarea'); text.value = words; text.dispatchEvent(f.event('input')); box.querySelector('[data-change-send]').click(); };
+  say(convos()[0].querySelector('.job-change'), 'And docs?');
+  assert.equal(f.sent.at(-1).convo, 'c1', 'sent before it replied, to the same wrangler');
+  assert.equal(convos()[0].querySelector('[data-sent-state] .job-sent-bubble').textContent, 'And docs?', 'the bubble stays in its conversation');
+  say(convos()[1].querySelector('.job-change'), 'Can it go faster?');
+  assert.equal(f.sent.at(-1).convo, 'c2');
+  say([...f.q('#job-dialog').querySelectorAll('.job-change')].at(-1), 'Is api deployed?');
+  assert.equal(f.sent.at(-1).convo, undefined, 'a new conversation of its own');
+  assert.equal(jobStatus(job, job.subJobs[0]).text === 'Held for the plan change', false, 'its steps keep running');
+  f.view.openDetail('job1', 'web');
+  assert.deepEqual(convos().map((c) => c.dataset.convo), ['c2'], 'a step shows only what was said on it');
 });
 
 test('a change idea goes straight to a proposal card in the same thread, with its changes lined up and what became of it', (t) => {
@@ -1467,7 +1500,7 @@ test('a pending plan change freezes a sub-job awaiting review: held, not needs-y
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false); assert.equal(f.q('#jobs-review-count').textContent, '');
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   assert.equal(f.q('[data-action="approve-code"]'), null);
-  assert.equal(f.q('.job-change'), null, 'a step’s own agent is refused while the change is pending');
+  assert.ok(f.q('.job-change textarea'), 'a question about it can still be asked: it holds nothing');
   assert.match(f.q('#job-dialog').textContent, /Held for the plan change/);
   job.runs = [{ id: 'w', subJobId: 'api', phase: 'implementation', stopped: false, status: 'running' }];
   assert.notEqual(jobStatus(job, job.subJobs[0]).text, 'Held for the plan change', 'a step already running carries on');
@@ -2156,13 +2189,13 @@ test('a red PR\'s box is plain words: no Instant or Claude chips, and the idea g
   assert.deepEqual([f.q('.job-quick'), f.q('.job-change-to').textContent], [null, 'WThe wrangler']);
 });
 
-test('a merged sub-job\'s idea goes to the planner; the box steps aside while the planner draws, and adds to the proposal once one waits', (t) => {
+test('a merged sub-job\'s idea goes to the planner; the box stays while the planner draws (a question is its own conversation), and adds to the proposal once one waits', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'deployment', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', mergeCommit: 'm1' }, deploymentResult: { status: 'failing', runs: [] } }, { ...sub('web'), stage: 'implementation', state: 'queued' }];
   f.view.update(f.data); f.q('.job-plate-graph [data-sub="api"]').dispatchEvent(f.event('click'));
   assert.deepEqual([f.q('.job-change').dataset.changeAt, f.q('.job-change-to').textContent, f.q('.job-quick')], ['step', 'WThe wrangler', null]);
   job.replan = { feedback: 'x', at: 1, proposal: null }; f.view.update(f.data);
-  assert.equal(f.q('.job-change'), null, 'the planner takes one idea at a time');
+  assert.ok(f.q('.job-change textarea'), 'a question can go to a conversation of its own meanwhile');
   job.replan.proposal = { id: 'run_p', plan: job.plan, merged: job.plan, changes: { frozen: [], kept: [], edited: [], added: [], removed: [] }, actions: [] }; f.view.update(f.data);
   assert.equal(f.q('.job-quick'), null);
   assert.deepEqual([f.q('.job-change').dataset.changeAt, f.q('.job-change-to').textContent], ['step', 'WThe wrangler']);

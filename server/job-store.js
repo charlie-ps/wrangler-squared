@@ -12,7 +12,7 @@ import { dropSub, retrySub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan, requestReplan } from './job-replan.js';
-import { answerAsk, answerReplan, askToReplan, askFailed } from './job-talk.js';
+import { answerAsk, answerReplan, askToReplan, askFailed, convoById, migrateTalk } from './job-talk.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
 
@@ -80,7 +80,8 @@ function approve(j, input) {
 function cancelJob(j, now) {
   if (j.stage === 'done') throw new Error('Job has already finished');
   if (j.cancelledAt) throw new Error('Job is already cancelled');
-  j.cancelledAt = now; j.paused = false; j.error = null; j.blocked = null; j.replan = null; j.ask = null;
+  j.cancelledAt = now; j.paused = false; j.error = null; j.blocked = null; j.replan = null;
+  for (const c of j.convos || []) c.pending = null;
   for (const s of j.subJobs) if (!['cleanup', 'done'].includes(s.stage)) dropSub(s, now);
 }
 // A running job's review checkpoints, switched from the detail footer. Every gate
@@ -205,6 +206,7 @@ export function migrateJobs(raw) {
     if (raw.version < 3) migrateTicketing(job);
     if (raw.version < 4) migratePlaces(job);
     if (raw.version < 5) migrateSessionWrites(job);
+    migrateTalk(job);
   }
   return data;
 }
@@ -431,21 +433,25 @@ export class JobStore {
     });
   }
   claim(jobId, subJobId, phase, extra = {}) {
+    // One run per sub-job, one plan run, and one per conversation (job-talk.js):
+    // conversations answer alongside each other and alongside a plan change.
+    const clash = (r) => runnable(r) && r.subJobId === subJobId && (r.convo || null) === (extra.convo || null);
     const job = this.data.jobs.find((j) => j.id === jobId);
     if (!job || job.paused || job.cancelledAt || this.data.settings.paused
-      || job.runs.some((r) => runnable(r) && r.subJobId === subJobId)
+      || job.runs.some(clash)
       || this.data.jobs.flatMap((j) => j.runs).filter(holdsSlot).length >= this.data.settings.concurrency) return null;
     return this.change((d) => {
       const j = d.jobs.find((j) => j.id === jobId);
       const active = d.jobs.flatMap((j) => j.runs).filter(holdsSlot);
       if (!j || j.paused || j.cancelledAt || d.settings.paused || active.length >= d.settings.concurrency) return null;
-      if (j.runs.some((r) => runnable(r) && r.subJobId === subJobId)) return null;
+      if (j.runs.some(clash)) return null;
       const run = { id: uid('run'), subJobId, phase, model: launchModel(j), effort: launchEffort(j), startedAt: Date.now(), sessionId: null, stopped: false, report: null, ...extra };
       // What its prompt tells it to draft, kept so a Writes switch mid-run
       // reaches the next launch rather than refusing this one's receipt.
       if (phase === 'session') run.drafting = toDraft(j, j.subJobs.find((s) => s.id === subJobId)).map((w) => w.id);
       // A new planner reads the whole conversation from its prompt, so nothing is left to mail it.
       if (phase === 'planning') for (const m of unsentIdea(j)) m.sentAt = run.startedAt;
+      for (const a of convoById(j, extra.convo)?.pending?.asks || []) a.sentAt ??= run.startedAt;
       j.runs.push(run); j.revision++;
       return run;
     });

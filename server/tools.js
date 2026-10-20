@@ -73,6 +73,12 @@ export const getJobContextTool = {
     for (const s of job.subJobs) if (isHumanSub(s) && !(direct.has(s.id) && s.stage === 'done' && !s.cancelledAt)) {
       if (s.result) delete s.result.output;
     }
+    // A conversation's wrangler reads its own conversation: the others are listed
+    // in its prompt only so it knows of them (job-talk.js).
+    if (hit.run.convo) {
+      job.talk = (job.talk || []).filter((m) => m.convo === hit.run.convo);
+      job.convos = (job.convos || []).filter((c) => c.id === hit.run.convo);
+    }
     return result({ job, run: hit.run });
   },
 };

@@ -6,9 +6,9 @@ import { isFrozen } from './job-replan.js';
 import { heldBy, needsTriage, triesOn, triesAllowed, startRed, failRedReplan } from './job-red.js';
 import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from './job-writes.js';
 import { dropSub } from './job-sub-ops.js';
-import { draftsDecidedMail, threadMail, ideaMail } from './job-prompts.js';
+import { draftsDecidedMail, threadMail, ideaMail, askMail } from './job-prompts.js';
 import { inConversation, unsentIdea } from './job-idea.js';
-import { askFailed } from './job-talk.js';
+import { askFailed, convosOf, convoById, convoRun, unsentAsks } from './job-talk.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
 import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps } from './job-running.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
@@ -17,7 +17,8 @@ const MAX_BRANCH_UPDATES = 3;
 export const acceptedRedLine = (sub) => `Post-merge run accepted red${sub.acceptedRed?.note ? `: ${sub.acceptedRed.note}` : ''}`;
 // Which red step a planning run was sent after: counted against that step's tries.
 const redStamp = (job) => job.replan?.red && !job.replan.red.human ? { red: { sub: job.replan.red.sub } } : undefined;
-const activeFor = (j, s) => j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null));
+// A conversation's run (job-talk.js) is its own: it never stands in for the plan's.
+const activeFor = (j, s) => j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null) && !r.convo);
 // A worker that stopped WORKING without reporting has finished in the only sense
 // this runner can observe. The grace is long because "idle" is also what a
 // session looks like between a tool call and its answer, and a false error here
@@ -96,8 +97,8 @@ export class JobRunner {
       // the review has moved on (approved, reworked, retried) or its card is gone:
       // the human can still approve the tree without it.
       const cancelled = job.cancelledAt || (run.subJobId && job.subJobs.find((s) => s.id === run.subJobId)?.cancelledAt)
-        // An ask run (job-talk.js) is the same once its question is gone.
-        || (run.phase === 'planning' && job.stage === 'active' && (run.ask ? job.ask?.messageId !== run.ask : !job.replan)) || run.phase === 'write'
+        // An ask run (job-talk.js) is the same once its conversation has nothing pending.
+        || (run.phase === 'planning' && job.stage === 'active' && (run.ask ? !convoById(job, run.convo)?.pending : !job.replan)) || run.phase === 'write'
         || (run.parkedFor === 'ready' && !run.report && (!waitsOnReview(job, run) || !(await this.runtime.exists(run))))
         // A new idea's planner is done talking once the idea is planned (its suggestion accepted).
         || (run.parkedFor === 'idea' && !run.report && !inConversation(job));
@@ -248,9 +249,13 @@ export class JobRunner {
       await this.launch(job, null, 'planning', redStamp(job));
       job = this.store.get(id);
     }
-    // A question for the wrangler (job-talk.js): a planning run that holds nothing.
-    if (job.ask && !activeFor(job)) {
-      await this.launch(job, null, 'planning', { ask: job.ask.messageId });
+    // A question for the wrangler (job-talk.js): one planning run per conversation,
+    // holding nothing, and what the human says before it replies is mailed to it.
+    for (const convo of convosOf(job)) {
+      if (!convo.pending) continue;
+      const run = convoRun(job, convo);
+      if (!run) await this.launch(job, null, 'planning', { convo: convo.id, ask: convo.pending.asks[0].messageId });
+      else if (run.sessionId && !run.report && unsentAsks(convo).length) await this.deliverAsks(id, run);
       job = this.store.get(id);
     }
     for (const initial of job.subJobs) {
@@ -411,7 +416,7 @@ export class JobRunner {
     const job = this.store.get(id);
     // Parsed, so a settings file from before `maxReplans` reads the default, not 0.
     const settings = settingsSchema.parse(this.store.snapshot().settings ?? {});
-    if (job.replan || job.stage !== 'active' || job.cancelledAt || !settings.maxReplans || !this.allowed(id) || job.runs.some((r) => !r.stopped && !r.subJobId)) return;
+    if (job.replan || job.stage !== 'active' || job.cancelledAt || !settings.maxReplans || !this.allowed(id) || job.runs.some((r) => !r.stopped && !r.subJobId && !r.ask)) return;
     const sub = job.subJobs.find((s) => needsTriage(job, s));
     if (!sub) return;
     const tries = triesOn(job, sub.id), limit = triesAllowed(settings, sub);
@@ -450,6 +455,18 @@ export class JobRunner {
       const note = `Could not send your message to the session: ${shortError(e)}`;
       if (sub.observationError !== note) this.patchSub(id, sub.id, (s) => { s.observationError = note; });
     }
+  }
+  // The human wrote again before this conversation's wrangler replied: the same
+  // session reads it, so the answer it is writing covers both. A failed send is
+  // tried again next tick; the asks stay unsent until one lands.
+  async deliverAsks(id, run) {
+    const job = this.store.get(id);
+    const batch = unsentAsks(convoById(job, run.convo));
+    try {
+      await this.runtime.resumeWithMail(run, askMail(job, run, batch));
+      const now = this.now();
+      this.store.update(id, (j) => { for (const a of convoById(j, run.convo)?.pending?.asks || []) if (batch.some((b) => b.messageId === a.messageId)) a.sentAt = now; });
+    } catch (e) { logWarn('[jobs] ask mail', run.sessionId, shortError(e)); }
   }
   // The human answered a new idea's planner (job-idea.js): mail it, waking its card
   // first if it went dormant. A failed send is tried again next tick.
