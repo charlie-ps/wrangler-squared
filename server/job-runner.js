@@ -13,6 +13,7 @@ import { waitsOnReview, unsentFor } from './job-parked.js';
 import { noteMain } from './job-main.js';
 import { pendingHelper } from './job-helper.js';
 import { stderrLine } from './git.js';
+import { budgetOf, liveCards, budgetContinueMail } from './job-budget.js';
 import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps, stopSandbox } from './job-running.js';
 export const shortError = (e) => {
   const first = String(e?.message || e).split('\n')[0], why = stderrLine(e);
@@ -47,8 +48,8 @@ export const IDLE_RECEIPT_GRACE_MS = 10 * 60 * 1000;
 // One process owns the store (the existing DATA_DIR instance lock). Claims are
 // durable before launch; an uncertain launch is blocked on restart, never replayed.
 export class JobRunner {
-  constructor({ store, runtime, github, onChange = async () => {}, now = Date.now, summarise = summariseComments, statusOf = () => null, running = defaultDeps() }) {
-    Object.assign(this, { store, runtime, github, onChange, now, summarise, statusOf, running });
+  constructor({ store, runtime, github, onChange = async () => {}, now = Date.now, summarise = summariseComments, statusOf = () => null, running = defaultDeps(), budget = null }) {
+    Object.assign(this, { store, runtime, github, onChange, now, summarise, statusOf, running, budget });
     this.busy = false; this.allowedFiles = new Set();
     this.triaging = new Map(); this.pending = new Set();
   }
@@ -60,6 +61,7 @@ export class JobRunner {
     const before = this.store.data;
     try {
       allowFiles(this.runtime.host, this.store.data.jobs, this.allowedFiles);
+      await this.enforceBudget();
       for (const job of this.store.data.jobs) {
         try {
           await this.sweepRunning(job.id);
@@ -83,6 +85,7 @@ export class JobRunner {
         const result = await this.runtime.retryMain(notice);
         this.store.update(id, (j) => { if (same(j, notice.path)?.retrying) noteMain(j, notice.path, null, result, this.now()); });
       } else if (notice.resolving && !notice.resolving.sessionId) {
+        if (this.store.get(id).budgetPaused) continue;
         let sessionId = null, error = null;
         try { sessionId = await this.runtime.resolveMain(this.store.get(id), notice, notice.resolving.id); } catch (e) { error = shortError(e); }
         this.store.update(id, (j) => {
@@ -99,6 +102,7 @@ export class JobRunner {
   // reason as a resolution, on any job, paused, finished or cancelled. A failure
   // stays on the entry, which frees the button and says why.
   async tendHelpers(id) {
+    if (this.store.get(id).budgetPaused) return;
     for (const sub of this.store.get(id).subJobs) {
       const queued = pendingHelper(sub);
       if (!queued) continue;
@@ -142,7 +146,35 @@ export class JobRunner {
     }
   }
   patchSub(jobId, subId, fn) { return this.store.update(jobId, (j) => fn(j.subJobs.find((s) => s.id === subId), j)); }
-  allowed(id) { const d = this.store.data; return !d.settings.paused && !d.jobs.find((j) => j.id === id)?.paused; }
+  allowed(id) { const d = this.store.data, job = d.jobs.find((j) => j.id === id); return !d.settings.paused && !job?.paused && !job?.budgetPaused; }
+  // The spend limit (job-budget.js), first each tick so nothing below launches,
+  // mails or triages for a job that has reached it. Over: paused for budget, and
+  // every working session of it interrupted (the enforcer's cooldown keeps it to
+  // one Escape per card per window, again each window while it is still over).
+  // Under again (a top-up, or a new X): released, and each session it interrupted
+  // is mailed to carry on. A failed mail is tried again next tick.
+  async enforceBudget() {
+    if (!this.budget) return;
+    const byCard = this.budget.spend(this.store.data.jobs);
+    for (const { id } of this.store.data.jobs) {
+      try {
+        const job = this.store.get(id);
+        const verdict = budgetOf(this.store.data.settings, job, byCard);
+        if (!verdict) continue;
+        if (verdict.over) {
+          if (!job.budgetPaused) this.store.budgetPause(id, verdict);
+          const halted = await this.budget.interrupt(liveCards(job));
+          for (const run of job.runs.filter((r) => halted.includes(r.sessionId) && !r.budgetHaltedAt)) this.patchRun(id, run.id, (r) => { r.budgetHaltedAt = this.now(); });
+          continue;
+        }
+        if (job.budgetPaused) this.store.budgetRelease(id, verdict);
+        for (const run of job.runs.filter((r) => runnable(r) && r.budgetHaltedAt && r.sessionId)) {
+          await this.runtime.resumeWithMail(run, budgetContinueMail(job, verdict.limit));
+          this.patchRun(id, run.id, (r) => { r.budgetHaltedAt = null; r.idleSince = null; });
+        }
+      } catch (e) { logWarn('[jobs] spend limit', id, shortError(e)); }
+    }
+  }
   // No clock runs against a session: a long step is legitimate work, and a
   // needs-you one is surfaced on the board rather than killed. What ends a run
   // is its receipt, its process, or having stopped working without either.
@@ -172,6 +204,8 @@ export class JobRunner {
           error = run.parkedFor === 'idea' ? 'The planner\'s session was closed while it waited for your reply. Retry to plan again.' : 'Session was closed while its drafts waited for review. Retry to run it again.';
         }
         else if (!(await this.runtime.isAlive(run))) error = 'Session stopped without a receipt. Open it to see why, then retry.';
+        // Stopped at the spend limit, a session sits idle by design until a top-up.
+        else if (job.budgetPaused) { if (run.idleSince) this.patchRun(id, run.id, (r) => { r.idleSince = null; }); continue; }
         else {
           await this.answerDialogs(run);
           const idleSince = this.statusOf(run.sessionId) === 'idle' ? (run.idleSince ?? this.now()) : null;

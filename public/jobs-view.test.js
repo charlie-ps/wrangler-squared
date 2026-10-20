@@ -757,8 +757,9 @@ test('global concurrency, pause and repair limits are explicit controls, and no 
   assert.equal(form.elements.maxRunMinutes, undefined, 'a step ends with a receipt or an idle session, not a timeout');
   assert.equal(form.elements.updateMain.checked, true, 'Keep local main updated is on until switched off');
   assert.match(form.elements.updateMain.closest('label').textContent, /^Keep local main updated/);
+  assert.equal(form.elements.spendLimit.value, '100', 'the spend limit starts at $100');
   form.elements.maxRepairs.value = '1'; form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, maxReplans: 2, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA', updateMain: true, reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
+  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, maxReplans: 2, deploymentStaleMinutes: 30, spendLimit: 100, ideApp: 'IntelliJ IDEA', updateMain: true, reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
 });
 
 test('the Jobs view wears the saved theme: Space forces dark and paints its masthead, Wrangler follows the board and paints nothing', (t) => {
@@ -3101,4 +3102,29 @@ test('what a helper sent the planner shows under it on the step, marked from the
   assert.equal(ideas[0].querySelector('q').textContent, 'Back off between retries <script>x</script>');
   assert.equal(document.querySelector('.job-helper-ideas script'), null);
   assert.equal(document.querySelectorAll('.job-helpers > li')[1].querySelector('.job-helper-ideas'), null, 'a helper that sent nothing shows nothing');
+});
+
+test('a job paused for budget keeps its limit off the board, and offers Add $X in its dialog, pinned to the count seen', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation' }];
+  Object.assign(job, { usd: 12.3, spendLimit: 10, spendStep: 10, topUps: 0, budgetPaused: { at: 1, usd: 12.3, limit: 10 } });
+  f.view.update(f.data);
+  const plate = f.q('[data-board="job1"]');
+  assert.equal(plate.querySelector('.job-plate-go').textContent, 'Open');
+  assert.doesNotMatch(plate.textContent, /\$10\b|Add \$/, 'no limit on the board');
+  plate.querySelector('.job-plate-go').click();
+  assert.match(f.q('#job-dialog .job-budget h3').textContent, /Paused for budget\s*\$12\.30 of \$10/);
+  f.q('#job-dialog [data-top-up]').click();
+  assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).id, f.sent.at(-1).topUps], ['top-up', 'job1', 0]);
+});
+
+test('an emptied spend limit saves as no limit, and a saved one is shown as it is', (t) => {
+  const f = fixture(t); f.data.settings.spendLimit = 12.5; f.view.update(f.data);
+  f.q('#jobs-settings').click(); let form = f.q('#job-settings-form');
+  assert.equal(form.elements.spendLimit.value, '12.5');
+  form.elements.spendLimit.value = ''; form.dispatchEvent(f.event('submit'));
+  assert.equal(f.sent.at(-1).patch.spendLimit, null);
+  f.data.settings.spendLimit = null; f.view.update(f.data);
+  f.q('#jobs-settings').click(); form = f.q('#job-settings-form');
+  assert.equal(form.elements.spendLimit.value, '', 'null is no limit, never the default');
 });

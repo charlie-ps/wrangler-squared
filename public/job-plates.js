@@ -2,7 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml, inflowHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, ideaStage, liveSuggestion, ideaOpen } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, budgetHeld, ideaStage, liveSuggestion, ideaOpen } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, mainWaiting } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 import { runningDotHtml } from './job-running.js';
@@ -185,6 +185,9 @@ export function plateAsk(job) {
   const tone = state === 'failing' ? 'bad' : 'warn';
   const whole = (label, button, detail = '') => ({ tone, label, detail, button, icon: state === 'failing' ? ICONS.x : ICONS.doc, act: 'open', sub: '' });
   if (job.error) return whole('Needs attention', 'Open');
+  // At its spend limit nothing of the job moves until the human adds to it. The
+  // figures and Add $X stay in the job's own dialog: the board never shows the limit.
+  if (budgetHeld(job)) return { ...whole('Paused for budget', 'Open'), tone: 'warn', icon: ICONS.pause };
   // An agent stuck on a prompt outranks anything else waiting on you, and is
   // answered on its own card whether or not the job rolls up to "needs you".
   const prompts = promptsWaiting(job);
