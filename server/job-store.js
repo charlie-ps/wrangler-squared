@@ -358,12 +358,10 @@ export class JobStore {
         }
         return;
       }
-      // Ask an agent (job-helper.js): a human step, at any stage, a cancelled job
-      // too; other kinds have their own agent or go via the planner. The runner's
-      // tick starts the session.
+      // Ask an agent (job-helper.js): any step, any stage, a cancelled job too;
+      // the runner's tick starts the session.
       if (action === 'ask-helper') {
         if (!s) throw new Error('Sub-job not found');
-        if (!isHumanSub(s)) throw new Error('Ask an agent is only for a human step: this step has its own agent, or goes through the planner');
         const { started } = queueHelper(j, s, Date.now());
         record(j, s, 'ask-helper', null, `Asked an agent to help with ${quoted(s.title)}${started ? ', and started it' : ''}`);
         return;

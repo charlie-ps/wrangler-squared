@@ -482,7 +482,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     helperAsked.error = msg.error;
     showHelperError();
   }
-  // A human step's dialog skips tick redraws, so the error redraws it here, keeping its typed result.
+  // A dialog may skip tick redraws (a human step's does), so the error redraws it here, keeping any typed result.
   function showHelperError() {
     if (!dialog.open || selected?.jobId !== helperAsked.jobId || selected?.subId !== helperAsked.subId) return;
     const output = dialog.querySelector('#job-human-form')?.elements.output.value;
@@ -1324,7 +1324,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       ${workflows.length ? `<h4>What runs on merge <small>${workflows.filter((w) => w.triggers).length} of ${workflows.length}</small></h4><ul class="job-checks">${workflows.map((w) => `<li class="${w.triggers ? 'passed' : ''}">${w.triggers ? '✓' : '○'} ${esc(w.name)} <small>${esc(w.reason)}</small></li>`).join('')}</ul>` : ''}
       ${sub.repairs.length ? `<h4>Changes after failed checks</h4>${sub.repairs.map((r, i) => `<div class="job-repair"><b>Repair ${i + 1}</b>${receiptHtml(r.changes)}<details><summary>Re-verified</summary>${receiptHtml(r.checks)}</details></div>`).join('')}` : ''}`;
     const detailsOpen = openMore.has('details');
-    if (isHumanSub(sub)) actions += askHelperHtml(sub);
+    actions += askHelperHtml(sub);
     if (!isWriteSub(sub)) actions += `<button type="button" class="job-details-toggle" data-details-toggle aria-expanded="${detailsOpen}">${ICONS.doc}Details</button>`;
     return `${appbar(sub.title, chips, kicker, line)}${depsHtml(job, sub)}
       ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub)}

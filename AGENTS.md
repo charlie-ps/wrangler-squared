@@ -252,15 +252,14 @@ text as public as the rest of this repo.
   beside the stage roll-up, never part of it: `jobNeedsYou`, `jobLabel` ("Local main behind",
   even on a Delivered job) and `plateAsk` all read it, below any step's own ask.
 - **Ask an agent opens the human's own session about a step, never a step** (`server/job-helper.js`).
-  A human step's dialog has the button, at any stage and on a cancelled job; `ask-helper` on any other
-  kind is refused (it has its own agent, or goes via the planner). One live helper per step: one still on
+  Every step's dialog has the button, at any stage and on a cancelled job. One live helper per step: one still on
   the board turns the button into Open agent, and a press in this browser opens the new session once it has
   an id (`helperAsked` in `public/jobs-view.js`). `ask-helper` queues
   `{id, at, sessionId: null}` on `sub.helpers` (refused while one is queued: that is the double-click
   guard) and marks a waiting human task `doing` unless a replan holds it; the runner's `tendHelpers`
   spawns it inside the tick, like `tendMain`, so no `pendingLaunch` is in flight: a plain session (no
-  worktree, no PR automation; the job's agent/model/effort and task) in `helperCwd` (a prerequisite PR's
-  checkout, else `''`, a scratch workspace; never a worktree), briefed by
+  worktree, no PR automation; the job's agent/model/effort and task) in `helperCwd` (the step's checkout,
+  else a prerequisite PR's, else `''`, a scratch workspace; never a worktree), briefed by
   `job-prompts.js helperPrompt`. A failed spawn is `error` on that entry, which frees the button. Its id is
   kept OUT of `sub.sessions` (cleanup archives those; Open session and Review code read the last) and
   `job.runs` (`runForSession` would hand it job_report, the worker skill and the job's sandbox). What it

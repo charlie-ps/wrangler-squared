@@ -378,12 +378,14 @@ test('a helper is briefed as the human\'s own session with the step, its PR and 
   assert.doesNotMatch(human, /Pull request:|Worktree:|worktree belongs/);
 });
 
-test('a helper starts in a prerequisite PR\'s checkout, else a scratch workspace; never a worktree', (t) => {
+test('a helper starts in the step\'s checkout, else a prerequisite PR\'s, else a scratch workspace; never a worktree', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-helper-cwd-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const near = path.join(dir, 'near'), wt = path.join(dir, 'wt');
-  for (const d of [near, wt]) fs.mkdirSync(d);
-  const j = { subJobs: [{ id: 'proto', kind: 'pr', repo: path.join(dir, 'gone'), after: [] }, { id: 'api', kind: 'pr', repo: near, after: ['proto'], worktree: { path: wt } }, { id: 'sign', kind: 'human', after: ['api'] }, { id: 'solo', kind: 'human', after: [] }] };
-  assert.equal(helperCwd(j, j.subJobs[2]), near, 'a checkout missing on this machine is skipped, and a worktree never used');
+  const own = path.join(dir, 'own'), prereq = path.join(dir, 'prereq'), wt = path.join(dir, 'wt');
+  for (const d of [own, prereq, wt]) fs.mkdirSync(d);
+  const j = { subJobs: [{ id: 'proto', kind: 'pr', repo: prereq, after: [] }, { id: 'api', kind: 'pr', repo: own, after: ['proto'], worktree: { path: wt } }, { id: 'sign', kind: 'human', after: ['proto'] }, { id: 'solo', kind: 'session', after: [] }] };
+  assert.equal(helperCwd(j, j.subJobs[1]), own);
+  assert.equal(helperCwd(j, { ...j.subJobs[1], repo: path.join(dir, 'gone') }), prereq, 'a checkout missing on this machine falls back');
+  assert.equal(helperCwd(j, j.subJobs[2]), prereq);
   assert.equal(helperCwd(j, j.subJobs[3]), '');
 });

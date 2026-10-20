@@ -1805,7 +1805,7 @@ test('a write waits on its session; a draft needs you, its panel the editor that
   assert.equal(panel.querySelector('[name="to"]').value, 'In Progress');
   assert.deepEqual([panel.querySelector('[name="on"]'), panel.querySelector('[name="review"]')], [null, null], 'in review only what it writes can change');
   assert.match(f.q('.job-write-spec').textContent, /By\s*Written by Run n-rev/);
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Move in Jira', 'Skip']);
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Move in Jira', 'Skip', 'Ask an agent']);
   assert.equal(f.q('.job-change').dataset.changeAt, 'write', 'a draft takes ideas too, pinned to where it stands'); assert.equal(f.q('.job-moves'), null);
   panel.requestSubmit();
   assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).subJobId, f.sent.at(-1).write], ['approve-write', 'w-rev', undefined], 'nothing changed: a plain approval');
@@ -1845,7 +1845,7 @@ test('a refused write shows its place\'s error with Retry and Pick another statu
   f.q('[data-board="job1"] .job-plate-open').click(); f.q('[data-open-sub="w-fail"]').click();
   assert.match(f.q('.job-event').textContent, /Jira refused the write.*Field Reviewer is required/);
   assert.match(hint(f), /Retry once it allows it, pick another status \(either runs Run n again for it\)/);
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Pick another status']);
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Pick another status', 'Ask an agent']);
   assert.equal(document.querySelector('.job-moves'), null, 'no Moves menu on a refused write');
   f.q('#job-write-edit').click();
   assert.equal(f.q('#job-dialog h2').textContent, 'Pick another status');
@@ -1857,10 +1857,10 @@ test('a refused write shows its place\'s error with Retry and Pick another statu
   assert.match(f.q('.job-write-spec').textContent, /In Review → In Progress/);
   at('n').stage = 'done'; f.view.update(f.data);
   f.q('[data-open-job]').click(); f.q('[data-open-sub="w-fail"]').click();
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Pick another status'], 'a finished session still runs again for its writes alone');
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Pick another status', 'Ask an agent'], 'a finished session still runs again for its writes alone');
   at('n').cancelledAt = 2; f.view.update(f.data);
   f.q('[data-open-job]').click(); f.q('[data-open-sub="w-fail"]').click();
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), [], 'its session was dropped: nothing runs it again');
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Ask an agent'], 'its session was dropped: nothing runs it again');
 });
 
 const made = (id, type, by, what, extra = {}) => ({ id, kind: 'write', place: { type }, title: `Make ${what}`, by, after: [], action: { type: 'make', what }, sessions: [], repairs: [], ...extra });
@@ -1904,7 +1904,7 @@ test('the stepper folds a session\'s writes into one pill per place: dots per wr
   assert.match(pill('post').querySelector('summary').textContent, /^#web-platform$/); assert.ok(pill('post').querySelector('.job-write-review'), 'the eye says it is reviewed first');
   f.q('[data-open-sub="k6"]').click();
   assert.equal(f.q('.job-event b').textContent, 'Not made');
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Edit'], 'Retry runs its session again for it');
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Edit', 'Ask an agent'], 'Retry runs its session again for it');
 });
 
 test('a place that exists opens from its pill; a local file shows its path to copy', async (t) => {
@@ -2019,7 +2019,7 @@ test('a Slack post in review asks to Post to Slack, with only its edited fields'
   const [job] = f.data.jobs;
   Object.assign(job.subJobs.find((s) => s.id === 'post'), { stage: 'review', state: 'verified' }); f.view.update(f.data);
   f.q('[data-open-job]').click(); f.q('[data-open-sub="post"]').click();
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Post to Slack', 'Skip']);
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Post to Slack', 'Skip', 'Ask an agent']);
   assert.match(f.q('.job-appbar .job-chip-state').title, /nothing has been written to Slack yet/);
   assert.equal(f.q('.job-write-hint'), null, 'the chip already says it');
   const panel = f.q('#job-write-review');
@@ -2041,7 +2041,7 @@ test('a made output in review is already published: it says where, and Accept fi
   assert.equal(f.q('.job-appbar .job-chip-state').title, 'Review is on for this output: Run report published it. Accept it to finish, or drop it.');
   const where = f.q('.job-write-where a');
   assert.deepEqual([where.getAttribute('href'), where.textContent, where.target], ['https://claude.ai/artifact/7f3c', 'Checkout <b>p95</b> ↗', '_blank']);
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Accept']);
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Accept', 'Ask an agent']);
   assert.equal(f.q('#job-write-review'), null, 'nothing is left to edit');
   f.q('[data-action="approve-write"]').click();
   assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).subJobId, f.sent.at(-1).write], ['approve-write', 'chart', undefined]);
@@ -2114,7 +2114,7 @@ test('a write elsewhere in review is approved as Write to its name, sending only
     { id: 'status', kind: 'write', place: { type: 'other', name: 'Status page', ref: 'https://status.example.com' }, title: 'Write to Status page', after: [], by: 'notify', review: true, action: { type: 'write', text: 'Post a notice' }, stage: 'review', state: 'verified', sessions: [], repairs: [] }] });
   f.q('[data-board="job1"] .job-plate-open').click(); f.q('[data-open-sub="status"]').click();
   assert.match(f.q('.job-appbar .job-chip-state').title, /nothing has been written to Status page yet/);
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Write to Status page', 'Skip']);
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Write to Status page', 'Skip', 'Ask an agent']);
   const panel = f.q('#job-write-review');
   panel.querySelector('[name="text"]').value = 'Post a resolved notice';
   panel.requestSubmit();
@@ -3126,13 +3126,11 @@ const helperJob = (f) => {
 const askButton = (f) => f.q('#job-dialog [data-ask-helper], #job-dialog [data-open-helper]');
 const sign = (job) => job.subJobs[1];
 
-test('Ask an agent is only on a human step\'s dialog; PR, session and write steps have none', (t) => {
+test('Ask an agent is on every step\'s dialog: human, PR, session and write', (t) => {
   const f = fixture(t); helperJob(f);
-  f.view.openDetail('job1', 'sign');
-  assert.equal(askButton(f).textContent, 'Ask an agent'); assert.equal(askButton(f).disabled, false);
-  for (const id of ['api', 'notes', 'post']) {
+  for (const id of ['sign', 'api', 'notes', 'post']) {
     f.view.openDetail('job1', id);
-    assert.equal(f.q('#job-dialog').open, true); assert.equal(askButton(f), null, `${id} has no Ask an agent`);
+    assert.equal(askButton(f)?.textContent, 'Ask an agent', id); assert.equal(askButton(f).disabled, false);
   }
 });
 
@@ -3153,6 +3151,23 @@ test('pressed on a human step, Ask an agent holds until the helper starts, then 
   assert.deepEqual(f.sessions, ['s_help1']); assert.equal(f.q('#job-dialog').open, false);
   f.view.update(f.data);
   assert.deepEqual(f.sessions, ['s_help1'], 'it opens once');
+});
+
+test('pressed on a PR, session or write step, Ask an agent opens the new session; pressed again it reads Open agent', (t) => {
+  const f = fixture(t); const job = helperJob(f);
+  for (const [i, id] of ['api', 'notes', 'post'].entries()) {
+    const step = job.subJobs.find((s) => s.id === id);
+    f.view.openDetail('job1', id);
+    askButton(f).click();
+    assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: id, action: 'ask-helper' });
+    assert.equal(askButton(f).textContent, 'Starting an agent');
+    step.helpers = [{ id: `hp_${id}`, at: 1, sessionId: `s_${id}` }]; f.onBoard.add(`s_${id}`); f.view.update(f.data);
+    assert.equal(f.sessions.at(-1), `s_${id}`); assert.equal(f.sessions.length, 2 * i + 1); assert.equal(f.q('#job-dialog').open, false);
+    f.view.openDetail('job1', id);
+    assert.equal(askButton(f).textContent, 'Open agent');
+    askButton(f).click();
+    assert.equal(f.sessions.at(-1), `s_${id}`); assert.equal(f.sent.filter((m) => m.action === 'ask-helper').length, i + 1);
+  }
 });
 
 test('a human step with a helper on the board reads Open agent and opens the newest, starting nothing', (t) => {
@@ -3239,8 +3254,7 @@ test('what a helper sent the planner shows under it on the step, marked from the
   assert.equal(ideas[0].querySelector('q').textContent, 'Back off between retries <script>x</script>');
   assert.equal(document.querySelector('.job-helper-ideas script'), null);
   assert.equal(document.querySelectorAll('.job-helpers > li')[1].querySelector('.job-helper-ideas'), null, 'a helper that sent nothing shows nothing');
-  assert.equal(f.q('[data-helper-session="s_help1"]').textContent, 'Restore', 'kept as history on a PR step, which has no Ask an agent');
-  assert.equal(f.q('#job-dialog [data-ask-helper], #job-dialog [data-open-helper]'), null);
+  assert.equal(f.q('[data-helper-session="s_help1"]').textContent, 'Restore', 'kept as history');
 });
 
 test('a job paused for budget keeps its limit off the board, and offers Add $X in its dialog, pinned to the count seen', (t) => {
