@@ -11,6 +11,8 @@ import { subState, subLabel, subLine, jobState, jobLabel } from './job-state.js'
 const sub = (id, after = []) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Implement it and open the PR', sessions: [], repairs: [] });
 const plan = { context: 'Keys live in the vault; every service reads them at boot.', stories: [{ id: 'story', key: 'AUTH-1', title: 'Customers can sign in' }], subJobs: [sub('api'), sub('web', ['api'])] };
 const hint = (f) => f.q('#job-dialog .job-chip-state').title;
+// A press stays busy until a redraw or its timeout; a test pressing again with neither hands it back as the timeout would.
+const release = (b) => { b.removeAttribute('aria-busy'); b.disabled = false; };
 const deploys = (summary = 'Deploys on merge · Deploy') => ({ head: 'head1', base: 'main', expected: true, workflows: [{ name: 'Deploy', file: 'deploy.yml', triggers: true, reason: 'runs on push' }], summary });
 function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], extra = {}) {
   const window = new Window({ url: 'http://localhost:7878' });
@@ -394,6 +396,36 @@ test('Review code in Wrangler opens the latest run already on the board, else th
   f.q('#job-diff').click(); assert.equal(f.diffs.at(-1), 's2', 'an archived card would resume its agent just to show a diff');
 });
 
+test('a round-trip press is busy at once, a double-click sends once, and the next broadcast redraws it fresh', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; Object.assign(job, { stage: 'backlog', plan: null }); f.view.update(f.data);
+  f.view.openDetail('job1');
+  const start = f.q('[data-action="start"]');
+  start.click();
+  assert.deepEqual([start.getAttribute('aria-busy'), start.disabled], ['true', true], 'busy before any broadcast');
+  start.click(); start.dispatchEvent(f.event('click'));
+  assert.equal(f.sent.filter((m) => m.action === 'start').length, 1, 'one start however often it is pressed');
+  job.revision++; f.view.update(f.data);
+  assert.equal(f.q('[data-action="start"]').hasAttribute('aria-busy'), false, 'the redraw is the confirmation');
+  job.stage = 'active'; job.plan = plan;
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1'], pr: { url: 'https://github.com/org/repo/pull/1', head: 'head1', checkStatus: 'passing', checks: [] } }];
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  const merge = f.q('[data-action="approve-merge"]');
+  merge.click(); merge.click();
+  assert.equal(f.sent.filter((m) => m.action === 'approve-merge').length, 1, 'a double-click on Merge sends one action');
+  assert.equal(merge.getAttribute('aria-busy'), 'true');
+});
+
+test('a plate\'s Merge holds its stub busy, so a double-click sends one merge', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1'], pr: { url: 'https://github.com/org/repo/pull/1', head: 'head1', checkStatus: 'passing', checks: [] } }];
+  f.view.update(f.data);
+  const go = f.q('[data-board="job1"] [data-ask="merge"]');
+  assert.ok(go, 'the plate offers Merge');
+  go.click(); go.dispatchEvent(f.event('click'));
+  assert.equal(f.sent.filter((m) => m.action === 'approve-merge').length, 1);
+  assert.deepEqual([go.getAttribute('aria-busy'), go.disabled], ['true', true]);
+});
+
 test('PR review shows green checks, what runs on merge, CI changes, and approves only the displayed head', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'pr', deploys: deploys(), worktree: { path: '/wt/api' }, sessions: ['s1'],
@@ -690,7 +722,8 @@ test('new idea is a brief beside a property sidebar, and the brief is the descri
   assert.equal(brief.querySelector('details'), null, 'no folded planning guidance or repository hints');
   assert.deepEqual([...brief.querySelectorAll('textarea')].map((e) => e.name), ['intent']);
   assert.equal(form.elements.repos, undefined); assert.equal(form.elements.planningPrompt, undefined);
-  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Sandbox', 'Images']);
+  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Images']);
+  assert.ok(props.querySelector('#job-sandbox').hidden, 'Claude has no Sandbox section');
   assert.deepEqual([...brief.querySelectorAll('legend')].map((l) => l.textContent), ['Review checkpoints']);
   for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'shareImages']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
   for (const name of ['reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites', 'reviewRed']) assert.ok(brief.contains(form.querySelector(`[name="${name}"]`)), `${name} is a tile under the brief`);
@@ -1776,6 +1809,7 @@ test('a write waits on its session; a draft needs you, its panel the editor that
   assert.equal(f.q('.job-change').dataset.changeAt, 'write', 'a draft takes ideas too, pinned to where it stands'); assert.equal(f.q('.job-moves'), null);
   panel.requestSubmit();
   assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).subJobId, f.sent.at(-1).write], ['approve-write', 'w-rev', undefined], 'nothing changed: a plain approval');
+  release(panel.querySelector('button.primary'));
   panel.querySelector('[name="to"]').value = ''; panel.querySelector('[name="comment"]').value = '';
   panel.requestSubmit();
   assert.match(f.q('#job-move-error').textContent, /moves the ticket, comments on it, or both/); assert.equal(f.sent.at(-1).write, undefined);
@@ -2085,6 +2119,7 @@ test('a write elsewhere in review is approved as Write to its name, sending only
   panel.querySelector('[name="text"]').value = 'Post a resolved notice';
   panel.requestSubmit();
   assert.deepEqual(f.sent.at(-1).write, { action: { text: 'Post a resolved notice' } });
+  release(panel.querySelector('button.primary'));
   panel.querySelector('[name="name"]').value = 'Statuspage'; panel.requestSubmit();
   assert.deepEqual(f.sent.at(-1).write, { action: { text: 'Post a resolved notice' }, name: 'Statuspage' });
 });
@@ -2184,9 +2219,11 @@ test('New job\'s Sandbox section follows the agent and round-trips its mode and 
   const sbx = () => f.q('#job-sandbox');
   assert.ok(f.q('.job-create-brief .job-review-grid .job-review-tiles .job-review[data-checkpoint="reviewWrites"]'), 'the checkpoints are tiles under the brief');
   assert.equal(f.q('.job-create-props .job-review'), null, 'and no longer in the side panel');
-  assert.match(sbx().textContent, /Not used by Claude/, 'Claude collapses the section to one row');
-  assert.equal(sbx().querySelector('.job-sbx'), null);
+  assert.ok(sbx().hidden, 'Claude hides the whole section');
+  assert.equal(sbx().querySelector('legend, .job-sbx'), null);
   click(f, '.pick-ticket'); click(f, '.pick-tab[data-agent=codex]'); click(f, '.pick-cell[data-value="gpt-5.6-sol"]');
+  assert.equal(sbx().hidden, false, 'Codex shows it again');
+  assert.equal(sbx().querySelector('legend').textContent, 'Sandbox');
   const pressed = () => sbx().querySelector('.job-sbx[aria-pressed=true]').dataset.mode;
   const launches = () => sbx().querySelector('.job-sbx-launch code').textContent;
   assert.equal(pressed(), 'auto', 'a new job auto-approves');
@@ -2940,7 +2977,7 @@ test('plan review sets a PR\'s own base from its branch pill, and blank lands wh
   assert.equal(f.sent.at(-1).plan.subJobs[0].base, 'release/2.x');
   const again = f.q('[data-base="0"]'); again.value = ''; again.dispatchEvent(f.event('change'));
   assert.equal(f.q('.job-node-base.own'), null);
-  f.q('[data-action="approve-plan"]').click();
+  release(f.q('[data-action="approve-plan"]')); f.q('[data-action="approve-plan"]').click();
   assert.equal('base' in f.sent.at(-1).plan.subJobs[0], false, 'cleared, it is gone rather than empty');
 });
 

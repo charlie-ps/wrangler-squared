@@ -31,6 +31,7 @@ import { createIdeaCorner } from './idea-corner.js';
 import { createRedrawHold, keepScrollX } from './redraw-hold.js';
 import { historyHtml } from './job-thread.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
+import { pressBusy, isBusy, submitterOf } from './busy-button.js';
 import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, shotBoxHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
 // Mirrors server/jobs-schema.js MAX_SHOW.
 const MAX_SHOW = 8;
@@ -558,7 +559,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (reviewed?.plan && JSON.stringify(reviewed.plan) === basePlan) {
       revision = reviewed.revision;
       const approve = dialog.querySelector('[data-action="approve-plan"]');
-      if (approve) approve.disabled = reviewed.runs.some((r) => !r.stopped);
+      if (approve && !isBusy(approve)) approve.disabled = reviewed.runs.some((r) => !r.stopped);
       // The chip was drawn while the planner was still stopping; it follows the job.
       const chip = dialog.querySelector('.job-appbar .job-chip-state');
       if (chip) chip.outerHTML = stateChip(jobState(reviewed), jobLabel(reviewed));
@@ -725,7 +726,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         if (problem) return fail(problem);
         write = writeReviewPayload(sub, f);
       }
-      action('approve-write', write ? { write } : {});
+      if (pressBusy(submitterOf(e))) action('approve-write', write ? { write } : {});
     };
   }
   function wireWriteEditor() {
@@ -807,7 +808,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const prs = job.subJobs.filter((s) => s.pr && s.stage === 'pr');
     const counts = job.stage === 'active' ? [`Drops ${unfinished} sub-job${unfinished === 1 ? '' : 's'}`, ...(prs.length ? [prs.length === 1 ? `PR #${prNumber(prs[0])} stays open on GitHub` : `${prs.length} PRs stay open on GitHub`] : []), 'Worktrees with unsaved work are kept'] : [live ? 'Stops planning' : 'Planning never starts'];
     show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Cancel this job?</h2><form id="job-cancel-form"><ul class="job-cancel-counts">${counts.map((c) => `<li>${esc(c)}</li>`).join('')}</ul><div class="job-actions"><button type="button" class="danger" data-cancel-job="1">Cancel job</button><button type="button" id="job-move-back">Keep working</button></div></form>`);
-    dialog.querySelector('[data-cancel-job]').onclick = () => send({ type: 'job-action', id: job.id, action: 'cancel-job' });
+    dialog.querySelector('[data-cancel-job]').onclick = (e) => { if (pressBusy(e.currentTarget)) send({ type: 'job-action', id: job.id, action: 'cancel-job' }); };
     dialog.querySelector('#job-move-back').onclick = () => back();
   }
   // One escaped line per intervention, newest first, with when it was made — the
@@ -1469,13 +1470,15 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       return note ? { note } : {};
     };
     dialog.querySelectorAll('[data-main-retry], [data-main-dismiss], [data-main-resolve]').forEach((b) => b.onclick = () => {
+      if (!pressBusy(b)) return;
       const path = b.closest('[data-main-path]').dataset.mainPath;
       if ('mainResolve' in b.dataset) action('resolve-main', { path, resolution: b.dataset.mainResolve }, null);
       else action('mainDismiss' in b.dataset ? 'dismiss-main' : 'retry-main', { path }, null);
     });
-    dialog.querySelectorAll('[data-top-up]').forEach((b) => b.onclick = () => { b.disabled = true; action('top-up', { topUps: job.topUps || 0 }, null); });
+    dialog.querySelectorAll('[data-top-up]').forEach((b) => b.onclick = () => { if (pressBusy(b)) action('top-up', { topUps: job.topUps || 0 }, null); });
     dialog.querySelectorAll('[data-main-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.mainSession); });
     dialog.querySelectorAll('[data-action]').forEach((b) => b.onclick = () => {
+      if (!pressBusy(b)) return;
       const name = b.dataset.action;
       const target = b.dataset.sub ? job.subJobs.find((s) => s.id === b.dataset.sub) : sub;
       action(name, name === 'approve-plan' ? { plan: cleanedPlan(planDraft), revision } : name === 'approve-replan' ? { proposalId: job.replan.proposal.id, ...(job.replan.proposal.alternatives?.length ? { option: pickedOption(job) } : {}) }
@@ -1484,6 +1487,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const humanForm = dialog.querySelector('#job-human-form');
     if (humanForm) humanForm.onsubmit = (e) => {
       e.preventDefault();
+      if (!pressBusy(submitterOf(e))) return;
       const output = String(new FormData(humanForm).get('output') || '').trim();
       action('finish-human', output ? { output } : {});
     };
@@ -1505,8 +1509,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
     dialog.querySelectorAll('.job-run-pop').forEach((d) => d.addEventListener('toggle', fitRunning));
     fitRunning();
-    dialog.querySelectorAll('[data-running-stop]').forEach((b) => b.onclick = () => { b.disabled = true; detailShown = null; runLogs.delete(sub.id); action('stop-running'); });
-    dialog.querySelectorAll('[data-running-restart]').forEach((b) => b.onclick = () => { b.disabled = true; detailShown = null; action('restart-running', b.dataset.runningRestart ? { name: b.dataset.runningRestart } : {}); });
+    dialog.querySelectorAll('[data-running-stop]').forEach((b) => b.onclick = () => { if (!pressBusy(b)) return; detailShown = null; runLogs.delete(sub.id); action('stop-running'); });
+    dialog.querySelectorAll('[data-running-restart]').forEach((b) => b.onclick = () => { if (!pressBusy(b)) return; detailShown = null; action('restart-running', b.dataset.runningRestart ? { name: b.dataset.runningRestart } : {}); });
     dialog.querySelectorAll('[data-running-logs]').forEach((b) => b.onclick = () => {
       if (runLogs.get(sub.id)?.name === b.dataset.runningLogs) { runLogs.delete(sub.id); renderDetail(); return; }
       send({ type: 'job-running-logs', id: job.id, subJobId: sub.id, name: b.dataset.runningLogs });
@@ -1542,7 +1546,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const target = sub?.error ? sub : null;
       show(`<h2>Retry ${esc(target ? target.title : job.title)}</h2>${target?.error ? `<p class="job-error">${esc(target.error)}</p>` : job.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}<form id="job-retry-form">${target ? noteField('Note for the retried session') : ''}<div class="job-actions"><button class="primary">Retry</button><button type="button" id="job-move-back">Back</button></div></form>`);
       dialog.querySelector('#job-move-back').onclick = () => renderDetail();
-      dialog.querySelector('form').onsubmit = (e) => { e.preventDefault(); action('retry', { subJobId: target?.id, ...only({ note: trimmed(new FormData(e.target), 'note') }) }); };
+      dialog.querySelector('form').onsubmit = (e) => { e.preventDefault(); if (pressBusy(submitterOf(e))) action('retry', { subJobId: target?.id, ...only({ note: trimmed(new FormData(e.target), 'note') }) }); };
     });
     // Echoes the head and fingerprint of the list being read, so a refusal the
     // runner has replaced since is refused by the server instead of discarded unseen.
@@ -1550,7 +1554,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const r = sub.cleanupRefusal;
       show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Discard ${esc(sub.title)}’s worktree?</h2><form id="job-discard-form">${r.cause === 'unremovable' ? `<p>This deletes the folder <code>${esc(tildify(r.path || sub.worktree?.path || ''))}</code> with everything in it, deletes the local branch <code>${esc(r.branch)}</code> and tells git the worktree is gone. Nothing in the folder can be listed first, and it is lost for good.</p>${r.commitCount ? lossHtml({ ...r, cause: null }) : ''}<p class="job-authority">Cleanup checks the branch again just before deleting: if it has moved, nothing is deleted and you are shown it again.</p>`
         : `<p>This force-removes <code>${esc(tildify(r.path || sub.worktree?.path || ''))}</code> and deletes the local branch <code>${esc(r.branch)}</code>. This is lost for good, along with any gitignored files in it (build output, a local <code>.env</code>):</p>${lossHtml(r)}<p class="job-authority">Cleanup checks the worktree again just before deleting it: if anything has changed, nothing is deleted and you are shown the new list.</p>`}<div class="job-actions"><button type="button" class="danger" data-discard="1">${r.cause === 'unremovable' ? 'Delete it' : 'Discard anyway'}</button><button type="button" id="job-move-back">Keep it</button></div></form>`);
-      dialog.querySelector('[data-discard]').onclick = () => action('discard-worktree', { discardHead: r.head, fingerprint: r.fingerprint });
+      dialog.querySelector('[data-discard]').onclick = (e) => { if (pressBusy(e.currentTarget)) action('discard-worktree', { discardHead: r.head, fingerprint: r.fingerprint }); };
       dialog.querySelector('#job-move-back').onclick = () => renderDetail();
     });
     bind('#job-cancel', () => openCancel(job));
@@ -1567,6 +1571,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         const f = readWriteFields(form);
         const problem = writeProblem(writeFromFields({ ...job.plan, subJobs: job.subJobs }, sub, f));
         if (problem) { const err = dialog.querySelector('#job-move-error'); err.textContent = problem; err.hidden = false; return; }
+        if (!pressBusy(submitterOf(e))) return;
         action('edit-write', { write: writeEditPayload(sub, f) });
       };
     });
@@ -1686,8 +1691,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   q('#jobs-boards').onclick = (e) => {
     const chip = e.target.closest('[data-place]'); if (chip) return openPlacePop(chip);
     const go = e.target.closest('[data-ask]');
-    // One click per decision: a sent one disables the stub until the next tick redraws it.
-    if (go) { if (askActs(go.dataset.ask)) { go.parentElement.querySelectorAll('button').forEach((b) => { b.disabled = true; }); boardHtml = null; } return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask, go.dataset.session); }
+    // One click per decision: a sent one holds the stub busy until the next tick redraws it.
+    if (go) { if (askActs(go.dataset.ask)) { if (!pressBusy(go, { also: go.parentElement.querySelectorAll('button') })) return; boardHtml = null; } return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask, go.dataset.session); }
     const el = e.target.closest('[data-job]'); if (el) return openDetail(el.getAttribute('data-job'), el.getAttribute('data-sub'));
     // Anywhere else on a plate (the sky, the gaps between chips) opens the job, as the title does.
     const plate = e.target.closest('.job-plate'); if (plate && !e.target.closest('a,button')) openDetail(plate.dataset.board, '');
