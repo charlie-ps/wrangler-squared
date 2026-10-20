@@ -330,6 +330,43 @@ test('a running job takes a plan change: the running step carries on, unstarted 
   assert.equal(f.job().stage, 'done');
 });
 
+test('a blocked session step whose after gains a new fix PR is queued, not "Worker blocked", once the red replan is approved, and runs when the fix lands', async (t) => {
+  const f = board(t, { settings: { maxReplans: 1 } });
+  await f.start({ subJobs: [session('check')] }, { reviewCode: false, reviewMerge: false });
+  await f.report(f.runOf('check', 'session'), { kind: 'blocked', summary: 'The artifact build is broken in production mode' });
+  await f.tick(); await f.tick();
+  const planner = f.runOf(null, 'planning');
+  assert.deepEqual(f.job().replan.red, { sub: 'check', auto: false, n: 1 }, 'the red step went to the planner');
+  await f.report(planner, { kind: 'plan', plan: { ...f.job().plan, subJobs: [pr('fix', [], { repo: f.repo }), session('check', ['fix'], { brief: 'Do check on the fixed build' })] } });
+  await f.tick();
+  await f.approve('approve-replan', { proposalId: planner.id });
+  const check = f.sub('check');
+  assert.deepEqual([check.state, check.error, check.blocked, check.red.held, check.red.declared], ['queued', null, null, null, null], 'waiting on fix, no longer red or held');
+  await f.tick();
+  assert.ok(f.runOf('fix', 'implementation')?.sessionId, 'the fix launches');
+  assert.equal(f.runOf('check', 'session').report.kind, 'blocked', 'check waits for the fix to land');
+  await f.publish('fix', f.runOf('fix', 'implementation'), { checkStatus: 'passing' });
+  await f.tick(); await f.tick(); await f.tick();
+  assert.equal(f.sub('fix').stage, 'done');
+  const rerun = f.runOf('check', 'session');
+  assert.ok(rerun.sessionId && !rerun.report, 'the fix landing releases check again');
+  assert.match(f.spawned.findLast((s) => s.sessionId === rerun.sessionId).intent, /Do check on the fixed build/, 'with its new brief');
+});
+
+test('an approved edit that changes no brief or after leaves a blocked step blocked', async (t) => {
+  const f = board(t);
+  await f.start({ subJobs: [session('check')] }, { reviewCode: false, reviewMerge: false });
+  await f.report(f.runOf('check', 'session'), { kind: 'blocked', summary: 'The artifact build is broken in production mode' });
+  await f.tick();
+  await f.idea('Call it the smoke check');
+  const planner = await f.propose([session('check', [], { title: 'Run the smoke check' })]);
+  await f.approve('approve-replan', { proposalId: planner.id });
+  const check = f.sub('check');
+  assert.equal(check.title, 'Run the smoke check');
+  assert.match(check.error, /artifact build is broken/, 'still red: nothing it needs has changed');
+  assert.equal(check.blocked.summary, 'The artifact build is broken in production mode');
+});
+
 // Open flow bugs, kept as todo until they are fixed: the runner reports them
 // without failing the suite, and each starts passing the day its fix lands.
 test('a plan edit to a step that is still running can be approved (charlie-ps/wrangler-squared#112)', { todo: '#112: approve-replan is refused while the edited step runs' }, async (t) => {
@@ -346,7 +383,7 @@ test('a plan edit to a step that is still running can be approved (charlie-ps/wr
   assert.equal(f.sub('api').brief, 'Implement api and log each request', 'the edit reaches the step, queued or by interrupting it');
 });
 
-test('a plan change that makes a red step wait on new work clears its red status (charlie-ps/wrangler-squared#165)', { todo: '#165: the blocked status stays until Retry' }, async (t) => {
+test('a plan change that makes a red step wait on new work clears its red status (charlie-ps/wrangler-squared#165)', async (t) => {
   const f = board(t);
   await f.start({ subJobs: [pr('api', [], { repo: f.repo })] }, { reviewCode: false, reviewMerge: false });
   await f.report(f.runOf('api', 'implementation'), { kind: 'blocked', summary: 'The schema migration has to land first' });

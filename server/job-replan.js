@@ -213,6 +213,12 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
     // The rework launches once the new prerequisites have landed (job-runner.js).
     if (hasCode(sub) && fields.some((k) => REWORKS.includes(k))) {
       lines.push({ sub, detail: reworkSub(job, sub, `${job.replan.feedback}\n\nNew brief: ${spec.brief}`, now) });
+    } else if (sub.error && !isWriteSub(sub) && fields.some((k) => REWORKS.includes(k))) {
+      // A step that went red before writing any code starts over on its new
+      // brief, once its new prerequisites land, as Retry would send it.
+      sub.error = null; sub.blocked = null; sub.state = 'queued';
+      if (sub.red) sub.red = { ...sub.red, held: null, declared: null };
+      lines.push({ sub, detail: `Sent ${quoted(sub.title)} back to wait for its new brief` });
     }
   }
   // Installed first: a story's create dropped here unlinks the story on it.
