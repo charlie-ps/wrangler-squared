@@ -1297,7 +1297,13 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       // Its writes hang under it in the graph; here each opens its own dialog,
       // which is where a draft is approved.
       const owned = job.subJobs.filter((w) => isWriteSub(w) && w.by === sub.id);
-      const writes = owned.length ? `<h3>Writes</h3><div class="job-chips">${owned.map((w) => `<button type="button" class="job-chip tone-${STATES[subState(job, w)].tone}" data-open-sub="${esc(w.id)}" title="${esc(jobStatus(job, w).text)}">${PLACES[placeOf(w)].icon}<span>${esc(w.title)}</span></button>`).join('')}</div>` : '';
+      // A made write with a link also opens where it is, beside the chip's own dialog.
+      const writeChip = (w) => {
+        const tone = `tone-${STATES[subState(job, w)].tone}`, href = webUrl(w.result?.url);
+        const open = `<button type="button" ${href ? '' : `class="job-chip ${tone}" `}data-open-sub="${esc(w.id)}" title="${esc(jobStatus(job, w).text)}">${PLACES[placeOf(w)].icon}<span>${esc(w.title)}</span></button>`;
+        return href ? `<span class="job-chip job-chip-go ${tone}">${open}<a class="job-place-go" href="${esc(href)}" target="_blank" rel="noopener" title="Open ${esc(w.result.title || w.title)} in a new tab">↗</a></span>` : open;
+      };
+      const writes = owned.length ? `<h3>Writes</h3><div class="job-chips">${owned.map(writeChip).join('')}</div>` : '';
       body = `${sub.feedback && !sub.result ? `<h3>Requested changes</h3><p>${esc(sub.feedback)}</p>` : ''}${sub.result ? `<h3>Reported</h3>${receiptHtml(sub.result.checks)}` : ''}${writes}${noteFor(sub)}${approvalNoteFor(sub)}`;
       actions = `${sub.stage === 'review' && !sub.error && !held ? approveSplitHtml('approve-session', hints.find((h) => h.startsWith('Approving')) || '', 'Approve', noteReaders(job, sub).length ? 'later' : null) : ''}${session}${retry}`;
     } else if (isHumanSub(sub)) {

@@ -432,6 +432,10 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-chip>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .job-chip .icon { font-size:14px; color:var(--fg-muted); }
 .job-chip-quiet { color:var(--fg-muted); }
+.job-chip-go { padding:0 9px 0 0; }
+.job-chip-go>button { display:inline-flex; align-items:center; gap:6px; min-width:0; padding:5px 4px 5px 10px; border:0; border-radius:8px 0 0 8px; background:none; color:inherit; font:inherit; cursor:pointer; }
+.job-chip-go>button>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.job-chip-go>button:focus-visible { outline:2px solid var(--blue); outline-offset:1px; }
 .job-chip-state { background:var(--cb); border-color:transparent; color:var(--c-fg); }
 .job-chip-state .icon { color:inherit; }
 .job-chip-state .icon:last-child { opacity:.6; font-size:12px; }

@@ -2029,6 +2029,22 @@ test('plan review adds a place under a session and picks its type: a Slack post 
     ['report-write-2', { type: 'artifact' }, { type: 'make', what: 'p95 chart' }, undefined, 'report', 'Make p95 chart']]);
 });
 
+test('a session\'s made write with a link opens it in a new tab beside the chip, which still opens the write', (t) => {
+  const f = fixture(t);
+  placesJob(f, { chart: { stage: 'done', state: 'done', result: { outcome: 'written', url: 'https://claude.ai/artifact/abc', title: 'p95 chart' } }, k6: { stage: 'done', state: 'done', result: { outcome: 'written', url: '/tmp/k6.html' } } });
+  f.q('[data-board="job1"] .job-plate-open').click(); f.q('[data-open-sub="report"]').click();
+  assert.deepEqual([...document.querySelectorAll('.job-chips [data-open-sub]')].map((b) => b.dataset.openSub), ['chart', 'k6']);
+  const go = f.q('[data-open-sub="chart"]').closest('.job-chip').querySelector('a.job-place-go');
+  assert.deepEqual([go.getAttribute('href'), go.target, go.rel, go.textContent], ['https://claude.ai/artifact/abc', '_blank', 'noopener', '↗']);
+  assert.equal(go.closest('button'), null, 'a link never sits inside the button');
+  assert.equal(f.q('[data-open-sub="k6"]').closest('.job-chips').querySelectorAll('a').length, 1, 'a file path is no link');
+  f.q('[data-open-sub="chart"]').click();
+  assert.equal(f.q('.job-appbar h2').textContent, 'Make p95 <i>chart</i>', 'the chip body opens the write');
+  f.q('[data-open-job]').click(); f.q('[data-open-sub="announce"]').click();
+  assert.equal(f.q('.job-chips [data-open-sub="post"]').classList.contains('job-chip'), true, 'a write not yet made is the plain chip');
+  assert.equal(f.q('.job-chips a.job-place-go'), null, 'with no link');
+});
+
 test('a Slack post in review asks to Post to Slack, with only its edited fields', (t) => {
   const f = fixture(t);
   placesJob(f, { k6: { state: 'failed', error: 'k6 was not installed' } });
