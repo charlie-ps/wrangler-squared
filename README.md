@@ -30,9 +30,8 @@ Claude jobs ignore it because Claude has no OS sandbox. A job saved before this
 existed stays locked.
 
 When a Job is created it can stay Unassigned, use an active Task, or create a
-new Task. A new Task from the New idea form starts under the Job's first line and is renamed when
-Haiku suggests a short name from the description that no other Task has
-(suffixed if one still clashes). Every agent session launched for that Job uses the same Task and its
+new Task. A new Task from the New idea form starts under the Job's first line and is renamed to
+the Job's generated title when it arrives (suffixed if another Task already has that name). Every agent session launched for that Job uses the same Task and its
 shared memory. Archiving that Task stops its active sessions; restore it before
 retrying the Job so later sessions do not lose the Task context.
 
