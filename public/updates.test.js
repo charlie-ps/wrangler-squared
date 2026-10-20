@@ -94,6 +94,7 @@ test('a reader behind on several releases steps through each unseen one, oldest 
   assert.match(p.q('.update-date').textContent, /September 2026/);
   assert.ok(p.q('[data-update="back"]').hidden);
   assert.match(p.q('[data-update="next"]').textContent, /Next/);
+  assert.deepEqual([...p.q('.job-actions').children].map((b) => b.dataset.update), ['back', 'next'], 'Back then Next, as in the intro');
   assert.ok(p.q('.update-panel .intro-figure'), 'a figure sits above the title when the update has one');
   assert.equal(p.q('.job-actions').textContent.includes('Learn more'), false);
   p.click('[data-update="next"]');

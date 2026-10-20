@@ -825,9 +825,11 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .jobs-intro h2 { font-size:32px; line-height:1.2; letter-spacing:-.01em; }
 .jobs-intro p { font-size:16px; line-height:1.6; margin:14px 0 0; max-width:62ch; }
 .jobs-intro p b { color:var(--fg); font-weight:500; }
-.jobs-intro .job-actions { margin-top:32px; }
+/* Skip on the left, Back then Next on the right, in DOM order too so Tab follows what is seen. */
+.jobs-intro .job-actions { justify-content:flex-end; margin-top:32px; }
 .jobs-intro .job-actions button { font-size:15px; }
-.jobs-intro .job-actions button.primary { padding:16px 24px; }
+.jobs-intro .job-actions button.primary { order:0; padding:16px 24px; margin:0; }
+.jobs-intro .job-actions [data-intro="skip"] { margin-right:auto; }
 .jobs-intro .job-actions button[hidden] { display:none; }
 .intro-figure { display:flex; flex-direction:column; gap:14px; padding:24px; background:var(--bg); border:1px solid var(--border-muted); border-radius:24px; font-size:15px; }
 .intro-figure .job-chips { margin:0; }
@@ -1179,9 +1181,9 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .update-body b { color:var(--fg); font-weight:500; }
 .update-body .intro-done li { align-items:flex-start; line-height:1.5; }
 .update-body .intro-done li>.icon { margin-top:.2em; }
-.jobs-update .job-actions { margin-top:28px; }
+.jobs-update .job-actions { justify-content:flex-end; margin-top:28px; }
 .jobs-update .job-actions button { font-size:15px; }
-.jobs-update .job-actions button.primary { padding:16px 24px; }
+.jobs-update .job-actions button.primary { order:0; padding:16px 24px; margin:0; }
 .jobs-update .job-actions button[hidden] { display:none; }
 .update-section { margin-top:22px; padding-top:4px; border-top:1px solid var(--border-muted); }
 .update-list { list-style:none; margin:0; padding:0; display:grid; gap:2px; }

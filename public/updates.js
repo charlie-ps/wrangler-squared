@@ -373,7 +373,7 @@ export function createUpdates({ storage, updates = UPDATES }) {
     dialog.innerHTML = `<button class="job-dialog-close" aria-label="Close" title="Close">${ICONS.x}</button>
       <div class="update-appbar"><span class="jobs-kicker">${W2} · WHAT’S NEW</span><time class="update-date"></time><span class="intro-count"></span></div>
       <div class="update-panel"></div>
-      <div class="job-actions"><button class="primary" data-update="next"></button><button data-update="back">${ICONS.back}Back</button></div>`;
+      <div class="job-actions"><button data-update="back">${ICONS.back}Back</button><button class="primary" data-update="next"></button></div>`;
     document.body.appendChild(dialog);
     const go = (i) => { at = Math.max(0, Math.min(queue.length - 1, i)); phase = queue[at].anim && still() ? queue[at].anim.still ?? 0 : 0; render(); };
     dialog.querySelector('.job-dialog-close').onclick = () => dialog.close();

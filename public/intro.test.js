@@ -37,6 +37,19 @@ test('opens by itself for a reader who has not seen it, and every way out record
   assert.equal(storage.get(SEEN_KEY), '1', 'Escape marks it seen too');
 });
 
+test('the button row reads Skip intro, Back, Next from the left, so the primary is the rightmost', (t) => {
+  const p = page(t);
+  createIntro({ storage: memoryStorage() }).open();
+  const order = () => [...document.querySelectorAll('.jobs-intro .job-actions button')].filter((b) => !b.hidden).map((b) => b.dataset.intro);
+  assert.deepEqual(order(), ['skip', 'next'], 'the first step has no Back');
+  p.click('[data-intro="next"]');
+  assert.deepEqual(order(), ['skip', 'back', 'next']);
+  assert.ok(p.q('.jobs-intro .job-actions button:last-child').classList.contains('primary'));
+  p.click(`[data-go="${INTRO_STEPS.length - 1}"]`);
+  assert.deepEqual(order(), ['back', 'next'], 'the last step drops Skip');
+  assert.match(p.q('.jobs-intro .job-actions button:last-child').textContent, /New idea/);
+});
+
 test('a reader who has seen it is never shown it again, and with no storage it never opens by itself', (t) => {
   const p = page(t);
   createIntro({ storage: memoryStorage({ [SEEN_KEY]: '1' }) }).maybeShow();
