@@ -97,9 +97,9 @@ function fixture(t) {
   const get = () => store.get(job.id);
   return { store, runner, job, launched, mailed, interrupted, alive, usd, tick, get,
     setWorking: (...ids) => { working = new Set(ids); },
-    async active() {
+    async active(p = plan) {
       store.action(job.id, 'start'); await tick();
-      store.report(launched.at(-1).sid, launched.at(-1).run.id, { kind: 'plan', plan }); await tick();
+      store.report(launched.at(-1).sid, launched.at(-1).run.id, { kind: 'plan', plan: p }); await tick();
       store.approvePlan(job.id, get().revision); await tick();
     } };
 }
@@ -194,13 +194,13 @@ test('a new X in Settings re-evaluates every job in flight: lower pauses one alr
 
 test('a budget-paused job starts no helper, and cancelling it clears the budget pause', async (t) => {
   const f = fixture(t);
-  await f.active();
+  await f.active({ ...plan, subJobs: [...plan.subJobs, { id: 'sign', kind: 'human', title: 'Sign the form', after: [], brief: 'Sign it' }] });
   f.usd.set(f.launched.at(-1).sid, 9);
   f.store.settings({ spendLimit: 1 });
   await f.tick();
   let spawned = 0;
   f.runner.runtime.spawnHelper = async () => { spawned++; return 'helper'; };
-  f.store.action(f.job.id, 'ask-helper', { subJobId: f.get().subJobs[0].id });
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'sign' });
   await f.tick();
   assert.equal(spawned, 0);
   assert.throws(() => f.store.action(f.job.id, 'top-up', { topUps: 5 }));
