@@ -17,7 +17,7 @@ import { limitStep, limitOf } from './job-budget.js';
 import { changeView } from './job-actions.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan, requestReplan } from './job-replan.js';
-import { answerAsk, answerReplan, askToReplan, askFailed, replanFailed, convoById, migrateTalk } from './job-talk.js';
+import { answerAsk, answerReplan, askToReplan, askFailed, replanFailed, convoById, migrateTalk, dismissConvo } from './job-talk.js';
 import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
@@ -328,6 +328,11 @@ export class JobStore {
       if (action === 'request-change') {
         const { detail } = requestChange(j, s, { ...payload, from: null }, { now: Date.now() });
         record(j, s, 'request-change', payload.text, detail);
+        return;
+      }
+      if (action === 'dismiss-convo') {
+        dismissConvo(j, payload.convo, Date.now());
+        record(j, s, 'dismiss-convo', null, 'Dismissed a conversation with the wrangler');
         return;
       }
       // The preview the agent left running (job-running.js): Stop owes its teardown

@@ -3538,3 +3538,30 @@ test('a question the wrangler could not answer is said in the conversation; the 
   assert.deepEqual(talk(f).at(-1).slice(1, 3), ['error', 'Could not answer: No access to the repo']);
   assert.equal(f.store.get(f.job.id).error, null);
 });
+
+test('dismiss-convo hides a conversation for good, never one whose wrangler is answering or has a plan change in it', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'What is left?');
+  const id = f.store.get(f.job.id).convos[0].id;
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'queued');
+  await f.tick();
+  const asker = plannerOf(f);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'answering');
+  f.report({ kind: 'reply', text: 'Only web.' }, asker);
+  await f.tick();
+  change(f, null, 'Add a CLI after web', id);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /plan change in progress/, 'a change being drawn');
+  await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli')]) }, plannerOf(f));
+  assert.ok(f.store.get(f.job.id).replan.proposal);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /plan change in progress/, 'a proposal waiting');
+  f.store.action(f.job.id, 'discard-replan');
+  await f.tick();
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  const job = f.store.get(f.job.id);
+  assert.equal(typeof job.convos[0].dismissedAt, 'number', 'kept on the job, so a reload still hides it');
+  assert.equal(job.moves.at(-1).move, 'dismiss-convo');
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /already gone/);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: 'convo_nope' }), /already gone/);
+  assert.throws(() => change(f, null, 'One more thing', id), /has gone/, 'nothing more is said in it');
+});

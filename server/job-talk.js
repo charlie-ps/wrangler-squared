@@ -65,6 +65,17 @@ export function escalate(convo, now) {
   if (convo?.sub && !convo.escalatedAt) convo.escalatedAt = now;
 }
 
+// The human's × on a conversation: hidden from every view for good. Never one
+// still at work: its wrangler answering, or a plan change drawn or waiting in it.
+export function dismissConvo(job, id, now) {
+  const convo = convoById(job, id);
+  if (!convo || convo.dismissedAt) throw new Error('That conversation is already gone');
+  if (convo.pending || convoRun(job, convo)) throw new Error('The wrangler is still answering in that conversation');
+  if (job.replan && job.replan.convo === convo.id) throw new Error('That conversation has a plan change in progress. Approve or discard it first.');
+  convo.dismissedAt = now;
+  return convo;
+}
+
 // The answer lands in the thread and ends the run. Anything the human said that
 // never reached it starts the conversation's next run.
 export function answerAsk(job, run, report, now) {

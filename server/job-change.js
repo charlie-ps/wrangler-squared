@@ -42,7 +42,7 @@ export function requestChange(job, sub, { at, ref, text, attachments, from, conv
     return { detail: 'Asked the wrangler to redraw the plan', route: 'planner' };
   }
   const target = convoById(job, convoId);
-  if (convoId && !target) throw new Error('That conversation has gone. Start a new one.');
+  if (convoId && (!target || target.dismissedAt)) throw new Error('That conversation has gone. Start a new one.');
   // Kept beside the round they were typed on (a code review), a step's pictures can
   // go on into its session's thread when the planner forwards the idea there.
   const source = sub ? { sub: sub.id, at: view.at, ref: view.ref } : null;

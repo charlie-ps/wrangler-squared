@@ -1695,6 +1695,73 @@ test('several conversations at once: one section each, both answering, each with
   assert.deepEqual(convos().map((c) => c.dataset.convo), ['c2'], 'a step shows only what was said on it');
 });
 
+test('an idle conversation folds to its question and the start of the reply; the live and the last-asked stay open; a click toggles and the choice survives a tick', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is <left>?', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Only web.\n\nAnd docs, later.', convo: 'c1' },
+    { id: 't3', at: 3, from: 'human', text: 'Fine', convo: 'c1' }, { id: 't4', at: 4, from: 'wrangler', kind: 'answer', text: 'Noted.', convo: 'c1' },
+    { id: 't5', at: 5, from: 'human', text: 'Is api deployed?', convo: 'c2' }, { id: 't6', at: 6, from: 'wrangler', kind: 'answer', text: 'Not yet.', convo: 'c2' },
+    { id: 't7', at: 7, from: 'human', text: 'Why slow?', convo: 'c3' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }, { id: 'c2', at: 5, pending: null }, { id: 'c3', at: 7, pending: { at: 7, asks: [{ messageId: 't7', feedback: 'x', sentAt: 7 }] } }];
+  job.runs = [{ id: 'a3', subJobId: null, phase: 'planning', stopped: false, ask: 't7', convo: 'c3' }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const convo = (id) => f.q(`#job-dialog [data-convo="${id}"]`);
+  const folded = () => ['c1', 'c2', 'c3'].filter((id) => convo(id).classList.contains('is-folded'));
+  assert.deepEqual(folded(), ['c1', 'c2'], 'the one answering stays open; the others fold');
+  const strip = convo('c1').querySelector('.job-talk-strip');
+  assert.equal(strip.querySelector('.job-sent-bubble').innerHTML, '<span>What is &lt;left&gt;?</span>', 'its first question, escaped');
+  assert.equal(strip.querySelector('.job-talk-clip').textContent, 'Noted.', 'and the start of the latest reply');
+  assert.equal(strip.querySelectorAll('[data-talk]').length, 2);
+  assert.equal(convo('c1').querySelector('.job-change'), null, 'no box while folded');
+  assert.match(convo('c1').querySelector('.job-talk-convo-head').textContent, /4 messages/);
+  assert.equal(convo('c3').querySelector('[data-convo-dismiss]'), null, 'no × while it is answering');
+  assert.ok(convo('c3').querySelector('.job-change'));
+
+  job.talk.push({ id: 't8', at: 8, from: 'wrangler', kind: 'answer', text: 'A slow suite.', convo: 'c3' });
+  job.convos[2].pending = null; job.runs = [];
+  f.view.update(f.data);
+  assert.deepEqual(folded(), ['c1', 'c2'], 'answered, it stays open: the human asked in it last');
+
+  convo('c1').querySelector('.job-talk-strip').click();
+  assert.deepEqual(folded(), ['c2'], 'a click on the strip unfolds it');
+  assert.equal(convo('c1').querySelectorAll('[data-talk]').length, 4);
+  assert.equal(convo('c1').querySelector('.job-talk-fold').getAttribute('aria-expanded'), 'true');
+  convo('c3').querySelector('.job-talk-convo-head').click();
+  assert.deepEqual(folded(), ['c2', 'c3'], 'a click on its header folds it');
+  f.view.update(f.data);
+  assert.deepEqual(folded(), ['c2', 'c3'], 'the choice survives a tick');
+  const text = convo('c1').querySelector('.job-change textarea'); text.value = 'And tests?'; text.dispatchEvent(f.event('input')); convo('c1').querySelector('[data-change-send]').click();
+  job.talk.push({ id: 't9', at: 9, from: 'human', text: 'And tests?', convo: 'c1' });
+  f.view.update(f.data);
+  assert.deepEqual(folded(), ['c2', 'c3'], 'just asked in, it is open');
+});
+
+test('× dismisses an idle conversation through dismiss-convo, and one dismissed is drawn nowhere', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Only web.', convo: 'c1' },
+    { id: 't3', at: 3, from: 'human', text: 'Add a CLI', convo: 'c2' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }, { id: 'c2', at: 3, pending: null }];
+  job.replan = { feedback: 'Add a CLI', at: 3, proposal: null, previous: null, convo: 'c2' };
+  job.runs = [{ id: 'plan2', subJobId: null, phase: 'planning', stopped: false }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const convo = (id) => f.q(`#job-dialog [data-convo="${id}"]`);
+  assert.equal(convo('c2').querySelector('[data-convo-dismiss]'), null, 'never while a change is drawn in it');
+  assert.equal(convo('c2').classList.contains('is-folded'), false);
+  convo('c1').querySelector('[data-convo-dismiss]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'dismiss-convo', convo: 'c1' });
+  assert.equal(convo('c1').classList.contains('is-folded'), true, 'the × does not toggle it');
+  f.view.created({ event: 'job-action-complete', jobId: 'job1', action: 'dismiss-convo' });
+  assert.equal(f.q('#job-dialog').open, true, 'the dialog stays');
+  job.convos[0].dismissedAt = 4;
+  f.view.update(f.data);
+  assert.equal(convo('c1'), null, 'gone');
+  assert.deepEqual([...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo')].map((c) => c.dataset.convo), ['c2']);
+  assert.match(f.q('#job-dialog .job-talk-head').textContent, /^Conversation with/);
+});
+
 test('a question asked on a step stays on that step until the wrangler escalates it, then the job lists it too', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
