@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import client from './index.js';
+import { markdownHtml, useMarkdownRenderer } from './markdown.js';
 
 // The client module the wrangler imports from /ext/jobs/index.js, mounted the
 // way public/slots.js mounts a `view` contribution: the registrar bound to this
@@ -27,7 +28,7 @@ function mountClient() {
   const el = window.document.createElement('div');
   host.appendChild(el);
   const c = contributions[0];
-  c.mount(el, { send: (f) => sent.push(f), openSession: (sid) => opened.push(sid), openDiff: (sid, opts) => diffs.push({ sid, ...opts }), selectedSessionId: () => board.selected, requestPanelRender: () => {}, agents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'opus', label: 'Opus 5.5', default: true }], efforts: [{ value: 'high', label: 'High' }] }], storage: null, version: '1.27.0' });
+  c.mount(el, { send: (f) => sent.push(f), openSession: (sid) => opened.push(sid), openDiff: (sid, opts) => diffs.push({ sid, ...opts }), selectedSessionId: () => board.selected, requestPanelRender: () => {}, agents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'opus', label: 'Opus 5.5', default: true }], efforts: [{ value: 'high', label: 'High' }] }], ui: { markdownPreview: (md) => `<p data-board-md>${md}</p>` }, storage: null, version: '1.27.0' });
   const dispatch = (frame) => { for (const fn of [...listeners]) fn({ type: 'ext:jobs', ...frame }); };
   return { window, el, c, sent, opened, diffs, board, contributions, dispatch, listeners };
 }
@@ -40,6 +41,12 @@ const activeJob = (subOver = {}) => {
   const s = sub(subOver);
   return job({ stage: 'active', plan: { context: '', stories: [{ id: 'story', key: 'AUTH-1', title: 'Sign in' }], subJobs: [s] }, subJobs: [s] });
 };
+
+test('mounting hands the threads the board\'s Markdown renderer', (t) => {
+  t.after(() => useMarkdownRenderer(null));
+  mountClient();
+  assert.equal(markdownHtml('**x**'), '<p data-board-md>**x**</p>');
+});
 
 const toastText = (el) => el.querySelector('.jobs-toast')?.textContent ?? null;
 

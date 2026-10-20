@@ -5,6 +5,7 @@ import { createIntro } from './intro.js';
 import { createUpdates } from './updates.js';
 import { ICONS } from './icons.js';
 import { closeOnBackdrop } from './dialog-backdrop.js';
+import { useMarkdownRenderer } from './markdown.js';
 
 // The client half: one `view` slot contribution (agent-wrangler public/slots.js),
 // which the board draws a rail button, a `#view=ext:jobs:board` route and a
@@ -26,6 +27,8 @@ import { closeOnBackdrop } from './dialog-backdrop.js';
 //    the same diff-return.js decision core's app.js did (reviewDiff below).
 //  - `getAgents()` read the board's connect-time `agents` list → `api.agents()`
 //    (host api 1.25), the same live-catalog list, read each time New job opens.
+//  - the threads render an agent's Markdown with the chat view's renderer,
+//    `api.ui.markdownPreview` (host api 1.17), styled by the board's `.chat-prose`.
 
 const TOAST_MS = 3000;
 // A failure is read, not glanced at: it stays until closed or this long.
@@ -179,6 +182,7 @@ export default {
         // view is active.
         el.innerHTML = '<section id="jobs" aria-label="Wrangler²"></section>';
         viewHost = el;
+        useMarkdownRenderer(api.ui?.markdownPreview);
         dialog = document.createElement('dialog');
         dialog.id = 'job-dialog';
         dialog.className = 'job-dialog';

@@ -4,6 +4,7 @@ import { Window } from 'happy-dom';
 import { initJobsView, isChatSendKey, isPrimaryActionKey, primaryAction } from './jobs-view.js';
 import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
+import { useMarkdownRenderer } from './markdown.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml, plateAsk } from './job-plates.js';
 import { subState, subLabel, subLine, jobState, jobLabel } from './job-state.js';
@@ -3207,6 +3208,25 @@ test('a forward reads as the quote the session will be told, pinned to its round
   assert.match(html, /<span class="job-msg-via">via the planner<\/span>/);
   assert.match(html, /Not enough &lt;b&gt;spacing&lt;\/b&gt;/, 'the words are escaped');
   assert.doesNotMatch(threadHtml(job, { ...sub, thread: [{ ...sub.thread[0], via: undefined }] }), /job-msg-via/);
+});
+
+test('the session\'s Markdown goes through the board\'s renderer, styled as board prose', (t) => {
+  useMarkdownRenderer((md) => `<rendered>${md}</rendered>`);
+  t.after(() => useMarkdownRenderer(null));
+  const job = { id: 'job1', runs: [{ id: 'run_1', subJobId: 'api', stopped: false, parkedFor: 'ready', sessionId: 's1' }] };
+  const sub = { id: 'api', ready: { round: 1 }, thread: [{ id: 'm1', at: 1, from: 'agent', text: '**Fixed**', round: 1 }] };
+  assert.match(threadHtml(job, sub), /<div class="job-msg-text chat-prose"><rendered>\*\*Fixed\*\*<\/rendered><\/div>/);
+});
+
+test('what the human typed is shown exactly as typed, never as Markdown', (t) => {
+  useMarkdownRenderer((md) => `<rendered>${md}</rendered>`);
+  t.after(() => useMarkdownRenderer(null));
+  const job = { id: 'job1', runs: [{ id: 'run_1', subJobId: 'api', stopped: false, parkedFor: 'ready', sessionId: 's1' }] };
+  const text = 'Search for *test* files.\nLeave C:\\foo\\_scratch <alone>.';
+  const sub = { id: 'api', ready: { round: 1 }, thread: [{ id: 'm1', at: 1, from: 'human', text, round: 1 }, { id: 'm2', at: 2, from: 'system', text: '**Round 2**', round: 2 }] };
+  const html = threadHtml(job, sub);
+  assert.doesNotMatch(html, /<rendered>/);
+  assert.match(html, /<p class="job-msg-text">Search for \*test\* files\.\nLeave C:\\foo\\_scratch &lt;alone&gt;\.<\/p>/);
 });
 
 test('a tick that changes nothing leaves the board and detail DOM alone, and a selection holds a changed one until cleared', (t) => {
