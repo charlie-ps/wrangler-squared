@@ -777,7 +777,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const unfinished = job.subJobs.filter((s) => !['cleanup', 'done'].includes(s.stage)).length;
     const prs = job.subJobs.filter((s) => s.pr && s.stage === 'pr');
     const counts = job.stage === 'active' ? [`Drops ${unfinished} sub-job${unfinished === 1 ? '' : 's'}`, ...(prs.length ? [prs.length === 1 ? `PR #${prNumber(prs[0])} stays open on GitHub` : `${prs.length} PRs stay open on GitHub`] : []), 'Worktrees with unsaved work are kept'] : [live ? 'Stops planning' : 'Planning never starts'];
-    show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Cancel this job?</h2><form id="job-cancel-form"><ul class="job-cancel-counts">${counts.map((c) => `<li>${esc(c)}</li>`).join('')}</ul><div class="job-actions"><button type="button" class="danger" data-cancel-job="1">Cancel job</button><button type="button" id="job-move-back">Keep working</button></div></form>`);
+    const noun = inConversation(job) ? 'idea' : 'job';
+    show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Cancel this ${noun}?</h2><form id="job-cancel-form"><ul class="job-cancel-counts">${counts.map((c) => `<li>${esc(c)}</li>`).join('')}</ul><div class="job-actions"><button type="button" class="danger" data-cancel-job="1">Cancel ${noun}</button><button type="button" id="job-move-back">Keep working</button></div></form>`);
     dialog.querySelector('[data-cancel-job]').onclick = (e) => { if (pressBusy(e.currentTarget)) send({ type: 'job-action', id: job.id, action: 'cancel-job' }); };
     dialog.querySelector('#job-move-back').onclick = () => back();
   }
