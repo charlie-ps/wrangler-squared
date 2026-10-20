@@ -1,5 +1,6 @@
 import { jobInputSchema, line } from './jobs-schema.js';
-import { generateTitle } from './job-title.js';
+import { generateTitle, fallbackTitle } from './job-title.js';
+import { generateTaskName, uniqueTaskName } from './task-name.js';
 import { runHeadlessClaude } from './headless-claude.js';
 import { runnerFor } from './jobs.js';
 
@@ -16,21 +17,39 @@ export const kick = (host) => runnerFor(host).tick();
 // The form sends only a description, so the job is created under a fallback
 // title and Haiku's replaces it after the fact: naming never delays or fails a
 // create. Its spend is billed to the planning card when one is already up.
+// A `newTask` the form asks for is named the same way: created under the job's
+// fallback title, renamed once Haiku suggests a name no other task has.
 export function makeCreateJob({ run = runHeadlessClaude } = {}) {
+  const bill = (job, host, liveSessionId) => {
+    const sid = host.stores.jobs.get(job.id)?.runs.findLast((r) => r.sessionId)?.sessionId;
+    if (sid && liveSessionId) host.sessions.bill(sid, liveSessionId);
+  };
   const retitle = async (job, host) => {
     const { title, liveSessionId } = await generateTitle(job.intent, { run });
     const swapped = host.stores.jobs.retitle(job.id, job.title, title);
     await host.rebuild();
-    const sid = swapped && host.stores.jobs.get(job.id)?.runs.findLast((r) => r.sessionId)?.sessionId;
-    if (sid && liveSessionId) host.sessions.bill(sid, liveSessionId);
+    if (swapped) bill(job, host, liveSessionId);
+  };
+  // Renames only the name it was created under: a human's rename meanwhile wins.
+  // The clash check is redone after the run, as tasks made meanwhile count too.
+  const nameTask = async (job, taskId, fallback, host) => {
+    const { name, liveSessionId } = await generateTaskName(job.intent, otherTaskNames(host, taskId), { run });
+    const renamed = Boolean(name) && host.tasks.get(taskId)?.name === fallback
+      && host.tasks.rename(taskId, uniqueTaskName(name, otherTaskNames(host, taskId)));
+    if (renamed) await host.rebuild();
+    bill(job, host, liveSessionId);
   };
   // `idea`: made from New idea, so planning may talk it through first (job-idea.js).
   // Only the board's form sets it; an agent's create_job plans straight away.
-  return async (host, { job: raw, newTaskName, start, idea = false }) => {
+  return async (host, { job: raw, newTaskName, newTask = false, start, idea = false }) => {
     const input = jobInputSchema.parse(raw);
     let taskId = input.taskId;
-    if (newTaskName !== undefined) {
-      if (taskId) throw new Error('Choose an existing task or create a new one, not both');
+    let unnamed = null;
+    if ((newTaskName !== undefined || newTask === true) && taskId) throw new Error('Choose an existing task or create a new one, not both');
+    if (newTaskName === undefined && newTask === true) {
+      unnamed = uniqueTaskName(input.title || fallbackTitle(input.intent), otherTaskNames(host));
+      taskId = host.tasks.create({ name: unnamed }).id;
+    } else if (newTaskName !== undefined) {
       if (typeof newTaskName !== 'string') throw new Error('Enter a task name of up to 180 characters on one line');
       const name = newTaskName.trim();
       if (!name) throw new Error('Enter a name for the new task');
@@ -53,6 +72,9 @@ export function makeCreateJob({ run = runHeadlessClaude } = {}) {
     await host.rebuild();
     if (start) kick(host).catch((e) => host.log('job-create tick failed', e));
     if (!raw?.title) retitle(job, host).catch((e) => host.log('job title generation failed', e));
+    if (unnamed) nameTask(job, taskId, unnamed, host).catch((e) => host.log('task name generation failed', e));
     return job;
   };
 }
+
+const otherTaskNames = (host, except) => host.tasks.list().filter((t) => !t.archived && t.taskId !== except).map((t) => t.name);

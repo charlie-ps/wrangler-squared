@@ -42,6 +42,13 @@ export function fakeHost() {
         const task = tasks.find((t) => t.id === id);
         return task ? { taskId: task.id, name: task.name, archived: Boolean(task.archivedAt), archivedAt: task.archivedAt ?? null, createdAt: task.createdAt ?? null } : null;
       },
+      list: () => tasks.map((t) => host.tasks.get(t.id)),
+      rename: (id, name) => {
+        const task = tasks.find((t) => t.id === id);
+        if (!task || !name.trim() || name.trim() === task.name) return false;
+        task.name = name.trim();
+        return true;
+      },
     },
     sessions: {
       spawn: async (opts) => {

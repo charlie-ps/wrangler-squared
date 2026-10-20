@@ -692,7 +692,7 @@ test('new idea is a brief beside a property sidebar, and the brief is the descri
   assert.equal(form.elements.repos, undefined); assert.equal(form.elements.planningPrompt, undefined);
   assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Sandbox', 'Images']);
   assert.deepEqual([...brief.querySelectorAll('legend')].map((l) => l.textContent), ['Review checkpoints']);
-  for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'shareImages']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
+  for (const name of ['taskId', 'agent', 'model', 'effort', 'shareImages']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
   for (const name of ['reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites', 'reviewRed']) assert.ok(brief.contains(form.querySelector(`[name="${name}"]`)), `${name} is a tile under the brief`);
   assert.ok(props.querySelector('#job-pick').querySelector('.pick-ticket') && props.querySelector('#job-pick .pick-meter'), 'the picker is a ticket with an effort meter in the sidebar');
   assert.deepEqual([...brief.querySelectorAll('.job-review')].map((r) => [r.querySelector('input').name, r.querySelector('.job-review-name').firstChild.textContent, form.elements[r.dataset.checkpoint].checked, r.querySelector('.job-review-name').title, r.querySelector('small')]),

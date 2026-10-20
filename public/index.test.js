@@ -80,17 +80,15 @@ test('the new-job form selects an active task or reveals a required new-task nam
     ['__new__', '＋ New task'],
   ]);
   assert.equal(form.elements.taskId.value, '');
-  assert.equal(form.elements.newTaskName.hidden, true);
   form.elements.taskId.value = '__new__';
   form.elements.taskId.dispatchEvent(new window.Event('change', { bubbles: true }));
-  assert.equal(form.elements.newTaskName.hidden, false);
-  assert.equal(form.elements.newTaskName.required, true);
+  assert.equal(form.elements.newTaskName, undefined, 'the new task is named from the idea, not typed');
   form.elements.intent.value = 'Customers can access their accounts';
-  form.elements.newTaskName.value = 'Sign-in delivery';
   assert.equal(form.checkValidity(), true);
   form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   assert.equal(sent[0].job.taskId, null);
-  assert.equal(sent[0].newTaskName, 'Sign-in delivery');
+  assert.equal(sent[0].newTask, true);
+  assert.equal('newTaskName' in sent[0], false);
 
   el.querySelector('#job-new').dispatchEvent(new window.Event('click', { bubbles: true }));
   const existing = window.document.getElementById('job-create-form');
@@ -99,7 +97,7 @@ test('the new-job form selects an active task or reveals a required new-task nam
   existing.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   const creates = sent.filter((m) => m.type === 'job-create');
   assert.equal(creates[1].job.taskId, 't_auth');
-  assert.equal('newTaskName' in creates[1], false);
+  assert.equal('newTask' in creates[1], false);
 });
 
 test('the rail badge counts every job that needs a human, whatever the view is drawing', () => {
