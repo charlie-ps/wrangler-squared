@@ -101,12 +101,28 @@ function contentPin(dir, files) {
   return { pinned, digest: h.digest('hex') };
 }
 
+// Two fetches into one checkout race for its remote-tracking refs, and the loser
+// fails ("cannot lock ref"), so every `git fetch` waits for the one before it in
+// the same checkout. Module-wide, since cleanup and main updates fetch too.
+const fetchQueues = new Map();
+export function queueFetches(run) {
+  return (bin, args, cwd) => {
+    if (bin !== 'git' || args[0] !== 'fetch') return run(bin, args, cwd);
+    const key = expandRepo(cwd || '.');
+    const mine = (fetchQueues.get(key) || Promise.resolve()).then(() => run(bin, args, cwd));
+    const tail = mine.catch(() => {});
+    fetchQueues.set(key, tail);
+    tail.then(() => { if (fetchQueues.get(key) === tail) fetchQueues.delete(key); });
+    return mine;
+  };
+}
+
 export class JobRuntime {
   // `statusOf(sessionId)` and `dormantOf(sessionId)` answer from the graph the
   // contributor last saw (server/jobs.js): core read `lastGraph` directly; the
   // projection `host.sessions.get()` carries neither (TODO(host-api sessions:read status)).
   constructor({ host, statusOf = () => null, dormantOf = () => false, now = Date.now }, run = runFile) {
-    Object.assign(this, { host, statusOf, dormantOf, now, run });
+    Object.assign(this, { host, statusOf, dormantOf, now, run: queueFetches(run) });
     this.pendingLaunch = null;
   }
 
