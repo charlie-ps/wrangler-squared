@@ -10,7 +10,7 @@ import { runningChipHtml, stoppedHtml } from './job-running.js';
 // words sit in a span, not a textarea, so a long example wraps instead of scrolling.
 export const composer = (to, placeholder, hint, text = '') => `<div class="job-change${text ? ' has-text is-open' : ''}">
   <div class="job-change-row"><span class="job-change-to"><i>${to[0]}</i>${to}</span><span class="job-change-text${text ? '' : ' ph'}">${text || placeholder}</span><span class="job-change-attach">${ICONS.image}</span><span class="job-change-go${text ? ' on' : ''}">${ICONS.send}</span></div>
-  <div class="job-change-foot"><span>${hint}</span><span>Paste or drop a screenshot</span><kbd>⌘↵ to send</kbd></div></div>`;
+  <div class="job-change-foot"><span>${hint}</span><span>Paste or drop a screenshot</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 
 // Two drawn screenshots: the Customers table with a filter applied, and the export open in a spreadsheet.
 const svgUrl = (s) => `data:image/svg+xml;utf8,${encodeURIComponent(s)}`;

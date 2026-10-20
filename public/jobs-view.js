@@ -336,6 +336,10 @@ const refusalHtml = (sub) => {
 // this dialog hangs off <body> outside every one of them, so the chord is matched
 // again here to the same rule: plain Cmd or Ctrl, inert once alt or shift is held.
 export const isPrimaryActionKey = (e) => (e.metaKey || e.ctrlKey) && e.key === 'Enter' && !e.altKey && !e.shiftKey;
+// A chat box sends on Enter, the chord included; Shift+Enter is a new line, and
+// an Enter that commits an IME composition is the composition's, not a send
+// (Safari reports that one after compositionend, as keyCode 229).
+export const isChatSendKey = (e) => e.key === 'Enter' && !e.altKey && !e.shiftKey && !e.isComposing && e.keyCode !== 229;
 // A dialog's primary action is either its form's primary button — fired through
 // requestSubmit so `required` and the submitter (New job's start/backlog pair)
 // behave exactly as the click does — or, on a detail, the lone primary
@@ -876,8 +880,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     return `${sent}<div class="job-change${open ? ' is-open' : ''}" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}" data-change-to="${esc(route.to)}">
       <ul class="job-change-tray" ${askImages.length ? '' : 'hidden'}>${askTrayHtml()}</ul>
       <p class="job-change-error" role="alert" ${askErrorText() ? '' : 'hidden'}>${esc(askErrorText())}</p>
-      <div class="job-change-row"><span class="job-change-to" title="Who hears it"><i>${esc(route.to[0])}</i>${esc(route.to)}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="Add idea for ${esc(route.to.toLowerCase())}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to.toLowerCase())}" title="Send (⌘↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
-      <div class="job-change-foot"><kbd>⌘↵</kbd></div></div>`;
+      <div class="job-change-row"><span class="job-change-to" title="Who hears it"><i>${esc(route.to[0])}</i>${esc(route.to)}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="Add idea for ${esc(route.to.toLowerCase())}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to.toLowerCase())}" title="Send (↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
+      <div class="job-change-foot"><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
   }
   // One control for reading the diff: Wrangler's own view, the desktop IDE in its menu.
   const reviewCodeHtml = (sub) => `<span class="job-split"><button id="job-diff" title="Review code in Wrangler">${ICONS.code}Review code</button>${sub.worktree?.path ? `<details class="job-split-more" data-keep="review-menu" ${openMore.has('review-menu') ? 'open' : ''}><summary aria-label="More ways to review code" title="More ways to review code">${ICONS.caret}</summary><div class="job-split-menu"><button id="job-ide" title="Review code in ${esc(ideApp())}">In ${esc(ideApp())}</button></div></details>` : ''}</span>`;
@@ -1379,7 +1383,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       renderDetail();
       dialog.querySelector('[data-idea-composer] textarea')?.focus();
     };
-    text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !isPrimaryActionKey(e)) { e.preventDefault(); sendReply(); } });
     go.onclick = sendReply;
     wireAskImages(box);
     hydrateStrips();
@@ -1766,10 +1769,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     dialog.querySelector('.update-section').onclick = (e) => { const b = e.target.closest('[data-update-id]'); if (b) { dialog.close(); updates.open(b.dataset.updateId); } };
   };
   dialog.addEventListener('keydown', (e) => {
-    if (!isPrimaryActionKey(e)) return;
-    // Request changes is not a form: the chord sent from its textarea is its Send.
+    // A chat box is not a form: Enter in its textarea, or the chord anywhere in
+    // it, is its Send. Plain Enter on its attach or Send button stays theirs.
     const box = e.target.closest?.('.job-change');
-    if (box) { e.preventDefault(); box.querySelector('[data-change-send],[data-idea-send]').click(); return; }
+    if (box && isChatSendKey(e) && (e.target.matches?.('textarea') || isPrimaryActionKey(e))) { e.preventDefault(); box.querySelector('[data-change-send],[data-idea-send]').click(); return; }
+    if (!isPrimaryActionKey(e)) return;
     const run = primaryAction(dialog);
     if (!run) return;
     e.preventDefault();

@@ -85,7 +85,7 @@ function tellFigure(phase) {
 // so the words wrap and show in full rather than scrolling in one row.
 const composer = (text) => `<div class="job-change has-text is-open">
   <div class="job-change-row"><span class="job-change-to"><i>T</i>This session</span><div class="wn-change-text">${text}</div><label class="job-change-attach">${ICONS.image}</label><button type="button" class="job-change-go" tabindex="-1">${ICONS.send}</button></div>
-  <div class="job-change-foot"><span>A question gets an answer. A change gets a new round.</span><span>Paste or drop a screenshot</span><kbd>⌘↵ to send</kbd></div></div>`;
+  <div class="job-change-foot"><span>A question gets an answer. A change gets a new round.</span><span>Paste or drop a screenshot</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 const thread = (msgs, state) => {
   const head = { waiting: [ICONS.terminal, 'Its session is waiting on your review', 'Paused · no slot · keeps its context'], answering: [ICONS.spin, 'Answering you', 'Working on what you sent'], stopped: [ICONS.terminal, 'Session stopped', 'Approved round 1'] }[state];
   const msg = ([from, text, at, att]) => `<div class="job-msg ${from} wn-fade"><span class="job-msg-who">${from === 'human' ? 'You' : 'Session'}</span><div><p>${text}<time>${at}</time></p>${att ? `<div class="job-msg-att"><span class="job-proof-thumb"><img alt="" src="${SHOTS[att]}"></span></div>` : ''}</div></div>`;
@@ -190,7 +190,7 @@ function ideaFigure(phase) {
   const f = IDEA[phase];
   const box = `<div class="job-change${f.text ? ' has-text is-open' : ''}">
     <div class="job-change-row"><span class="job-change-to"><i>M</i>Mock-up</span><div class="job-change-text${f.text ? '' : ' ph'}">${f.text || 'Add idea: a change, a question, new work…'}</div><label class="job-change-attach">${ICONS.image}</label><button type="button" class="job-change-go${f.go ? ' on' : ''}" tabindex="-1">${ICONS.send}</button></div>
-    <div class="job-change-foot"><span>The planner works out where it goes</span><span>Paste or drop a screenshot</span><kbd>⌘↵ to send</kbd></div></div>`;
+    <div class="job-change-foot"><span>The planner works out where it goes</span><span>Paste or drop a screenshot</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
   const route = f.route ? `<div class="wn-route wn-fade">${ICONS.sparkle}<span>Planner: <b>feedback on the mock-up</b>, so it goes back to the step that made it. The PR’s brief is unchanged.</span></div>` : '<div class="wn-route"></div>';
   return `<div class="wn-row2s" role="img" aria-label="You write that a published mock-up is too tall; the planner sends it back to the design step, which publishes it again while the PR waits">
       <div class="wn-stack">${node(f.d[0], 'sparkle', 'Mock-up the splash', f.d[1])}</div>

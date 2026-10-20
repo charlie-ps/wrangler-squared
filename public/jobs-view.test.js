@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { initJobsView, isPrimaryActionKey, primaryAction } from './jobs-view.js';
+import { initJobsView, isChatSendKey, isPrimaryActionKey, primaryAction } from './jobs-view.js';
 import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
@@ -85,7 +85,7 @@ test('code review is a stop before anything is committed: the card asks for a re
   const box = f.q('.job-change');
   assert.deepEqual([box.dataset.changeAt, box.dataset.changeRef], ['code', 'run_1'], 'the idea box is on the review itself, pinned to the receipt that was read');
   assert.equal(box.querySelector('textarea').placeholder, 'Add an idea about this step…');
-  assert.equal(box.querySelector('.job-change-to').textContent, 'PPlanner', 'one recipient'); assert.equal(box.querySelector('.job-change-foot').textContent, '⌘↵'); assert.equal(f.q('.job-moves'), null, 'no Moves menu');
+  assert.equal(box.querySelector('.job-change-to').textContent, 'PPlanner', 'one recipient'); assert.equal(box.querySelector('.job-change-foot').textContent, '↵ send · ⇧↵ new line'); assert.equal(f.q('.job-moves'), null, 'no Moves menu');
   job.runs = [{ id: 'run_1', subJobId: 'api', phase: 'implementation', stopped: false, parkedFor: 'ready' }]; f.view.update(f.data);
   const parked = f.q('.job-change');
   assert.deepEqual([parked.querySelector('.job-change-to').textContent, parked.querySelector('textarea').placeholder, parked.querySelector('[data-change-send]').getAttribute('aria-label')], ['PPlanner', 'Ask about it, or say what to change…', 'Send to planner'], 'its session is open, and the idea still goes to the planner');
@@ -1426,6 +1426,59 @@ test('the dialog chord is the board\u2019s: plain Cmd or Ctrl with Enter, and no
   assert.equal(isPrimaryActionKey({ key: 'Enter', ctrlKey: true, altKey: true }), false);
 });
 
+test('a chat box sends on Enter, the chord included, never on Shift+Enter or inside an IME composition', () => {
+  assert.equal(isChatSendKey({ key: 'Enter' }), true);
+  assert.equal(isChatSendKey({ key: 'Enter', metaKey: true }), true);
+  assert.equal(isChatSendKey({ key: 'Enter', ctrlKey: true }), true);
+  assert.equal(isChatSendKey({ key: 'Enter', shiftKey: true }), false, 'Shift+Enter is a new line');
+  assert.equal(isChatSendKey({ key: 'Enter', altKey: true }), false);
+  assert.equal(isChatSendKey({ key: 'Enter', isComposing: true }), false, 'the Enter that picks a kana is not a send');
+  assert.equal(isChatSendKey({ key: 'Enter', keyCode: 229 }), false, 'nor Safari\u2019s late report of it');
+  assert.equal(isChatSendKey({ key: 'a' }), false);
+});
+
+test('Enter in Request changes sends it; Shift+Enter, a composition or an empty box hold it back', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'h1', checkStatus: 'failing', checks: [] } }];
+  f.view.update(f.data);
+  f.q('.job-plate-graph [data-sub="api"]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('[data-change-send]').title, 'Send (↵)');
+  const text = f.q('.job-change textarea');
+  chord(f, text, { metaKey: false });
+  assert.equal(f.sent.length, 0, 'an empty box holds Enter back');
+  text.value = 'Pin the client to v3'; text.dispatchEvent(f.event('input'));
+  const newline = new f.window.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true });
+  text.dispatchEvent(newline);
+  assert.equal(newline.defaultPrevented, false, 'Shift+Enter is left to the textarea, a new line'); assert.equal(f.sent.length, 0);
+  chord(f, text, { metaKey: false, isComposing: true });
+  assert.equal(f.sent.length, 0, 'Enter inside an IME composition is the composition\u2019s');
+  chord(f, f.q('.job-change [data-change-send]'), { metaKey: false });
+  assert.equal(f.sent.length, 0, 'plain Enter on another control in the box is that control\u2019s');
+  chord(f, text, { metaKey: false });
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', at: 'pr', ref: 'h1', text: 'Pin the client to v3' });
+  assert.equal(f.sent.length, 1);
+});
+
+test('Enter in the job\u2019s Add idea box sends it to the planner', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued' }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const text = f.q('.job-change textarea'); text.value = 'Split web in two'; text.dispatchEvent(f.event('input'));
+  chord(f, text, { metaKey: false });
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', at: 'job', ref: 'job', text: 'Split web in two' });
+});
+
+test('in New idea, Enter is a new line in the Idea and only the chord submits', (t) => {
+  const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
+  form.elements.intent.value = 'Customers can access their accounts';
+  const enter = new f.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  form.elements.intent.dispatchEvent(enter);
+  assert.equal(enter.defaultPrevented, false, 'left to the textarea, a new line'); assert.equal(f.sent.length, 0);
+  chord(f, form.elements.intent);
+  assert.equal(f.sent.at(-1).type, 'job-create');
+});
+
 test('Cmd+Enter in Request changes sends it, and waits for words exactly as the button does', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'h1', checkStatus: 'failing', checks: [] } }];
@@ -1530,7 +1583,7 @@ test('Add idea on a running job asks the planner for a proposal; the sent idea s
   f.q('[data-board="job1"] .job-plate-open').click();
   assert.equal(f.q('#job-refine'), null, 'there is no separate Change plan dialog: the box is on the job');
   assert.equal(f.q('.job-change textarea').placeholder, 'Add an idea for the planner…');
-  assert.equal(f.q('.job-change-foot').textContent, '⌘↵');
+  assert.equal(f.q('.job-change-foot').textContent, '↵ send · ⇧↵ new line');
   const text = f.q('.job-change textarea'); text.value = 'Split web in two'; text.dispatchEvent(f.event('input')); f.q('[data-change-send]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', at: 'job', ref: 'job', text: 'Split web in two' });
 
