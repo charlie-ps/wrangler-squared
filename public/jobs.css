@@ -253,16 +253,23 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-plate-ask { display:inline-flex; align-items:center; gap:8px; flex:none; max-width:55%; color:var(--t); font-weight:600; font-size:13px; white-space:nowrap; }
 .job-plate-ask .job-status { overflow:hidden; text-overflow:ellipsis; }
 .job-plate-detail { flex:1; min-width:0; font:400 11px var(--jobs-mono); color:var(--fg-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.job-plate-go { flex:none; height:34px; padding:0 15px; border:0; border-radius:var(--jt-radius-pill); background:var(--c); color:var(--bar-on); font:600 12.5px var(--font); cursor:pointer; transition:transform .15s, filter .15s; }
+/* A stub button that acts now (.acts: merge, post, skip) is a filled pill; one that
+   only opens something to read (.opens) is outlined with a trailing arrow
+   (job-plates.js askActs). Skip is the filled pill's quiet partner: same pill, no fill. */
+.job-plate-go,.job-plate-alt { flex:none; display:inline-flex; align-items:center; gap:6px; box-sizing:border-box; height:34px; border-radius:var(--jt-radius-pill); font:600 12.5px var(--font); cursor:pointer; transition:transform .15s, filter .15s, background-color .15s; }
+.job-plate-go { padding:0 15px; border:0; background:var(--c); color:var(--bar-on); }
+.job-plate-go.acts { padding-left:12px; }
 /* Core's global button:hover (background:var(--border-muted)) outranks .job-plate-go and would blank its fill under white text. */
 .job-plate-go:hover { background:var(--c); filter:brightness(1.08); }
-.job-plate-go:active { transform:scale(.96); }
-.job-plate-go:disabled { opacity:.6; cursor:default; }
-.job-plate-go:focus-visible { outline:2px solid var(--c); outline-offset:2px; }
-.job-plate-alt { flex:none; height:34px; padding:0 10px; border:0; border-radius:var(--jt-radius-pill); background:transparent; color:var(--fg-muted); font:600 12.5px var(--font); cursor:pointer; }
-.job-plate-alt:hover { color:var(--fg); }
-.job-plate-alt:disabled { opacity:.6; cursor:default; }
-.job-plate-alt:focus-visible { outline:2px solid var(--c); outline-offset:2px; }
+.job-plate-go.opens { padding:0 11px 0 14px; border:1.5px solid color-mix(in srgb, var(--c) 70%, transparent); background:transparent; color:var(--c-fg); }
+.job-plate-go.opens:hover { background:color-mix(in srgb, var(--c) 16%, transparent); filter:none; }
+.job-plate-go.opens .icon { transition:transform .15s; }
+.job-plate-go.opens:hover .icon { transform:translateX(2px); }
+.job-plate-go:active,.job-plate-alt:active { transform:scale(.96); }
+.job-plate-go:disabled,.job-plate-alt:disabled { opacity:.6; cursor:default; }
+.job-plate-go:focus-visible,.job-plate-alt:focus-visible { outline:2px solid var(--c); outline-offset:2px; }
+.job-plate-alt { padding:0 13px; border:0; background:transparent; color:var(--c-fg); }
+.job-plate-alt:hover { background:color-mix(in srgb, var(--c) 16%, transparent); }
 /* Where the job writes: a chip per place under the title, above the title's
    stretched hit area so a chip's link (and tooltip) is its own. */
 .job-plate-places { position:relative; z-index:1; display:flex; flex-wrap:wrap; gap:6px; margin-top:2px; }
@@ -297,7 +304,7 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-plate-place i { width:6px; height:6px; flex:none; border-radius:50%; background:var(--c); }
 .job-plate-place-out { font-size:11px; opacity:.65; }
 @media(max-width:560px) { #jobs { padding:16px 16px 84px; } .jobs-mast h1 { font-size:min(34px, var(--jt-mast-size)); } .jobs-top { padding:var(--jt-mast-pad-narrow); } .jobs-top::after { background:linear-gradient(0deg, color-mix(in srgb, var(--jt-night) 85%, transparent) 0%, color-mix(in srgb, var(--jt-night) 40%, transparent) 55%, transparent 80%); } .jobs-tools { margin-left:0; } .jobs-rail { padding:10px 8px 12px; } }
-@media(prefers-reduced-motion:reduce) { .jobs-beacon::before,.jobs-newjob::before,.job-plate-graph .halo,.job-plate-graph .failing,.job-plate-art::after { animation:none !important; } .job-plate,.job-plate-go { transition:none; } }
+@media(prefers-reduced-motion:reduce) { .jobs-beacon::before,.jobs-newjob::before,.job-plate-graph .halo,.job-plate-graph .failing,.job-plate-art::after { animation:none !important; } .job-plate,.job-plate-go,.job-plate-alt,.job-plate-go .icon { transition:none; } }
 
 /* The intro's figures still draw the earlier tonal card and its progress segments. */
 .job-card { position:relative; display:flex; flex-direction:column; gap:16px; padding:18px; border-radius:21px; background:var(--cb); color:var(--fg); transition:transform .15s, box-shadow .15s; }
@@ -1154,7 +1161,6 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .theme-mini.band { padding:0; }
 .theme-mini.band .jobs-mast { flex:1; border:0; border-radius:0; }
 .theme-mini.thumb { padding:12px; }
-.theme-mini :is(.job-plate-go,.job-plate-alt) { display:inline-flex; align-items:center; }
 
 .plate-spin { transform-origin:0 0; animation:pick-spin var(--d,30s) linear infinite; }
 @keyframes pick-spin { to { transform:rotate(360deg); } }

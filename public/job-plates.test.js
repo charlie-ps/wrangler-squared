@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assignScenes, plateAsk, plateHtml, placePopHtml, levelOf, inkFor } from './job-plates.js';
+import { assignScenes, plateAsk, plateHtml, placePopHtml, levelOf, inkFor, askActs } from './job-plates.js';
 import { planGraphHtml } from './job-graph.js';
 
 const sub = (id, extra = {}) => ({ id, title: `Deliver ${id}`, repo: '/Users/me/repo', after: [], sessions: [], repairs: [], ...extra });
@@ -109,12 +109,21 @@ test('a write is a moon off the session that makes it, its place a chip under th
   assert.ok(!html.includes('#web<b>'));
   const ask = plateAsk(j);
   assert.deepEqual([ask.label, ask.detail, ask.button, ask.act, ask.sub, ask.alt], ['Draft ready', '', 'Post to Slack', 'approve-write', 'w', { label: 'Skip', act: 'skip-write' }]);
-  assert.match(html, /<button type="button" class="job-plate-alt" data-ask="skip-write" data-job="job1" data-sub="w">Skip<\/button><button type="button" class="job-plate-go" data-ask="approve-write" data-job="job1" data-sub="w">Post to Slack<\/button>/);
+  assert.match(html, /<button type="button" class="job-plate-alt" data-ask="skip-write" data-job="job1" data-sub="w">Skip<\/button><button type="button" class="job-plate-go acts" data-ask="approve-write" data-job="job1" data-sub="w"><svg class="icon"[^>]*><path d="M5 12.5l4.5 4.5L19 7.5"\/><\/svg><span>Post to Slack<\/span><\/button>/);
   const made = { ...draft, place: { type: 'artifact' }, action: { type: 'make', what: 'chart' }, result: { url: 'https://claude.ai/artifact/1', at: 1 } };
   const output = plateAsk(job({ ...j, subJobs: [j.subJobs[0], j.subJobs[1], made] }));
   assert.deepEqual([output.label, output.button, output.alt], ['Check output', 'Accept', null], 'a made output is accepted, never skipped');
   const failing = plateAsk(job({ ...j, subJobs: [sub('api', { stage: 'implementation', error: 'boom' }), j.subJobs[1], draft] }));
   assert.equal(failing.tone, 'bad', 'failing still wins over a draft');
+});
+
+test('a stub button that acts now is filled, and one that only opens is outlined with an arrow', () => {
+  assert.deepEqual(['merge', 'approve-write', 'skip-write', 'open', 'session'].map(askActs), [true, true, true, false, false]);
+  const green = sub('api', { stage: 'pr', pr: { url: 'https://github.com/o/r/pull/7', head: 'h7', checkStatus: 'passing', checks: [] } });
+  const merge = plateHtml(job({ subJobs: [green] }), 'opus').match(/<button type="button" class="job-plate-go[^"]*"[\s\S]*?<\/button>/)[0];
+  assert.match(merge, /^<button type="button" class="job-plate-go acts" data-ask="merge"[^>]*><svg class="icon"[^>]*><circle cx="6" cy="5"[\s\S]*<\/svg><span>Merge<\/span><\/button>$/, 'leads with the merge glyph');
+  const review = plateHtml(job({ subJobs: [sub('api', { stage: 'review', state: 'verified' })] }), 'opus').match(/<button type="button" class="job-plate-go[^"]*"[\s\S]*?<\/button>/)[0];
+  assert.match(review, /^<button type="button" class="job-plate-go opens" data-ask="open"[^>]*><span>Review<\/span><svg class="icon"[^>]*><path d="M5 12h14M13 6l6 6-6 6"\/><\/svg><\/button>$/, 'trails an arrow');
 });
 
 test('a plate stacks each column in the order and rows the expanded dialog untangles it into', () => {
