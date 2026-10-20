@@ -287,10 +287,10 @@ text as public as the rest of this repo.
   `data-theme` (and `data-scheme="dark"` for a forced-dark theme) on `#jobs` and every dialog on
   `<body>`; a theme's `mount` is its only live art, so a theme without one runs no animation loop.
   Theme-only options live in `settings.themeOptions[id]` and must be listed in the server schema.
-  The picker (`public/theme-picker.js`) saves each choice at once; Save settings never sends the theme.
-  A theme draws no picture of its own: the picker shows the real masthead and plates in its tokens
-  (`public/theme-preview.js`), with the plates' buttons and links turned to spans (`inert`), since the
-  picker's own buttons wrap them.
+  The picker (`public/theme-picker.js`) is a radio list of themes beside a captioned preview, and saves
+  each choice at once; Save settings never sends the theme. A theme draws no picture of its own: the
+  preview is the real masthead and plates in its tokens (`public/theme-preview.js`), with their buttons
+  and links turned to spans and the whole picture `inert`, so it never reads or acts as a control.
 - **What's new is `public/updates.js`'s `UPDATES`, oldest first.** A bigger release appends `{ id, date, title, body }` (our own copy; optional `icon`, `tone`, `figure`, `anim`); every unseen one opens in one run, oldest first, and closing it records them all under `updatesSeen`. A first-run reader gets the intro instead, and closing that counts every current update seen, so an id must never be reused.
 - **Client modules import their leaves RELATIVELY** (`./util.js`, `./icons.js`,
   vendored) rather than from the board by absolute URL, so the same files load

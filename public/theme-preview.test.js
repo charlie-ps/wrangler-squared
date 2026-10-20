@@ -15,11 +15,12 @@ function dom(t) {
 test('a theme\'s picture is the board itself: its masthead and real plates in its own plate art', () => {
   const space = themeById('space'), wrangler = themeById('wrangler');
   const big = previewHtml(space, 'preview', { plateArt: 'quiet' });
-  assert.match(big, /^<div class="theme-mini preview" data-theme="space" data-scheme="dark" data-plate-art="quiet" data-w="860" style="width:860px" aria-hidden="true">/);
+  assert.match(big, /^<div class="theme-mini preview" data-theme="space" data-scheme="dark" data-plate-art="quiet" data-w="860" style="width:860px" aria-hidden="true" inert>/);
   assert.match(big, /<header class="jobs-mast">[\s\S]*<h1>Wrangler²<\/h1>/);
   assert.equal(big.match(/<article class="job-plate /g).length, 2);
   assert.equal(big.match(/class="gx"/g).length, 2, 'Space\'s plates carry their painted skies');
   assert.match(big, /Review code/, 'one plate asks for a review, the other is working');
+  assert.match(big, /<span type="button" class="job-plate-go opens"[^>]*><span>Review<\/span><svg class="icon"/, 'its stub keeps the opens pill, inert');
   assert.match(previewHtml(space, 'preview', { plateArt: 'full' }), /<svg class="scene"/, 'the plate art option shows');
   const plain = previewHtml(wrangler, 'preview', {});
   assert.match(plain, /data-scheme="host" data-plate-art="plain"/);

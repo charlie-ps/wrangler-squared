@@ -24,7 +24,7 @@
 #jobs.hidden { display:none; }
 /* Themes (public/themes.js). Each [data-theme] block sets the --jt-* tokens the rest of this file reads,
    on #jobs and on everything that wears a theme outside it: the dialogs on <body>, and the theme picker's
-   ticket, plates and cabinet. A new theme is one block here, one registry entry and its id. The tokens:
+   swatches and preview. A new theme is one block here, one registry entry and its id. The tokens:
    type (--jobs-serif and its weight and sizes), the view's ground, --jt-night/--jt-ivory (the ground and
    ink of the masthead, an idea's band and the launch strip; scrims and tints are mixed from them), the
    accent glow, radii, the plain plate's ground and ink, and switches for the flourishes, painted skies,
@@ -66,7 +66,6 @@
   --jt-art-bg:#05070c; --jt-art-rule:0;
   --jt-ink:#f4ede2; --jt-ink-run:#a9b8ff; --jt-ink-needs:#f7cd5f; --jt-ink-bad:#ff7b4f; --jt-ink-ok:#7fe0b0; --jt-ink-pause:#d0b0f5; --jt-ink-hollow:rgba(6,8,14,.4);
   --jt-flourish:block; --jt-sky:block; --jt-halo:inline; --jt-motion:running;
-  --jt-cab-bg:#070a10 radial-gradient(ellipse at 25% 35%, #1a2340aa 0, transparent 55%); --jt-cab-ink:#eef0f6;
 }
 /* Agent Wrangler's own look: the board's wallpaper, surfaces, system type and radii, in its light or dark
    mode. Nothing is painted and nothing moves. */
@@ -83,8 +82,6 @@
   --jt-art-bg:radial-gradient(circle, var(--border-muted) 1px, transparent 1.3px) 0 0 / 14px 14px, color-mix(in srgb, var(--surface-2) 55%, var(--surface)); --jt-art-rule:1px solid var(--border-muted);
   --jt-ink:var(--fg-muted); --jt-ink-run:var(--blue-fg); --jt-ink-needs:var(--snooze-fg); --jt-ink-bad:var(--red-fg); --jt-ink-ok:var(--green-fg); --jt-ink-pause:var(--purple); --jt-ink-hollow:var(--surface);
   --jt-flourish:none; --jt-sky:none; --jt-halo:none; --jt-motion:paused;
-  /* A custom board style may make --surface see-through (glass over its wallpaper); the cabinet covers the form. */
-  --jt-cab-bg:rgb(from var(--surface) r g b / 1); --jt-cab-ink:var(--fg);
 }
 /* The only text drawn straight on the view's ground. */
 #jobs .jobs-empty { color:color-mix(in srgb, var(--jt-ivory) 62%, transparent); }
@@ -256,16 +253,23 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-plate-ask { display:inline-flex; align-items:center; gap:8px; flex:none; max-width:55%; color:var(--t); font-weight:600; font-size:13px; white-space:nowrap; }
 .job-plate-ask .job-status { overflow:hidden; text-overflow:ellipsis; }
 .job-plate-detail { flex:1; min-width:0; font:400 11px var(--jobs-mono); color:var(--fg-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.job-plate-go { flex:none; height:34px; padding:0 15px; border:0; border-radius:var(--jt-radius-pill); background:var(--c); color:var(--bar-on); font:600 12.5px var(--font); cursor:pointer; transition:transform .15s, filter .15s; }
+/* A stub button that acts now (.acts: merge, post, skip) is a filled pill; one that
+   only opens something to read (.opens) is outlined with a trailing arrow
+   (job-plates.js askActs). Skip is the filled pill's quiet partner: same pill, no fill. */
+.job-plate-go,.job-plate-alt { flex:none; display:inline-flex; align-items:center; gap:6px; box-sizing:border-box; height:34px; border-radius:var(--jt-radius-pill); font:600 12.5px var(--font); cursor:pointer; transition:transform .15s, filter .15s, background-color .15s; }
+.job-plate-go { padding:0 15px; border:0; background:var(--c); color:var(--bar-on); }
+.job-plate-go.acts { padding-left:12px; }
 /* Core's global button:hover (background:var(--border-muted)) outranks .job-plate-go and would blank its fill under white text. */
 .job-plate-go:hover { background:var(--c); filter:brightness(1.08); }
-.job-plate-go:active { transform:scale(.96); }
-.job-plate-go:disabled { opacity:.6; cursor:default; }
-.job-plate-go:focus-visible { outline:2px solid var(--c); outline-offset:2px; }
-.job-plate-alt { flex:none; height:34px; padding:0 10px; border:0; border-radius:var(--jt-radius-pill); background:transparent; color:var(--fg-muted); font:600 12.5px var(--font); cursor:pointer; }
-.job-plate-alt:hover { color:var(--fg); }
-.job-plate-alt:disabled { opacity:.6; cursor:default; }
-.job-plate-alt:focus-visible { outline:2px solid var(--c); outline-offset:2px; }
+.job-plate-go.opens { padding:0 11px 0 14px; border:1.5px solid color-mix(in srgb, var(--c) 70%, transparent); background:transparent; color:var(--c-fg); }
+.job-plate-go.opens:hover { background:color-mix(in srgb, var(--c) 16%, transparent); filter:none; }
+.job-plate-go.opens .icon { transition:transform .15s; }
+.job-plate-go.opens:hover .icon { transform:translateX(2px); }
+.job-plate-go:active,.job-plate-alt:active { transform:scale(.96); }
+.job-plate-go:disabled,.job-plate-alt:disabled { opacity:.6; cursor:default; }
+.job-plate-go:focus-visible,.job-plate-alt:focus-visible { outline:2px solid var(--c); outline-offset:2px; }
+.job-plate-alt { padding:0 13px; border:0; background:transparent; color:var(--c-fg); }
+.job-plate-alt:hover { background:color-mix(in srgb, var(--c) 16%, transparent); }
 /* Where the job writes: a chip per place under the title, above the title's
    stretched hit area so a chip's link (and tooltip) is its own. */
 .job-plate-places { position:relative; z-index:1; display:flex; flex-wrap:wrap; gap:6px; margin-top:2px; }
@@ -300,7 +304,7 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-plate-place i { width:6px; height:6px; flex:none; border-radius:50%; background:var(--c); }
 .job-plate-place-out { font-size:11px; opacity:.65; }
 @media(max-width:560px) { #jobs { padding:16px 16px 84px; } .jobs-mast h1 { font-size:min(34px, var(--jt-mast-size)); } .jobs-top { padding:var(--jt-mast-pad-narrow); } .jobs-top::after { background:linear-gradient(0deg, color-mix(in srgb, var(--jt-night) 85%, transparent) 0%, color-mix(in srgb, var(--jt-night) 40%, transparent) 55%, transparent 80%); } .jobs-tools { margin-left:0; } .jobs-rail { padding:10px 8px 12px; } }
-@media(prefers-reduced-motion:reduce) { .jobs-beacon::before,.jobs-newjob::before,.job-plate-graph .halo,.job-plate-graph .failing,.job-plate-art::after { animation:none !important; } .job-plate,.job-plate-go { transition:none; } }
+@media(prefers-reduced-motion:reduce) { .jobs-beacon::before,.jobs-newjob::before,.job-plate-graph .halo,.job-plate-graph .failing,.job-plate-art::after { animation:none !important; } .job-plate,.job-plate-go,.job-plate-alt,.job-plate-go .icon { transition:none; } }
 
 /* The intro's figures still draw the earlier tonal card and its progress segments. */
 .job-card { position:relative; display:flex; flex-direction:column; gap:16px; padding:18px; border-radius:21px; background:var(--cb); color:var(--fg); transition:transform .15s, box-shadow .15s; }
@@ -1120,48 +1124,43 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .generic .pick-cell:hover,.generic .pick-cell:focus-visible { background:var(--surface-2); }
 .generic .pick-cell[aria-checked=true] { box-shadow:0 0 0 1px var(--fg); }
 
-/* Automation settings' theme picker (theme-picker.js): the model picker's ticket and cabinet, on its .pick-*
-   layout. The ticket, each plate and the cabinet carry the theme they show (data-theme, and data-scheme when
-   it forces dark), so their colours are that theme's tokens whatever the dialog around them wears. */
-.job-settings-theme,.theme-cabinet { --pick-sans:system-ui,-apple-system,"Segoe UI",sans-serif; --pick-mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+/* Automation settings' theme picker (theme-picker.js): a radio list of themes with the chosen one's options
+   under it, beside a captioned preview. Only the swatches and the preview's board carry a theme (data-theme,
+   and data-scheme when it forces dark), so the controls stay in the dialog's own look. */
+.job-settings-theme { --pick-sans:system-ui,-apple-system,"Segoe UI",sans-serif; --pick-mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .job-dialog .job-settings-theme { padding:12px 12px 14px; }
-.theme-pick-row { display:grid; grid-template-columns:minmax(0,240px) minmax(0,1fr); gap:16px; align-items:start; }
+.theme-pick-row { display:grid; grid-template-columns:minmax(0,230px) minmax(0,640px); gap:18px; align-items:start; }
 @media(max-width:560px) { .theme-pick-row { grid-template-columns:1fr; } }
-.theme-ticket { background:var(--jt-night); color:var(--jt-ivory); border:1px solid var(--border); }
-.theme-ticket .pick-tname { font:var(--jt-display-weight) 16px/1.2 var(--jobs-serif); letter-spacing:-.01em; }
-.theme-opts { display:grid; gap:6px; justify-items:start; }
+.theme-side { display:grid; gap:14px; align-content:start; min-width:0; }
+.theme-list { display:grid; gap:6px; }
+.theme-choice { appearance:none; display:grid; grid-template-columns:14px minmax(0,1fr) auto; align-items:center; gap:10px; width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--fg); font:inherit; text-align:left; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+.theme-choice:hover:not([aria-checked="true"]) { border-color:var(--fg-subtle); }
+.theme-choice[aria-checked="true"] { border-color:var(--blue); box-shadow:0 0 0 1px var(--blue); }
+.theme-choice:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.theme-radio { width:14px; height:14px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--fg-subtle); }
+.theme-choice[aria-checked="true"] .theme-radio { box-shadow:inset 0 0 0 4px var(--blue); }
+.theme-cname { display:grid; min-width:0; }
+.theme-cname b { font:600 13.5px/1.3 var(--font); }
+.theme-cname small { font:500 9.5px var(--pick-mono); letter-spacing:.1em; color:var(--fg-subtle); }
+.theme-swatch { width:30px; height:20px; border-radius:4px; box-shadow:inset 0 0 0 1px var(--border); background:radial-gradient(circle at 72% 30%, var(--jt-glow) 0 1.5px, transparent 5px), linear-gradient(var(--jt-night) 0 45%, var(--jt-view-color) 45%); }
+.theme-opts { display:grid; gap:6px; justify-items:start; padding-top:12px; border-top:1px dashed var(--border); }
 .theme-opts .pick-lab { width:auto; }
 .theme-segs { display:inline-flex; flex-wrap:wrap; gap:3px; }
 .theme-segs button { appearance:none; padding:4px 10px; border:0; border-radius:999px; background:none; box-shadow:inset 0 0 0 1px var(--border); color:var(--fg-muted); font:500 11.5px var(--font); cursor:pointer; }
 .theme-segs button:hover:not([aria-checked="true"]) { color:var(--fg); }
 .theme-segs button[aria-checked="true"] { background:var(--fg); color:var(--surface); box-shadow:none; }
 .theme-segs button:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
-/* The cabinet covers the part of the dialog in view (theme-picker.js sets its top and height), which holds still. */
-.job-dialog.theme-cab-open { overflow:hidden; }
-.theme-cabinet { position:absolute; left:0; right:0; top:0; height:100%; z-index:6; box-sizing:border-box; display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; border-radius:inherit; background:var(--jt-cab-bg); color:var(--jt-cab-ink); box-shadow:inset 0 0 0 1px var(--border); animation:pick-open .38s cubic-bezier(.2,.8,.2,1); }
-.theme-cabinet .pick-head { gap:10px; padding:20px 22px 10px; }
-.theme-cabinet .pick-head b { font:var(--jt-display-weight) 17px var(--jobs-serif); }
-.theme-cabinet .pick-head small { font:400 11px var(--pick-mono); opacity:.6; }
-.theme-cabinet .pick-body { grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:22px; padding:6px 22px 22px; overflow:auto; }
-.theme-cabinet .pick-pname { font:var(--jt-display-weight) 30px/1.08 var(--jobs-serif); letter-spacing:-.02em; }
-.theme-cabinet .pick-pdesc { line-height:1.5; opacity:.85; }
-.theme-cabinet .pick-rows { font:400 13px var(--jobs-serif); }
-.theme-cabinet .pick-rows i { border-bottom-color:color-mix(in srgb, currentColor 22%, transparent); }
-.theme-cabinet .pick-tray { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-.theme-cabinet .pick-cell { gap:6px; padding:6px; border-radius:9px; }
-.theme-cabinet .pick-cell:hover,.theme-cabinet .pick-cell:focus-visible { background:color-mix(in srgb, currentColor 10%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent); }
-.theme-cabinet .pick-cell[aria-checked=true] { box-shadow:inset 0 0 0 1px currentColor; }
-.theme-cabinet .pick-thumb { border-radius:6px; }
-.theme-cabinet .pick-tag { font:var(--jt-display-weight) 14px/1.25 var(--jobs-serif); }
+.theme-preview { display:grid; gap:8px; margin:0; min-width:0; }
+.theme-cap { font:500 10.5px var(--pick-mono); letter-spacing:.12em; text-transform:uppercase; color:var(--fg-subtle); }
+.theme-art { position:relative; width:100%; aspect-ratio:16/10; border-radius:9px; overflow:hidden; box-shadow:inset 0 0 0 1px var(--border-muted); cursor:default; user-select:none; }
+.theme-blurb { margin:0; font-size:12px; line-height:1.5; color:var(--fg-subtle); }
+@media(prefers-reduced-motion:reduce) { .theme-choice { transition:none; } }
 /* A theme's picture is the board itself, small (theme-preview.js): drawn at board width and zoomed to its box. */
-:is(.pick-band,.pick-art,.pick-thumb)>.theme-mini { inset:auto; left:0; top:0; height:auto; }
+.theme-art>.theme-mini { position:absolute; left:0; top:0; }
 .theme-mini { --jobs-mono:ui-monospace,SFMono-Regular,Menlo,monospace; box-sizing:border-box; display:flex; flex-direction:column; gap:18px; padding:18px; overflow:hidden; pointer-events:none; background-color:var(--jt-view-color); background-image:var(--jt-view-image); background-size:var(--jt-view-size); color:var(--fg); font-family:var(--font); text-align:left; }
 .theme-mini.band { padding:0; }
 .theme-mini.band .jobs-mast { flex:1; border:0; border-radius:0; }
 .theme-mini.thumb { padding:12px; }
-.theme-mini :is(.job-plate-go,.job-plate-alt) { display:inline-flex; align-items:center; }
-@media(max-width:560px) { .theme-cabinet .pick-body { grid-template-columns:1fr; } }
-@media(prefers-reduced-motion:reduce) { .theme-cabinet { animation:none; } .theme-ticket { transition:none; } }
 
 .plate-spin { transform-origin:0 0; animation:pick-spin var(--d,30s) linear infinite; }
 @keyframes pick-spin { to { transform:rotate(360deg); } }

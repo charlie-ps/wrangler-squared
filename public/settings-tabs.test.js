@@ -72,7 +72,7 @@ test('Automation settings groups its fields into General, Automation, Review def
   assert.deepEqual(['ideApp', 'updateMain', 'maxRepairs', 'maxReplans', 'spendLimit', 'deploymentStaleMinutes', 'reviewPlan'].map((n) => form.elements[n].closest('[role="tabpanel"]').dataset.panel), ['general', 'general', 'automation', 'automation', 'automation', 'automation', 'review']);
   assert.deepEqual([...inPanel('general').querySelectorAll('.job-settings-section h3')].map((h) => h.textContent), ['Editor', 'Local checkout']);
   assert.deepEqual([...inPanel('automation').querySelectorAll('.job-settings-section h3')].map((h) => h.textContent), ['Repairs and replans', 'Spend', 'Deployments']);
-  assert.ok(inPanel('appearance').querySelector('#job-theme-pick .theme-ticket'), 'the theme picker mounts in its hidden panel');
+  assert.ok(inPanel('appearance').querySelector('#job-theme-pick .theme-choice'), 'the theme picker mounts in its hidden panel');
   assert.ok(inPanel('updates').querySelector('.update-item'));
   assert.ok(p.q('#job-settings-form .job-actions'), 'Save sits under every tab');
 });

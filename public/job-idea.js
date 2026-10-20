@@ -81,9 +81,10 @@ export function suggestionHtml(job, msg, state = 'live') {
 }
 
 const humanHtml = (text, at, extra = '', pics = '') => `<div class="job-sent ${extra}"><div class="job-sent-bubble">${pics}<span>${esc(text)}</span></div><span class="job-sent-meta">You${at ? ` · ${esc(time(at))}` : ''}</span></div>`;
-// A sent message's pictures are kept server-side: placeholders the dialog fills from
-// a job-images frame (jobs-view.js hydrateStrips), as the job's own strip is.
-const keptPics = (job, m) => m.images?.length ? `<div class="job-image-strip job-sent-strip" data-strip="${esc(job.id)}">${m.images.map((i, n) => `<button type="button" class="job-image-thumb" data-image="${esc(`idea:${i.file}`)}" aria-label="Enlarge image ${n + 1}"><span class="job-image-num">${n + 1}</span></button>`).join('')}</div>` : '';
+// Kept pictures are placeholders the dialog fills from a job-images frame (jobs-view.js
+// hydrateStrips): `names` are the frame's keys, the job's own as stored, a message's `idea:<file>`.
+export const imageStripHtml = (job, names = [], cls = '') => names.length ? `<div class="job-image-strip${cls ? ` ${cls}` : ''}" data-strip="${esc(job.id)}">${names.map((n, i) => `<button type="button" class="job-image-thumb" data-image="${esc(n)}" aria-label="Enlarge image ${i + 1}"><span class="job-image-num">${i + 1}</span></button>`).join('')}</div>` : '';
+const keptPics = (job, names) => imageStripHtml(job, names, 'job-sent-strip');
 const pendingPics = (urls = []) => urls.length ? `<span class="job-sent-imgs">${urls.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
 const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh ? ' fresh' : ''}" data-msg="${esc(m.id)}"><span class="job-idea-orb" aria-hidden="true"></span><div><div class="job-idea-who">Planner<time>${esc(time(m.at))}</time></div><div class="job-idea-body">${proseHtml(m.text)}</div>${launch}</div></div>`;
 
@@ -92,9 +93,9 @@ const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh 
 // `fresh(id)` says whether a message is new to this dialog, so only it fades in.
 export function ideaThreadHtml(job, { pending = null, firing = null, fresh = () => false } = {}) {
   const thread = ideaThread(job), live = liveSuggestion(job);
-  const rows = [humanHtml(job.intent, job.createdAt)];
+  const rows = [humanHtml(job.intent, job.createdAt, '', keptPics(job, job.images))];
   for (const m of thread) {
-    if (m.from === 'human') { rows.push(humanHtml(m.text, m.at, '', keptPics(job, m))); continue; }
+    if (m.from === 'human') { rows.push(humanHtml(m.text, m.at, '', keptPics(job, (m.images || []).map((i) => `idea:${i.file}`)))); continue; }
     const state = !m.suggest ? null : m.acceptedAt || firing?.state === 'sent' && firing.id === m.id ? 'done' : firing?.id === m.id ? 'firing' : m === live ? 'live' : 'stale';
     rows.push(plannerHtml(job, m, state ? suggestionHtml(job, m, state) : '', fresh(m.id)));
   }

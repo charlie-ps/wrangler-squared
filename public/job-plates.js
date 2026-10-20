@@ -233,6 +233,16 @@ export function plateAsk(job) {
   return ask(job.cancelledAt ? jobLabel(job) : subLabel(job, lead), deploymentStalled(lead) ? 'Resolve' : 'Open', ICONS.eye);
 }
 
+// A stub's button either does it now (merges, posts, skips: outward and not undone
+// from here) or opens something to read first. They must not look alike, so the
+// kind comes from `act`, never the label: a filled pill leading with what it does,
+// or an outlined one trailing an arrow. jobs-view.js runAsk is the other reader.
+export const askActs = (act) => ['merge', 'approve-write', 'skip-write'].includes(act);
+const goHtml = (job, ask) => {
+  const acts = askActs(ask.act);
+  return `<button type="button" class="job-plate-go ${acts ? 'acts' : 'opens'}" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}"${ask.session ? ` data-session="${esc(ask.session)}"` : ''}>${acts ? (ask.act === 'merge' ? ICONS.merge : ICONS.check) : ''}<span>${esc(ask.button)}</span>${acts ? '' : ICONS.arrow}</button>`;
+};
+
 const ago = (at) => { const m = Math.max(1, Math.round((Date.now() - at) / 60000)); return m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`; };
 function repoLine(job) {
   const repos = job.repos?.length ? job.repos : [...new Set(planOf(job).subJobs.filter((s) => isPrSub(s) && s.repo).map((s) => s.repo))];
@@ -247,7 +257,7 @@ const ideaSkyHtml = (job) => inflowHtml(job.id, IDEA_SKY[ideaStage(job)] ?? 0);
 function ideaPlateHtml(job, art) {
   const ask = plateAsk(job), tone = ask ? ask.tone : 'idle';
   const foot = ask
-    ? `<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span><button type="button" class="job-plate-go" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}"${ask.session ? ` data-session="${esc(ask.session)}"` : ''}>${esc(ask.button)}</button></div>`
+    ? `<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span>${goHtml(job, ask)}</div>`
     : `<div class="job-plate-foot"><span class="job-plate-glyph">${stateIconHtml(jobState(job))}</span><span class="job-status">${esc(jobLabel(job))}</span></div>`;
   return `<article class="job-plate idea tone-${tone} ${jobState(job)} ${ask ? 'stubbed' : ''}" data-board="${esc(job.id)}">
     <div class="job-plate-art">${art === 'plain' ? '' : ideaSkyHtml(job)}<div class="job-plate-tag ${art === 'plain' ? 'pl' : 'lt'}"><span class="job-idea-mark">Idea</span></div></div>
@@ -268,7 +278,7 @@ export function plateHtml(job, scene, art = 'quiet', { forming = null } = {}) {
   const empty = job.stage === 'planning' && !job.plan && !job.cancelledAt ? 'Planning' : 'Not planned yet';
   const tip = [subs.length ? kindCountLabel(subs) : '', reviewFlagsLabel(job)].filter(Boolean).join(' · ');
   const foot = ask
-    ? `${ask.film ? filmHtml(job, ask.film) : ''}<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span>${ask.alt ? `<button type="button" class="job-plate-alt" data-ask="${esc(ask.alt.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.alt.label)}</button>` : ''}<button type="button" class="job-plate-go" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}"${ask.session ? ` data-session="${esc(ask.session)}"` : ''}>${esc(ask.button)}</button></div>`
+    ? `${ask.film ? filmHtml(job, ask.film) : ''}<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span>${ask.alt ? `<button type="button" class="job-plate-alt" data-ask="${esc(ask.alt.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.alt.label)}</button>` : ''}${goHtml(job, ask)}</div>`
     : `<div class="job-plate-foot"><span class="job-plate-glyph">${stateIconHtml(state)}</span><span class="job-status">${esc(jobLabel(job))}</span>${when ? `<span class="job-plate-when">${esc(when)}</span>` : ''}</div>`;
   const repo = repoLine(job), graph = work.length ? skyGraphHtml(job, scene, lvl, art) : null;
   const dim = !stateSolid(state);

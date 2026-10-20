@@ -1,9 +1,9 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT } from './jobs.js';
-import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml } from './job-idea.js';
+import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener } from './job-graph.js';
-import { assignScenes, plateHtml, placePopHtml } from './job-plates.js';
+import { assignScenes, plateHtml, placePopHtml, askActs } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, releaseSkies, spinTo } from './job-skylines.js';
 import { THEMES, themeOf, optionsOf, applyTheme, setCurrentTheme } from './themes.js';
@@ -895,10 +895,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   // Everything a plan says in prose, folded into one section: the stepper is the
   // decision, this is the reading behind it.
-  // The pictures a job was created with, as numbered thumbnails under the outcome. The
-  // markup is only placeholders: the bytes live server-side (images:keep) and are
-  // filled in from `imageCache` once a job-images frame has brought them.
-  const stripHtml = (job) => (job.images || []).length ? `<div class="job-image-strip" data-strip="${esc(job.id)}">${job.images.map((n, i) => `<button type="button" class="job-image-thumb" data-image="${esc(n)}" aria-label="Enlarge image ${i + 1}"><span class="job-image-num">${i + 1}</span></button>`).join('')}</div>` : '';
+  // The pictures a job was created with, as numbered thumbnails under the outcome, filled
+  // in from `imageCache` once a job-images frame has brought them.
+  const stripHtml = (job) => imageStripHtml(job, job.images);
   function hydrateStrips() {
     dialog.querySelectorAll('[data-strip]').forEach((strip) => {
       const missing = [];
@@ -1645,7 +1644,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const chip = e.target.closest('[data-place]'); if (chip) return openPlacePop(chip);
     const go = e.target.closest('[data-ask]');
     // One click per decision: a sent one disables the stub until the next tick redraws it.
-    if (go) { if (['merge', 'approve-write', 'skip-write'].includes(go.dataset.ask)) { go.parentElement.querySelectorAll('button').forEach((b) => { b.disabled = true; }); boardHtml = null; } return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask, go.dataset.session); }
+    if (go) { if (askActs(go.dataset.ask)) { go.parentElement.querySelectorAll('button').forEach((b) => { b.disabled = true; }); boardHtml = null; } return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask, go.dataset.session); }
     const el = e.target.closest('[data-job]'); if (el) return openDetail(el.getAttribute('data-job'), el.getAttribute('data-sub'));
     // Anywhere else on a plate (the sky, the gaps between chips) opens the job, as the title does.
     const plate = e.target.closest('.job-plate'); if (plate && !e.target.closest('a,button')) openDetail(plate.dataset.board, '');
@@ -1705,7 +1704,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const settingsForm = dialog.querySelector('form'); bindReviewPoints(settingsForm);
     themePicker?.dispose();
     themePicker = mountThemePicker(dialog.querySelector('#job-theme-pick'), {
-      themes: THEMES, value: themeOf(data.settings).id, cover: dialog,
+      themes: THEMES, value: themeOf(data.settings).id,
       optionsOf: (t) => optionsOf(data.settings, t),
       onChange: (id) => saveSettings({ theme: id }),
       // Sent whole: settings(patch) merges shallowly, and each theme keeps its own.

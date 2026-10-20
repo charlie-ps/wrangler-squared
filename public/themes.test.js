@@ -26,7 +26,6 @@ for (const theme of THEMES) {
   test(`${theme.name}: a complete registry entry, a CSS block with every token, and a schema that accepts it`, () => {
     assert.match(theme.name, /\S/); assert.ok(theme.blurb.length > 20);
     assert.ok(['dark', 'host'].includes(theme.scheme));
-    assert.ok(theme.facts.length && theme.facts.every((f) => f.length === 2 && f.every((s) => typeof s === 'string')));
     for (const o of theme.options) assert.ok(o.values.some(([v]) => v === o.default), `${o.key} defaults to one of its values`);
     assert.ok(PLATE_ART.includes(theme.plateArt(optionsOf({}, theme))));
     if (theme.mount) assert.equal(typeof theme.mount, 'function');

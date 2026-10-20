@@ -119,6 +119,23 @@ test('a screenshot pasted into the idea\'s reply box waits in its tray, holds Se
   assert.equal(f.q('#job-dialog .job-sent-strip img').src, 'data:image/png;base64,cG5n');
 });
 
+test('the pictures an idea was created with sit on its first bubble, in the live view and the Conversation after planning', (t) => {
+  const f = fixture(t, [{ ...ideaJob([asked]), images: ['a.png', 'b.png'] }]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const first = () => f.q('#job-dialog .job-sent');
+  assert.deepEqual([...first().querySelectorAll('.job-sent-strip [data-image]')].map((b) => b.dataset.image), ['a.png', 'b.png']);
+  assert.deepEqual(f.sent.at(-1), { type: 'job-images', id: 'idea1' });
+  f.view.images({ jobId: 'idea1', images: [{ name: 'a.png', mime: 'image/png', dataBase64: 'YQ==' }, { name: 'b.png', mime: 'image/png', dataBase64: 'Yg==' }] });
+  assert.deepEqual([...first().querySelectorAll('.job-sent-strip img')].map((i) => i.src), ['data:image/png;base64,YQ==', 'data:image/png;base64,Yg==']);
+  first().querySelectorAll('[data-image]')[1].click();
+  assert.equal(f.q('dialog.job-image-zoom img').src, 'data:image/png;base64,Yg==', 'a thumbnail enlarges');
+  f.q('dialog.job-image-zoom').click();
+  Object.assign(f.data.jobs[0], { plan: suggest.plan, stage: 'review' }); f.view.update(f.data);
+  const past = f.q('#job-dialog .job-idea-past .job-sent');
+  assert.match(past.textContent, /PRs sit green/);
+  assert.deepEqual([...past.querySelectorAll('.job-sent-strip img')].map((i) => i.src), ['data:image/png;base64,YQ==', 'data:image/png;base64,Yg==']);
+});
+
 test('a picture that fails to upload says so rather than vanishing', async (t) => {
   const f = fixture(t, [ideaJob([asked])], { stageImage: async () => { throw new Error('too big'); } });
   f.q('[data-board="idea1"] .job-plate-open').click();

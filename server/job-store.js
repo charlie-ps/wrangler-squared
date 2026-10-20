@@ -392,8 +392,8 @@ export class JobStore {
       }
       if (action === 'approve-replan') {
         const red = j.replan?.red;
-        this._approveReplan(j, payload.proposalId, Number.isInteger(payload.option) ? payload.option : 0);
-        if (red) holdRed(j, red.sub);
+        const { sentBack } = this._approveReplan(j, payload.proposalId, Number.isInteger(payload.option) ? payload.option : 0);
+        if (red && !sentBack) holdRed(j, red.sub);
         return;
       }
       if (action === 'retry') {
@@ -681,10 +681,11 @@ export class JobStore {
   // The one road an approved plan change takes, by the human's click or by Wrangler
   // itself under Red steps; the history reads the same either way.
   _approveReplan(j, proposalId, option, by = null) {
-    const { lines, detail, feedback: asked } = approveReplan(j, proposalId, { now: Date.now(), buildSubJob, option });
+    const { lines, detail, feedback: asked, sentBack } = approveReplan(j, proposalId, { now: Date.now(), buildSubJob, option });
     j.repos = planRepos(j.plan);
-    record(j, null, 'approve-replan', asked.slice(0, 180), by ? `${detail} (${by})` : detail);
-    for (const l of lines) record(j, l.sub, 'replan', null, l.detail);
+    record(j, null, sentBack ? 'replan-sent-back' : 'approve-replan', sentBack ? null : asked.slice(0, 180), by ? `${detail} (${by})` : detail);
+    for (const l of lines) record(j, l.sub, sentBack ? 'replan-sent-back' : 'replan', null, l.detail);
+    return { sentBack: !!sentBack };
   }
   _applyReceipt(j, r, s, report, proof = null, meta = {}) {
     if (report.kind === 'plan' && j.stage === 'active') {
