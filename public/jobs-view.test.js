@@ -2333,6 +2333,32 @@ test('a plan change reads as a decision: one bar asks and holds both buttons, un
   assert.deepEqual([...rows['waits for'].children].map((e) => `${e.tagName} ${e.textContent}`), ['INS + Deliver cli', 'DEL − Deliver api']);
 });
 
+test('the proposal bar clamps a long ask to a few lines: Show more only when the clamp hides something, and it stays open across redraws', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued' }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
+  job.replan = { feedback: 'Short', at: 1, previous: null, proposal: { id: 'run_p', plan: job.plan, merged: job.plan, changes: { frozen: [], kept: ['api', 'web'], edited: [], added: [], removed: [] } } };
+  // happy-dom lays nothing out, so a clamped ask "overflows" exactly when its words are long.
+  const proto = Object.getPrototypeOf(f.window.document.createElement('span'));
+  const height = (e) => e.classList?.contains('job-ask-clamp') && e.textContent.length > 200 ? 300 : 80;
+  Object.defineProperty(proto, 'scrollHeight', { get() { return height(this); }, configurable: true });
+  Object.defineProperty(proto, 'clientHeight', { get() { return this.classList?.contains('job-ask-clamp') ? 80 : height(this); }, configurable: true });
+  f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
+  assert.ok(f.q('.job-proposal-bar .job-ask-text').classList.contains('job-ask-clamp'));
+  assert.equal(f.q('.job-proposal-bar [data-ask-more]').hidden, true, 'a short ask has no toggle');
+  job.replan.feedback = 'Long '.repeat(80); f.view.update(f.data);
+  const more = f.q('.job-proposal-bar [data-ask-more]');
+  assert.equal(more.hidden, false); assert.equal(more.textContent, 'Show more');
+  more.click();
+  assert.ok(!f.q('.job-proposal-bar .job-ask-text').classList.contains('job-ask-clamp'), 'expanded shows every line');
+  assert.equal(f.q('.job-proposal-bar [data-ask-more]').textContent, 'Show less');
+  assert.equal(f.sent.filter((m) => m.type === 'job-action').length, 0, 'the toggle sends nothing');
+  job.replan.feedback += 'and more'; f.view.update(f.data);
+  assert.ok(!f.q('.job-proposal-bar .job-ask-text').classList.contains('job-ask-clamp'), 'a redraw keeps it open');
+  f.q('.job-proposal-bar [data-ask-more]').click();
+  assert.ok(f.q('.job-proposal-bar .job-ask-text').classList.contains('job-ask-clamp'));
+  assert.equal(f.q('.job-proposal-bar [data-ask-more]').textContent, 'Show more');
+});
+
 test('a proposal with a diagnosis, ranked options and actions: options switch the graph, actions are marks on the node, approve names the option', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   const pr = { url: 'https://github.com/org/repo/pull/7', head: 'h1', checkStatus: 'failing' };

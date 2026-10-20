@@ -578,6 +578,15 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // Connectors follow the tiles' rendered rectangles, so anything that can move a
   // node (a dependency editor opening, the dialog resizing) re-traces them.
   const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => layoutGraphEdges(dialog.querySelector('.job-graph'))) : null;
+  // Show more is offered only while the clamp hides something (or to undo an expanded ask).
+  const askObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => fitAsk()) : null;
+  function fitAsk() {
+    askObserver?.disconnect();
+    const text = dialog.querySelector('.job-proposal-bar .job-ask-text');
+    if (!text) return;
+    text.nextElementSibling.hidden = !openMore.has('proposal-ask') && text.scrollHeight <= text.clientHeight + 1;
+    askObserver?.observe(text);
+  }
   function wireGraph() {
     const graph = dialog.querySelector('.job-graph');
     observer?.disconnect();
@@ -986,7 +995,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // A red step's replan was Wrangler's own (job-red.js): say which step, not what a human typed.
     const red = job.replan.red && !job.replan.red.human ? job.replan.red : null;
     const redSub = red && liveSub(red.sub);
-    const asked = red ? `<p class="job-replan-ask"><b>${proposal.escalation ? 'Declared red' : 'Red step'}</b> ${esc(redSub?.title || red.sub)}${redSub?.error ? ` · ${esc(redSub.error)}` : ''}${proposal.escalation?.ask ? `<br><b>Needs you</b> ${esc(proposal.escalation.ask)}` : ''}</p>` : `<p class="job-replan-ask"><b>You asked</b> ${esc(job.replan.feedback)}</p>`;
+    const words = red ? `<b>${proposal.escalation ? 'Declared red' : 'Red step'}</b> ${esc(redSub?.title || red.sub)}${redSub?.error ? ` · ${esc(redSub.error)}` : ''}${proposal.escalation?.ask ? `<br><b>Needs you</b> ${esc(proposal.escalation.ask)}` : ''}` : `<b>You asked</b> ${esc(job.replan.feedback)}`;
+    // The bar stays pinned while the graph scrolls under it, so a long ask shows one line until asked for more (fitAsk).
+    const askOpen = openMore.has('proposal-ask');
+    const asked = `<p class="job-replan-ask"><span class="job-ask-text ${askOpen ? '' : 'job-ask-clamp'}">${words}</span><button type="button" class="job-ask-more" data-ask-more hidden>${askOpen ? 'Show less' : 'Show more'}</button></p>`;
     // The decision, and the two buttons that make it, head the proposal: nothing else on the dialog looks like this.
     const blocked = job.runs.some((r) => !r.stopped && !r.subJobId);
     const bar = `<section class="job-proposal-bar" aria-label="Plan change waiting for you"><div class="job-proposal-head"><span class="job-proposal-title">${ICONS.eye}<b>Plan change waiting for your decision</b></span><span class="job-proposal-hint">${blocked ? 'Wrangler is still planning; approve once it stops.' : 'Nothing new starts until you approve or discard it. Running steps carry on.'}</span></div>
@@ -1518,6 +1530,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     dialog.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });
     wireGraph();
+    fitAsk();
+    const askMore = dialog.querySelector('[data-ask-more]');
+    if (askMore) askMore.onclick = () => { if (!openMore.delete('proposal-ask')) openMore.add('proposal-ask'); renderDetail(); };
     hydrateStrips();
     wireWriteEditor();
     const bind = (id, fn) => { const e = dialog.querySelector(id); if (e) e.onclick = fn; };
