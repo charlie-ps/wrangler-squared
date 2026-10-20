@@ -62,18 +62,36 @@ export function withRunStatus(jobs, sessions = []) {
   };
 }
 
+// Planning runs (and a writer run from before session-owned writes) carry a
+// null subJobId, so no sub-job holds their cards: a job's total is every card
+// ANY of its runs bound, unioned with whatever its sub-jobs list (identical
+// today — sub.sessions is filled from bindRun — but the union can never
+// under-report if that changes).
+const jobCards = (job) => [...(job.runs || []).map((r) => r.sessionId), ...(job.subJobs || []).flatMap((s) => s.sessions || [])];
+export const jobUsd = (job, byCard) => sumCards(byCard, jobCards(job)).usd ?? 0;
+
 export function withJobSpend(snapshot, byCard = new Map()) {
   return {
     ...snapshot,
-    jobs: (snapshot?.jobs || []).map((job) => {
-      const subJobs = (job.subJobs || []).map((sub) => ({ ...sub, ...sumCards(byCard, sub.sessions || []) }));
-      // Planning runs (and a writer run from before session-owned writes) carry
-      // a null subJobId, so no sub-job holds their cards: a job's total is
-      // every card ANY of its runs bound, unioned with whatever its sub-jobs
-      // list (identical today — sub.sessions is filled from bindRun — but the
-      // union can never under-report if that changes).
-      const cards = [...(job.runs || []).map((r) => r.sessionId), ...subJobs.flatMap((s) => s.sessions || [])];
-      return { ...job, subJobs, ...sumCards(byCard, cards) };
-    }),
+    jobs: (snapshot?.jobs || []).map((job) => ({
+      ...job,
+      subJobs: (job.subJobs || []).map((sub) => ({ ...sub, ...sumCards(byCard, sub.sessions || []) })),
+      ...sumCards(byCard, jobCards(job)),
+    })),
   };
+}
+
+// A live card's own `usd` off the ~4s graph, folded over the 60s usage map: each
+// card keeps the larger of the two, so a working session's price is at most one
+// graph tick old while the scan still owns everything the graph cannot see (an
+// archived step, a triage billed onto a card). `seen` is the highest price each
+// card ever showed live, so a step archived between two scans does not drop out
+// of its job's total (and unpause it) until the next scan has it.
+export function withLiveUsd(byCard, seen) {
+  const out = new Map(byCard);
+  for (const [id, usd] of seen) {
+    const cur = out.get(id);
+    if (!cur || usd > cur.usd) out.set(id, { usd, estimated: cur?.estimated ?? false });
+  }
+  return out;
 }

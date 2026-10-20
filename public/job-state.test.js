@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs } from './job-state.js';
+import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, jobNeedsYou, mainWaiting } from './job-state.js';
+import { plateHtml } from './job-plates.js';
+import { jobStatus } from './jobs.js';
 
 const sub = (id, over = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after: [], brief: 'b', sessions: [], repairs: [], stage: 'implementation', ...over });
 const job = (over = {}) => ({ id: 'j', title: 'Job', intent: 'x', repos: [], stage: 'active', plan: null, subJobs: [], runs: [], moves: [], reviewMerge: true, ...over });
@@ -26,7 +28,7 @@ test('a sub-job maps onto the vocabulary from its stage, run, checks and gates',
     ['agent stuck on a prompt', {}, { runs: [run('a', { status: 'needs-you' })] }, 'needs'],
     ['diff awaiting review', { stage: 'review', state: 'verified', ready: { checks: [] } }, {}, 'needs'],
     ['approved, committing next', { stage: 'review', state: 'approved' }, {}, 'running'],
-    ['checks pending', { stage: 'pr', pr: pr() }, {}, 'queued'],
+    ['checks pending', { stage: 'pr', pr: pr() }, {}, 'running'],
     ['green PR awaiting manual merge', { stage: 'pr', pr: pr({ checkStatus: 'passing' }) }, {}, 'needs'],
     ['green PR, manual merge, fix requested', { stage: 'pr', pr: pr({ checkStatus: 'passing' }), fixRequested: { note: null, at: 1 } }, {}, 'running'],
     ['green PR, manual merge, repair running', { stage: 'pr', pr: pr({ checkStatus: 'passing' }) }, { runs: [run('a', { phase: 'repair' })] }, 'running'],
@@ -37,7 +39,7 @@ test('a sub-job maps onto the vocabulary from its stage, run, checks and gates',
     ['blocking comments', { stage: 'pr', pr: pr({ checkStatus: 'passing' }), prComments: { items: [{}], fingerprint: 'f' }, commentSummary: { tone: 'red', text: 't', fingerprint: 'f' } }, { reviewMerge: false }, 'failing'],
     ['worker error', { error: 'blocked' }, {}, 'failing'],
     ['job-level error', {}, { error: 'coordinator' }, 'failing'],
-    ['watching post-merge runs', { stage: 'deployment', pr: pr({ mergeCommit: 'm' }) }, {}, 'queued'],
+    ['watching post-merge runs', { stage: 'deployment', pr: pr({ mergeCommit: 'm' }) }, {}, 'running'],
     ['post-merge run red', { stage: 'deployment', pr: pr({ mergeCommit: 'm' }), deploymentResult: { status: 'failing', runs: [] } }, {}, 'failing'],
     ['no deploy run for too long', { stage: 'deployment', pr: pr({ mergeCommit: 'm' }), deploymentStale: { since: 1 } }, {}, 'needs'],
     ['session queued', { kind: 'session', stage: 'session' }, {}, 'queued'],
@@ -137,6 +139,43 @@ test('a cancelled job whose cleanup kept a worktree needs the human until Retry 
   assert.equal(jobState(dropped), 'needs', 'a sub-job dropped from a live job surfaces the same way'); assert.equal(jobLabel(dropped), 'Worktree kept');
 });
 
+test('a job needs you exactly when its plate asks, once however many of its steps wait', () => {
+  const review = (id) => sub(id, { kind: 'session', stage: 'review', result: { checks: [] } });
+  const cases = [
+    ['two steps waiting', job({ subJobs: [review('a'), review('b')] }), true],
+    ['plan ready', job({ stage: 'planning', plan: { subJobs: [sub('a')] } }), true],
+    ['red step', job({ subJobs: [sub('a', { error: 'blocked' })] }), true],
+    ['prompt waiting on a paused job', job({ paused: true, subJobs: [sub('a')], runs: [run('a', { status: 'needs-you', sessionId: 'card' })] }), true],
+    ['cancelled, cleaning up a red step', job({ cancelledAt: 1, subJobs: [sub('a', { stage: 'cleanup', cancelledAt: 1, error: 'cleanup failed' })] }), false],
+    ['finished with a red step', job({ stage: 'done', subJobs: [sub('a', { stage: 'done', error: 'cleanup failed' })] }), false],
+    ['step held by a replan', job({ replan: { at: 1, source: { sub: 'a' } }, subJobs: [review('a')], runs: [run(null, { phase: 'planning' })] }), false],
+    ['running', job({ subJobs: [sub('a')], runs: [run('a')] }), false],
+  ];
+  for (const [name, j, expected] of cases) {
+    assert.equal(jobNeedsYou(j), expected, name);
+    assert.equal(/\bstubbed\b/.test(plateHtml(j, 0)), expected, `${name}: the plate agrees`);
+  }
+});
+
+test('a local main left behind asks for you without moving the stage, until something is fixing it', () => {
+  const notice = (over = {}) => ({ path: '/repo', base: 'main', reason: 'dirty', subs: ['a'], at: 1, retrying: false, resolving: null, ...over });
+  const working = job({ subJobs: [sub('a', { stage: 'done' }), sub('b')], runs: [run('b')], mainNotices: [notice()] });
+  assert.equal(jobState(working), 'running', 'the roll-up is untouched'); assert.equal(subState(working, working.subJobs[1]), 'running', 'no step is held');
+  assert.equal(jobNeedsYou(working), true); assert.equal(jobLabel(working), 'Local main behind');
+  const plate = plateHtml(working, 0);
+  assert.match(plate, /\bstubbed\b/); assert.match(plate, /tone-warn/); assert.match(plate, /Local main behind/); assert.match(plate, /data-ask="open" data-job="j" data-sub=""/);
+  const delivered = job({ stage: 'done', subJobs: [sub('a', { stage: 'done' })], mainNotices: [notice({ base: 'trunk', path: '/other' }), notice()] });
+  assert.equal(jobState(delivered), 'done'); assert.equal(jobLabel(delivered), 'Local trunk behind', 'not Delivered while the notice is open');
+  assert.equal(jobNeedsYou(delivered), true); assert.match(plateHtml(delivered, 0), /\/other \+1/);
+  for (const [name, over] of [['retrying', { retrying: true }], ['resolving', { resolving: { id: 'stash', at: 2, sessionId: 's_fix' } }], ['starting a fix', { resolving: { id: 'stash', at: 2, sessionId: null } }]]) {
+    const j = job({ stage: 'done', subJobs: [sub('a', { stage: 'done' })], mainNotices: [notice(over)] });
+    assert.deepEqual(mainWaiting(j), [], name); assert.equal(jobNeedsYou(j), false, name); assert.equal(jobLabel(j), 'Delivered', name);
+    assert.doesNotMatch(plateHtml(j, 0), /\bstubbed\b/, `${name}: the plate agrees`);
+  }
+  const review = job({ subJobs: [sub('a', { kind: 'session', stage: 'review', result: { checks: [] } })], mainNotices: [notice()] });
+  assert.equal(jobLabel(review), 'Review result', 'a step waiting on you outranks the notice'); assert.doesNotMatch(plateHtml(review, 0), /Local main behind/);
+});
+
 test('the board orders jobs newest first by creation, whatever their live state', () => {
   const quiet = job({ id: 'quiet', createdAt: 10, subJobs: [sub('a')] });
   const fine = job({ id: 'fine', createdAt: 30, subJobs: [sub('a', { stage: 'done' })] });
@@ -144,4 +183,43 @@ test('the board orders jobs newest first by creation, whatever their live state'
   const legacy = job({ id: 'legacy', createdAt: undefined });
   const legacy2 = job({ id: 'legacy2', createdAt: undefined });
   assert.deepEqual(sortJobs([legacy, quiet, legacy2, broken, fine]).map((j) => j.id), ['fine', 'broken', 'quiet', 'legacy2', 'legacy']);
+});
+
+test('a job label never throws when the roll-up state has no sub-job behind it', () => {
+  const dropped = sub('a', { cancelledAt: 1, stage: 'cleanup' });
+  assert.equal(jobState(job({ subJobs: [dropped] })), 'queued');
+  assert.equal(jobLabel(job({ subJobs: [dropped] })), 'Queued', 'every sub-job dropped');
+  assert.equal(leadSub(job({ subJobs: [dropped] })), null);
+  assert.equal(jobLabel(job({ paused: true, subJobs: [dropped] })), 'Paused');
+});
+
+test('a job held by a replan labels itself whatever the replan is', () => {
+  const waiting = sub('a', { kind: 'session' });
+  const done = sub('a', { kind: 'session', stage: 'done' });
+  const red = { sub: 'a', auto: true, n: 1 };
+  const proposal = { plan: { subJobs: [] } };
+  for (const [replan, state, label] of [
+    [{}, 'running', 'Re-planning'],
+    [{ proposal }, 'needs', 'Plan change ready'],
+    [{ red }, 'running', 'Fixing'],
+    [{ red, proposal }, 'needs', null],
+  ]) {
+    const j = job({ subJobs: [waiting], replan });
+    assert.equal(jobState(j), state);
+    assert.doesNotThrow(() => jobLabel(j));
+    if (label) assert.equal(jobLabel(j), label);
+  }
+  const fixReady = job({ subJobs: [done], replan: { red, proposal } });
+  assert.equal(jobState(fixReady), 'needs');
+  assert.equal(leadSub(fixReady), null);
+  assert.equal(jobLabel(fixReady), jobStatus(fixReady, null).text, 'a red triage proposal with no step of its own falls back to the job status');
+});
+
+test('approving a session step while a red triage proposal is open moves the step to done and still labels the job', () => {
+  const approved = sub('a', { kind: 'session', stage: 'done' });
+  const later = sub('b', { kind: 'session', after: ['a'], stage: undefined });
+  const j = job({ subJobs: [approved, later], replan: { red: { sub: 'a', auto: true, n: 1 }, proposal: { plan: { subJobs: [] } } } });
+  assert.equal(jobState(j), 'needs');
+  assert.doesNotThrow(() => jobLabel(j));
+  assert.doesNotThrow(() => plateHtml(j, 'sonnet'));
 });

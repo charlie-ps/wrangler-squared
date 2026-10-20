@@ -48,7 +48,8 @@ test('the shipped registry is the two Writes pages, review defaults, See it work
   assert.ok(at(5).chat.querySelector('.job-launch.firing'));
   assert.match(at(6).chat.querySelector('.job-launch.done').textContent, /Creating the job/);
   assert.ok(!at(7).plate.classList.contains('idea'), 'and the job takes the idea’s place on the board');
-  assert.match(at(7).plate.querySelector('.job-plate-stub').textContent, /Plan ready/);
+  assert.ok(at(7).plate.classList.contains('running'), 'creating it approved the plan: the job is already working');
+  assert.doesNotMatch(at(7).plate.textContent, /Plan ready/);
   assert.ok([...Array(idea.anim.frames).keys()].every((i) => !drawn(i).querySelector('button:not([tabindex="-1"])')), 'its buttons stay out of the tab order');
   const storage = memoryStorage();
   assert.equal(createUpdates({ storage }).maybeShow(), true);
@@ -166,7 +167,6 @@ test('Automation settings lists past updates newest first, and each reopens its 
   assert.deepEqual(rows.map((r) => r.querySelector('strong').textContent), ['Third release', 'Second release', 'First release']);
   assert.deepEqual(rows.map((r) => !!r.querySelector('.update-new')), [true, false, false], 'unseen ones are marked new');
   assert.ok(rows[1].classList.contains('tone-warn'));
-  assert.equal(p.q('.update-empty'), null);
   rows[1].click();
   assert.equal(p.q('#job-dialog').open, false, 'settings closes first, so the splash is not stacked on it');
   assert.ok(p.q('#jobs-update').open);
@@ -176,14 +176,14 @@ test('Automation settings lists past updates newest first, and each reopens its 
   assert.deepEqual(seenIds(storage), ['a', 'b']);
 });
 
-test('Automation settings shows an empty state when there are no updates', (t) => {
+test('Automation settings keeps the What’s new heading when there are no updates', (t) => {
   const p = page(t);
   settings(p, createUpdates({ storage: memoryStorage(), updates: [] }));
   assert.match(p.q('.update-section h3').textContent, /What’s new/);
   assert.equal(document.querySelectorAll('.update-item').length, 0);
-  assert.match(p.q('.update-empty').textContent, /Nothing here yet/);
+  assert.equal(p.q('.update-list'), null);
   settings(p, undefined);
-  assert.ok(p.q('.update-empty'), 'and without the updates dependency at all');
+  assert.ok(p.q('.update-section'), 'and without the updates dependency at all');
 });
 
 // The client wires these to the shipped registry; the hand-off to the intro and

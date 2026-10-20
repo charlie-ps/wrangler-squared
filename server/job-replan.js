@@ -1,7 +1,7 @@
 import { isPrSub, isWriteSub, isStoryCreate, isMakeWrite, withStoryCreates } from './jobs-schema.js';
 import { dropSub, reworkSub, validatePlan, notStarted } from './job-sub-ops.js';
 import { milestoneReached } from './job-writes.js';
-import { stampActions, checkActions, applyActions } from './job-actions.js';
+import { stampActions, checkActions, applyActions, movedActions, landedAs, changeView } from './job-actions.js';
 import { parkedReadyRun } from './job-parked.js';
 import { noteProposal, closeProposal } from './job-talk.js';
 
@@ -220,10 +220,18 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
   if (!proposal || proposal.id !== proposalId) throw new Error('The proposal changed. Review the latest version before approving.');
   const chosen = optionsOf(proposal)[option];
   if (!chosen) throw new Error('Choose one of the proposal\'s options');
-  const { plan, changes } = mergeReplan(job, chosen.plan);
-  // Every action's pin must still be true, before anything is touched: a claim
-  // about a head or merge commit is refused once that has moved.
-  checkActions(job, chosen.actions, plan);
+  let merged;
+  try {
+    merged = mergeReplan(job, chosen.plan);
+    // Every action's pin must still be true, before anything is touched: a claim
+    // about a head or merge commit is refused once that has moved.
+    checkActions(job, chosen.actions, merged.plan);
+  } catch (e) {
+    const moved = movedSince(job, chosen);
+    if (!moved.length) throw e;
+    return sendBack(job, moved, now);
+  }
+  const { plan, changes } = merged;
   // A write is busy while its session runs, the one it leaves or the one it
   // goes to: that session was told its writes as they stood, and a parked one is
   // waiting on its drafts.
@@ -284,6 +292,37 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
   closeProposal(job, proposal.id, 'approved', now);
   job.replan = null;
   return { lines, detail: `Changed the plan: ${summary}`, feedback };
+}
+
+// What the chosen option touches that has landed, finished or moved since it was
+// written: an edit, removal or write's session now frozen, or an action's pin gone.
+// No refusal it causes can ever clear, so the proposal would be dead.
+function movedSince(job, chosen) {
+  const moved = movedActions(job, chosen.actions, chosen.merged);
+  const was = new Set(chosen.changes?.frozen || []);
+  const writers = [...(chosen.changes?.added || []), ...(chosen.changes?.edited || []).map((e) => e.id)]
+    .map((id) => chosen.merged?.subJobs.find((s) => s.id === id)).filter(isWriteSub).map((s) => s.by);
+  for (const id of new Set([...(chosen.changes?.edited || []).map((e) => e.id), ...(chosen.changes?.removed || []), ...writers])) {
+    const sub = job.subJobs.find((s) => s.id === id);
+    if (!sub || was.has(id) || moved.some((m) => m.sub === sub) || !isFrozen(sub)) continue;
+    moved.push({ sub, how: landedAs(sub) || 'has finished' });
+  }
+  return moved;
+}
+
+// A proposal the job moved under goes back to the planner with the human's ideas
+// and source as they were, told what moved, rather than refusing every approval.
+// The source is re-pinned to its step as it is now: the human approved acting on
+// it, and the old pin would refuse the planner's next action there.
+function sendBack(job, moved, now) {
+  const what = moved.map(({ sub, how }) => `${quoted(sub.title)} (${sub.id}) ${how}`).join('; ');
+  const source = job.replan.source;
+  const step = source && job.subJobs.find((s) => s.id === source.sub);
+  const view = step && changeView(job, step);
+  requestReplan(job, `Wrangler, not the human: the human approved your last proposal, but it could not apply because the job moved under it: ${what}. Propose again against the job as it stands now; the human's ideas above still stand.`,
+    now, null, { source: view ? { sub: step.id, ...view } : source });
+  return { lines: moved.map(({ sub, how }) => ({ sub, detail: `${quoted(sub.title)} ${how} since the plan change was proposed, so it went back to the wrangler` })),
+    detail: `Sent the plan change back to the wrangler: ${moved.map(({ sub, how }) => `${quoted(sub.title)} ${how}`).join(', ')} since it was proposed`, feedback: job.replan.feedback, sentBack: true };
 }
 
 // The re-planner's view of the job: every sub-job as it stands, which ones are

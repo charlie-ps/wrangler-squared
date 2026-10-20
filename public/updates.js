@@ -3,6 +3,7 @@ import { SHOTS, proofFigure, runningBar } from './figs.js';
 import { plateHtml } from './job-plates.js';
 import { ideaThreadHtml } from './job-idea.js';
 import { mountSkies, releaseSkies } from './job-skylines.js';
+import { applyTheme } from './themes.js';
 
 // What's new: a splash for each bigger release, shown once per browser, and the
 // list Automation settings reads to show any of them again. Seen ids live in the
@@ -34,7 +35,7 @@ const DESIGN = scenes([
 ]);
 function designFigure(phase) {
   const f = DESIGN[phase];
-  const mock = [['warn', 'Plan', true], ['warn', 'Code', true], ['idle', 'Merge', false], ['idle', 'Writes', false]]
+  const mock = [['warn', 'Plan', true], ['warn', 'Local verification', true], ['idle', 'Merge', false], ['idle', 'Writes', false]]
     .map(([t, n, on]) => `<div class="wn-art-cp tone-${t}"><i></i><span>${n}</span><span class="wn-art-tg${on ? ' on' : ''}"></span></div>`).join('');
   const body = f.view === 'live' ? `<div class="wn-art-title wn-fade">Checkpoint buttons</div><div class="wn-art-mock wn-fade">${mock}</div>`
     : f.view === 'draft' ? '<div class="wn-art-sk" style="width:55%"></div><div class="wn-art-sk"></div><div class="wn-art-sk" style="width:80%"></div><div class="wn-art-sk" style="width:65%"></div>' : '';
@@ -84,7 +85,7 @@ function tellFigure(phase) {
 // so the words wrap and show in full rather than scrolling in one row.
 const composer = (text) => `<div class="job-change has-text is-open">
   <div class="job-change-row"><span class="job-change-to"><i>T</i>This session</span><div class="wn-change-text">${text}</div><label class="job-change-attach">${ICONS.image}</label><button type="button" class="job-change-go" tabindex="-1">${ICONS.send}</button></div>
-  <div class="job-change-foot"><span>A question gets an answer. A change gets a new round.</span><span>Paste or drop a screenshot</span><kbd>⌘↵ to send</kbd></div></div>`;
+  <div class="job-change-foot"><span>A question gets an answer. A change gets a new round.</span><span>Paste or drop a screenshot</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 const thread = (msgs, state) => {
   const head = { waiting: [ICONS.terminal, 'Its session is waiting on your review', 'Paused · no slot · keeps its context'], answering: [ICONS.spin, 'Answering you', 'Working on what you sent'], stopped: [ICONS.terminal, 'Session stopped', 'Approved round 1'] }[state];
   const msg = ([from, text, at, att]) => `<div class="job-msg ${from} wn-fade"><span class="job-msg-who">${from === 'human' ? 'You' : 'Session'}</span><div><p>${text}<time>${at}</time></p>${att ? `<div class="job-msg-att"><span class="job-proof-thumb"><img alt="" src="${SHOTS[att]}"></span></div>` : ''}</div></div>`;
@@ -189,7 +190,7 @@ function ideaFigure(phase) {
   const f = IDEA[phase];
   const box = `<div class="job-change${f.text ? ' has-text is-open' : ''}">
     <div class="job-change-row"><span class="job-change-to"><i>M</i>Mock-up</span><div class="job-change-text${f.text ? '' : ' ph'}">${f.text || 'Add idea: a change, a question, new work…'}</div><label class="job-change-attach">${ICONS.image}</label><button type="button" class="job-change-go${f.go ? ' on' : ''}" tabindex="-1">${ICONS.send}</button></div>
-    <div class="job-change-foot"><span>The planner works out where it goes</span><span>Paste or drop a screenshot</span><kbd>⌘↵ to send</kbd></div></div>`;
+    <div class="job-change-foot"><span>The planner works out where it goes</span><span>Paste or drop a screenshot</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
   const route = f.route ? `<div class="wn-route wn-fade">${ICONS.sparkle}<span>Planner: <b>feedback on the mock-up</b>, so it goes back to the step that made it. The PR’s brief is unchanged.</span></div>` : '<div class="wn-route"></div>';
   return `<div class="wn-row2s" role="img" aria-label="You write that a published mock-up is too tall; the planner sends it back to the design step, which publishes it again while the PR waits">
       <div class="wn-stack">${node(f.d[0], 'sparkle', 'Mock-up the splash', f.d[1])}</div>
@@ -230,9 +231,13 @@ const IDEAS = scenes([
 const inert = (html) => html.replaceAll('<button ', '<button tabindex="-1" ').replaceAll(' aria-live="polite"', '');
 function ideasFigure(phase) {
   const f = IDEAS[phase], { clock, suggest, threads } = ideaTalk(Date.now());
-  const job = { id: 'wn-idea', title: 'Friday digest of finished jobs', intent: 'Could the board tell the team what finished each week?', repos: [], stage: 'planning', subJobs: [], moves: [], revision: 1,
-    createdAt: clock(0), reviewPlan: true, idea: { thread: threads[f.thread] }, plan: f.made ? suggest.suggest.plan : null,
-    runs: [{ id: 'wn-run', subJobId: null, phase: 'planning', stopped: f.made, parkedFor: 'idea', parkedAt: f.parked ? clock(5) : null, mailedAt: null }] };
+  // Creating it approved the plan, so the job it became is already building.
+  const plan = f.made ? suggest.suggest.plan : null;
+  const subJobs = plan ? plan.subJobs.map((s) => ({ sessions: [], repairs: [], ...s, stage: s.id === 'build' ? 'implementation' : 'queued' })) : [];
+  const job = { id: 'wn-idea', title: 'Friday digest of finished jobs', intent: 'Could the board tell the team what finished each week?', repos: [], stage: f.made ? 'active' : 'planning', subJobs, moves: [], revision: 1,
+    createdAt: clock(0), reviewPlan: true, idea: { thread: threads[f.thread] }, plan,
+    runs: [{ id: 'wn-run', subJobId: null, phase: 'planning', stopped: f.made, parkedFor: 'idea', parkedAt: f.parked ? clock(5) : null, mailedAt: null },
+      ...(f.made ? [{ id: 'wn-build', subJobId: 'build', phase: 'implementation', stopped: false, status: 'working' }] : [])] };
   const thread = ideaThreadHtml(job, { fresh: (id) => id === f.fresh, firing: f.press && { id: 'm3', state: f.press } });
   return `<div class="wn-ideas" role="img" aria-label="An idea sits on the board as a forming sky while its planner asks one question, then suggests a job you create with one press">
       <div class="wn-ideas-plate">${inert(plateHtml(job, 'opus'))}</div>
@@ -330,7 +335,7 @@ export const UPDATES = [
     body: `<p><b>New job</b> is now <b>New idea</b>. Write what you’re after in your own words. If it’s clear, the planner plans it. If not, it asks what it needs to know, then suggests a job you create with one press.</p>${done([
       '<b>Ideas sit on the board</b> as forming skies, beside your jobs, until they become one. The <b>Ideas</b> filter shows just them.',
       '<b>Keep refining</b> as long as you like: a reply after a suggestion gets a fresh one.',
-      '<b>Your checkpoints still apply.</b> With Plan on You review, you approve the plan before anything runs.',
+      '<b>Creating a suggested job approves its plan</b>, so it starts at once. A plan the planner drafts itself still waits for you with Plan on You review.',
     ])}`,
     anim: { frames: 9, ms: 1700, still: 3 }, figure: (phase) => ideasFigure(phase) },
 ];
@@ -418,6 +423,7 @@ export function createUpdates({ storage, updates = UPDATES }) {
     at = 0;
     phase = list[0].anim && still() ? list[0].anim.still ?? 0 : 0;
     render();
+    applyTheme(dialog);
     if (!dialog.open) dialog.showModal();
     return true;
   }
@@ -437,5 +443,5 @@ export function createUpdates({ storage, updates = UPDATES }) {
 // The What's new section of Automation settings: each row reopens its splash.
 export function whatsNewHtml(items) {
   const rows = items.map((u) => `<li><button type="button" class="update-item tone-${u.tone || 'run'}" data-update-id="${u.id}"><span class="job-node-tile">${ICONS[u.icon] || ICONS.info}</span><span class="update-item-text"><strong>${u.title}</strong><time datetime="${u.date}">${dateLabel(u.date)}</time></span><span class="update-item-end">${u.seen ? '' : '<span class="update-new">NEW</span>'}${ICONS.next}</span></button></li>`).join('');
-  return `<section class="update-section" aria-labelledby="job-settings-updates"><h3 id="job-settings-updates">What’s new</h3>${rows ? `<ul class="update-list">${rows}</ul>` : '<p class="update-empty">Nothing here yet. When a release adds something bigger, it opens once on its own and stays listed here.</p>'}</section>`;
+  return `<section class="update-section" aria-labelledby="job-settings-updates"><h3 id="job-settings-updates">What’s new</h3>${rows ? `<ul class="update-list">${rows}</ul>` : ''}</section>`;
 }

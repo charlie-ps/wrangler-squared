@@ -8,7 +8,7 @@ import { JobRunner } from './job-runner.js';
 import { changeView } from './job-change.js';
 import { ensureInbox, inboxDir } from './job-evidence.js';
 import { reportSchema } from './jobs-schema.js';
-import { teardown, readLog, setRunning, owe, holdsRunning } from './job-running.js';
+import { teardown, readLog, setRunning, owe, holdsRunning, stopSandbox, defaultDeps } from './job-running.js';
 import { jobPrompt, threadMail } from './job-prompts.js';
 import { jobRunningLogsHandler } from './handlers.js';
 
@@ -33,6 +33,7 @@ function fakeDeps({ stopFails = false, stubborn = false } = {}) {
     run: async (bin, args, cwd) => { calls.runs.push({ bin, args, cwd }); if (stopFails) throw Object.assign(new Error('boom'), { code: 1 }); urls.delete('http://localhost:55432/'); return ''; },
     sleep: async () => {},
     exists: () => true,
+    sandboxExec: '/usr/bin/sandbox-exec',
   };
   return deps;
 }
@@ -99,7 +100,7 @@ test('approving tears down: the group is killed, the stop command runs in the wo
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId });
   await f.tick();
   assert.deepEqual(f.deps.calls.kills, [[-48211, 'SIGTERM']], 'a setsid leader is killed as its whole group');
-  assert.deepEqual(f.deps.calls.runs, [{ bin: 'sh', args: ['-c', 'docker compose -p sec-412 down'], cwd: '/worktree/api' }]);
+  assert.deepEqual(f.deps.calls.runs.map((r) => [r.bin, r.args.slice(-3), r.cwd]), [['/usr/bin/sandbox-exec', ['sh', '-c', 'docker compose -p sec-412 down'], '/worktree/api']]);
   const { running } = f.sub();
   assert.deepEqual([running.items, running.owed, running.stopped.reason, running.stopped.still], [[], [], 'approved', []]);
   assert.deepEqual(running.stopped.results.map((r) => [r.name, r.ok]), [['vite dev server', true], ['postgres', true]]);
@@ -128,6 +129,68 @@ test('a pid that does not lead its own group is killed alone, and never our own 
   assert.deepEqual(deps.calls.kills, [[777, 'SIGTERM']]);
 });
 
+test('a stop runs under a seatbelt that writes only the worktree, the proof inbox, writableDirs and temp', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-sbx-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const wt = path.join(dir, 'wt'), extra = path.join(dir, 'docker');
+  fs.mkdirSync(wt); fs.mkdirSync(extra);
+  const job = { id: 'job_sbx', agent: 'codex', sandbox: 'auto', writableDirs: [extra, path.join(dir, 'missing')] };
+  const sub = { id: 'api', worktree: { path: wt } };
+  const inbox = ensureInbox(job.id, sub.id);
+  const sandbox = stopSandbox(job, sub);
+  const real = (p) => fs.realpathSync(p);
+  assert.deepEqual(sandbox.writable.slice(0, 3), [real(wt), real(inbox), real(extra)], 'a folder missing on this machine is dropped');
+  assert.ok(sandbox.writable.includes(real(os.tmpdir())) && sandbox.writable.includes(real('/tmp')));
+  const deps = fakeDeps();
+  const { results } = await teardown([DB], { cwd: wt, sandbox, deps });
+  const [{ bin, args, cwd }] = deps.calls.runs;
+  assert.equal(bin, '/usr/bin/sandbox-exec');
+  assert.equal(cwd, wt);
+  assert.equal(args[0], '-p');
+  assert.match(args[1], /\(deny file-write\*\)/);
+  assert.match(args[1], /\(subpath \(param "W0"\)\)/);
+  assert.ok(!args[1].includes(dir), 'paths go in as parameters, never into the profile text');
+  assert.deepEqual(args.slice(2, 4), ['-D', `W0=${real(wt)}`]);
+  assert.deepEqual(args.slice(-3), ['sh', '-c', DB.stop]);
+  assert.equal(results[0].ok, true);
+  assert.equal(stopSandbox({ ...job, agent: 'claude' }, sub).off, undefined, 'a Claude step has no OS sandbox of its own, so its stop gets one');
+});
+
+test('only a Codex job on Full access runs its stop unsandboxed', async () => {
+  const sandbox = stopSandbox({ id: 'j', agent: 'codex', sandbox: 'full' }, { id: 's' });
+  assert.deepEqual(sandbox, { off: true });
+  const deps = fakeDeps();
+  await teardown([DB], { cwd: '/worktree/api', sandbox, deps });
+  assert.deepEqual(deps.calls.runs, [{ bin: 'sh', args: ['-c', DB.stop], cwd: '/worktree/api' }]);
+  assert.equal(stopSandbox({ id: 'j', agent: 'codex', sandbox: 'locked' }, { id: 's' }).off, undefined);
+});
+
+test('with no sandbox on this machine a stop is not run, reported, and never throws', async () => {
+  const deps = { ...fakeDeps(), sandboxExec: null };
+  const out = await teardown([DB], { cwd: '/worktree/api', sandbox: { writable: [] }, deps });
+  assert.deepEqual(deps.calls.runs, [], 'refused, not run');
+  assert.equal(out.results[0].ok, false);
+  assert.match(out.results[0].detail, /docker compose -p sec-412 down · not run: no sandbox to run it in on this machine · still answering/);
+  assert.deepEqual(out.still, ['postgres']);
+  const unsandboxed = fakeDeps(); unsandboxed.sandboxExec = null;
+  await teardown([DB], { sandbox: { off: true }, deps: unsandboxed });
+  assert.equal(unsandboxed.calls.runs.length, 1, 'Full access needs no sandbox');
+});
+
+test('the real seatbelt denies a write outside the worktree and allows one inside', { skip: defaultDeps().sandboxExec ? false : 'no sandbox-exec here' }, async (t) => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-sbx-real-'));
+  const escaped = path.join(os.homedir(), `aw-escaped-${process.pid}`);
+  t.after(() => { fs.rmSync(wt, { recursive: true, force: true }); fs.rmSync(escaped, { force: true }); });
+  const deps = defaultDeps();
+  const sandbox = { writable: [fs.realpathSync(wt)] };
+  const out = await teardown([{ name: 'escape', stop: `touch ${escaped}` }, { name: 'inside', stop: 'touch ./stopped' }], { cwd: wt, sandbox, deps });
+  assert.equal(out.results[0].ok, false);
+  assert.match(out.results[0].detail, /exit 1/);
+  assert.equal(fs.existsSync(escaped), false, 'nothing written outside');
+  assert.equal(out.results[1].ok, true);
+  assert.ok(fs.existsSync(path.join(wt, 'stopped')));
+});
+
 test('a later round that no longer lists an entry stops it at once and keeps the rest', async (t) => {
   const f = fixture(t); await f.start(); await f.ready([VITE, DB]);
   const asked = f.store.get(f.job.id); const view = changeView(asked, asked.subJobs[0]);
@@ -135,7 +198,6 @@ test('a later round that no longer lists an entry stops it at once and keeps the
   await f.tick();
   const planner = f.launched.at(-1);
   f.report({ kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'Drop the database' }] }, planner);
-  f.store.action(f.job.id, 'approve-replan', { proposalId: planner.run.id });
   await f.tick();
   f.deps.urls.add('http://localhost:55432/');
   await f.ready([VITE], [shot]);
@@ -197,7 +259,7 @@ test('Stop tears down on the next tick; Restart asks the parked session, and its
   f.store.action(f.job.id, 'stop-running', { subJobId: 'api', name: 'postgres' });
   await f.tick();
   assert.deepEqual(f.sub().running.items.map((i) => i.name), ['vite dev server']);
-  assert.deepEqual(f.deps.calls.runs.at(-1).args, ['-c', 'docker compose -p sec-412 down']);
+  assert.deepEqual(f.deps.calls.runs.at(-1).args.slice(-3), ['sh', '-c', 'docker compose -p sec-412 down']);
   f.store.action(f.job.id, 'stop-running', { subJobId: 'api' });
   await f.tick();
   assert.equal(f.sub().running.items.length, 0);

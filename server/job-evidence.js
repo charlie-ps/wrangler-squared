@@ -20,6 +20,8 @@ const KINDS = [
   { mime: 'image/jpeg', exts: ['.jpg', '.jpeg'], magic: [0xff, 0xd8, 0xff] },
   { mime: 'image/gif', exts: ['.gif'], magic: [0x47, 0x49, 0x46, 0x38] },
   { mime: 'video/webm', exts: ['.webm'], magic: [0x1a, 0x45, 0xdf, 0xa3] },
+  // RIFF....WEBP: the host stages a pasted WebP as-is.
+  { mime: 'image/webp', exts: ['.webp'], magic: [0x52, 0x49, 0x46, 0x46, null, null, null, null, 0x57, 0x45, 0x42, 0x50] },
 ];
 export const EVIDENCE_EXTENSIONS = KINDS.flatMap((k) => k.exts);
 // A bare file name, never a path: the agent names files, and a name is only ever
@@ -35,7 +37,7 @@ export const ensureInbox = (jobId, subId) => { const dir = inboxDir(jobId, subId
 
 // What the bytes ARE, not what the name claims: a renamed text file is refused.
 export function sniffKind(bytes) {
-  return KINDS.find((k) => k.magic.every((b, i) => bytes[i] === b)) || null;
+  return KINDS.find((k) => k.magic.every((b, i) => b === null || bytes[i] === b)) || null;
 }
 
 // Copy every file a receipt's proof names into this round's folder and return
@@ -76,12 +78,14 @@ export function adoptEvidence({ jobId, subId, round, proof, prefix = '' }) {
 // copy is the source (`images:keep` read); the bytes are sniffed like any proof.
 // TODO(host-api mail:images): mail carries text only, so the session is mailed the
 // file's path and reads it itself, where spawn({ images }) would attach it.
+// The host's own paste cap: anything it staged is kept, never skipped.
+export const ASK_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export function keepAskImages({ jobId, subId, round, messageId, images }) {
   const dest = round == null ? ideasDir(jobId, subId) : roundDir(jobId, subId, round);
   const kept = [];
   for (const { bytes } of images) {
     const kind = sniffKind(bytes);
-    if (!kind || bytes.length > EVIDENCE_MAX_BYTES) continue;
+    if (!kind || kind.mime.startsWith('video/') || bytes.length > ASK_IMAGE_MAX_BYTES) continue;
     fs.mkdirSync(dest, { recursive: true });
     const file = `ask-${messageId}-${kept.length + 1}${kind.exts[0]}`;
     fs.writeFileSync(path.join(dest, file), bytes);
@@ -106,6 +110,15 @@ export async function thumbnailOf({ jobId, subId, round, file, run = runFile }) 
     try { await run('sips', ['-s', 'format', 'jpeg', '-Z', String(THUMB_PX), from, '--out', out]); } catch { return null; }
   }
   try { return { mime: 'image/jpeg', bytes: fs.readFileSync(out) }; } catch { return null; }
+}
+
+export function readIdeaImage({ jobId, file }) {
+  if (!evidenceName(file)) return null;
+  try {
+    const bytes = fs.readFileSync(path.join(ideasDir(jobId), file));
+    const kind = sniffKind(bytes);
+    return kind ? { mime: kind.mime, bytes } : null;
+  } catch { return null; }
 }
 
 export function readEvidence({ jobId, subId, round, file }) {

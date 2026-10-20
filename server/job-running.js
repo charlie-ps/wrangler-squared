@@ -1,8 +1,10 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { runFile } from './job-github.js';
 import { inboxDir } from './job-evidence.js';
+import { expandRepo } from './job-runtime.js';
 
 // What a Code review step's agent left running for the human to try (docs: "See
 // it working"). The AGENT starts it, detached (`setsid`) so it outlives the session
@@ -17,6 +19,12 @@ import { inboxDir } from './job-evidence.js';
 // Teardown NEVER fails an approval: a stop command that errors or a process that
 // outlives its group is reported on `stopped` (and flagged amber on the step), not
 // thrown.
+//
+// A `stop` is the agent's own words run later by us, so it never gets more power
+// than the agent that wrote it: it runs under a seatbelt profile (`stopSandbox`)
+// that writes only the worktree, the proof inbox, the job's writableDirs and temp
+// (network and sockets stay open, for `docker compose down`), unsandboxed only for
+// a Codex job on Full access. With no sandbox to hand it is not run at all.
 //
 // TODO(host-api processes): there is no façade to signal a process group, run a
 // shell command in a worktree or read a log file, so this module uses node's
@@ -72,7 +80,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pgidOfDefault = (pid) => new Promise((resolve) => execFile('ps', ['-o', 'pgid=', '-p', String(pid)], (err, out) => resolve(err ? null : Number.parseInt(String(out).trim(), 10) || null)));
 const aliveDefault = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 const answersDefault = async (url) => { try { await fetch(url, { signal: AbortSignal.timeout(1500) }); return true; } catch { return false; } };
-export const defaultDeps = () => ({ kill: (pid, sig) => process.kill(pid, sig), alive: aliveDefault, pgidOf: pgidOfDefault, answers: answersDefault, run: runFile, sleep, exists: (p) => fs.existsSync(p) });
+const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
+const sandboxExecDefault = () => process.platform === 'darwin' && fs.existsSync(SANDBOX_EXEC) ? SANDBOX_EXEC : null;
+export const defaultDeps = () => ({ kill: (pid, sig) => process.kill(pid, sig), alive: aliveDefault, pgidOf: pgidOfDefault, answers: answersDefault, run: runFile, sleep, exists: (p) => fs.existsSync(p), sandboxExec: sandboxExecDefault() });
+
+// Where a sub-job's stop command may write. Seatbelt matches resolved paths
+// (/tmp is /private/tmp), so each is realpath'd and a missing one dropped.
+export function stopSandbox(job, sub) {
+  if (job?.agent === 'codex' && job.sandbox === 'full') return { off: true };
+  const dirs = [sub?.worktree?.path, job?.id && sub?.id ? inboxDir(job.id, sub.id) : null, ...(job?.writableDirs || []).map(expandRepo), os.tmpdir(), '/tmp'];
+  const real = dirs.filter(Boolean).flatMap((d) => { try { return [fs.realpathSync(d)]; } catch { return []; } });
+  return { writable: [...new Set(real)] };
+}
+
+// The paths go in as -D parameters, never spliced into the profile text.
+const PROFILE_HEAD = '(version 1)(allow default)(deny file-write*)(allow file-write* (literal "/dev/null") (literal "/dev/zero") (regex #"^/dev/fd/") (regex #"^/dev/tty")';
+export function stopCommand(stop, sandbox, deps) {
+  if (sandbox?.off) return { bin: 'sh', args: ['-c', stop] };
+  if (!deps.sandboxExec) return null;
+  const writable = sandbox?.writable || [];
+  const profile = `${PROFILE_HEAD}${writable.map((_, n) => ` (subpath (param "W${n}"))`).join('')})`;
+  return { bin: deps.sandboxExec, args: ['-p', profile, ...writable.flatMap((w, n) => ['-D', `W${n}=${w}`]), 'sh', '-c', stop] };
+}
 
 // Whether an entry is up now: its URL answers, else its process is alive; an
 // entry with only a stop command has nothing to probe and reads as up.
@@ -85,8 +114,9 @@ export async function isUp(item, deps = defaultDeps()) {
 // The whole of one entry's teardown: its process group (the agent started it with
 // setsid, so the pid leads one; a pid that does not lead its own group is killed
 // alone, never a group that is not the agent's), then its stop command in the
-// worktree, then a check that its URL stopped answering. Never throws.
-async function tearOne(item, { cwd, deps }) {
+// worktree (sandboxed, see stopCommand), then a check that its URL stopped
+// answering. Never throws.
+async function tearOne(item, { cwd, sandbox, deps }) {
   const notes = [];
   let ok = true;
   if (item.pid && item.pid !== process.pid && item.pid !== process.ppid) {
@@ -102,8 +132,10 @@ async function tearOne(item, { cwd, deps }) {
       } else notes.push(`process ${item.pid} already gone`);
     } catch (e) { ok = false; notes.push(`could not kill ${item.pid}: ${String(e?.message || e).split('\n')[0]}`); }
   }
-  if (item.stop) {
-    try { await deps.run('sh', ['-c', item.stop], cwd && deps.exists(cwd) ? cwd : undefined); notes.push(`${item.stop} · exit 0`); }
+  const cmd = item.stop ? stopCommand(item.stop, sandbox, deps) : null;
+  if (item.stop && !cmd) { ok = false; notes.push(`${item.stop} · not run: no sandbox to run it in on this machine`); }
+  else if (cmd) {
+    try { await deps.run(cmd.bin, cmd.args, cwd && deps.exists(cwd) ? cwd : undefined); notes.push(`${item.stop} · exit 0`); }
     catch (e) { ok = false; notes.push(`${item.stop} · ${e?.code != null ? `exit ${e.code}` : String(e?.message || e).split('\n')[0]}`); }
   }
   if (item.url) {
@@ -115,9 +147,10 @@ async function tearOne(item, { cwd, deps }) {
   return { name: item.name, ok, detail: notes.join(' · ') || 'nothing to stop' };
 }
 
-export async function teardown(items, { cwd = null, deps = defaultDeps() } = {}) {
+// `sandbox` is stopSandbox(job, sub); left out, a stop may write nowhere.
+export async function teardown(items, { cwd = null, sandbox = { writable: [] }, deps = defaultDeps() } = {}) {
   const results = [];
-  for (const item of items) results.push(await tearOne(item, { cwd, deps }));
+  for (const item of items) results.push(await tearOne(item, { cwd, sandbox, deps }));
   return { results, still: results.filter((r) => !r.ok).map((r) => r.name) };
 }
 

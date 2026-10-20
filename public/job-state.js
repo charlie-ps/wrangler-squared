@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber, worktreeKept } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, budgetHeld, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber, worktreeKept, promptsWaiting } from './jobs.js';
 
 // The one state vocabulary every surface draws: a tone (the colour, see the
 // .tone-* rules in jobs.css), a glyph and a short name. Every stage, run status,
@@ -30,7 +30,7 @@ export function subState(job, sub) {
   if (!job.error && redFixing(job, sub)) return 'running';
   if (!job.error && redFixReady(job, sub)) return 'needs';
   if (job.error || cancelledDependencies(job, sub).length || (eventFor(job, sub) && !deploymentStalled(sub))) return 'failing';
-  if (job.paused || heldByReplan(job, sub)) return 'paused';
+  if (job.paused || budgetHeld(job) || heldByReplan(job, sub)) return 'paused';
   if (jobNeedsReview(job, sub)) return 'needs';
   if (jobStatus(job, sub).tone === 'working') return 'running';
   if (redPipeline(sub)) return 'failing';
@@ -43,21 +43,28 @@ export function jobState(job) {
   if (job.error) return 'failing';
   if (job.stage === 'done') return 'done';
   if (job.stage !== 'active') {
-    if (job.paused) return 'paused';
+    if (job.paused || budgetHeld(job)) return 'paused';
     if (jobNeedsReview(job, null)) return 'needs';
     if (job.runs.some((r) => !r.stopped)) return 'running';
     return job.stage === 'backlog' ? 'planned' : 'queued';
   }
   // Sub-jobs frozen by a pending plan change roll up to the change itself:
   // re-planning, then a proposal that needs the human.
-  const states = job.subJobs.filter((s) => job.paused || !heldByReplan(job, s)).map((s) => subState(job, s)).filter((s) => s !== 'dropped');
-  if (replanProposed(job) && !job.paused) states.push('needs');
-  else if (replanPending(job) && !job.paused) states.push('running');
+  const halted = job.paused || budgetHeld(job);
+  const states = job.subJobs.filter((s) => halted || !heldByReplan(job, s)).map((s) => subState(job, s)).filter((s) => s !== 'dropped');
+  if (replanProposed(job) && !halted) states.push('needs');
+  else if (replanPending(job) && !halted) states.push('running');
   if (!states.length) return 'queued';
   if (states.every((s) => s === 'done')) return 'done';
   return STATE_ORDER.find((s) => states.includes(s));
 }
 
+// A local checkout main could not be fast-forwarded (job-main.js), and nothing is fixing it yet:
+// an ask of its own beside the stage roll-up, which it never changes, so a finished job keeps it.
+export const mainWaiting = (job) => (job.mainNotices || []).filter((n) => !n.retrying && !n.resolving);
+// A job needs you exactly when its plate draws an ask (job-plates.js plateAsk): the rail
+// badge and the Needs you tab count jobs by this, so both match the cards on the board.
+export const jobNeedsYou = (job) => !!job.error || budgetHeld(job) || promptsWaiting(job).length > 0 || ['needs', 'failing'].includes(jobState(job)) || mainWaiting(job).length > 0;
 export const leadSub = (job, state = jobState(job)) => job.subJobs.find((s) => subState(job, s) === state) || null;
 const redChecks = (sub) => (sub.pr?.checks || []).filter((c) => ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT'].includes(c.state)).length;
 // A few words for what a sub-job is waiting for, where its state is one a human
@@ -96,6 +103,8 @@ export function jobLabel(job) {
   const state = jobState(job);
   if (job.cancelledAt) return jobStatus(job, null).text;
   if (job.error) return 'Needs attention';
+  if (!['needs', 'failing'].includes(state) && mainWaiting(job).length) return `Local ${mainWaiting(job)[0].base} behind`;
+  if (budgetHeld(job)) return 'Paused for budget';
   if (job.stage === 'backlog') return job.paused ? 'Paused' : 'Backlog';
   if (job.stage === 'planning' && state === 'needs' && job.plan && !runStatus(job, null)) return 'Plan ready';
   if (job.stage !== 'active') return jobStatus(job, null).text;
@@ -104,6 +113,7 @@ export function jobLabel(job) {
   if (state === 'needs' && replanProposed(job) && !job.replan.red) return 'Plan change ready';
   if (state === 'running' && replanPending(job) && !replanProposed(job)) return job.replan.red ? 'Fixing' : 'Re-planning';
   const peers = job.subJobs.filter((s) => subState(job, s) === state);
+  if (!peers.length) return jobStatus(job, null).text;
   return `${subLabel(job, peers[0])}${peers.length > 1 ? ` +${peers.length - 1}` : ''}`;
 }
 export const sortJobs = (jobs) => jobs.map((job, i) => [job, job.createdAt ?? 0, i]).sort((a, b) => b[1] - a[1] || b[2] - a[2]).map(([job]) => job);

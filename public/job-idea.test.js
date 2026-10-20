@@ -4,7 +4,7 @@ import { Window } from 'happy-dom';
 import { initJobsView } from './jobs-view.js';
 import { ideaStage, liveSuggestion, jobNeedsReview, jobStatus } from './jobs.js';
 import { plateAsk, plateHtml } from './job-plates.js';
-import { proseHtml, suggestionSummary } from './job-idea.js';
+import { TITLE_FADE_MS, proseHtml, suggestionSummary } from './job-idea.js';
 
 const suggest = { title: 'Nudge when a green PR waits over a day', plan: { context: '', stories: [], subJobs: [
   { id: 'track', title: 'Track how long a merge-ready PR has waited', repo: '/Users/me/wrangler-squared', after: [], brief: 'b' },
@@ -17,19 +17,19 @@ const ideaJob = (thread = [], runs = [parked()]) => ({ id: 'idea1', title: 'Nudg
   subJobs: [], runs, moves: [], revision: 3, createdAt: 1, reviewPlan: true, idea: { thread } });
 const asked = { id: 'm1', at: 2, from: 'planner', text: 'Two choices change the work:\n\n1. Which wait counts?\n2. Where should the nudge land?' };
 
-function fixture(t, jobs) {
+function fixture(t, jobs, { stageImage = async () => ({ name: 'x' }) } = {}) {
   const window = new Window({ url: 'http://localhost:7878' });
   const prevDoc = globalThis.document, prevFormData = globalThis.FormData, prevCSS = globalThis.CSS;
   globalThis.document = window.document; globalThis.FormData = window.FormData; globalThis.CSS = { escape: (v) => String(v) };
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
-  const sent = [];
-  const view = initJobsView({ send: (m) => sent.push(structuredClone(m)), stageImage: async () => ({ name: 'x' }), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [] }], onSession: () => {}, onDiff: () => {}, onBoard: () => true });
+  const sent = [], toasts = [];
+  const view = initJobsView({ toast: (m) => toasts.push(m), send: (m) => sent.push(structuredClone(m)), stageImage: (b) => stageImage(b), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [] }], onSession: () => {}, onDiff: () => {}, onBoard: () => true });
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; globalThis.CSS = prevCSS; await window.happyDOM.close(); });
   const data = { jobs, settings: { concurrency: 2, maxRepairs: 2 } };
   view.update(data);
   const q = (s) => document.querySelector(s);
   const key = (el, k, extra = {}) => el.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...extra }));
-  return { window, view, data, sent, q, key };
+  return { window, view, data, sent, toasts, q, key };
 }
 
 test('New idea replaces New job: the button, the form, and a create that asks the planner to triage', (t) => {
@@ -38,9 +38,9 @@ test('New idea replaces New job: the button, the form, and a create that asks th
   f.q('#job-new').click();
   const form = f.q('#job-create-form');
   assert.equal(form.querySelector('h2').textContent, 'New idea');
-  assert.match(form.querySelector('.job-outcome label').textContent, /^Describe your idea/);
-  assert.match(form.elements.intent.placeholder, /the wrangler will ask/);
-  assert.match(form.querySelector('.job-create-foot span').textContent, /If the idea is clear, the wrangler plans it/);
+  assert.match(form.querySelector('.job-outcome label').textContent, /^Idea$/);
+  assert.equal(form.elements.intent.placeholder, 'What should exist that doesn’t yet?');
+  assert.equal(form.querySelector('.job-create-foot span'), null);
   form.elements.intent.value = 'Something for flaky CI';
   form.dispatchEvent(new f.window.Event('submit', { bubbles: true, cancelable: true }));
   const create = f.sent.find((m) => m.type === 'job-create');
@@ -86,6 +86,69 @@ test('a vague idea is its conversation: the planner\'s reply, escaped, and Enter
   assert.equal([...f.q('#job-dialog').querySelectorAll('.job-sent-bubble')].filter((b) => b.textContent === 'Green and unmerged for a day.').length, 1, 'never twice once the thread has it');
 });
 
+test('a screenshot pasted into the idea\'s reply box waits in its tray, holds Send until it lands, and stays in the thread once sent', async (t) => {
+  let release;
+  const f = fixture(t, [ideaJob([asked])], { stageImage: () => new Promise((r) => { release = () => r({ name: 'paste-1700000000000-cccc3333.png' }); }) });
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const box = f.q('[data-idea-composer]'), text = box.querySelector('textarea');
+  assert.ok(box.querySelector('.job-change-attach input[type="file"]'), 'a picture can be picked as well as pasted or dropped');
+  const e = new f.window.Event('paste', { bubbles: true, cancelable: true }); e.clipboardData = { files: [new f.window.File(['x'], 'Screenshot.png', { type: 'image/png' })], items: [], types: ['Files'], getData: () => '' };
+  text.dispatchEvent(e);
+  assert.equal(e.defaultPrevented, true);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(box.querySelectorAll('.job-change-tray li.uploading').length, 1);
+  assert.equal(box.querySelector('[data-idea-send]').disabled, true, 'not while it is still travelling');
+  f.view.update(f.data);
+  assert.equal(f.q('[data-idea-composer]'), box, 'a tick leaves a box holding only a picture alone');
+  text.value = 'Like this, but lighter'; text.dispatchEvent(new f.window.Event('input'));
+  assert.equal(box.querySelector('[data-idea-send]').disabled, true);
+  f.key(text, 'Enter');
+  assert.equal(f.sent.filter((m) => m.action === 'idea-reply').length, 0, 'Enter waits for it too');
+  release(); await new Promise((r) => setTimeout(r, 0));
+  assert.equal(box.querySelector('[data-idea-send]').disabled, false);
+  f.key(text, 'Enter');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'idea-reply', text: 'Like this, but lighter', images: ['paste-1700000000000-cccc3333.png'] });
+  assert.equal([...f.q('#job-dialog').querySelectorAll('.job-sent-imgs img')].length, 1, 'the picture rides up into the bubble');
+  assert.equal(f.q('[data-idea-composer] .job-change-tray').hidden, true, 'the tray empties once sent');
+  f.data.jobs[0].idea.thread.push({ id: 'm2', at: Date.now(), from: 'human', text: 'Like this, but lighter', images: [{ file: 'ask-abc-1.png', mime: 'image/png' }], sentAt: null });
+  f.view.update(f.data);
+  const strip = f.q('#job-dialog .job-sent-strip');
+  assert.equal(strip.querySelector('[data-image]').dataset.image, 'idea:ask-abc-1.png');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-images', id: 'idea1' }, 'the kept copy is asked for');
+  f.view.images({ jobId: 'idea1', images: [{ name: 'idea:ask-abc-1.png', mime: 'image/png', dataBase64: 'cG5n' }] });
+  assert.equal(f.q('#job-dialog .job-sent-strip img').src, 'data:image/png;base64,cG5n');
+});
+
+test('the pictures an idea was created with sit on its first bubble, in the live view and the Conversation after planning', (t) => {
+  const f = fixture(t, [{ ...ideaJob([asked]), images: ['a.png', 'b.png'] }]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const first = () => f.q('#job-dialog .job-sent');
+  assert.deepEqual([...first().querySelectorAll('.job-sent-strip [data-image]')].map((b) => b.dataset.image), ['a.png', 'b.png']);
+  assert.deepEqual(f.sent.at(-1), { type: 'job-images', id: 'idea1' });
+  f.view.images({ jobId: 'idea1', images: [{ name: 'a.png', mime: 'image/png', dataBase64: 'YQ==' }, { name: 'b.png', mime: 'image/png', dataBase64: 'Yg==' }] });
+  assert.deepEqual([...first().querySelectorAll('.job-sent-strip img')].map((i) => i.src), ['data:image/png;base64,YQ==', 'data:image/png;base64,Yg==']);
+  first().querySelectorAll('[data-image]')[1].click();
+  assert.equal(f.q('dialog.job-image-zoom img').src, 'data:image/png;base64,Yg==', 'a thumbnail enlarges');
+  f.q('dialog.job-image-zoom').click();
+  Object.assign(f.data.jobs[0], { plan: suggest.plan, stage: 'review' }); f.view.update(f.data);
+  const past = f.q('#job-dialog .job-idea-past .job-sent');
+  assert.match(past.textContent, /PRs sit green/);
+  assert.deepEqual([...past.querySelectorAll('.job-sent-strip img')].map((i) => i.src), ['data:image/png;base64,YQ==', 'data:image/png;base64,Yg==']);
+});
+
+test('a picture that fails to upload says so rather than vanishing', async (t) => {
+  const f = fixture(t, [ideaJob([asked])], { stageImage: async () => { throw new Error('too big'); } });
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const text = f.q('[data-idea-composer] textarea');
+  const e = new f.window.Event('paste', { bubbles: true, cancelable: true }); e.clipboardData = { files: [new f.window.File(['x'], 'Screenshot.png', { type: 'image/png' })], items: [], types: ['Files'], getData: () => '' };
+  text.dispatchEvent(e);
+  await new Promise((r) => setTimeout(r, 0)); await new Promise((r) => setTimeout(r, 0));
+  assert.ok(f.q('[data-idea-composer] .job-image.failed'), 'the failed picture stays in the tray');
+  assert.match(f.q('[data-idea-composer] .job-change-error').textContent, /Couldn’t attach this image: too big/);
+  text.value = 'See this'; text.dispatchEvent(new f.window.Event('input'));
+  assert.equal(f.q('[data-idea-send]').disabled, true, 'Send waits until it is retried or removed');
+});
+
 test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos, and the hole that creates it', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = fixture(t, [ideaJob([asked, { id: 'm2', at: 3, from: 'human', text: 'Plate first', sentAt: 3 }, { id: 'm3', at: 4, from: 'planner', text: 'That is enough to plan.', suggest }])]);
@@ -97,7 +160,7 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   assert.deepEqual([...panel.querySelectorAll('.job-launch-steps li small')].map((s) => s.textContent), ['wrangler-squared', 'wrangler-squared', 'agent · 1 write']);
   assert.ok(panel.querySelector('.job-launch-go .gx[data-arc][data-tone="warn"]'), 'the event horizon is the button');
   assert.equal(panel.querySelector('.job-launch-label b').textContent, 'Create job');
-  assert.match(panel.querySelector('.job-launch-fine').textContent, /Plan on You review/);
+  assert.match(panel.querySelector('.job-launch-fine').textContent, /Creating it approves this plan/);
   panel.querySelector('[data-accept-idea]').click();
   assert.ok(f.q('.job-launch').classList.contains('firing'), 'the hole flares first');
   assert.equal(f.sent.filter((m) => m.action === 'accept-idea').length, 0);
@@ -105,14 +168,39 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3' });
   assert.ok(f.q('.job-launch').classList.contains('done'));
   f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
-  assert.ok(f.q('#job-dialog').open, 'the dialog stays for the plan');
-  Object.assign(f.data.jobs[0], { title: suggest.title, plan: suggest.plan, runs: [parked({ stopped: true })] });
+  assert.equal(f.q('#job-dialog').open, false, 'the dialog closes onto the board, where the job forms');
+  const subJobs = suggest.plan.subJobs.map((s) => ({ sessions: [], repairs: [], ...s, stage: 'queued' }));
+  Object.assign(f.data.jobs[0], { title: suggest.title, plan: suggest.plan, stage: 'active', approvedAt: 5, subJobs, runs: [parked({ stopped: true })] });
   f.data.jobs[0].idea.thread[2].acceptedAt = 5;
   f.view.update(f.data);
-  assert.equal(f.q('#job-dialog .job-idea'), null, 'the plan review takes over');
-  assert.ok(f.q('#job-dialog [data-action="approve-plan"]'));
-  assert.ok(f.q('#job-dialog details[data-keep="idea"] .job-launch.done'), 'the conversation is folded under the plan');
-  assert.equal(f.q('[data-board="idea1"] .job-status').textContent, 'Plan ready');
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  assert.equal(f.q('#job-dialog .job-idea'), null, 'the job takes over');
+  assert.equal(f.q('#job-dialog [data-action="approve-plan"]'), null, 'creating it approved the plan: nothing to approve again');
+  assert.ok(f.q('#job-dialog details[data-keep="idea"] .job-launch.done'), 'the conversation is folded under the job');
+  assert.notEqual(f.q('[data-board="idea1"] .job-status').textContent, 'Plan ready');
+});
+
+test('a refused Create job leaves the dialog open and stops flaring', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }])]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  f.q('[data-accept-idea]').click();
+  t.mock.timers.tick(900);
+  f.view.ideaFailed({ event: 'job-action-failed', jobId: 'idea1', action: 'accept-idea', error: 'Suggestion moved' });
+  assert.ok(f.q('#job-dialog').open);
+  assert.ok(f.q('.job-launch').classList.contains('live'), 'pressable again');
+});
+
+test('a Create job confirmed after the human opened another job leaves that job open', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const other = { ...ideaJob([asked]), id: 'idea2' };
+  const f = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]), other]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  f.q('[data-accept-idea]').click();
+  t.mock.timers.tick(900);
+  f.view.openDetail('idea2');
+  f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
+  assert.ok(f.q('#job-dialog').open);
 });
 
 test('a suggestion something newer was said after is stale and cannot be pressed', (t) => {
@@ -141,6 +229,8 @@ test('on the board an idea waiting on you is a needs-you stub; one the planner i
 test('the planner\'s prose is escaped before it is marked up, and a summary counts only the work', () => {
   assert.equal(proseHtml('a `b<c>` d\n\n- one\n- two'), '<p>a <code>b&lt;c&gt;</code> d</p><ul><li>one</li><li>two</li></ul>');
   assert.equal(proseHtml('Two things:\n1. Whose CI?\n   a) ours\n2. Which pain?\nIf you mean (a), I would'), '<p>Two things:</p><ol><li>Whose CI?<br>a) ours</li><li>Which pain?</li></ol><p>If you mean (a), I would</p>');
+  assert.equal(proseHtml('Three layers:\n\n1. One\n\n2. Two\n   more\n\n3. Three'), '<p>Three layers:</p><ol><li>One</li></ol><ol start="2"><li>Two<br>more</li></ol><ol start="3"><li>Three</li></ol>', 'a list split by blank lines keeps its written numbers');
+  assert.equal(proseHtml('1. One\n2. Two\n3. Three'), '<ol><li>One</li><li>Two</li><li>Three</li></ol>');
   assert.equal(proseHtml('**Why** it <waits>'), '<p><b>Why</b> it &lt;waits&gt;</p>');
   const s = suggestionSummary(suggest.plan);
   assert.deepEqual([s.work.length, s.repos.length, s.line], [3, 1, '3 sub-jobs · wrangler-squared · Slack']);
@@ -160,7 +250,8 @@ test('an idea is a plate under a forming sky, tagged IDEA, idle while the planne
   const ideaPlate = f.q('[data-board="reply"]');
   assert.ok(ideaPlate.classList.contains('idea'));
   assert.equal(ideaPlate.querySelector('.job-plate-tag').textContent, 'Idea');
-  assert.equal(ideaPlate.querySelector('.job-plate-idea').textContent, '2 messages');
+  assert.equal(ideaPlate.querySelector('.job-plate-idea'), null, 'the card shows only its age');
+  assert.doesNotMatch(ideaPlate.querySelector('.job-plate-where').textContent, /message/);
   assert.equal(f.q('[data-board="think"] .job-status').textContent, 'The wrangler is reading the idea');
   f.q('[data-filter="ideas"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-plate')].map((p) => p.dataset.board).sort(), ['later', 'reply', 'sugg', 'think'], 'the Ideas filter shows only ideas');
@@ -170,22 +261,58 @@ test('an idea is a plate under a forming sky, tagged IDEA, idle while the planne
   assert.ok(f.q('#job-dialog [data-idea-composer]'));
 });
 
-test('an accepted idea becomes a job plate, folding its cloud into the job\'s sky once', async (t) => {
+test('an accepted idea becomes a job plate, forming its black hole from the cloud once', async (t) => {
+  // Reduced motion's crossfade, so the test waits for its end rather than the whole sequence.
+  const prevMatch = globalThis.matchMedia;
+  globalThis.matchMedia = (q) => ({ matches: q.includes('reduce') });
+  t.after(() => { globalThis.matchMedia = prevMatch; });
   const idea = ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]);
   const f = fixture(t, [idea]);
+  // The collapse is Space's: a theme with no plate art has no cloud or hole to form.
+  f.data.settings.theme = 'space'; f.view.update(f.data);
   assert.ok(f.q('[data-board="idea1"]').classList.contains('idea'));
   Object.assign(f.data.jobs[0], { plan: suggest.plan, title: suggest.title, runs: [{ ...parked(), stopped: true }] });
   f.data.jobs[0].idea.thread[0].acceptedAt = 5;
   f.view.update(f.data);
   const plate = f.q('[data-board="idea1"]'), art = plate.querySelector('.job-plate-art');
   assert.equal(plate.classList.contains('idea'), false, 'now a job plate');
-  assert.ok(art.classList.contains('collapsing'));
+  assert.ok(art.classList.contains('forming'));
   assert.ok(art.querySelector(':scope > .gx.nb') && art.querySelector(':scope > .gx:not(.nb)'), 'the cloud over the job\'s own sky');
   assert.equal(plate.querySelectorAll('.job-plate-graph .node').length, 4, 'the plan it became, its write a moon');
-  await new Promise((r) => setTimeout(r, 200));
-  assert.ok(art.classList.contains('collapsed'), 'then it folds in');
   f.view.update(f.data);
-  assert.ok(f.q('[data-board="idea1"] .job-plate-art').classList.contains('collapsed'), 'a redraw mid-fold keeps it folded');
-  await new Promise((r) => setTimeout(r, 2300));
+  assert.ok(f.q('[data-board="idea1"] .job-plate-art').classList.contains('forming'), 'a redraw mid-transition keeps it forming');
+  await new Promise((r) => setTimeout(r, 600));
   assert.equal(f.q('[data-board="idea1"] .gx.nb'), null, 'and after it the cloud is gone');
+  assert.equal(f.q('[data-board="idea1"] .job-plate-art').classList.contains('forming'), false);
+});
+
+test('the idea header is its title alone: no uppercase kicker above it', (t) => {
+  const f = fixture(t, [ideaJob([asked])]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const band = f.q('#job-dialog .job-idea-band');
+  assert.equal(band.querySelector('.job-idea-kicker, .job-idea-mark'), null);
+  assert.doesNotMatch(band.textContent, /talking with the planner/i);
+  assert.equal(band.querySelector('h2').textContent, 'Nudge me when a green PR waits on me');
+});
+
+test('a title Haiku is still naming is a loader, on the plate and in the dialog, until the real one cross-fades in', (t) => {
+  const f = fixture(t, [{ ...ideaJob(), title: 'PRs sit green for ages. Can the board…', titlePending: true }]);
+  assert.ok(f.q('[data-board="idea1"] .job-plate-open .job-title-loader.small'), 'the plate waits too');
+  assert.doesNotMatch(f.q('[data-board="idea1"] .job-plate-open').textContent, /PRs sit green/);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const h2 = () => f.q('#job-dialog .job-idea-band h2');
+  assert.equal(h2().getAttribute('aria-busy'), 'true');
+  assert.equal(h2().querySelector('.job-title-loader').getAttribute('role'), 'status');
+  assert.equal(h2().textContent, '', 'the clipped description never shows as the title');
+  t.mock.timers.enable({ apis: ['Date'], now: 1000 });
+  f.data.jobs[0] = { ...f.data.jobs[0], title: 'Nudge on waiting green PRs', titlePending: undefined }; f.view.update(f.data);
+  assert.equal(h2().textContent, 'Nudge on waiting green PRs');
+  assert.ok(h2().classList.contains('titled'), 'it fades in');
+  assert.equal(h2().querySelector('.job-title-loader').getAttribute('aria-hidden'), 'true', 'over the bars fading out, which no longer announce');
+  assert.equal(h2().getAttribute('aria-busy'), null);
+  t.mock.timers.tick(400); f.view.update(f.data);
+  assert.equal(h2().style.getPropertyValue('--fade-at'), '-400ms', 'a tick mid-fade resumes it rather than restarting or cutting it');
+  t.mock.timers.tick(TITLE_FADE_MS); f.view.update(f.data);
+  assert.equal(h2().classList.contains('titled'), false, 'and once it has ended a tick does not replay it');
+  assert.equal(h2().querySelector('.job-title-loader'), null);
 });

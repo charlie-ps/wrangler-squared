@@ -53,6 +53,7 @@ test('Next, Back and the stepper walk the steps; only the current one is readabl
   assert.deepEqual(INTRO_STEPS.map((s) => s.tab), ['Welcome', 'Jobs', 'New idea', 'Sub-jobs', 'Needs you', 'Receipts', 'See it working', 'Reviews', 'Writes', 'Start']);
   assert.equal(p.q('.intro-count').textContent, `1 of ${INTRO_STEPS.length}`);
   assert.ok(p.q('[data-intro="back"]').hidden, 'no Back on the first step');
+  assert.deepEqual([...document.querySelectorAll('.intro-actions button')].map((b) => b.dataset.intro), ['skip', 'back', 'next'], 'Skip, then Back, then Next last, so Tab follows the wizard layout');
   assert.equal(document.querySelectorAll('.intro-panel:not([inert])').length, 1, 'every step is laid out, one is live');
   p.click('[data-intro="next"]');
   assert.match(p.title(), /splits the work/);
@@ -115,7 +116,7 @@ test('the Jobs step plays a mini board whose rail badge counts the amber rows', 
   assert.deepEqual(idea.map((r) => r.querySelector('.gx.nb[data-inflow]')?.dataset.stage ?? null), ['0', '0', '1', '0', '2', null, null], 'an idea under its forming sky, brighter as the planner asks and suggests, then the job it became');
   assert.deepEqual(idea.slice(0, 5).map((r) => r.querySelector('small').textContent), ['Idea · The wrangler is reading it', 'Idea · The wrangler is reading it', 'Idea · The wrangler asked you', 'Idea · The wrangler is reading it', 'Idea · Job suggested · review']);
   assert.ok(idea[2].classList.contains('tone-warn'), 'a question waiting on you counts');
-  assert.equal(idea[5].querySelector('small').textContent, 'Plan ready for review');
+  assert.equal(idea[5].querySelector('small').textContent, 'Starting its sub-jobs', 'creating the suggested job approved its plan');
   const before = fig().querySelector('.intro-figure').innerHTML;
   await new Promise((r) => p.window.setTimeout(r, 1650));
   assert.notEqual(fig().querySelector('.intro-figure').innerHTML, before, 'it advances by itself');
@@ -128,7 +129,7 @@ test('with reduced motion each live figure holds a finished frame and nothing ti
   const html = p.q('.intro-body').innerHTML;
   assert.match(p.q('.intro-goal').textContent, /Delivered/);
   assert.equal(document.querySelectorAll('.intro-panel')[1].querySelector('.intro-rail-badge').textContent, '3');
-  assert.ok(document.querySelectorAll('.intro-panel')[2].querySelector('.intro-chat-plan'), 'New idea holds on the plan to approve');
+  assert.ok(document.querySelectorAll('.intro-panel')[2].querySelector('.intro-chat-plan'), 'New idea holds on the job it started');
   await new Promise((r) => p.window.setTimeout(r, 1450));
   assert.equal(p.q('.intro-body').innerHTML, html);
 });
@@ -138,7 +139,7 @@ test('the arrow keys step through, and the review checkpoints are a picture that
   createIntro({ storage: memoryStorage() }).open(7);
   assert.match(p.title(), /stops for you\./);
   const row = () => p.q('.intro-checkpoint[data-checkpoint="reviewMerge"]');
-  assert.deepEqual([...p.window.document.querySelectorAll('.intro-checkpoint .job-review-name')].map((n) => n.firstChild.textContent), ['Plan', 'Code', 'Merge', 'Session results', 'Writes', 'Red steps'], 'all six checkpoints, in the form’s words');
+  assert.deepEqual([...p.window.document.querySelectorAll('.intro-checkpoint .job-review-name')].map((n) => n.firstChild.textContent), ['Plan', 'Local verification', 'Merge', 'Session results', 'Writes', 'Red steps'], 'all six checkpoints, in the form’s words');
   const toggle = () => row().querySelector('input[role="switch"]');
   assert.equal(row().querySelectorAll('input').length, 1, 'one control flips the checkpoint');
   assert.equal(toggle().checked, false);
@@ -178,7 +179,7 @@ test('New idea plays an idea, the planner’s question, the job it suggests, the
   assert.equal(plan.querySelector('.job-plan-branch').textContent, 'next');
   assert.equal(plan.querySelector('.job-change textarea'), null, 'a one-row textarea would scroll the example');
   assert.equal(plan.querySelector('.job-change-text').textContent, 'Design the switch first');
-  assert.deepEqual(els.map((el) => el.querySelector('.intro-flow .job-node:last-child .job-status').textContent), ['Next', 'Next', 'Next', 'Next', 'Working', 'Needs you', 'Needs you'], 'Approve waits on you at the end');
+  assert.deepEqual(els.map((el) => el.querySelector('.intro-flow .job-node:last-child .job-status').textContent), ['Next', 'Next', 'Next', 'Next', 'Working', 'Working', 'Working'], 'pressing the suggestion starts the job: no Approve after it');
   for (const el of els) assert.ok(el.querySelector('.intro-chat').hasAttribute('inert'), 'its buttons do nothing here, so nobody can reach them');
   assert.equal(INTRO_STEPS[step('New idea')].anim.still, els.length - 2, 'reduced motion holds on the plan');
 });

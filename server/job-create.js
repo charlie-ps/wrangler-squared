@@ -19,9 +19,9 @@ export const kick = (host) => runnerFor(host).tick();
 export function makeCreateJob({ run = runHeadlessClaude } = {}) {
   const retitle = async (job, host) => {
     const { title, liveSessionId } = await generateTitle(job.intent, { run });
-    if (!title || !host.stores.jobs.retitle(job.id, job.title, title)) return;
-    const sid = host.stores.jobs.get(job.id)?.runs.findLast((r) => r.sessionId)?.sessionId;
+    const swapped = host.stores.jobs.retitle(job.id, job.title, title);
     await host.rebuild();
+    const sid = swapped && host.stores.jobs.get(job.id)?.runs.findLast((r) => r.sessionId)?.sessionId;
     if (sid && liveSessionId) host.sessions.bill(sid, liveSessionId);
   };
   // `idea`: made from New idea, so planning may talk it through first (job-idea.js).
@@ -47,7 +47,8 @@ export function makeCreateJob({ run = runHeadlessClaude } = {}) {
       if (host.images.keep(name)) kept.push(name);
       else { for (const k of kept) host.images.remove(k); throw new Error('An attached image is no longer available. Attach it again.'); }
     }
-    const job = host.stores.jobs.create({ ...input, taskId }, idea ? { idea: { thread: [] } } : {});
+    // `titlePending` until Haiku answers either way; the board draws a loader for it.
+    const job = host.stores.jobs.create({ ...input, taskId }, { ...(idea && { idea: { thread: [] } }), ...(!raw?.title && { titlePending: true }) });
     if (start) host.stores.jobs.action(job.id, 'start', {});
     await host.rebuild();
     if (start) kick(host).catch((e) => host.log('job-create tick failed', e));

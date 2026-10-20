@@ -1,3 +1,4 @@
+import { allowFiles } from './job-files.js';
 import { runnable, dependencySatisfied, dependenciesSatisfied, MERGE_IS_DELIVERY } from './job-store.js';
 import { summariseComments, commentsBlockMerge } from './job-comments.js';
 import { awaitsTicket, settingsSchema } from './jobs-schema.js';
@@ -10,10 +11,31 @@ import { draftsDecidedMail, threadMail, ideaMail, askMail } from './job-prompts.
 import { inConversation, unsentIdea } from './job-idea.js';
 import { askFailed, replanFailed, convosOf, convoById, convoRun, unsentAsks } from './job-talk.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
-import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps } from './job-running.js';
-const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
+import { noteMain } from './job-main.js';
+import { pendingHelper } from './job-helper.js';
+import { stderrLine } from './git.js';
+import { budgetOf, liveCards, budgetContinueMail } from './job-budget.js';
+import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps, stopSandbox } from './job-running.js';
+export const shortError = (e) => {
+  const first = String(e?.message || e).split('\n')[0], why = stderrLine(e);
+  return (why && !first.includes(why) ? `${first}: ${why}` : first).slice(0, 240);
+};
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
+// A failed post-merge run is red but still watched, more slowly: a re-run that
+// passes, or a later run containing the merge that does, clears it and the
+// sub-job climbs on as a green one would, with nobody pressing Retry. Read from
+// the error, not the last result: a re-run in flight reads pending meanwhile.
+// The watch backs off with the red's age (`redSince`) and ends after
+// RED_WATCH_MS, so one nobody acts on stops costing GitHub calls; Retry clears
+// the error, and the next failing poll stamps a fresh `redSince`.
+const POST_MERGE_FAILED = 'Post-merge run failed';
+const RED_POLL_MS = [[30 * 60000, 120000], [2 * 3600000, 300000], [Infinity, 900000]];
+const RED_WATCH_MS = 6 * 3600000;
+const redAge = (sub, now) => sub.error?.startsWith(POST_MERGE_FAILED) && sub.redSince ? now - sub.redSince : 0;
+const redPollMs = (sub, now) => RED_POLL_MS.find(([upTo]) => redAge(sub, now) < upTo)[1];
+const postMergeRed = (sub, now) => sub.stage === 'deployment' && !sub.recoveredBy && !!sub.error?.startsWith(POST_MERGE_FAILED)
+  && redAge(sub, now) < RED_WATCH_MS;
 export const acceptedRedLine = (sub) => `Post-merge run accepted red${sub.acceptedRed?.note ? `: ${sub.acceptedRed.note}` : ''}`;
 // Which red step a planning run was sent after: counted against that step's tries.
 const redStamp = (job) => job.replan?.red && !job.replan.red.human ? { red: { sub: job.replan.red.sub } } : undefined;
@@ -28,9 +50,9 @@ export const IDLE_RECEIPT_GRACE_MS = 10 * 60 * 1000;
 // One process owns the store (the existing DATA_DIR instance lock). Claims are
 // durable before launch; an uncertain launch is blocked on restart, never replayed.
 export class JobRunner {
-  constructor({ store, runtime, github, onChange = async () => {}, now = Date.now, summarise = summariseComments, statusOf = () => null, running = defaultDeps() }) {
-    Object.assign(this, { store, runtime, github, onChange, now, summarise, statusOf, running });
-    this.busy = false;
+  constructor({ store, runtime, github, onChange = async () => {}, now = Date.now, summarise = summariseComments, statusOf = () => null, running = defaultDeps(), budget = null }) {
+    Object.assign(this, { store, runtime, github, onChange, now, summarise, statusOf, running, budget });
+    this.busy = false; this.allowedFiles = new Set();
     this.triaging = new Map(); this.pending = new Set();
   }
   // Every in-flight comment triage has settled (tests; the poll never waits).
@@ -40,14 +62,59 @@ export class JobRunner {
     this.busy = true;
     const before = this.store.data;
     try {
-      for (const job of this.store.snapshot().jobs) {
+      allowFiles(this.runtime.host, this.store.data.jobs, this.allowedFiles);
+      await this.enforceBudget();
+      for (const job of this.store.data.jobs) {
         try {
           await this.sweepRunning(job.id);
+          await this.tendMain(job.id);
+          await this.tendHelpers(job.id);
           await this.settle(job.id);
           await this.advance(job.id);
         } catch (e) { this.store.update(job.id, (j) => { j.error = shortError(e); }); }
       }
     } finally { this.busy = false; if (before !== this.store.data) await this.onChange(); }
+  }
+  // The human's buttons on a "Local main not updated" notice (job-main.js): Retry
+  // runs the update again; a resolution spawns its session here, in the tick, so
+  // no launch's pendingLaunch is in flight; and a notice whose session has brought
+  // the branch level with origin clears itself. Runs on a finished or paused job
+  // too: it touches only the human's checkout.
+  async tendMain(id) {
+    const same = (j, path) => j.mainNotices?.find((n) => n.path === path);
+    for (const notice of this.store.get(id).mainNotices || []) {
+      if (notice.retrying) {
+        const result = await this.runtime.retryMain(notice);
+        this.store.update(id, (j) => { if (same(j, notice.path)?.retrying) noteMain(j, notice.path, null, result, this.now()); });
+      } else if (notice.resolving && !notice.resolving.sessionId) {
+        if (this.store.get(id).budgetPaused) continue;
+        let sessionId = null, error = null;
+        try { sessionId = await this.runtime.resolveMain(this.store.get(id), notice, notice.resolving.id); } catch (e) { error = shortError(e); }
+        this.store.update(id, (j) => {
+          const n = same(j, notice.path);
+          if (n?.resolving && !n.resolving.sessionId) n.resolving = error ? null : { ...n.resolving, sessionId };
+          if (n && error) n.resolveError = error;
+        });
+      } else if (notice.resolving && await this.runtime.mainCaughtUp(notice)) {
+        this.store.update(id, (j) => { if (same(j, notice.path)?.resolving) noteMain(j, notice.path, null, { ok: true }, this.now()); });
+      }
+    }
+  }
+  // Ask an agent (job-helper.js): a queued helper is spawned here for the same
+  // reason as a resolution, on any job, paused, finished or cancelled. A failure
+  // stays on the entry, which frees the button and says why.
+  async tendHelpers(id) {
+    if (this.store.get(id).budgetPaused) return;
+    for (const sub of this.store.get(id).subJobs) {
+      const queued = pendingHelper(sub);
+      if (!queued) continue;
+      let sessionId = null, error = null;
+      try { sessionId = await this.runtime.spawnHelper(this.store.get(id), sub); if (!sessionId) error = 'The session did not start'; } catch (e) { error = shortError(e); }
+      this.patchSub(id, sub.id, (s) => {
+        const h = s?.helpers?.find((x) => x.id === queued.id);
+        if (h && !h.sessionId) Object.assign(h, error ? { error } : { sessionId });
+      });
+    }
   }
   // What an agent left running for the human to try (job-running.js). A preview
   // is probed while its review is open, written only when up/down flips (the
@@ -63,7 +130,7 @@ export class JobRunner {
       const due = dueTeardown(job, sub);
       if (due.length) {
         let outcome;
-        try { outcome = await teardown(due, { cwd: sub.worktree?.path, deps: this.running }); } catch (e) { outcome = { results: due.map((i) => ({ name: i.name, ok: false, detail: shortError(e) })), still: due.map((i) => i.name) }; }
+        try { outcome = await teardown(due, { cwd: sub.worktree?.path, sandbox: stopSandbox(job, sub), deps: this.running }); } catch (e) { outcome = { results: due.map((i) => ({ name: i.name, ok: false, detail: shortError(e) })), still: due.map((i) => i.name) }; }
         const reason = stopReason(job, sub);
         this.patchSub(id, sub.id, (s) => {
           const gone = (list) => (list || []).filter((i) => !due.some((d) => sameItem(i, d)));
@@ -81,7 +148,35 @@ export class JobRunner {
     }
   }
   patchSub(jobId, subId, fn) { return this.store.update(jobId, (j) => fn(j.subJobs.find((s) => s.id === subId), j)); }
-  allowed(id) { const d = this.store.snapshot(); return !d.settings.paused && !d.jobs.find((j) => j.id === id)?.paused; }
+  allowed(id) { const d = this.store.data, job = d.jobs.find((j) => j.id === id); return !d.settings.paused && !job?.paused && !job?.budgetPaused; }
+  // The spend limit (job-budget.js), first each tick so nothing below launches,
+  // mails or triages for a job that has reached it. Over: paused for budget, and
+  // every working session of it interrupted (the enforcer's cooldown keeps it to
+  // one Escape per card per window, again each window while it is still over).
+  // Under again (a top-up, or a new X): released, and each session it interrupted
+  // is mailed to carry on. A failed mail is tried again next tick.
+  async enforceBudget() {
+    if (!this.budget) return;
+    const byCard = this.budget.spend(this.store.data.jobs);
+    for (const { id } of this.store.data.jobs) {
+      try {
+        const job = this.store.get(id);
+        const verdict = budgetOf(this.store.data.settings, job, byCard);
+        if (!verdict) continue;
+        if (verdict.over) {
+          if (!job.budgetPaused) this.store.budgetPause(id, verdict);
+          const halted = await this.budget.interrupt(liveCards(job));
+          for (const run of job.runs.filter((r) => halted.includes(r.sessionId) && !r.budgetHaltedAt)) this.patchRun(id, run.id, (r) => { r.budgetHaltedAt = this.now(); });
+          continue;
+        }
+        if (job.budgetPaused) this.store.budgetRelease(id, verdict);
+        for (const run of job.runs.filter((r) => runnable(r) && r.budgetHaltedAt && r.sessionId)) {
+          await this.runtime.resumeWithMail(run, budgetContinueMail(job, verdict.limit));
+          this.patchRun(id, run.id, (r) => { r.budgetHaltedAt = null; r.idleSince = null; });
+        }
+      } catch (e) { logWarn('[jobs] spend limit', id, shortError(e)); }
+    }
+  }
   // No clock runs against a session: a long step is legitimate work, and a
   // needs-you one is surfaced on the board rather than killed. What ends a run
   // is its receipt, its process, or having stopped working without either.
@@ -112,6 +207,8 @@ export class JobRunner {
           error = run.parkedFor === 'idea' ? 'The wrangler\'s session was closed while it waited for your reply. Retry to plan again.' : 'Session was closed while its drafts waited for review. Retry to run it again.';
         }
         else if (!(await this.runtime.isAlive(run))) error = 'Session stopped without a receipt. Open it to see why, then retry.';
+        // Stopped at the spend limit, a session sits idle by design until a top-up.
+        else if (job.budgetPaused) { if (run.idleSince) this.patchRun(id, run.id, (r) => { r.idleSince = null; }); continue; }
         else {
           await this.answerDialogs(run);
           const idleSince = this.statusOf(run.sessionId) === 'idle' ? (run.idleSince ?? this.now()) : null;
@@ -239,7 +336,9 @@ export class JobRunner {
     if (job.cancelledAt && job.stage !== 'active') { if (!job.runs.some(runnable)) await this.finish(id); return; }
     if (job.stage === 'planning' && !job.plan && !activeFor(job)) { await this.launch(job, null, 'planning'); return; }
     if (inConversation(job)) {
-      const run = job.runs.find((r) => runnable(r) && r.parkedFor === 'idea' && r.parkedAt && !r.mailedAt);
+      // Parked or still mid-turn: a message written while the planner works is
+      // mailed now, or a plan reported before its next reply would never see it.
+      const run = job.runs.find((r) => runnable(r) && r.phase === 'planning' && !r.subJobId && r.sessionId);
       if (run && unsentIdea(job).length) await this.deliverIdea(id, run);
       return;
     }
@@ -264,7 +363,7 @@ export class JobRunner {
       if (!this.allowed(id) || job.error) return;
       let sub = job.subJobs.find((s) => s.id === initial.id);
       if (activeFor(job, sub)) continue;
-      if (sub.error) continue;
+      if (sub.error && !postMergeRed(sub, this.now())) continue;
       try {
         if (sub.stage === 'session') {
           // A session starts once its milestone (`on`) and its prerequisites
@@ -302,7 +401,8 @@ export class JobRunner {
           let pr = await this.github.pr(sub);
           // A failed update-branch (conflicts) on this head reads as DIRTY, so the
           // repair path that already handles conflicts takes it from here.
-          if (pr.behind && sub.branchUpdate?.failedHead === pr.head) pr = { ...pr, behind: false, dirty: true, checkStatus: 'failing' };
+          const redBehind = sub.acceptedRed?.ref === pr.head && pr.state === 'OPEN' && pr.mergeState === 'BEHIND' && !pr.dirty;
+          if ((pr.behind || redBehind) && sub.branchUpdate?.failedHead === pr.head) pr = { ...pr, behind: false, dirty: true, checkStatus: 'failing' };
           const comments = await this.github.comments(sub);
           // Whether this diff deploys is a property of the head, so it is read
           // once per head and again after every repair push.
@@ -337,12 +437,15 @@ export class JobRunner {
             if (dependenciesSatisfied(job, sub)) await this.launch(job, sub, 'repair');
           } else if (pr.checkStatus === 'failing' && sub.acceptedRed?.ref !== pr.head) {
             const attempts = job.runs.filter((r) => r.subJobId === sub.id && r.phase === 'repair').length;
-            const limit = this.store.snapshot().settings.maxRepairs + (sub.repairAllowance || 0);
+            const limit = this.store.data.settings.maxRepairs + (sub.repairAllowance || 0);
             if (attempts >= limit) this.patchSub(id, sub.id, (s) => { s.error = 'Automatic repair limit reached. Review changes, then retry if needed.'; });
             else await this.launch(job, sub, 'repair');
-          } else if (pr.behind && sub.acceptedRed?.ref !== pr.head) {
+          } else if (pr.behind && sub.acceptedRed?.ref !== pr.head || redBehind) {
             // Green but behind a base that requires up-to-date branches: bring it
             // up to date and keep watching, since the new head re-runs the checks.
+            // An accepted-red head is behind too (`behind` excludes red ones); an
+            // --admin merge cannot be relied on for it, so it is updated and
+            // carryApproval moves the acceptance to the new head.
             if (!heldBy(job, sub) && dependenciesSatisfied(job, sub)) await this.updateBranch(id, sub, pr);
           } else if (!heldBy(job, sub) && (pr.checkStatus === 'passing' || sub.acceptedRed?.ref === pr.head) && dependenciesSatisfied(job, sub) && (sub.mergeApprovedHead === pr.head || (!job.reviewMerge && !commentsBlockMerge(sub)))) {
             // An accepted-red head merges whatever its checks say — the move
@@ -363,9 +466,9 @@ export class JobRunner {
         } else if (sub.stage === 'deployment') {
           if (sub.nextPollAt > this.now()) continue;
           const result = await this.github.deployment(sub);
-          const staleMs = this.store.snapshot().settings.deploymentStaleMinutes * 60000;
+          const staleMs = this.store.data.settings.deploymentStaleMinutes * 60000;
           this.patchSub(id, sub.id, (s) => {
-            s.deploymentResult = result; s.observationError = null; s.nextPollAt = this.now() + 30000;
+            s.deploymentResult = result; s.observationError = null; s.nextPollAt = this.now() + (result.status === 'failing' || s.error ? redPollMs(s, this.now()) : 30000);
             // NOTHING running this long after the merge means the workflows said
             // this push deploys and GitHub disagrees — nothing triggered, or
             // everything that did was skipped, or a cancelled run that no later
@@ -389,21 +492,26 @@ export class JobRunner {
           // says which colour it was.
           const accepted = result.status === 'failing' && !!sub.acceptedRed && sub.acceptedRed.ref === sub.pr?.mergeCommit;
           if (result.status === 'passing' || accepted) {
+            if (sub.error) { this.patchSub(id, sub.id, (s) => { s.error = null; s.blocked = null; s.redSince = null; }); job = this.store.get(id); sub = job.subJobs.find((s) => s.id === sub.id); }
             if (sub.check) await this.launch(job, sub, 'verify');
             else this.patchSub(id, sub.id, (s) => { s.deployed = { at: this.now(), checks: [accepted ? acceptedRedLine(s) : 'Post-merge runs passed'], commit: s.pr?.mergeCommit }; s.stage = 'cleanup'; s.state = 'queued'; });
           } else if (result.status === 'failing') {
             const failed = result.runs.filter((r) => r.status === 'failing').map((r) => r.workflow).join(', ');
-            this.patchSub(id, sub.id, (s) => { s.error = `Post-merge run failed: ${failed || 'unknown workflow'}`; });
+            this.patchSub(id, sub.id, (s) => {
+              if (!s.error?.startsWith(POST_MERGE_FAILED) || !s.redSince) s.redSince = this.now();
+              s.error = `${POST_MERGE_FAILED}: ${failed || 'unknown workflow'}`;
+            });
           }
         } else if (sub.stage === 'cleanup') {
-          await this.runtime.cleanup(job, sub);
-          this.patchSub(id, sub.id, (s) => { s.stage = 'done'; s.state = s.cancelledAt ? 'cancelled' : 'done'; s.cleanupRefusal = null; s.discard = null; });
+          const { main } = (await this.runtime.cleanup(job, sub, { updateMain: settingsSchema.parse(this.store.data.settings ?? {}).updateMain })) || {};
+          this.patchSub(id, sub.id, (s, j) => { if (main) noteMain(j, main.path, s.id, main.result, this.now()); s.stage = 'done'; s.state = s.cancelledAt ? 'cancelled' : 'done'; s.cleanupRefusal = null; s.discard = null; });
         }
       } catch (e) {
         this.patchSub(id, sub.id, (s) => {
           // A refusal keeps what would be lost for the board; a Discard is spent
           // either way, so a changed tree has to be looked at and chosen again.
           if (s.stage === 'cleanup') { s.error = shortError(e); s.cleanupRefusal = e.refusal || null; s.discard = null; }
+          else if (e.needsAdmin) s.error = shortError(e);
           else { s.observationError = shortError(e); s.nextPollAt = this.now() + 60000; }
         });
       }
@@ -424,7 +532,7 @@ export class JobRunner {
   async triageRed(id) {
     const job = this.store.get(id);
     // Parsed, so a settings file from before `maxReplans` reads the default, not 0.
-    const settings = settingsSchema.parse(this.store.snapshot().settings ?? {});
+    const settings = settingsSchema.parse(this.store.data.settings ?? {});
     if (job.replan || job.stage !== 'active' || job.cancelledAt || !settings.maxReplans || !this.allowed(id) || job.runs.some((r) => !r.stopped && !r.subJobId && !r.ask)) return;
     const sub = job.subJobs.find((s) => needsTriage(job, s));
     if (!sub) return;
@@ -483,7 +591,7 @@ export class JobRunner {
     const job = this.store.get(id);
     const batch = unsentIdea(job);
     try {
-      await this.runtime.resumeWithMail(run, ideaMail(job, run, batch));
+      await this.runtime.resumeWithMail(run, ideaMail(job, run, batch, { busy: !(run.parkedAt && !run.mailedAt) }));
       const now = this.now();
       this.patchRun(id, run.id, (r) => { r.mailedAt = now; r.idleSince = null; });
       this.store.update(id, (j) => { for (const m of j.idea.thread) if (batch.some((b) => b.id === m.id)) m.sentAt = now; j.idea.error = null; });

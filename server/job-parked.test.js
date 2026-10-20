@@ -15,8 +15,13 @@ import { _resetForTests, runnerFor } from './jobs.js';
 import { looksLikeQuestion } from './job-parked.js';
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png body')]);
+// As the real façade: read() sees only the kept store, keep() copies a staged paste into it.
 function hostFor(t, f, images = {}) {
-  const host = { stores: { jobs: f.store }, sessions: { get: () => null }, images: { read: (n) => images[n] || null, remove: (n) => { delete images[n]; } },
+  // As the real host (paste-store.js): `images` is the STAGING dir, which read()
+  // never sees; keep() copies a staged name into the extension's own store.
+  const kept = {};
+  const host = { stores: { jobs: f.store }, sessions: { get: () => null }, kept,
+    images: { keep: (n) => { if (!images[n]) return false; kept[n] = images[n]; return true; }, read: (n) => kept[n] || null, remove: (n) => { delete kept[n]; } },
     rebuilds: 0, broadcasts: [], log: () => {}, rebuild: async () => { host.rebuilds++; }, broadcast: (p) => host.broadcasts.push(p) };
   _resetForTests(); t.after(_resetForTests);
   runnerFor(host).tick = async () => {};
@@ -48,7 +53,7 @@ function fixture(t) {
   const sub = () => store.get(job.id).subJobs[0];
   const run = () => store.get(job.id).runs.find((r) => r.id === last().run.id);
   // An idea typed on the review goes to the planner, which forwards it to the open
-  // session; the human approves that proposal.
+  // session; a forward and nothing else applies with no prompt.
   const propose = async (actions) => {
     await tick();
     const planner = launched.at(-1);
@@ -58,8 +63,7 @@ function fixture(t) {
   const ask = async (text, extra = {}) => {
     const j = store.get(job.id); const view = changeView(j, j.subJobs[0]);
     store.action(job.id, 'request-change', { subJobId: 'api', at: view.at, ref: view.ref, text, ...extra });
-    const proposalId = await propose([{ type: 'forward', sub: 'api', note: text }]);
-    store.action(job.id, 'approve-replan', { proposalId });
+    await propose([{ type: 'forward', sub: 'api', note: text }]);
   };
   async function ready(checks = [shot()], meta = {}) {
     ensureInbox(job.id, 'api'); fs.writeFileSync(path.join(ensureInbox(job.id, 'api'), 'list.png'), PNG);
@@ -124,6 +128,34 @@ test('a question is mailed to the parked session, answered by a reply, and the r
   assert.throws(() => f.report({ kind: 'reply', text: 'Another' }), /wait for mail/);
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: receipt });
   assert.equal(f.sub().state, 'approved', 'a reply leaves the approval it did not touch standing');
+});
+
+test('a forward-only idea lands in the step\'s thread with no plan-change prompt, recorded as Wrangler\'s', async (t) => {
+  const f = fixture(t); await f.start(); await f.ready();
+  await f.ask('Make the filter a dropdown');
+  const job = f.store.get(f.job.id);
+  assert.equal(job.replan, null, 'no proposal waits for the human');
+  assert.deepEqual(f.sub().thread.map((m) => [m.from, m.via, m.text]), [['human', 'planner', 'Make the filter a dropdown']]);
+  const approved = job.moves.find((m) => m.move === 'approve-replan');
+  assert.match(approved.detail, /Changed the plan: 1 action \(Forwarded without a prompt\)/);
+  await f.tick();
+  assert.match(f.mailed.at(-1).text, /The human \(through the planner\): "Make the filter a dropdown"/);
+});
+
+test('a forward that comes with a plan edit still waits for the human to approve', async (t) => {
+  const f = fixture(t); await f.start(); await f.ready();
+  const j = f.store.get(f.job.id); const view = changeView(j, j.subJobs[0]);
+  f.store.action(f.job.id, 'request-change', { subJobId: 'api', at: view.at, ref: view.ref, text: 'Use a dropdown, and add docs after' });
+  await f.tick();
+  const planner = f.launched.at(-1);
+  const docs = { id: 'docs', title: 'Docs', repo: '/repo', after: ['api'], brief: 'Document it' };
+  f.store.report(planner.sid, planner.run.id, { kind: 'plan', plan: { ...plan(), subJobs: [...plan().subJobs, docs] }, actions: [{ type: 'forward', sub: 'api', note: 'Use a dropdown' }] });
+  const waiting = f.store.get(f.job.id).replan.proposal;
+  assert.deepEqual([waiting.id, waiting.changes.added, waiting.actions.map((a) => a.type)], [planner.run.id, ['docs'], ['forward']]);
+  assert.equal(f.sub().thread, undefined, 'nothing reaches the session before the human approves');
+  f.store.action(f.job.id, 'approve-replan', { proposalId: planner.run.id });
+  assert.equal(f.sub().thread.length, 1);
+  assert.ok(f.store.get(f.job.id).subJobs.some((s) => s.id === 'docs'));
 });
 
 test('a reply needs a human to have written first, and a ready run to answer', async (t) => {
@@ -230,15 +262,35 @@ test('pasted images go to the evidence folder and the session is mailed their pa
   const host = hostFor(t, f, images);
   const view = changeView(f.store.get(f.job.id), f.sub());
   await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: view.at, ref: view.ref, text: 'See attached', images: ['pasted.png'], attachments: [{ file: '../../etc/passwd' }] }, host);
-  assert.equal(f.sub().thread, undefined, 'nothing reaches the session before the human approves');
+  assert.equal(f.sub().thread, undefined, 'nothing reaches the session before the planner has read it');
   assert.match(f.store.get(f.job.id).replan.feedback, /See attached\n\(Pasted images, read them: /, 'the planner reads the picture');
-  f.store.action(f.job.id, 'approve-replan', { proposalId: await f.propose([{ type: 'forward', sub: 'api', note: 'See attached' }]) });
+  await f.propose([{ type: 'forward', sub: 'api', note: 'See attached' }]);
   const [m] = f.sub().thread;
   assert.equal(m.images.length, 1); assert.match(m.images[0].file, /^ask-.*-1\.png$/);
   assert.ok(fs.existsSync(path.join(roundDir(f.job.id, 'api', 1), m.images[0].file)));
-  assert.deepEqual(Object.keys(images), [], 'the staged copy is released');
+  assert.deepEqual(Object.keys(host.kept), [], 'the kept copy is released once it is beside the round');
   const text = threadMail(f.store.get(f.job.id), f.run(), f.sub(), [m]);
   assert.ok(text.includes(path.join(roundDir(f.job.id, 'api', 1), m.images[0].file)));
+});
+
+test('an image that cannot be kept refuses the idea out loud, so nothing the human saw is quietly dropped', async (t) => {
+  const f = fixture(t); await f.start(); await f.ready();
+  const host = hostFor(t, f, {});
+  const view = changeView(f.store.get(f.job.id), f.sub());
+  await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: view.at, ref: view.ref, text: 'See attached', images: ['gone.png'] }, host);
+  assert.deepEqual(host.broadcasts.at(-1), { event: 'job-action-failed', jobId: f.job.id, action: 'request-change', subJobId: 'api', error: 'An attached image could not be kept. Attach it again.' });
+  assert.equal(f.store.get(f.job.id).replan, undefined, 'the planner is not handed an idea missing its picture');
+  assert.equal(fs.existsSync(roundDir(f.job.id, 'api', 1)) && fs.readdirSync(roundDir(f.job.id, 'api', 1)).some((n) => n.startsWith('ask-')), false);
+});
+
+test('a pasted WebP is kept like any other picture', async (t) => {
+  const f = fixture(t); await f.start(); await f.ready();
+  const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.from([8, 0, 0, 0]), Buffer.from('WEBPVP8 ')]);
+  const host = hostFor(t, f, { 'pasted.webp': { mime: 'image/webp', bytes: webp } });
+  const view = changeView(f.store.get(f.job.id), f.sub());
+  await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: view.at, ref: view.ref, text: 'See attached', images: ['pasted.webp'] }, host);
+  assert.equal(host.broadcasts.at(-1).event, 'job-action-complete');
+  assert.deepEqual(fs.readdirSync(roundDir(f.job.id, 'api', 1)).filter((n) => n.startsWith('ask-')).map((n) => path.extname(n)), ['.webp']);
 });
 
 test('an idea for the planner keeps its pasted images too, and hands the planner their paths in the words', async (t) => {
@@ -254,7 +306,7 @@ test('an idea for the planner keeps its pasted images too, and hands the planner
   assert.ok(job.replan.feedback.startsWith('Split web in two\n(Pasted images, read them: '));
   assert.ok(job.replan.feedback.includes(JSON.stringify(path.join(ideasDir(f.job.id), file))));
   assert.equal(job.moves.at(-1).note, 'Split web in two', 'the history keeps the words, not the paths');
-  assert.deepEqual(Object.keys(images), [], 'the staged copy is released');
+  assert.deepEqual(Object.keys(host.kept), [], 'the kept copy is released');
 });
 
 test('a plan change that reworks the sub-job ends the parked session and starts a new one', async (t) => {
@@ -284,7 +336,6 @@ test('the planner is told the step\'s session is open and where the idea was typ
   assert.match(prompt, /The latest idea was typed on its code review of api "Audit page" \(pinned to run_\w+\)\./);
   assert.match(prompt, /\{type:"forward",sub,note\}/);
   f.store.report(planner.sid, planner.run.id, { kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'Is the empty state covered?' }] });
-  f.store.action(f.job.id, 'approve-replan', { proposalId: planner.run.id });
   await f.tick();
-  assert.match(f.mailed.at(-1).text, /The human \(through the planner, approved\): "Is the empty state covered\?"/);
+  assert.match(f.mailed.at(-1).text, /The human \(through the planner\): "Is the empty state covered\?"/);
 });

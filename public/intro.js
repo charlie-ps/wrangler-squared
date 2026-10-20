@@ -4,6 +4,7 @@ import { CHECKPOINTS, checkpointFlagHtml, checkpointHint, checkpointToggleHtml }
 import { composer, proofFigure, runningBar } from './figs.js';
 import { ideaThreadHtml } from './job-idea.js';
 import { inflowHtml, holdSkies, mountSkies, releaseSkies } from './job-skylines.js';
+import { applyTheme } from './themes.js';
 
 // The "How Jobs works" walkthrough: shown once to every browser that has not
 // dismissed it (installed today or long ago), then only on request from the Jobs
@@ -70,7 +71,7 @@ const BOARD_FRAMES = [
   [['reply'], ['review', 'Tests passed · review', 1], ['review', 'Ready for your review', 1], ['running', '4 agents working', 0]],
   [['thinking'], ['running', 'Checks running', 2], ['review', 'Ready for your review', 1], ['review', 'Green PR · merge?', 2]],
   [['suggested'], ['running', 'Checks running', 2], ['deploying', 'Merged · deploying', 2], ['running', '3 agents working', 2]],
-  [['review', 'Plan ready for review', 0], ['done', 'Delivered', 3], ['done', 'Delivered', 3], ['running', '2 agents working', 3]],
+  [['running', 'Starting its sub-jobs', 0], ['done', 'Delivered', 3], ['done', 'Delivered', 3], ['running', '2 agents working', 3]],
   [['running', '2 agents working', 0], ['done', 'Delivered', 3], ['done', 'Delivered', 3], ['review', 'Check the backfill', 3]],
 ];
 const waits = ([st]) => st === 'review' || IDEA[st]?.[0] === 'warn';
@@ -99,7 +100,7 @@ const AUTO = `<b class="intro-cp">${ICONS.ff}Auto</b>`;
 const checkpointsFigure = (reviews) => `<div class="intro-checkpoints">${CHECKPOINTS.map((cp) => `<div class="job-review intro-checkpoint" data-checkpoint="${cp.field}"><div class="job-review-row">${checkpointFlagHtml(cp, reviews[cp.field])}<span class="job-review-name">${cp.name}<small>${checkpointHint(cp, reviews[cp.field])}</small></span>${checkpointToggleHtml(cp, reviews[cp.field], `intro-${cp.field}`)}</div></div>`).join('')}</div>`;
 
 // New idea: the idea, the planner's question and the job it suggests, drawn by
-// job-idea.js itself, then the plan waiting to be approved. The chat is a fixed
+// job-idea.js itself, then the job it starts: pressing the suggestion approves its plan. The chat is a fixed
 // window that keeps its newest message at the foot, so the dialog never grows.
 const SUGGEST = { title: 'Dark mode for the reports dashboard', plan: { subJobs: [
   { id: 'tokens', kind: 'pr', title: 'Dark theme colours in the UI kit', repo: 'acme/ui-kit', base: 'next' },
@@ -118,19 +119,19 @@ const IDEA_FRAMES = [
   [2, true, false, false, ['run', 'ok', 'idle']],
   [3, false, false, false, ['warn', 'ok', 'idle']],
   [3, false, true, false, ['ok', 'ok', 'run']],
-  [3, false, true, true, ['ok', 'ok', 'warn']],
-  [3, false, true, true, ['ok', 'ok', 'warn']],
+  [3, false, true, true, ['ok', 'ok', 'run']],
+  [3, false, true, true, ['ok', 'ok', 'run']],
 ];
 const FLOW = { ok: ['check', 'Done'], run: ['spin', 'Working'], warn: ['eye', 'Needs you'], idle: ['planned', 'Next'] };
 const flowNode = (tone, icon, title) => node(tone, icon, title, FLOW[tone][1], FLOW[tone][0], tone !== 'idle');
 const newIdeaFigure = (phase) => {
-  const [n, thinking, pressed, plan, [talk, , approve]] = IDEA_FRAMES[phase];
+  const [n, thinking, pressed, plan, [talk, , start]] = IDEA_FRAMES[phase];
   const thread = SAID.slice(0, n).map((m) => (m.suggest && pressed ? { ...m, acceptedAt: 1 } : m));
   const job = { id: 'intro-idea', intent: 'Add a dark mode to the reports dashboard', idea: { thread }, stage: 'planning', runs: thinking ? [] : [{ parkedFor: 'idea', parkedAt: 1 }], reviewPlan: true };
   const fresh = (id) => id === SAID[n - 1]?.id && !pressed;
-  return `<div class="intro-flow">${flowNode('ok', 'edit', 'Idea')}<span class="intro-flow-line"></span>${flowNode(talk, 'robot', 'Wrangler')}<span class="intro-flow-line"></span>${flowNode(approve, 'eye', 'Approve')}</div>
+  return `<div class="intro-flow">${flowNode('ok', 'edit', 'Idea')}<span class="intro-flow-line"></span>${flowNode(talk, 'robot', 'Wrangler')}<span class="intro-flow-line"></span>${flowNode(start, 'play', 'Job')}</div>
   <div class="intro-chat" inert>${ideaThreadHtml(job, { fresh })}${plan ? `<div class="intro-chat-plan"><div class="job-chips"><span class="job-chip job-plan-branch">${ICONS.branch}<span>next</span></span><span class="job-chip">${ICONS.pr}<span>2 PRs · 1 session</span></span></div>
-  ${composer('The wrangler', 'Add an idea for the wrangler…', 'Redraws the plan for you to review.', 'Design the switch first')}</div>` : ''}</div>`;
+  ${composer('The wrangler', 'Add an idea for the wrangler…', 'Sorts it into feedback for a step or a change to the plan.', 'Design the switch first')}</div>` : ''}</div>`;
 };
 
 // Sub-jobs: three kinds of tile, and the places a session writes to as pills.
@@ -177,16 +178,16 @@ const writesFigure = (phase) => {
 // `anim` steps redraw their figure every `ms`; `still` is the frame shown with
 // reduced motion. `stack` puts the figure under the heading at full width.
 export const INTRO_STEPS = [
-  { tab: 'Welcome', title: 'Welcome', body: '', stack: true, cls: 'intro-value',
+  { tab: 'Welcome', title: 'Welcome', body: `<p>${W2} breaks work into AI sessions and PRs, provides proof that changes work, and allows you to get more done in parallel.</p>`, stack: true, cls: 'intro-value',
     anim: { frames: GRAPH.length, ms: 1400, still: GRAPH.length - 1 },
     figure: (reviews, phase) => graph(phase) },
   { tab: 'Jobs', title: `Hand ${W2} an outcome. It splits the work and tracks it for you.`,
-    body: `<p>${W2} adds <b>automated jobs</b> to Agent Wrangler. You describe a goal; it splits the goal into sub-jobs, starts agent sessions for them, and stops for you wherever you’ve asked to review.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board. An idea you are still talking through is a forming nebula until it becomes a job.</p>`,
+    body: `<p>You describe a goal; ${W2} splits it into sub-jobs, starts agent sessions for them, and stops for you wherever you’ve asked to review.</p><p>Everything lives behind the <b>Jobs</b> button in the left rail. The number on it is how many things are waiting on you, wherever you are on the board. An idea you are still talking through sits there too, marked <b>Idea</b>, until it becomes a job.</p>`,
     cls: 'intro-board', anim: { frames: BOARD_FRAMES.length, ms: 1600, still: 2 },
     figure: (reviews, phase) => board(phase) },
   { tab: 'New idea',
     title: 'New idea, then a plan you approve before anything runs.',
-    body: `<p>Press <b>New idea</b> and describe the outcome, in words or with screenshots. If it is unclear, the wrangler asks you, then suggests a job; if it is clear, ${W2} drafts the <b>plan</b> straight away. It picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>Press <b>Create job</b> and you get the plan of ordered sub-jobs. To change it, write in <b>Add idea</b> under it. Once the job runs, the same box is a conversation with the wrangler: ask it anything about the job and it answers there, or say what to change and it proposes the change for you to approve. Nothing runs until you <b>Approve</b>: no session, ticket or PR. You can also save an idea to the backlog and come back to it.</p>`,
+    body: `<p>Press <b>New idea</b> and describe the outcome, in words or with screenshots. If it is unclear, the wrangler asks you, then suggests a job; if it is clear, ${W2} drafts the <b>plan</b> straight away. It picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>A drafted plan is ordered sub-jobs. To change it, write in <b>Add idea</b> under it. Once the job runs, the same box is a conversation with the wrangler: ask it anything about the job and it answers there, or say what to change and it proposes the change for you to approve. Nothing runs until you <b>Approve</b>: no session, ticket or PR. A suggested job needs no second look: pressing <b>Create job</b> approves its plan and starts it. You can also save an idea to the backlog and come back to it.</p>`,
     cls: 'intro-idea', anim: { frames: IDEA_FRAMES.length, ms: 1700, still: 5 },
     figure: (reviews, phase) => newIdeaFigure(phase) },
   { tab: 'Sub-jobs',
@@ -209,7 +210,7 @@ export const INTRO_STEPS = [
     figure: (reviews, phase) => seeFigure(phase) },
   { tab: 'Reviews',
     title: 'You choose where a job stops for you.',
-    body: `<p>Every job has six checkpoints: the plan, the code, the merge, session results, writes to other places, and red steps. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself, so a Plan on Auto starts as soon as it is drafted. For red steps you choose <b>You decide</b> or <b>Wrangler replans</b>.</p><p>New idea starts from the defaults in <b>Automation settings</b>, where all but Writes start on You review. To stop everything at once, press <b>Pause</b> in the Jobs header.</p>`,
+    body: `<p>Every job has six checkpoints: the plan, local verification, the merge, session results, writes to other places, and red steps. Set one to ${YOU} and that step turns amber and waits for you. Set it to ${AUTO} and ${W2} carries on by itself, so a Plan on Auto starts as soon as it is drafted. For red steps you choose <b>You decide</b> or <b>Wrangler replans</b>.</p><p>New idea starts from the defaults in <b>Automation settings</b>, where all but Writes start on You review. To stop everything at once, press <b>Pause</b> in the Jobs header.</p>`,
     figure: (reviews) => checkpointsFigure(reviews) },
   { tab: 'Writes',
     title: 'Tickets, designs and posts, kept up to date as the job runs.',
@@ -244,10 +245,10 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
     dialog.className = 'job-dialog jobs-intro';
     dialog.setAttribute('aria-labelledby', 'jobs-intro-title');
     dialog.innerHTML = `<button class="job-dialog-close" aria-label="Close" title="Close">${ICONS.x}</button>
-      <div class="job-appbar intro-appbar"><span class="jobs-kicker">WRANGLER<sup>2</sup> · AUTOMATED JOBS</span><span class="intro-count"></span></div>
+      <div class="job-appbar intro-appbar"><span class="jobs-kicker">WRANGLER<sup>2</sup> · A NEW WAY OF WORKING WITH AI</span><span class="intro-count"></span></div>
       <div class="job-progress intro-steps" role="tablist" aria-label="Intro steps"></div>
       <div class="intro-body"></div>
-      <div class="job-actions"><button class="primary" data-intro="next"></button><button data-intro="back">${ICONS.back}Back</button><button data-intro="skip">Skip intro</button></div>`;
+      <div class="job-actions intro-actions"><button data-intro="skip">Skip intro</button><button data-intro="back">${ICONS.back}Back</button><button class="primary" data-intro="next"></button></div>`;
     document.body.appendChild(dialog);
     const go = (i) => { at = Math.max(0, Math.min(INTRO_STEPS.length - 1, i)); render(); };
     dialog.querySelector('.job-dialog-close').onclick = () => dialog.close();
@@ -317,6 +318,7 @@ export function createIntro({ storage, onNewJob = () => {}, onClose = () => {} }
     INTRO_STEPS.forEach((s, i) => { phases[i] = reduce ? s.anim?.still ?? 0 : 0; });
     stop();
     render();
+    applyTheme(dialog);
     if (!dialog.open) dialog.showModal();
     relayout();
   }

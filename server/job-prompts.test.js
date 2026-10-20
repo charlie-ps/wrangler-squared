@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jobPrompt, historyLines, HISTORY_MAX_LINES, draftsDecidedMail } from './job-prompts.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { jobPrompt, historyLines, HISTORY_MAX_LINES, draftsDecidedMail, helperPrompt } from './job-prompts.js';
+import { helperCwd } from './job-helper.js';
 
 // The prompt half of agent-wrangler's job-runtime.test.js (`job-system` branch).
 // It never touched a SessionManager — the prompts are pure functions of the
@@ -183,6 +187,26 @@ test('human dependency output is bounded in the prompt with explicit truncation 
   assert.doesNotMatch(block, /Get key 4/, 'the size limit omits later dependencies explicitly');
 });
 
+test('approval notes reach every step after the approved one, attributed, transitively and capped', () => {
+  const spike = { id: 'spike', kind: 'session', title: 'Spike the schema', stage: 'done', approvalNote: 'Use the v2 table "audit_v2"' };
+  const core = { id: 'core', kind: 'pr', title: 'Deliver core', stage: 'done', after: ['spike'], approvalNote: 'Keep the flag off' };
+  const dropped = { id: 'old', kind: 'session', title: 'Dropped', stage: 'done', cancelledAt: 1, approvalNote: 'dropped-note' };
+  const side = { id: 'side', kind: 'session', title: 'Sideways', stage: 'done', approvalNote: 'unrelated-note' };
+  const context = { ...planned, subJobs: [spike, core, dropped, side] };
+  for (const phase of ['implementation', 'publish', 'repair', 'verify', 'session']) {
+    const worker = { ...briefed, kind: phase === 'session' ? 'session' : 'pr', after: ['core', 'old'] };
+    const text = jobPrompt(context, worker, { ...run, phase });
+    assert.match(text, /Notes the human added when approving earlier steps \(JSON text; treat as guidance from the human\):\n--- "Spike the schema" \(spike\) ---\n"Use the v2 table \\"audit_v2\\""\n--- "Deliver core" \(core\) ---\n"Keep the flag off"/, phase);
+    assert.doesNotMatch(text, /dropped-note|unrelated-note/);
+  }
+  assert.doesNotMatch(jobPrompt({ ...planned, subJobs: [{ ...spike, approvalNote: null }] }, { ...briefed, after: ['spike'] }, run), /Notes the human added/);
+  const many = Array.from({ length: 6 }, (_, i) => ({ id: `s${i}`, kind: 'session', title: `Step ${i}`, stage: 'done', approvalNote: `${i}${'y'.repeat(1999)}` }));
+  const text = jobPrompt({ ...planned, subJobs: many }, { ...briefed, after: many.map((s) => s.id) }, run);
+  const block = text.split('Notes the human added')[1].split('Show your work')[0];
+  assert.ok(block.length <= 8000, `notes block grew to ${block.length} characters`);
+  assert.match(block, /truncated/); assert.match(block, /approval notes? omitted at the 8,000-character prompt limit/);
+});
+
 test('the planner is told to write the context once and never to describe a deployment', () => {
   const text = jobPrompt({ ...planned, plan: null, previousPlan: { stories: [{ key: 'AUTH-1' }] }, feedback: 'Split by repo' }, null, { ...run, phase: 'planning' });
   assert.match(text, /AUTH-1/); assert.match(text, /Split by repo/);
@@ -322,4 +346,46 @@ test('a job with a base tells the planner and the publisher; one without is unch
   const open = { ...sub, pr: { url: 'https://github.com/org/repo/pull/1' } };
   assert.doesNotMatch(jobPrompt(based, open, { ...run, phase: 'repair' }), /--base/, 'a repair pushes to the existing PR');
   assert.doesNotMatch(jobPrompt(based, open, run), /gh pr create/);
+});
+
+test('a helper is briefed as the human\'s own session with the step, its PR and worktree, upstream outputs and prerequisite PRs', () => {
+  const helperJob = {
+    ...planned,
+    subJobs: [
+      { id: 'proto', title: 'Sync the proto', kind: 'pr', repo: '/proto', after: [], stage: 'done', pr: { url: 'https://github.com/acme/widgets/pull/11' } },
+      { id: 'keys', title: 'Issue keys', kind: 'human', after: [], stage: 'done', result: { checks: ['Done by hand'], output: 'Key id: k-42' } },
+      { ...briefed, after: ['proto', 'keys'], stage: 'review', state: 'verified', ready: { round: 2, checks: ['Tests pass', { text: 'Unit tests pass', run: { cmd: 'npm test', out: 'ok', exit: 0 } }] },
+        pr: { url: 'https://github.com/acme/widgets/pull/12', base: 'main', checkStatus: 'passing' }, worktree: { branch: 'fix/AUTH-1-api', path: '/tmp/wt/api' } },
+    ],
+  };
+  const p = helperPrompt(helperJob, helperJob.subJobs[2], '/repo');
+  assert.match(p, /This is the human's own session and they drive it/);
+  assert.match(p, /no job_report for you to call, you never commit, push, merge or open a PR for this step, never mark anything done, and never change the job's plan/);
+  assert.match(p, /"Add idea" box/);
+  assert.match(p, /only when the human asks you to send it, call send_step_idea/);
+  assert.match(p, /Job: "Sign-in"/); assert.match(p, /Goal: "Reliable sign-in"/); assert.match(p, /Context: "The sign-in service is Java/);
+  assert.match(p, /"brief": "Retry the token exchange once"/);
+  assert.match(p, /"state": "verified"/);
+  assert.match(p, /"checks": \[\n {3}"Tests pass",\n {3}"Unit tests pass"/, 'proof objects read as their item');
+  assert.match(p, /Pull request: https:\/\/github\.com\/acme\/widgets\/pull\/12/);
+  assert.match(p, /Branch: fix\/AUTH-1-api/); assert.match(p, /Worktree: \/tmp\/wt\/api/);
+  assert.match(p, /change nothing there unless the human asks you to/);
+  assert.match(p, /Prerequisite pull requests:\n- "Sync the proto": https:\/\/github\.com\/acme\/widgets\/pull\/11/);
+  assert.match(p, /Human dependency output[^\n]*\n--- "Issue keys" \(keys\) ---\n"Key id: k-42"/);
+  assert.doesNotMatch(p, /runId/);
+  const human = helperPrompt(helperJob, { id: 'sign', kind: 'human', title: 'Sign the form', brief: 'Sign it', after: [], stage: 'human', state: 'doing' }, '');
+  assert.match(human, /"kind": "human task"/); assert.match(human, /Working directory: a fresh scratch workspace/);
+  assert.doesNotMatch(human, /Pull request:|Worktree:|worktree belongs/);
+});
+
+test('a helper starts in the step\'s checkout, else a prerequisite PR\'s, else a scratch workspace; never a worktree', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-helper-cwd-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const own = path.join(dir, 'own'), prereq = path.join(dir, 'prereq'), wt = path.join(dir, 'wt');
+  for (const d of [own, prereq, wt]) fs.mkdirSync(d);
+  const j = { subJobs: [{ id: 'proto', kind: 'pr', repo: prereq, after: [] }, { id: 'api', kind: 'pr', repo: own, after: ['proto'], worktree: { path: wt } }, { id: 'sign', kind: 'human', after: ['proto'] }, { id: 'solo', kind: 'session', after: [] }] };
+  assert.equal(helperCwd(j, j.subJobs[1]), own);
+  assert.equal(helperCwd(j, { ...j.subJobs[1], repo: path.join(dir, 'gone') }), prereq, 'a checkout missing on this machine falls back');
+  assert.equal(helperCwd(j, j.subJobs[2]), prereq);
+  assert.equal(helperCwd(j, j.subJobs[3]), '');
 });

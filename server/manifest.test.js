@@ -21,9 +21,11 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   assert.deepEqual([...manifest.requires].sort(), [...declared.requires].sort(), 'the manifest may not be wider than what the human consented to');
   assert.ok(manifest.requires.includes('tasks:read'));
   assert.ok(manifest.requires.includes('tasks:write'));
-  assert.equal(manifest.engines.wranglerApi, '^1.31.0', 'images:keep and the spawn images option arrived in 1.31');
+  assert.equal(manifest.engines.wranglerApi, '^1.38.0', 'files:view and the client api.files arrived in 1.38');
   assert.ok(manifest.requires.includes('images:keep'));
-  assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context', 'create_job']);
+  assert.ok(manifest.requires.includes('files:view'));
+  assert.ok(declared.requires.includes('files:view'));
+  assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context', 'create_job', 'send_step_idea']);
   assert.deepEqual(Object.keys(manifest.session), ['onBeforeDispatch']);
   assert.equal(manifest.client, 'public/index.js');
   assert.equal(manifest.styles, 'public/jobs.css');
@@ -66,6 +68,46 @@ test('a job created without review flags takes the saved review defaults; a flag
   assert.deepEqual(host.stores.jobs.snapshot().jobs.map(flags), [
     [true, true, true, true, false, true], [false, true, false, true, true, false], [true, true, false, true, false, false],
   ]);
+});
+
+const usualPickHost = (usualPick) => {
+  _resetForTests();
+  const { host } = fakeHost();
+  runnerFor(host).tick = async () => {};
+  host.stores.jobs.settings({ usualPick });
+  return host;
+};
+const pick = (j) => ({ agent: j.agent, model: j.model, effort: j.effort });
+const created = async (host, args) => {
+  const res = await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, start: false, ...args });
+  return host.stores.jobs.get(JSON.parse(res.content[0].text).jobId);
+};
+
+test('create_job with no model creates a job whose model is the usual pick', async () => {
+  const host = usualPickHost({ agent: 'claude', model: 'opus', effort: 'high' });
+  const job = await created(host, {});
+  assert.deepEqual(pick(job), { agent: 'claude', model: 'opus', effort: 'high' });
+  host.stores.jobs.action(job.id, 'start', {});
+  const run = host.stores.jobs.claim(job.id, null, 'planning');
+  assert.deepEqual([run.model, run.effort], ['opus', 'high'], 'its steps launch with --model, not the org default');
+  host.stores.jobs.settings({ usualPick: null });
+  assert.deepEqual(pick(await created(host, {})), { agent: 'claude', model: '', effort: '' }, 'no usual pick is the agent\'s own default');
+});
+
+test('an explicit model passed to create_job is kept', async () => {
+  const host = usualPickHost({ agent: 'claude', model: 'opus', effort: 'high' });
+  assert.deepEqual(pick(await created(host, { model: 'sonnet' })), { agent: 'claude', model: 'sonnet', effort: '' }, 'the usual effort belongs to the usual model');
+  assert.deepEqual(pick(await created(host, { model: 'sonnet', effort: 'low' })), { agent: 'claude', model: 'sonnet', effort: 'low' });
+  assert.deepEqual(pick(await created(host, { model: '' })), { agent: 'claude', model: '', effort: '' }, 'an empty model asks for the agent default');
+  assert.deepEqual(pick(await created(host, { effort: 'max' })), { agent: 'claude', model: 'opus', effort: 'max' });
+});
+
+test('a codex job ignores a claude usual pick\'s model', async () => {
+  const host = usualPickHost({ agent: 'claude', model: 'opus', effort: 'high' });
+  assert.deepEqual(pick(await created(host, { agent: 'codex' })), { agent: 'codex', model: '', effort: '' });
+  host.stores.jobs.settings({ usualPick: { agent: 'codex', model: 'gpt-6-sol', effort: 'high' } });
+  assert.deepEqual(pick(await created(host, {})), { agent: 'codex', model: 'gpt-6-sol', effort: 'high' }, 'an omitted agent takes the usual one too');
+  assert.deepEqual(pick(await created(host, { agent: 'claude' })), { agent: 'claude', model: '', effort: '' });
 });
 
 test('job-create creates a named task and stores it on the job', async () => {
@@ -263,6 +305,17 @@ test('the graph contributor carries jobs under its own key and stamps live runs 
   assert.deepEqual(Object.keys(out), ['jobs']);
   assert.equal(out.jobs.jobs[0].runs[0].status, 'needs-you');
   assert.equal(statusOf(spawned[0].sessionId), 'needs-you', 'the runner reads the same cache');
+});
+
+test('an idle card with a background shell running reads as working to the runner', () => {
+  _resetForTests();
+  const { host } = fakeHost();
+  manifest.graph({ host, graph: { sessions: [
+    { sessionId: 'waiting', status: 'idle', hasBackgroundShell: true },
+    { sessionId: 'done', status: 'idle', hasBackgroundShell: false },
+  ] } });
+  assert.equal(statusOf('waiting'), 'working', 'not reaped as receipt-less while its background job runs');
+  assert.equal(statusOf('done'), 'idle');
 });
 
 test('the graph contributor prices a job off the host\'s usage rows, one refresh behind and never awaited', async () => {

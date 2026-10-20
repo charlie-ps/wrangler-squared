@@ -13,6 +13,8 @@ export async function runFile(bin, args, cwd) {
 }
 const bad = new Set(['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
 const good = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
+const ADMIN_REFUSED = /admin|bypass|not authorized|permission/i;
+const needsAdmin = (message) => Object.assign(new Error(message), { needsAdmin: true });
 const MERGEABLE_AS_IS = new Set(['CLEAN', 'UNSTABLE']);
 export function prSummary(pr) {
   const checks = (pr.statusCheckRollup || []).map((c) => ({ name: c.name || c.context || 'Check',
@@ -137,7 +139,16 @@ export class JobGithub {
     const description = (JSON.parse(await this.run('gh', ['pr', 'view', sub.pr.url, '--json', 'body'], sub.repo)).body || '').trim();
     const body = description.endsWith(ATTRIBUTION) ? description : [description, ATTRIBUTION].filter(Boolean).join('\n\n');
     if (!canMerge()) throw new Error('Job paused before merge');
-    await this.run('gh', ['pr', 'merge', sub.pr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', sub.pr.head, '--body', body], sub.repo);
+    if (admin) {
+      const { viewerPermission } = JSON.parse(await this.run('gh', ['repo', 'view', '--json', 'viewerPermission'], sub.repo));
+      if (viewerPermission !== 'ADMIN') throw needsAdmin(`Merging this PR needs admin rights on the repository (you have ${String(viewerPermission || 'unknown').toLowerCase()} access). Merge it yourself, or have someone with admin rights do it.`);
+    }
+    try {
+      await this.run('gh', ['pr', 'merge', sub.pr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', sub.pr.head, '--body', body], sub.repo);
+    } catch (e) {
+      if (admin && ADMIN_REFUSED.test(String(e.stderr || e.message))) throw needsAdmin('Merging this PR needs admin rights on the repository, and GitHub refused the bypass. Merge it yourself, or have someone with admin rights do it.');
+      throw e;
+    }
   }
   // Watch whatever GitHub actually started for this merge, rather than a list of
   // workflow names chosen before the merge existed: the plan cannot reliably
@@ -166,38 +177,47 @@ export class JobGithub {
     // A skipped run is GitHub saying the workflow did not apply to this commit —
     // not a failure worth a recovery job, but not deployment evidence either, so
     // it neither blocks nor satisfies. All-skipped therefore reads as silence.
-    const results = await Promise.all([...latest.values()].map(async (run) => run.conclusion === 'cancelled'
-      ? this.successor(sub, run) : verdict(run)));
+    const results = await Promise.all([...latest.values()].map(async (run) => {
+      const own = verdict(run);
+      return run.conclusion === 'cancelled' || own.status === 'failing' ? this.successor(sub, run, own) : own;
+    }));
     // A cancelled run nothing has replaced yet holds the verdict like a pending
     // one, but is not one: the runner flags it stale rather than waiting forever.
     return { status: results.some((r) => r.status === 'failing') ? 'failing'
       : results.some((r) => r.status === 'passing') && !results.some((r) => ['pending', 'cancelled'].includes(r.status)) ? 'passing' : 'pending',
       runs: results, commit: sub.pr.mergeCommit };
   }
-  // A cancelled push run is almost always a concurrency group replacing a queued
-  // run with a newer push, so the merge is judged by the first later run of the
-  // same workflow on the same branch whose commit contains it. Later runs are
-  // walked oldest first: on a linear branch the first that contains the merge is
-  // the one that built it soonest, and one cancelled in turn is skipped for the
-  // next. A run on a commit that does not contain the merge (a sibling that
-  // landed first) is never evidence. Nothing yet is `cancelled`, not failing —
-  // GitHub may still queue the successor, and a hand-cancelled run is the
-  // human's call, not a recovery job's.
-  async successor(sub, run) {
-    const cancelled = { ...verdict(run), status: 'cancelled' };
-    if (!run.headBranch) return cancelled;
+  // A cancelled or failed push run is judged again by later runs of the same
+  // workflow on the same branch and event whose commit contains the merge: a
+  // cancellation is almost always a concurrency group replacing a queued run with
+  // a newer push, and a red one is often fixed by the next push or a flake gone
+  // green. The NEWEST completed (not cancelled) such run is the verdict, so a
+  // failed-then-passed branch reads green and passed-then-failed reads red. A run
+  // on a commit that does not contain the merge (a sibling that landed first) is
+  // never evidence. A cancelled run with only a replacement still running is
+  // pending on it; with nothing at all it stays `cancelled`, not failing — GitHub
+  // may still queue the successor, and a hand-cancelled run is the human's call,
+  // not a recovery job's. A failed run with nothing completed after it stays red.
+  // A green run on a revert of the merge contains it too and reads as deployed,
+  // by design: this is evidence a run that built the merge passed, not that the
+  // change is still live, and a revert is a later change somebody chose.
+  async successor(sub, run, own = verdict(run)) {
+    const fallback = run.conclusion === 'cancelled' ? { ...own, status: 'cancelled' } : own;
+    if (!run.headBranch) return fallback;
     const later = JSON.parse(await this.run('gh', ['run', 'list', '--workflow', run.workflowName, '--branch', run.headBranch,
       '--event', run.event, '--limit', '50', '--json', 'databaseId,headSha,status,conclusion,url,workflowName,attempt'], sub.repo))
       .filter((r) => r.databaseId > run.databaseId && r.headSha !== run.headSha)
-      .sort((a, b) => a.databaseId - b.databaseId || a.attempt - b.attempt);
+      .sort((a, b) => b.databaseId - a.databaseId || b.attempt - a.attempt);
     const runs = new Map();
-    for (const r of later) runs.set(r.databaseId, r);
-    let covered = false;
+    for (const r of later) if (!runs.has(r.databaseId)) runs.set(r.databaseId, r);
+    let running = null;
     for (const r of runs.values()) {
-      covered ||= await this.includes(sub, run.headSha, r.headSha);
-      if (covered && r.conclusion !== 'cancelled') return { ...verdict(r), supersedes: run.databaseId, commit: r.headSha };
+      if (r.conclusion === 'cancelled' || (r.status !== 'completed' && (running || fallback.status !== 'cancelled'))) continue;
+      if (!await this.includes(sub, run.headSha, r.headSha)) continue;
+      if (r.status === 'completed') return { ...verdict(r), supersedes: run.databaseId, commit: r.headSha };
+      running = r;
     }
-    return cancelled;
+    return running ? { ...verdict(running), supersedes: run.databaseId, commit: running.headSha } : fallback;
   }
   async includes(sub, commit, head) {
     const key = `${sub.repo}\0${commit}\0${head}`;

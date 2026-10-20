@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import path from 'node:path';
+import { THEME_IDS, DEFAULT_THEME, migrateTheme } from '../public/theme-ids.js';
 
 export const line = z.string().trim().min(1).max(180).refine((s) => !/[\r\n]/.test(s), 'Use one short line');
 export const id = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
@@ -387,8 +388,10 @@ export const SANDBOX_MODES = ['locked', 'auto', 'full'];
 export const jobInputSchema = z.object({
   title: line.optional(), intent: z.string().trim().min(1).max(16000),
   repos: z.array(repoPath).max(30).default([]),
-  agent: z.enum(['claude', 'codex']).default('claude'), model: z.string().max(150).default(''),
-  effort: z.string().max(40).default(''),
+  // Left out, these take the human's `settings.usualPick` (JobStore.create); no
+  // zod default for the same reason as the review flags below.
+  agent: z.enum(['claude', 'codex']).optional(), model: z.string().max(150).optional(),
+  effort: z.string().max(40).optional(),
   planningPrompt: z.string().max(8000).default(''),
   // Left out, a flag takes the human's `settings.reviewDefaults` (JobStore.create).
   // No zod default here: create_job spreads this shape, and the MCP SDK would fill
@@ -403,7 +406,7 @@ export const jobInputSchema = z.object({
   // (an integration branch for multi-PR work). Absent on a job saved before it,
   // and then everything keeps targeting the default.
   base: branchName.optional(),
-  updateMain: z.boolean().default(false), taskId: z.string().nullable().default(null),
+  taskId: z.string().nullable().default(null),
   // Names of images the job keeps in the host's per-extension store (`images:keep`),
   // already staged by the client's `api.images.stage`. `shareImages` decides whether
   // sub-job sessions get them too; planning always does.
@@ -415,7 +418,8 @@ export const jobInputSchema = z.object({
   // (job-runtime.js writableDirsFor); ignored under Full access.
   writableDirs: z.array(folderPath).max(12).default([]),
 });
-export const settingsSchema = z.object({
+export const DEFAULT_SPEND_LIMIT = 100;
+export const settingsSchema = z.preprocess(migrateTheme, z.object({
   concurrency: z.number().int().min(1).max(16).default(8),
   maxRepairs: z.number().int().min(0).max(5).default(2),
   // Automatic replans of one red step before it is declared red to the human
@@ -425,17 +429,27 @@ export const settingsSchema = z.object({
   // on the merge commit before the board flags it (job-runner.js).
   deploymentStaleMinutes: z.number().int().min(5).max(1440).default(30),
   paused: z.boolean().default(false),
+  // Per-job spend limit X in dollars (job-budget.js): a job may spend X × (1 + its
+  // top-ups). Absent (a settings file from before it, too) is DEFAULT_SPEND_LIMIT;
+  // null, the emptied field, is no limit. Cents are kept, anything finer rounded off.
+  spendLimit: z.preprocess((v) => (v === '' || v === null ? null : typeof v === 'number' ? Math.round(v * 100) / 100 : v),
+    z.number().positive().max(100000).nullable()).default(DEFAULT_SPEND_LIMIT),
   // The macOS application "Review code in …" hands a sub-job's worktree to
   // (`open -na <ideApp> --args <path>`, server/handlers.js). An app NAME, not a
   // command: nothing typed here ever reaches a shell.
   ideApp: z.string().trim().min(1).max(120).default('IntelliJ IDEA'),
-  // What the board's plates are drawn over: each job's skyline or its launch-page
-  // scene (public/job-plates.js PLATE_ART). A hover mode, 'peek', was dropped and
-  // reads as the skyline.
-  plateArt: z.preprocess((v) => (v === 'peek' ? 'quiet' : v), z.enum(['quiet', 'full']).default('quiet')),
-  // What the Jobs view itself is drawn over: its own night sky, made to sit with the
-  // dark plate art, or the host board's wallpaper (public/jobs-view.js BACKDROPS).
-  backdrop: z.enum(['sky', 'wrangler']).default('sky'),
+  // Fast-forward the human's checkout of the default branch once a PR lands
+  // (job-main.js). It never blocks a sub-job, so it is on unless switched off.
+  updateMain: z.boolean().default(true),
+  // The Jobs view's look (public/themes.js), from the shared id list; settings saved
+  // before themes are migrated by migrateTheme (a `backdrop` and a top-level `plateArt`)
+  // onto the default, and a version-5 jobs.json's Space is reset once (job-store.js migrateJobs).
+  theme: z.enum(THEME_IDS).default(DEFAULT_THEME),
+  // Options that belong to one theme, kept per theme so switching away and back keeps
+  // them. Space's plate art: each job's skyline or its launch-page scene (job-plates.js PLATE_ART).
+  themeOptions: z.object({
+    space: z.object({ plateArt: z.enum(['quiet', 'full']).default('quiet') }).default({}),
+  }).default({}),
   // The agent/model/effort the last created job used: New job's picker opens on it
   // while the catalog still offers that model. Same bounds as the job's own fields.
   usualPick: z.object({
@@ -444,7 +458,7 @@ export const settingsSchema = z.object({
   // What New job's checkpoints start on, and what a create_job that leaves one out
   // gets. The board always sends all six: `settings(patch)` merges shallowly.
   reviewDefaults: z.object(Object.fromEntries(Object.entries(REVIEW_DEFAULTS).map(([f, v]) => [f, z.boolean().default(v)]))).default({}),
-});
+}));
 // Strict, so a receipt carrying a field this system no longer has (an
 // `amendment`, a `commitMessage`) fails loudly with the offending key rather
 // than being silently stripped — the agent can then correct and retry, exactly

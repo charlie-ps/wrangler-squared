@@ -38,7 +38,7 @@ import { STATES, stateIconHtml, stateSolid } from './job-state.js';
 export const dependencyEditorHtml = (s, others, depKey) => others.filter((d) => !isWriteSub(d)).map((d) => `<label><input type="checkbox" data-dep="${esc(depKey)}" value="${esc(d.id)}" ${s.after.includes(d.id) ? 'checked' : ''}>${kindChipHtml(d)}<span>${esc(d.title)}</span></label>`).join('') || '<span>No other sub-jobs</span>';
 // "Show me before review", edited like the title: one input per item, redrawn
 // from the draft on add and remove so the stepper never holds a stale list.
-export const showEditorHtml = (s, key) => `<div class="job-show-ed"><small>Show me before review: things the agent must show working, one each</small>${(s.show || []).map((t, k) => `<div class="job-show-row"><input data-show="${esc(key)}" data-show-k="${k}" maxlength="180" value="${esc(t)}" aria-label="Show me item ${k + 1}"><button type="button" class="ghost" data-show-rm="${esc(key)}:${k}" aria-label="Remove item ${k + 1}">${ICONS.x}</button></div>`).join('')}<button type="button" class="job-show-add" data-show-add="${esc(key)}">${ICONS.plus}Add an item</button></div>`;
+export const showEditorHtml = (s, key) => `<div class="job-show-ed"><small>Show me</small>${(s.show || []).map((t, k) => `<div class="job-show-row"><input data-show="${esc(key)}" data-show-k="${k}" maxlength="180" value="${esc(t)}" aria-label="Show me item ${k + 1}"><button type="button" class="ghost" data-show-rm="${esc(key)}:${k}" aria-label="Remove item ${k + 1}">${ICONS.x}</button></div>`).join('')}<button type="button" class="job-show-add" data-show-add="${esc(key)}">${ICONS.plus}Add an item</button></div>`;
 // Blank lands where the job does; the summary names the branch only once it differs.
 // A PR tile's branch line: its worktree branch once cut, then where it lands. A PR
 // on the default branch with no worktree yet shows nothing: that is the usual case.
@@ -49,7 +49,7 @@ const landingHtml = (s, base) => {
   return `<span class="job-node-landing" title="${esc(tip)}">${branch ? `<span class="job-node-wt">${esc(branch)}</span>` : ''}${target ? `<span class="job-node-arrow" aria-hidden="true">→</span><span class="job-node-base ${offBase({ base }, s) ? 'own' : ''}">${esc(target)}</span>` : ''}</span>`;
 };
 const branchEditorHtml = (s, i, base, open) => `<details class="job-node-deps job-node-branch ${s.base ? 'set' : base ? '' : 'unset'}" data-base-of="${esc(s.id)}" ${open ? 'open' : ''}><summary title="Lands on ${esc(targetOf({ base }, s) || 'the default branch')} · change">${ICONS.branch}<span>${esc(s.base || base || 'default branch')}</span></summary>
-  <input data-base="${i}" value="${esc(s.base || '')}" placeholder="${esc(base || 'Default branch')}" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Land on branch"><span>Blank lands where the job does. The worktree is cut from origin/&lt;branch&gt; and the PR opens against it.</span></details>`;
+  <input data-base="${i}" value="${esc(s.base || '')}" placeholder="${esc(base || 'Default branch')}" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Land on branch"></details>`;
 // A place pill's parts: the glyph, a short mono label, a dot per write in its
 // state, and ↗ once the place exists.
 const urgentOf = (states) => ['failing', 'needs'].find((st) => states.includes(st));
@@ -63,14 +63,21 @@ const placeBodyHtml = (p, states) => {
 };
 const placeTip = (plan, p, writes, states) => [`${PLACES[p.type].name} · ${p.name}${p.type === 'file' && p.url ? `\n${p.url}` : ''}`,
   ...writes.map((w, i) => `${STATES[states[i]].label}: ${writeAction(w)} (${writeWhen(plan, w)})`)].join('\n');
+// A host serving `api.files` (1.38) can open a path it knows how to show, so Open
+// sits beside Copy for those only; an older host, or any other file, keeps Copy.
+let canOpenFile = () => false;
+export const setFileOpener = (canOpen) => { canOpenFile = typeof canOpen === 'function' ? canOpen : () => false; };
+export function filePathHtml(path) {
+  let can = false;
+  try { can = !!canOpenFile(path); } catch { can = false; }
+  return `<div class="job-place-path"><code>${esc(path)}</code>${can ? `<button type="button" data-open-path="${esc(path)}" title="Open the file">${ICONS.link}Open</button>` : ''}<button type="button" data-copy-path="${esc(path)}" title="Copy the path">${ICONS.copy}Copy</button></div>`;
+}
 // The popover's header: the whole name, and Open ↗ once there is somewhere to
 // go. Only an http(s) link is ever an href, whoever reported it.
 function placeHeadHtml(p) {
   const href = p.type === 'file' ? null : webUrl(p.url);
   const head = `<header class="job-place-head">${PLACES[p.type].icon}<b title="${esc(p.name)}">${esc(p.name)}</b>${href ? `<a href="${esc(href)}" target="_blank" rel="noopener">Open ↗</a>` : p.exists ? '' : '<em>not made yet</em>'}</header>`;
-  // TODO(host-api file:reveal): the board is served over http and cannot follow
-  // file://, so a local file shows its path to copy rather than an Open link.
-  return p.type === 'file' && p.url ? `${head}<div class="job-place-path"><code>${esc(p.url)}</code><button type="button" data-copy-path="${esc(p.url)}" title="Copy the path">${ICONS.copy}Copy</button></div>` : head;
+  return p.type === 'file' && p.url ? `${head}${filePathHtml(p.url)}` : head;
 }
 
 // Each wave's column, top to bottom. A connector that skips waves reserves a
@@ -173,15 +180,34 @@ export function graphGrid(cols, work, levels, styleOf) {
   return { at, lanes, laneOnly, gutters: gutters.map((g) => g.size), rows: tileRows };
 }
 
+// A plan's steps laid out once, for the dialog's grid and the Jobs view's plate
+// alike, so both read in the same columns, order and rows.
+export function planLayout(plan) {
+  const levels = dependencyLevels(plan), byId = new Map(plan.subJobs.map((s) => [s.id, s]));
+  const styleOf = (s, id) => isPrSub(byId.get(id)) && s.after.includes(id) ? 'deploy' : s.after.includes(id) ? 'start' : 'on';
+  const waves = Math.max(...levels.values()) + 1, tiles = plan.subJobs.filter((s) => !isWriteSub(s));
+  const rows = graphRows(tiles, levels, waves);
+  return { levels, waves, tiles, rows, grid: graphGrid(rows, tiles, levels, styleOf) };
+}
+
 // A proposed change to a running job's plan (`markOf`) is drawn static, each
 // node in its live state and labelled with what approval would do to it.
 export const rocketHtml = (id) => `<g class="job-edge-glyph" data-glyph="${esc(id)}"><circle r="12"/><g transform="translate(-9.6 -9.6) scale(.8)">${ROCKET_PATH}</g></g>`;
 const MARKS = { frozen: 'Locked · already landed', removed: 'Will be cancelled', added: 'New', edited: 'Edited', kept: 'Unchanged',
   'accept-red': 'Accept red', recover: 'Waits for its fix', rework: 'Rework', forward: 'To its open session', 'mark-done': 'Marked done', 'mark-merged': 'Marked merged', retry: 'Retry this step' };
-export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, openDeps = new Set(), openTickets = new Set(), openShow = new Set(), editing = null, reviewWrites = false, base = null } = {}) {
+// `was` (a proposal's live plan) diffs the drawing: a dependency the change drops
+// stays drawn, struck, so the graph shows every edge it adds and every one it takes away.
+const FIELD_NAMES = { title: 'title', brief: 'brief', check: 'check', show: 'show me', after: 'waits for', action: 'action', on: 'trigger', by: 'session', review: 'review', why: 'why', place: 'place', base: 'base' };
+export const fieldName = (k) => FIELD_NAMES[k] || k;
+export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, editsOf = () => [], was = null, openDeps = new Set(), openTickets = new Set(), openShow = new Set(), editing = null, reviewWrites = false, base = null } = {}) {
+  const before = was && new Map(was.subJobs.map((s) => [s.id, s]));
+  const goneDeps = (s) => (before?.get(s.id)?.after || []).filter((id) => !s.after.includes(id) && plan.subJobs.some((t) => t.id === id));
+  const dropped = new Map(before ? plan.subJobs.map((s) => [s.id, goneDeps(s)]) : []);
+  if (before) plan = { ...plan, subJobs: plan.subJobs.map((s) => dropped.get(s.id).length ? { ...s, after: [...s.after, ...dropped.get(s.id)] } : s) };
   const subs = plan.subJobs;
   if (!subs.length) return '';
-  const levels = dependencyLevels(plan);
+  const edgeDiff = (s, id) => !before ? '' : dropped.get(s.id)?.includes(id) || [s.id, id].some((x) => markOf?.({ id: x }) === 'removed') ? 'gone' : !before.has(s.id) || !(before.get(s.id).after || []).includes(id) ? 'added' : 'kept';
+  const { levels, waves, tiles, rows, grid } = planLayout(plan);
   const byId = new Map(subs.map((s) => [s.id, s]));
   const work = new Set(subs.filter((s) => !isWriteSub(s)).map((s) => s.id));
   const hangsOn = (w) => (work.has(w.by) ? w.by : null);
@@ -224,7 +250,6 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     const add = editable && isSessionSub(s) ? `<button type="button" class="job-place-add" data-add-write="${esc(s.id)}" title="Add a place this session writes to">${ICONS.plus}<b>place</b></button>` : '';
     return list.length || add ? `<div class="job-places">${pills(list, s.id)}${add}</div>` : '';
   };
-  const waves = Math.max(...levels.values()) + 1;
   const story = (s) => s.jiraKey || (s.storyId ? storyLabel(plan.stories?.find((t) => t.id === s.storyId), plan.stories) : 'No ticket');
   const node = (s, i) => {
     const state = stateOf ? stateOf(s) : 'planned';
@@ -240,15 +265,16 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
       return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<textarea class="job-node-title" aria-label="${kindLabel(s)} title ${i + 1}" data-title="${i}" maxlength="180" rows="3">${esc(s.title)}</textarea>${repo}
         <div class="job-node-edit"><details class="job-node-deps" data-deps="${esc(s.id)}" ${openDeps.has(s.id) ? 'open' : ''}><summary title="${esc(deps || 'Independent')} · change">${ICONS.link}<span>${s.after.length || 'None'}</span></summary>${dependencyEditorHtml(s, others, String(i))}</details>${isPrSub(s) ? `<details class="job-node-show" data-show-d="${esc(s.id)}" ${openShow.has(s.id) ? 'open' : ''}><summary title="Show me before review · change">${ICONS.eye}<span>${(s.show || []).length || 'None'}</span></summary>${showEditorHtml(s, String(i))}</details>${branchEditorHtml(s, i, base, openDeps.has(`base:${s.id}`))}` : ''}</div></div>`;
     }
-    if (markOf) { const mark = markOf(s); return `<div class="${cls} job-mark-${mark}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}<span class="job-mark">${mark === 'frozen' ? ICONS.lock : ''}${esc(MARKS[mark])}</span></div>`; }
+    if (markOf) {
+      const mark = markOf(s), fields = mark === 'edited' ? editsOf(s.id) : [];
+      const old = fields.includes('title') && before?.get(s.id) ? `<s class="job-node-was" title="Title before this change">${esc(before.get(s.id).title)}</s>` : '';
+      const label = fields.length ? `${MARKS.edited} · ${fields.map(fieldName).join(', ')}` : MARKS[mark];
+      return `<div class="${cls} job-mark-${mark}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}${old}<strong class="job-node-title">${esc(s.title)}</strong>${repo}<span class="job-mark">${mark === 'frozen' ? ICONS.lock : ''}${esc(label)}</span></div>`;
+    }
     if (!stateOf) return `<div class="${cls}" data-node="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}</div>`;
     return `<button type="button" class="${cls} ${state === 'done' ? 'done' : ''}" data-node="${esc(s.id)}" data-open-sub="${esc(s.id)}" title="${esc(tip)}">${tile}<strong class="job-node-title">${esc(s.title)}</strong>${repo}<span class="job-status">${esc(lineOf ? lineOf(s) : STATES[state].label)}</span></button>`;
   };
   const loose = subs.filter((w) => isWriteSub(w) && !hangsOn(w));
-  const styleOf = (s, id) => isPrSub(byId.get(id)) && s.after.includes(id) ? 'deploy' : s.after.includes(id) ? 'start' : 'on';
-  const tiles = subs.filter((s) => !isWriteSub(s));
-  const rows = graphRows(tiles, levels, waves);
-  const grid = graphGrid(rows, tiles, levels, styleOf);
   const top = loose.length ? 1 : 0;
   // Columns sit at odd grid tracks; the even track after column w is gutter w, sized by `layoutGraphEdges`.
   const cell = (w, r) => `grid-column:${2 * w + 1};grid-row:${2 * r + top + 1}`;
@@ -259,7 +285,8 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
   const edges = subs.flatMap((s) => edgesOf(s).filter((id) => levels.has(id)).map((id) => {
     const deploy = isPrSub(byId.get(id)) && s.after.includes(id);
     // A flag, not a class: the class is the connector's style, which picks its port.
-    return `<path class="${deploy ? 'deploy' : s.after.includes(id) ? 'start' : 'on'}" data-from="${esc(id)}" data-to="${esc(s.id)}"${s.cancelledAt ? ' data-cancelled' : ''}/>`;
+    const diff = edgeDiff(s, id);
+    return `<path class="${deploy ? 'deploy' : s.after.includes(id) ? 'start' : 'on'}" data-from="${esc(id)}" data-to="${esc(s.id)}"${s.cancelledAt ? ' data-cancelled' : ''}${diff ? ` data-diff="${diff}"` : ''}/>`;
   })).join('');
   // Every deploy connector out of a PR says the same thing (it waits for that
   // PR to deploy), so the PR gets one rocket, beside its tile, not one per connector.
