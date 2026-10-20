@@ -194,7 +194,8 @@ text as public as the rest of this repo.
   only). A step's dialog shows only what was said on it. A conversation not at work and not the one
   the human spoke in last folds to a strip (`convoOpen`; clicks are client-side, per id), and its ×
   (`dismiss-convo`, refused while it answers or holds a plan change) stamps `convo.dismissedAt`,
-  which hides it everywhere and refuses replies in it. A job
+  which hides it everywhere until anything new is said in it (`say` clears it, so a reply
+  from a stale box or a wrangler's message brings it back). A job
   saved with the old single `job.ask` is migrated on load (`migrateTalk`). Open PR #209
   keeps a step's sent ideas on `job.replan.asks`; once both land, the step dialog
   should draw them from the thread, not twice.

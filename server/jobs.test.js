@@ -15,6 +15,7 @@ import { jobCreateHandler, makeJobCreateHandler, jobActionHandler, jobSettingsHa
 import { _resetForTests, runnerFor } from './jobs.js';
 import { jobReportTool, getJobContextTool, sendStepIdeaTool } from './tools.js';
 import { changeView } from './job-change.js';
+import { say } from './job-talk.js';
 import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 
@@ -3563,5 +3564,23 @@ test('dismiss-convo hides a conversation for good, never one whose wrangler is a
   assert.equal(job.moves.at(-1).move, 'dismiss-convo');
   assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /already gone/);
   assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: 'convo_nope' }), /already gone/);
-  assert.throws(() => change(f, null, 'One more thing', id), /has gone/, 'nothing more is said in it');
+});
+
+test('a dismissed conversation comes back when anything new is said in it, by the human or the wrangler', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'What is left?');
+  await f.tick();
+  f.report({ kind: 'reply', text: 'Only web.' }, plannerOf(f));
+  await f.tick();
+  const id = f.store.get(f.job.id).convos[0].id;
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  change(f, null, 'Is web started?', id);
+  assert.equal(f.store.get(f.job.id).convos[0].dismissedAt, undefined, 'the human said something in it');
+  await f.tick();
+  f.report({ kind: 'reply', text: 'Not yet.' }, plannerOf(f));
+  await f.tick();
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  const job = f.store.get(f.job.id);
+  say(job, { from: 'wrangler', kind: 'answer', text: 'Web has started.', convo: id }, 9);
+  assert.equal(job.convos[0].dismissedAt, undefined, 'the wrangler said something in it');
 });

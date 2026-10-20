@@ -22,8 +22,11 @@ export const convoRun = (job, convo) => job.runs.find((r) => !r.stopped && r.con
 export const unsentAsks = (convo) => (convo?.pending?.asks || []).filter((a) => !a.sentAt);
 const nextId = (job, now) => `talk_${now.toString(36)}${talkOf(job).length.toString(36)}`;
 
+// Anything new said in a dismissed conversation brings it back.
 export function say(job, entry, now) {
   const msg = { id: nextId(job, now), at: now, ...entry };
+  const convo = convoById(job, entry.convo);
+  if (convo?.dismissedAt) delete convo.dismissedAt;
   (job.talk ||= []).push(msg);
   if (job.talk.length > TALK_MAX) job.talk.splice(0, job.talk.length - TALK_MAX);
   return msg;
@@ -65,7 +68,8 @@ export function escalate(convo, now) {
   if (convo?.sub && !convo.escalatedAt) convo.escalatedAt = now;
 }
 
-// The human's × on a conversation: hidden from every view for good. Never one
+// The human's × on a conversation: hidden from every view until something new is
+// said in it (say). Never one
 // still at work: its wrangler answering, or a plan change drawn or waiting in it.
 export function dismissConvo(job, id, now) {
   const convo = convoById(job, id);

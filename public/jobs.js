@@ -409,7 +409,8 @@ export function changeRoute(at, job = null, sub = null) {
 }
 // A running job's conversations with the wrangler (mirrors server/job-talk.js): a
 // step's on that step only, and on the job too once its wrangler escalated it; the
-// rest on the job; one the human dismissed nowhere. A conversation is pending while its wrangler has something of
+// rest on the job; one the human dismissed nowhere, until the server
+// clears its dismissal because something new was said in it. A conversation is pending while its wrangler has something of
 // the human's left to answer.
 export const talkOf = (job) => job?.talk || [];
 export const convosOf = (job) => job?.convos || [];
