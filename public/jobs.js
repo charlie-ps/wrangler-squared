@@ -409,14 +409,15 @@ export function changeRoute(at, job = null, sub = null) {
 }
 // A running job's conversations with the wrangler (mirrors server/job-talk.js): a
 // step's on that step only, and on the job too once its wrangler escalated it; the
-// rest on the job. A conversation is pending while its wrangler has something of
+// rest on the job; one the human dismissed nowhere, until the server
+// clears its dismissal because something new was said in it. A conversation is pending while its wrangler has something of
 // the human's left to answer.
 export const talkOf = (job) => job?.talk || [];
 export const convosOf = (job) => job?.convos || [];
 export const askPending = (job, convo = null) => !job?.cancelledAt && (convo ? !!convo.pending : convosOf(job).some((c) => c.pending));
 export function talkFor(job, sub) {
   const convo = (m) => m.convo ? convosOf(job).find((c) => c.id === m.convo) : null;
-  return talkOf(job).filter(sub ? (m) => m.sub === sub.id || convo(m)?.sub === sub.id : (m) => !convo(m)?.sub || convo(m).escalatedAt);
+  return talkOf(job).filter((m) => !convo(m)?.dismissedAt).filter(sub ? (m) => m.sub === sub.id || convo(m)?.sub === sub.id : (m) => !convo(m)?.sub || convo(m).escalatedAt);
 }
 // The conversations a view shows, in the order they started, each with its
 // messages; a message from no conversation (a red step's card) is grouped apart.

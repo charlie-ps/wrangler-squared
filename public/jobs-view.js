@@ -566,6 +566,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (!dialog.open) dialog.showModal();
   }
   const more = (key, summary, body, cls = '') => `<details class="job-more ${cls}" data-keep="${key}" ${openMore.has(key) ? 'open' : ''}><summary>${summary}</summary>${body}</details>`;
+  // The conversations the human folded or unfolded by hand, by id; kept across redraws and dialogs.
+  const convoFold = new Map();
   // Which of a proposal's options is picked; it resets with a new proposal.
   let optionPick = { id: null, i: 0 };
   const pickedOption = (job) => (optionPick.id === job.replan?.proposal?.id && proposalOptions(job.replan.proposal)[optionPick.i] ? optionPick.i : 0);
@@ -910,7 +912,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const view = changeView(job, sub);
     // A step Wrangler is fixing is the wrangler's for now.
     const open = view && !(sub && redFixing(job, sub));
-    const talk = talkHtml(job, sub, open && view.at !== 'plan' ? (convo) => boxHtml(job, sub, view, convo) : null);
+    const talk = talkHtml(job, sub, open && view.at !== 'plan' ? (convo) => boxHtml(job, sub, view, convo) : null, convoFold);
     return open ? `${talk}${boxHtml(job, sub, view, null)}` : talk + askSentHtml(job, sub);
   }
   // One control for reading the diff: Wrangler's own view, the desktop IDE in its menu.
@@ -1560,6 +1562,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     dialog.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
     dialog.querySelectorAll('[data-open-path]').forEach((b) => b.onclick = () => openPath(b));
     dialog.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
+    // A conversation folds and unfolds on its header or strip; × is for good (job-talk.js).
+    dialog.querySelectorAll('[data-convo-fold]').forEach((el) => el.onclick = (e) => {
+      if (e.target.closest('[data-convo-dismiss], a, .job-proof')) return;
+      const box = el.closest('[data-convo]');
+      convoFold.set(box.dataset.convo, box.classList.contains('is-folded'));
+      renderDetail();
+    });
+    dialog.querySelectorAll('[data-convo-dismiss]').forEach((b) => b.onclick = () => { if (pressBusy(b)) action('dismiss-convo', { convo: b.closest('[data-convo]').dataset.convo }, null); });
     dialog.querySelectorAll('[data-talk-review]').forEach((b) => b.onclick = () => dialog.querySelector('.job-replan-ask')?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });
     wireGraph();
@@ -1578,7 +1588,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim(), ...(box.dataset.changeConvo ? { convo: box.dataset.changeConvo } : {}), ...(images.length ? { images } : {}) });
         clearAskSent();
         askSent = { jobId: job.id, subId: sub?.id ?? null, convo: key, text: text.value.trim(), items: mine, images: mine.map((i) => i.url), to: box.dataset.changeTo, at: Date.now(), state: 'sending' };
-        askImages = askImages.filter((i) => i.box !== key); text.value = '';
+        askImages = askImages.filter((i) => i.box !== key); text.value = ''; convoFold.delete(key);
         renderDetail();
       };
       wireAskImages(box);
@@ -1853,7 +1863,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       return;
     }
     // A Retry's, a fix's or a helper's outcome lands on a later tick, in the dialog it was pressed in.
-    if (['retry-main', 'dismiss-main', 'resolve-main', 'ask-helper'].includes(msg?.action)) return;
+    if (['retry-main', 'dismiss-main', 'resolve-main', 'ask-helper', 'dismiss-convo'].includes(msg?.action)) return;
     // A New idea that is planning opens on its conversation once the snapshot has it.
     if (msg?.event === 'job-created' && msg.idea && msg.started) { openOnCreate = msg.jobId; if (data.jobs.some((j) => j.id === msg.jobId)) { openOnCreate = null; openDetail(msg.jobId); } return; }
     // A reply stays in its conversation for the next tick. A created job closes the dialog it was pressed in,
