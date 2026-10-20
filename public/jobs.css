@@ -613,6 +613,10 @@ button.job-write:focus-visible { outline:2px solid var(--c); outline-offset:1px;
 .job-split-more>summary:hover, .job-split-more[open]>summary { background:color-mix(in srgb, var(--blue) 12%, transparent); }
 .job-split-more>summary:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
 .job-split-more>summary svg { width:14px; height:14px; }
+/* Beside a primary its caret is the same action, so it wears the primary's state colour. */
+.job-split>button.primary~.job-split-more>summary, .job-split>button.primary~.job-split-more .job-split-menu button { color:var(--c-fg, var(--blue-fg)); }
+.job-split>button.primary~.job-split-more>summary:hover, .job-split>button.primary~.job-split-more[open]>summary { background:color-mix(in srgb, var(--c, var(--blue)) 14%, transparent); }
+.job-split>button.primary~.job-split-more>summary:focus-visible { outline-color:var(--c, var(--blue)); }
 .job-split-menu { position:absolute; z-index:5; bottom:calc(100% + 4px); left:0; display:grid; min-width:180px; padding:4px; border:1px solid var(--border); border-radius:12px; background:var(--surface); box-shadow:0 8px 24px var(--shadow); }
 .job-split-menu button { justify-content:flex-start; border-radius:8px; white-space:nowrap; }
 .job-actions .job-details-toggle { margin-left:auto; color:var(--fg-muted); }
@@ -711,7 +715,7 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-context,.job-intent { white-space:pre-wrap; color:var(--fg) !important; }
 .job-brief { color:var(--fg) !important; }
 .job-approve-split { order:-1; margin-right:6px; }
-.job-approve-split>button.primary { margin-right:2px; }
+.job-approve-split>button.primary,.job-retry-split>button { margin-right:2px; }
 .job-approve-pop { width:min(340px, 75vw); gap:8px; padding:10px; backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); }
 .job-approve-pop label { display:grid; gap:6px; font-size:12px; color:var(--fg-muted); }
 .job-approve-pop textarea { font-size:13px; }

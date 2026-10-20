@@ -543,7 +543,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if (chip) chip.outerHTML = stateChip(jobState(reviewed), jobLabel(reviewed));
     }
     // A picture waiting in a box is as much a draft as words are.
-    const typing = askImages.length > 0 || [...dialog.querySelectorAll('.job-change textarea, [data-approve-note]')].some((t) => t.value);
+    const typing = askImages.length > 0 || [...dialog.querySelectorAll('.job-change textarea, [data-approve-note], [data-retry-note]')].some((t) => t.value);
     // An empty reply box with the cursor in it is someone reading the thread: it redraws, keeping the cursor.
     const composing = document.activeElement?.closest?.('[data-idea-composer]');
     const humanForm = dialog.querySelector('#job-human-form');
@@ -769,6 +769,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const [aria, heading, placeholder] = NOTE_REACH[reach];
     return `<span class="job-split job-approve-split">${button}<details class="job-split-more job-approve-more" data-keep="approve-note" ${openMore.has('approve-note') ? 'open' : ''}><summary aria-label="${aria}" title="${aria}">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>${heading}<textarea data-approve-note maxlength="2000" rows="3" placeholder="${placeholder}"></textarea></label><button type="button" data-action="${action}" data-with-note>${ICONS.check}${label} with note</button></div></details></span>`;
   };
+  // A failing step's Retry goes at once; its caret holds the one line the retried
+  // session reads last (server/job-prompts.js). A coordinator error has no session
+  // to read it, so the job's own Retry stays plain.
+  const retrySplitHtml = (primary) => `<span class="job-split job-retry-split"><button id="job-retry" ${primary ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button><details class="job-split-more" data-keep="retry-note" ${openMore.has('retry-note') ? 'open' : ''}><summary aria-label="Retry with a note for the retried session" title="Retry with a note for the retried session">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>Note for the retried session<textarea data-retry-note maxlength="180" rows="2" placeholder="Read last by the retried session, and shown on the card until it reports"></textarea></label><button type="button" data-retry-with-note>${ICONS.wrench}Retry with note</button></div></details></span>`;
   // Ask an agent: the human's own sessions about this step (server/job-helper.js),
   // newest last. A queued one is the only state that holds the button.
   const helperQueued = (sub) => (sub.helpers || []).some((h) => !h.sessionId && !h.error);
@@ -1289,7 +1293,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // Wrangler's own turn (Fixing) or a fix for you (Fix ready, a declared red's options)
     // outranks Retry as the primary action; Retry stays for a transient failure.
     const redAsk = sub.error && !job.error && (redFixReady(job, sub) || (redDeclared(job, sub) && job.replan?.proposal)) ? `<button class="primary" data-open-job title="Opens the job dialog on the proposal">${ICONS.eye}${redFixReady(job, sub) ? 'Review fix' : 'Decide'}</button>` : '';
-    const retry = sub.error || job.error ? `${redAsk}<button id="job-retry" ${sub.error && !redAsk && !redFixing(job, sub) ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button>` : '';
+    const retry = sub.error ? `${redAsk}${retrySplitHtml(!redAsk && !redFixing(job, sub))}` : job.error ? `<button id="job-retry">${ICONS.wrench}Retry</button>` : '';
     let body = '', actions = '';
     const reviewing = ['code', 'session'].includes(changeView(job, sub)?.at);
     if (isWriteSub(sub)) {
@@ -1560,16 +1564,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       wireAskImages(box);
     });
     dialog.querySelectorAll('input[name="opt"]').forEach((r) => r.onchange = () => { optionPick = { id: job.replan.proposal.id, i: +r.value }; renderDetail(); });
-    // The note is what the retried session reads as the last line of its
-    // history (server/job-prompts.js): a blocked step usually needs one sentence
-    // from the human ("that file is a template, stage it"), and Retry was the one
-    // button with nowhere to type it.
-    bind('#job-retry', () => {
-      const target = sub?.error ? sub : null;
-      show(`<h2>Retry ${esc(target ? target.title : job.title)}</h2>${target?.error ? `<p class="job-error">${esc(target.error)}</p>` : job.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}<form id="job-retry-form">${target ? noteField('Note for the retried session') : ''}<div class="job-actions"><button class="primary">Retry</button><button type="button" id="job-move-back">Back</button></div></form>`);
-      dialog.querySelector('#job-move-back').onclick = () => renderDetail();
-      dialog.querySelector('form').onsubmit = (e) => { e.preventDefault(); if (pressBusy(submitterOf(e))) action('retry', { subJobId: target?.id, ...only({ note: trimmed(new FormData(e.target), 'note') }) }); };
-    });
+    // Only the popup's own button sends its words: plain Retry sends none.
+    const retry = (b, note) => { if (pressBusy(b)) action('retry', { subJobId: sub?.error ? sub.id : undefined, ...only({ note }) }); };
+    bind('#job-retry', (e) => retry(e.currentTarget));
+    bind('[data-retry-with-note]', (e) => retry(e.currentTarget, dialog.querySelector('[data-retry-note]').value.replace(/\s+/g, ' ').trim()));
     // Echoes the head and fingerprint of the list being read, so a refusal the
     // runner has replaced since is refused by the server instead of discarded unseen.
     bind('#job-discard', () => {
@@ -1616,12 +1614,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       e.currentTarget.setAttribute('aria-expanded', String(open)); if (body) body.hidden = !open;
     });
   }
-  const trimmed = (f, name) => String(f.get(name) || '').trim();
   // An empty optional field is left OUT of the payload rather than sent as '': the
   // schemas treat a present empty string as a value, and a blank note would clear
   // nothing but occupy the card.
   const only = (fields) => Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== '' && v != null));
-  const noteField = (label = 'Note for the next session') => `<label>${esc(label)} <small>Optional · one line, shown on the card until the next session reports</small><input name="note" maxlength="180"></label>`;
   function createJob() {
     selected = null; planDraft = null;
     picker?.dispose(); picker = null;
