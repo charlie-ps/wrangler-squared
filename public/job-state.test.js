@@ -75,6 +75,13 @@ test('a green PR moved behind work that has not deployed waits instead of offeri
   assert.equal(subState(job({ subJobs: [dep, red] }), red), 'failing', 'red checks still repair while it waits');
 });
 
+test('a red PR a plan change moved behind a fix waits for it instead of reading red', () => {
+  const fix = sub('fix');
+  const behind = sub('b', { stage: 'pr', pr: pr({ checkStatus: 'failing' }), after: ['fix'], catchUp: { at: 1 } });
+  const j = job({ subJobs: [fix, behind] });
+  assert.equal(subState(j, behind), 'waiting'); assert.equal(subLabel(j, behind), 'Waiting for 1 deployment');
+});
+
 test('a job rolls up to its most urgent sub-job, and before work starts follows its own stage', () => {
   assert.equal(jobState(job({ stage: 'backlog' })), 'planned');
   assert.equal(jobState(job({ stage: 'planning', plan: { subJobs: [], stories: [] } })), 'needs');

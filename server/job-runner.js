@@ -8,7 +8,7 @@ import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from
 import { dropSub } from './job-sub-ops.js';
 import { draftsDecidedMail, threadMail, ideaMail, askMail } from './job-prompts.js';
 import { inConversation, unsentIdea } from './job-idea.js';
-import { askFailed, convosOf, convoById, convoRun, unsentAsks } from './job-talk.js';
+import { askFailed, replanFailed, convosOf, convoById, convoRun, unsentAsks } from './job-talk.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
 import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps } from './job-running.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
@@ -136,9 +136,10 @@ export class JobRunner {
           // history a later session reads (job-prompts.js) needs the run's.
           // A red step's planner that died is that step's to declare, not the job's:
           // `job.error` would hold every sub-job for one step's trouble.
-          // An unanswered question is said in the thread; the job never stops for it.
+          // An unanswered question, or a plan change never drawn, is said in its
+          // conversation; the job never stops for it.
           if (error && r.ask) { r.error = error; askFailed(j, r, error.replace(/\. .*$/, ''), this.now()); }
-          else if (error && !failRedReplan(j, r, error.replace(/\. .*$/, ''), this.now())) { r.error = error; (s || j).error = error; }
+          else if (error && !failRedReplan(j, r, error.replace(/\. .*$/, ''), this.now()) && !replanFailed(j, r, error.replace(/\. .*$/, ''), this.now())) { r.error = error; (s || j).error = error; }
           else if (error) r.error = error;
         });
       } catch (e) {
@@ -208,10 +209,10 @@ export class JobRunner {
     this.triaging.set(key, { fingerprint: comments.fingerprint }); this.pending.add(done);
   }
   async launch(job, sub, phase, extra) {
-    // A plan change waiting on the human freezes every sub-job it may still
-    // edit or cancel: no new step, no merge, no human approval (job-store.js).
-    // Steps already running carry on, PRs keep being watched, and work past the
-    // point of no return (a verify after deploy) lands as it would have.
+    // A plan change waiting on the human freezes only the sub-jobs it would
+    // edit, cancel or act on (job-red.js heldBy): no new step, no merge, no human
+    // approval (job-store.js). Everything else carries on, steps already running
+    // finish, and work past the point of no return lands as it would have.
     if (sub && heldBy(this.store.get(job.id), sub) && !isFrozen(sub)) return;
     const run = this.store.claim(job.id, sub?.id || null, phase, extra);
     if (!run) return;
@@ -321,6 +322,14 @@ export class JobRunner {
             });
           } else if (pr.state === 'CLOSED') {
             this.patchSub(id, sub.id, (s) => { s.error = 'PR was closed without merging'; });
+          } else if (sub.catchUp) {
+            // A plan change moved this PR behind new work (job-replan.js): no
+            // repair or merge until that lands, then its branch takes it from the
+            // base and the checks run again.
+            if (dependenciesSatisfied(job, sub)) {
+              await this.updateBranch(id, sub, pr);
+              this.patchSub(id, sub.id, (s) => { s.catchUp = null; });
+            }
           } else if (sub.fixRequested) {
             // The human saw something the checks do not cover; the repair runs
             // whatever colour they are. A plan change can ask for one ahead of

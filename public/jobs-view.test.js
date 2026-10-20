@@ -1369,7 +1369,7 @@ test('a folded section stays open across live ticks', (t) => {
 
 // --- Changing the plan of a running job ---
 
-test('Add idea on a running job asks the planner for a proposal; the sent idea stays as a bubble; while it is pending new work reads as held and Discard is offered', (t) => {
+test('Add idea on a running job asks the planner for a proposal; the sent idea stays as a bubble; while it is drawn nothing is held and Discard is offered', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'done', deployed: { at: 1, checks: ['ok'] } }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
   f.view.update(f.data);
@@ -1385,7 +1385,7 @@ test('Add idea on a running job asks the planner for a proposal; the sent idea s
   f.view.created({ event: 'job-action-complete', jobId: 'job1', action: 'request-change' }); f.view.update(f.data);
   assert.equal(f.q('#job-dialog').open, true);
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Re-planning');
-  assert.equal(jobStatus(job, job.subJobs[1]).text, 'Held for the plan change');
+  assert.notEqual(jobStatus(job, job.subJobs[1]).text, 'Held for the plan change', 'a change being drawn pauses nothing');
   assert.match(f.q('.job-replan-ask').textContent, /Split web in two/);
   assert.ok(f.q('.job-change textarea'), 'a question can still be asked while the change is drawn');
   assert.equal(f.q('.job-sent .job-sent-bubble').textContent, 'Split web in two', 'what was sent stays where the box was');
@@ -1489,12 +1489,14 @@ test('a change idea goes straight to a proposal card in the same thread, with it
   assert.equal(f.q('#job-dialog .job-talk-card [data-talk-review]'), null);
 });
 
-test('a pending plan change freezes a sub-job awaiting review: held, not needs-you, and nothing to approve or move', (t) => {
+test('a plan change about a sub-job awaiting review freezes it: held, not needs-you, and nothing to approve or move; one about the job holds nothing', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'review', state: 'verified', ready: { checks: ['Tests pass'], receiptId: 'r1' }, worktree: { path: '/wt/api' } }];
   f.view.update(f.data);
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Review code');
-  job.replan = { feedback: 'Rethink api', at: 1, proposal: null, previous: null };
+  job.replan = { feedback: 'Rethink everything', at: 1, proposal: null, previous: null };
+  assert.equal(jobNeedsReview(job, job.subJobs[0]), true, 'an idea typed on the job holds no step');
+  job.replan = { feedback: 'Rethink api', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'r1' } };
   f.view.update(f.data);
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Re-planning');
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false); assert.equal(f.q('#jobs-review-count').textContent, '');
@@ -1514,7 +1516,7 @@ test('a plan-change proposal locks landed work, marks removed work as cancelled 
   job.subJobs = [api, web, docs]; job.plan = { ...plan, subJobs: [sub('api'), sub('web', ['api']), sub('docs')] };
   const merged = { ...job.plan, subJobs: [sub('api'), sub('web', ['api']), { ...sub('docs'), title: 'Docs <b>v2</b>' }, sub('cli', ['docs'])] };
   job.replan = { feedback: 'Replace web with a CLI', at: 1, proposal: { id: 'run_p', plan: merged, merged,
-    changes: { frozen: ['api'], kept: [], edited: [{ id: 'docs', fields: ['title'] }], added: ['cli'], removed: ['web'] } } };
+    changes: { frozen: ['api'], kept: [], edited: [{ id: 'docs', fields: ['title'] }], added: ['cli'], removed: ['web'] }, then: { cli: 'Starts after “Docs <b>v2</b>”' } } };
   f.view.update(f.data);
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Plan change ready');
   assert.ok(f.q('[data-board="job1"]').classList.contains('tone-warn'));
@@ -1524,6 +1526,8 @@ test('a plan-change proposal locks landed work, marks removed work as cancelled 
   assert.equal(mark('api'), 'Locked · already landed'); assert.ok(f.q('.job-node[data-node="api"] .job-mark svg'));
   assert.equal(mark('web'), 'Will be cancelled'); assert.equal(mark('docs'), 'Edited'); assert.equal(mark('cli'), 'New');
   assert.equal(f.q('.job-node[data-node="docs"] .job-node-title').textContent, 'Docs <b>v2</b>', 'agent text is escaped');
+  assert.equal(f.q('.job-replan-changes .job-mark-added .job-talk-then').textContent, 'Starts after “Docs <b>v2</b>”', 'what approval does to it, escaped');
+  assert.equal(f.q('.job-replan-changes .job-mark-edited .job-talk-then'), null, 'a title edit asks nothing of the step');
   const removed = f.q('.job-replan-changes .job-mark-removed');
   assert.match(removed.textContent, /Will be cancelledDeliver web · PR #7 ↗ stays open on GitHub/);
   assert.equal(removed.querySelector('a').href, 'https://github.com/org/repo/pull/7');

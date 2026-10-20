@@ -99,8 +99,9 @@ export function answerReplan(job, run, report, now) {
 function changesOf(job, proposal) {
   const title = (id) => proposal.merged.subJobs.find((s) => s.id === id)?.title || job.subJobs.find((s) => s.id === id)?.title || id;
   const { added, edited, removed } = proposal.changes;
-  return [...added.map((id) => ({ mark: 'added', title: title(id) })),
-    ...edited.map((e) => ({ mark: 'edited', title: title(e.id), detail: e.fields.join(', ') })),
+  const then = (id) => (proposal.then?.[id] ? { then: proposal.then[id] } : {});
+  return [...added.map((id) => ({ mark: 'added', title: title(id), ...then(id) })),
+    ...edited.map((e) => ({ mark: 'edited', title: title(e.id), detail: e.fields.join(', '), ...then(e.id) })),
     ...removed.map((id) => ({ mark: 'removed', title: title(id) })),
     ...(proposal.actions || []).map((a) => ({ mark: a.type, title: title(a.sub) }))];
 }
@@ -114,6 +115,17 @@ export function noteProposal(job, proposal, now) {
 export function closeProposal(job, proposalId, outcome, now) {
   const card = talkOf(job).findLast((m) => m.kind === 'proposal' && m.proposalId === proposalId);
   if (card && !card.outcome) Object.assign(card, { outcome, outcomeAt: now });
+}
+
+// A plan change's wrangler died or blocked before it proposed anything: said in
+// its conversation, and the change is dropped so the human can send it again;
+// the job goes on. One with no conversation to say it in still stops the job.
+export function replanFailed(job, run, why, now) {
+  const r = job.replan;
+  if (!r?.convo || r.red || r.proposal || job.stage !== 'active' || run.phase !== 'planning' || run.subJobId || run.ask) return false;
+  say(job, { from: 'wrangler', kind: 'error', text: `Could not draw the change: ${why}. Send it again to retry.`, convo: r.convo, ...(r.source?.sub ? { sub: r.source.sub } : {}) }, now);
+  job.replan = null;
+  return true;
 }
 
 // The ask run died or blocked: said in the thread, and the job goes on.
