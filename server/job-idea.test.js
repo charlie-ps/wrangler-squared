@@ -89,7 +89,7 @@ test('accepting the suggestion is the plan receipt: plan review applies, the par
   assert.deepEqual([job.stage, job.title, job.plan.subJobs[0].id], ['planning', 'Nudge when a green PR waits', 'nudge']);
   assert.ok(job.idea.thread.at(-1).acceptedAt);
   assert.equal(inConversation(job), false);
-  assert.match(job.moves.at(-1).detail, /from the planner's suggestion/);
+  assert.match(job.moves.at(-1).detail, /from the wrangler's suggestion/);
   await f.tick();
   assert.equal(f.run(planner).stopped, true);
   assert.equal(f.run(planner).error, undefined, 'stopped quietly, not as a missing receipt');

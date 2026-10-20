@@ -39,8 +39,8 @@ test('New idea replaces New job: the button, the form, and a create that asks th
   const form = f.q('#job-create-form');
   assert.equal(form.querySelector('h2').textContent, 'New idea');
   assert.match(form.querySelector('.job-outcome label').textContent, /^Describe your idea/);
-  assert.match(form.elements.intent.placeholder, /the planner will ask/);
-  assert.match(form.querySelector('.job-create-foot span').textContent, /If the idea is clear, the planner plans it/);
+  assert.match(form.elements.intent.placeholder, /the wrangler will ask/);
+  assert.match(form.querySelector('.job-create-foot span').textContent, /If the idea is clear, the wrangler plans it/);
   form.elements.intent.value = 'Something for flaky CI';
   form.dispatchEvent(new f.window.Event('submit', { bubbles: true, cancelable: true }));
   const create = f.sent.find((m) => m.type === 'job-create');
@@ -80,7 +80,7 @@ test('a vague idea is its conversation: the planner\'s reply, escaped, and Enter
   f.key(box, 'Enter');
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'idea-reply', text: 'Green and unmerged for a day.' });
   assert.equal([...f.q('#job-dialog').querySelectorAll('.job-sent-bubble')].at(-1).textContent, 'Green and unmerged for a day.', 'drawn at once');
-  assert.match(f.q('.job-idea-thinking').textContent, /Planner is thinking/);
+  assert.match(f.q('.job-idea-thinking').textContent, /The wrangler is thinking/);
   f.data.jobs[0].idea.thread.push({ id: 'm2', at: Date.now(), from: 'human', text: 'Green and unmerged for a day.', sentAt: null });
   f.view.update(f.data);
   assert.equal([...f.q('#job-dialog').querySelectorAll('.job-sent-bubble')].filter((b) => b.textContent === 'Green and unmerged for a day.').length, 1, 'never twice once the thread has it');
@@ -134,13 +134,14 @@ test('on the board an idea waiting on you is a needs-you stub; one the planner i
   assert.deepEqual([plateAsk(reply).label, plateAsk(reply).button], ['Your reply', 'Reply']);
   assert.deepEqual([plateAsk(suggested).label, plateAsk(suggested).detail], ['Job suggested', '2 PRs · 1 session · 1 write · wrangler-squared']);
   assert.equal(plateAsk(thinking), null);
-  assert.deepEqual(jobStatus(thinking, null), { tone: 'working', text: 'Planner is reading the idea' });
+  assert.deepEqual(jobStatus(thinking, null), { tone: 'working', text: 'The wrangler is reading the idea' });
   assert.equal(ideaStage({ ...reply, idea: undefined }), null, 'a job not made from New idea has no conversation');
 });
 
 test('the planner\'s prose is escaped before it is marked up, and a summary counts only the work', () => {
   assert.equal(proseHtml('a `b<c>` d\n\n- one\n- two'), '<p>a <code>b&lt;c&gt;</code> d</p><ul><li>one</li><li>two</li></ul>');
   assert.equal(proseHtml('Two things:\n1. Whose CI?\n   a) ours\n2. Which pain?\nIf you mean (a), I would'), '<p>Two things:</p><ol><li>Whose CI?<br>a) ours</li><li>Which pain?</li></ol><p>If you mean (a), I would</p>');
+  assert.equal(proseHtml('**Why** it <waits>'), '<p><b>Why</b> it &lt;waits&gt;</p>');
   const s = suggestionSummary(suggest.plan);
   assert.deepEqual([s.work.length, s.repos.length, s.line], [3, 1, '3 sub-jobs · wrangler-squared · Slack']);
 });
@@ -160,7 +161,7 @@ test('an idea is a plate under a forming sky, tagged IDEA, idle while the planne
   assert.ok(ideaPlate.classList.contains('idea'));
   assert.equal(ideaPlate.querySelector('.job-plate-tag').textContent, 'Idea');
   assert.equal(ideaPlate.querySelector('.job-plate-idea').textContent, '2 messages');
-  assert.equal(f.q('[data-board="think"] .job-status').textContent, 'Planner is reading the idea');
+  assert.equal(f.q('[data-board="think"] .job-status').textContent, 'The wrangler is reading the idea');
   f.q('[data-filter="ideas"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-plate')].map((p) => p.dataset.board).sort(), ['later', 'reply', 'sugg', 'think'], 'the Ideas filter shows only ideas');
   assert.equal(f.q('[data-filter="ideas"] .jobs-rail-n').textContent, '4');

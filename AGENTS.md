@@ -122,7 +122,8 @@ feature).
   human read (`changeView`, mirrored client-side in `public/jobs.js`): a moved
   head, receipt, revision or proposal refuses it. Every idea goes to ONE
   recipient, the planner (`requestReplan`, with `replan.source = {sub, at, ref}`
-  and the idea's `images`), except a first plan (redrawn via `job.feedback`); a
+  and the idea's `images`), unless it reads as a question (an ask run, below), and
+  except a first plan (redrawn via `job.feedback`); a
   declared red still goes up with what was tried. The planner sorts it into
   actions on live steps (`forward` to a session parked on review, `rework`) and
   plan edits, and the human approves that proposal: an action on the source step
@@ -135,6 +136,29 @@ feature).
   planner as paths in the idea's words; a `forward` to the step it was typed on
   carries that round's pictures as thread images. What was sent stays as a bubble (`askSent`) until the dialog
   moves on, ticked by `job-action-complete`, refused back into the box.
+- **The Add idea box is a conversation with "the wrangler"** (`server/job-talk.js`,
+  `public/job-talk.js`). "The wrangler" is the board's name for the planner: every
+  user-facing string says it, internal identifiers (`planner`, `job.replan`,
+  `route: 'planner'`) do not. On a running job every idea is said on `job.talk`
+  (capped at 200), which outlives a plan change: human messages (`sub` when typed
+  on a step), answers, errors and one `kind:'proposal'` card per proposal
+  (`noteProposal` in `proposeOptions`), whose `outcome` (approved, discarded,
+  revised) `approveReplan`, `discardReplan` and `requestReplan` stamp. An idea that
+  `looksLikeQuestion` (and no planner run is live) starts an ASK run instead of a
+  replan: `job.ask`, then a planning run with `run.ask` set, which never sets
+  `job.replan`, so `heldBy` stays false and nothing is held. It answers with
+  `reply` (`answerAsk`, ends the run; follow-ups start a fresh run that reads the
+  last 12 messages from its prompt, no parking), or proposes with `plan`
+  (`askToReplan` folds it into `requestReplan` exactly as a change idea, Earlier/Now
+  included). A fresh replan run may also `reply` when the idea was only a question
+  (`answerReplan`, refused once a red or earlier proposal rides on it). An ask run
+  that dies or blocks says so in the thread (`askFailed`), never `job.error`.
+  `planningRun` (client) ignores ask runs, so Approve change stays live while one
+  answers. The thread is drawn above the box (`changeBoxHtml`), all of it on the
+  job, a step's own messages on that step; the box steps aside while `job.ask` or
+  a fresh replan is pending. Open PR #209 keeps a step's sent ideas on
+  `job.replan.asks`; once both land, the step dialog should draw them from the
+  thread, not twice.
 - **Red steps go up one level before the human** (`server/job-red.js`). A sub-job
   with an `error` is sent to the planner by the runner's `triageRed` when
   `settings.maxReplans` > 0 (0 = the old "red waits for you"), one replan at a

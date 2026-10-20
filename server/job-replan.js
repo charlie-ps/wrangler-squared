@@ -3,6 +3,7 @@ import { dropSub, reworkSub, validatePlan, notStarted } from './job-sub-ops.js';
 import { milestoneReached } from './job-writes.js';
 import { stampActions, checkActions, applyActions } from './job-actions.js';
 import { parkedReadyRun } from './job-parked.js';
+import { noteProposal, closeProposal } from './job-talk.js';
 
 // Changing the plan of a job that is already running. The human asks with
 // feedback, a planning session proposes a whole plan, and nothing changes until
@@ -119,14 +120,16 @@ export function mergeReplan(job, proposal) {
 // add up, so a later one never drops an earlier one. `source` is the step and view
 // the latest idea was typed on (job-actions.js holds the step's actions to it);
 // `images` are every idea's pictures, for a forward to carry into a thread.
+// `running` is the ask run handing its question over as a change (job-talk.js).
 export const REPLAN_FEEDBACK_MAX = 16000;
-export function requestReplan(job, feedback, now, red = null, { source = null, images = [] } = {}) {
+export function requestReplan(job, feedback, now, red = null, { source = null, images = [], running = null } = {}) {
   if (job.stage !== 'active') throw new Error('Only a running job has a plan to change');
-  if (job.runs.some((r) => !r.stopped && !r.subJobId)) throw new Error('Wait for the planning step to finish');
+  if (job.runs.some((r) => !r.stopped && !r.subJobId && r.id !== running)) throw new Error('Wait for the wrangler to finish what it is doing');
   const text = String(feedback || '').trim().slice(0, 8000);
   if (!text) throw new Error('Explain the change you want');
   clearPlanningError(job);
   const prev = job.replan;
+  if (prev?.proposal) closeProposal(job, prev.proposal.id, 'revised', now);
   const asked = prev?.feedback ? `Earlier: ${prev.feedback}\n\nNow: ${text}`.slice(-REPLAN_FEEDBACK_MAX) : text;
   const actions = (prev?.proposal?.actions || []).map(({ pin: _pin, ...a }) => a);
   job.replan = { feedback: asked, at: now, proposal: null, previous: prev?.proposal?.plan || prev?.previous || null,
@@ -146,6 +149,7 @@ function clearPlanningError(job) {
 export function discardReplan(job) {
   if (!job.replan) throw new Error('No plan change is pending');
   clearPlanningError(job);
+  if (job.replan.proposal) closeProposal(job, job.replan.proposal.id, 'discarded', Date.now());
   job.replan = null;
 }
 
@@ -166,6 +170,7 @@ export function proposeOptions(job, run, options, extra, now) {
   };
   const [first, ...rest] = options.map(option);
   job.replan = { ...job.replan, proposal: { id: run.id, ...first, ...extra, alternatives: rest, at: now } };
+  noteProposal(job, job.replan.proposal, now);
 }
 // The proposal's options as the human picks between them: the first is the one
 // recommended, and the only one a proposal without alternatives has.
@@ -235,6 +240,7 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
     changes.removed.length && `${changes.removed.length} cancelled`, chosen.actions?.length && `${chosen.actions.length} ${chosen.actions.length === 1 ? 'action' : 'actions'}`].filter(Boolean).join(', ') || 'no sub-job changed';
   const feedback = job.replan.feedback;
   clearPlanningError(job);
+  closeProposal(job, proposal.id, 'approved', now);
   job.replan = null;
   return { lines, detail: `Changed the plan: ${summary}`, feedback };
 }

@@ -716,6 +716,7 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-option.sel { border-color:var(--blue); background:color-mix(in srgb, var(--blue) 10%, var(--surface)); }
 .job-option-rec { font-size:10.5px; font-weight:600; color:var(--blue-fg); margin-left:6px; }
 .job-replan-changes { margin:12px 0; padding-left:18px; font-size:13px; }
+.job-replan-changes.job-talk-changes { padding-left:0; }
 .job-replan-changes small { color:var(--fg-muted); }
 .job-superseded { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--fg-muted) !important; }
 /* The intro (intro.js): the job dialog's surface, app bar, stepper and FAB, with
@@ -1506,7 +1507,7 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-idea-who time { font-weight:400; letter-spacing:.04em; text-transform:none; color:var(--fg-subtle); }
 .job-idea-body { padding:12px 15px; border-radius:4px 18px 18px 18px; background:color-mix(in srgb, var(--surface-2) 70%, transparent); box-shadow:inset 0 0 0 1px var(--border-muted); color:var(--fg); font-size:13.5px; line-height:1.6; overflow-wrap:anywhere; }
 .job-dialog .job-idea-body p { margin:0; font-size:inherit; color:inherit; }
-.job-idea-body :is(p,ol,ul)+:is(p,ol,ul) { margin-top:8px; }
+.job-idea-body :is(p,ol,ul)+:is(p,ol,ul), .job-dialog .job-idea-body :is(p,ol,ul)+:is(p,ol,ul) { margin-top:8px; }
 .job-idea-body :is(ol,ul) { margin:0; padding-left:20px; } .job-idea-body li+li { margin-top:4px; }
 .job-idea-body code { padding:1px 5px; border-radius:5px; background:color-mix(in srgb, var(--fg) 8%, transparent); font:12px var(--jobs-mono); }
 .job-idea-thinking { display:flex; align-items:center; gap:10px; padding-left:2px; font:500 12px var(--jobs-mono); }
@@ -1573,3 +1574,33 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-plate-art.collapsing.collapsed > :not(.nb) { opacity:1; transform:none; }
 @media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-dock { padding-left:16px; padding-right:16px; } }
 @media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-plate-art.collapsing > * { transition:opacity .3s !important; } .job-plate-art.collapsing.collapsed > .gx.nb { transform:none; } }
+/* The job's conversation with the wrangler (job-talk.js), above the Add idea box: the human's bubbles,
+   the wrangler's answers, and each proposal as a card whose changes line up in one label column. */
+.job-talk { display:grid; gap:12px; margin:14px 0 6px; padding-top:12px; border-top:1px solid var(--border-muted); }
+.job-talk-head { display:flex; align-items:center; gap:6px; margin:0; font:600 10px/1.9 var(--jobs-mono); letter-spacing:.16em; text-transform:uppercase; color:var(--fg-muted); }
+.job-talk-head .icon { width:13px; height:13px; }
+.job-talk .job-sent { margin:0; }
+.job-talk .job-sent-bubble { max-width:min(86%,560px); }
+.job-talk-msg { grid-template-columns:18px minmax(0,1fr); gap:10px; max-width:none; }
+.job-talk-msg .job-idea-orb { margin-top:2px; }
+.job-talk-msg .job-idea-body { max-width:640px; }
+.job-talk-msg.error .job-idea-body { color:var(--red-fg); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--red) 35%, transparent); }
+.job-talk-card { display:grid; gap:10px; max-width:640px; padding:12px 14px; border-radius:4px 16px 16px 16px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); }
+.job-talk-card.tone-needs { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 60%, transparent); }
+.job-talk-card header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; }
+.job-talk-card header b { font-weight:600; }
+.job-talk-tag { padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; color:var(--fg-muted); background:var(--surface-2); }
+.job-talk-card.tone-needs .job-talk-tag { color:var(--st-warn-fg); background:color-mix(in srgb, var(--st-warn) 18%, transparent); }
+.job-talk-card.tone-ok .job-talk-tag { color:var(--st-ok-fg); background:color-mix(in srgb, var(--st-ok) 15%, transparent); }
+.job-talk-options { color:var(--fg-subtle); font-size:11.5px; }
+.job-talk-card .job-idea-body { padding:0; background:none; box-shadow:none; color:var(--fg-muted); }
+.job-talk-changes { margin:0; padding:0; list-style:none; display:grid; grid-template-columns:max-content minmax(0,1fr); gap:6px 10px; align-items:baseline; font-size:13px; }
+.job-talk-change { display:contents; }
+.job-talk-change .job-mark { justify-self:stretch; justify-content:center; }
+.job-talk-change-title { color:var(--fg); overflow-wrap:anywhere; }
+.job-talk-change-title small { margin-left:4px; color:var(--fg-muted); }
+.job-talk-change.job-mark-removed .job-talk-change-title { text-decoration:line-through; color:var(--fg-muted); }
+.job-talk-none { margin:0; font-size:12.5px; color:var(--fg-muted); }
+.job-talk-card footer { display:flex; gap:8px; }
+.job-talk-card footer button { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; font-size:12.5px; }
+.job-talk-working { padding-left:0; }

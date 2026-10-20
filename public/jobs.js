@@ -370,23 +370,33 @@ export function actionLine(a, plan) {
   if (a.type === 'forward') return { text: `Forward: ${name}`, detail: `“${a.note || ''}”` };
   return { text: `Rework: ${name}`, detail: a.note || '' };
 }
-// Every idea goes to one recipient, the planner (server/job-change.js): it sorts
-// the idea into feedback for a live step and changes to the plan, and the human
-// approves the proposal. `to` names it on the box, `hint` says what happens to the
+// Every idea goes to one recipient, the planner, which the board calls "the
+// wrangler" (server/job-change.js): a question is answered in the job's
+// conversation (server/job-talk.js), and anything else is sorted into feedback
+// for a live step and changes to the plan, a proposal the human approves. `to`
+// names it on the box, `mark` is its initial, `hint` says what happens to the
 // idea from where it was typed.
-const PLANNER = { to: 'Planner', placeholder: 'Add an idea for the planner…', hint: 'Sorts it into feedback for a step or a change to the plan. Nothing changes until you approve.' };
-const STEP = { ...PLANNER, placeholder: 'Add an idea about this step…', hint: 'About this step. The planner sends feedback back to this step and anything else into the plan. You approve first.' };
+const WRANGLER = { to: 'The wrangler', mark: 'W', placeholder: 'Ask the wrangler, or say what to change…', hint: 'A question is answered here. A change becomes a proposal you approve.' };
+const STEP = { ...WRANGLER, placeholder: 'Ask about this step, or say what to change…', hint: 'About this step. A question is answered here; feedback goes back to the step and anything else into the plan, once you approve.' };
 const CHANGE_ROUTE = {
-  plan: { ...PLANNER, hint: 'Redraws the plan for you to review.' },
-  proposal: { ...PLANNER, placeholder: 'Add to this proposal…', hint: 'Redraws the proposal, keeping what it already carries.' },
+  plan: { ...WRANGLER, placeholder: 'Add an idea for the wrangler…', hint: 'Redraws the plan for you to review.' },
+  proposal: { ...WRANGLER, placeholder: 'Ask about this proposal, or add to it…', hint: 'A question is answered here. Anything else redraws the proposal, keeping what it already carries.' },
 };
 export function changeRoute(at, job = null, sub = null) {
-  if (sub && job && redDeclared(job, sub)) return { ...PLANNER, hint: 'Gets everything already tried, and proposes a fix for you to approve.' };
+  if (sub && job && redDeclared(job, sub)) return { ...WRANGLER, hint: 'Gets everything already tried, and proposes a fix for you to approve.' };
   if (CHANGE_ROUTE[at]) return CHANGE_ROUTE[at];
-  if (!sub) return PLANNER;
-  if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…', hint: 'About this step. The planner forwards feedback to its open session and anything else into the plan. You approve first.' };
+  if (!sub) return WRANGLER;
+  if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…', hint: 'About this step. A question is answered here; feedback goes to its open session and anything else into the plan, once you approve.' };
   return STEP;
 }
+// A running job's conversation with the wrangler (mirrors server/job-talk.js): the
+// whole of it on the job, a step's own messages on that step. `asking` is a
+// question it is still answering.
+export const talkOf = (job) => job?.talk || [];
+export const askPending = (job) => !!job?.ask && !job.cancelledAt;
+export const talkFor = (job, sub) => sub ? talkOf(job).filter((m) => m.sub === sub.id) : talkOf(job);
+// A planning run that is a question's (an ask run) holds nothing and approves nothing.
+export const planningRun = (job) => job.runs.some((r) => !r.stopped && !r.subJobId && !r.ask);
 export const changeHint = (at, job = null, sub = null) => changeRoute(at, job, sub).hint;
 // What the human is looking at, and the exact thing in it, which Request changes
 // pins its idea to. Mirrors server/job-change.js changeView: the server refuses a
@@ -481,7 +491,7 @@ export function jobNeedsReview(job, sub) {
   if (sub?.stage === 'pr' && (sub.fixRequested || liveRun(job, sub))) return false;
   if (sub && mergeHeldByComments(job, sub)) return true;
   if (!sub && ['reply', 'suggested'].includes(ideaStage(job))) return !job.paused;
-  if (!sub) return !job.cancelledAt && (job.stage === 'planning' && job.plan || replanProposed(job)) && !job.runs.some((r) => !r.stopped && !r.subJobId);
+  if (!sub) return !job.cancelledAt && (job.stage === 'planning' && job.plan || replanProposed(job)) && !planningRun(job);
   if (!sub.cancelledAt && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return true;
   if (isWriteSub(sub)) return writeAwaitingReview(sub);
   if (isHumanSub(sub)) return humanTaskWaiting(job, sub);
@@ -510,7 +520,7 @@ export function jobStatus(job, sub) {
   if (sub && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return { tone: 'needs', text: triggerDropped(job, sub) ? 'Trigger dropped' : 'Depends on a dropped sub-job' };
   if (isWriteSub(sub)) return writeStatusLine(job, sub);
   const idea = !sub && ideaStage(job);
-  if (idea) return idea === 'thinking' ? { tone: 'working', text: ideaThread(job).length ? 'Planner is thinking' : 'Planner is reading the idea' } : { tone: 'needs', text: idea === 'suggested' ? 'Job suggested' : 'Your reply' };
+  if (idea) return idea === 'thinking' ? { tone: 'working', text: ideaThread(job).length ? 'The wrangler is thinking' : 'The wrangler is reading the idea' } : { tone: 'needs', text: idea === 'suggested' ? 'Job suggested' : 'Your reply' };
   const run = liveRun(job, sub);
   if (run) {
     if (run.status === 'needs-you') return { tone: 'needs', text: 'Waiting on a prompt' };
@@ -518,7 +528,7 @@ export function jobStatus(job, sub) {
     if (run.parkedFor === 'ready') return { tone: 'working', text: answeringLabel(sub) };
     if (parkedRun(job, sub)) { const n = draftsWaiting(job, sub).length; return n ? { tone: 'muted', text: `Paused · ${n} draft${n === 1 ? '' : 's'} to review` } : { tone: 'working', text: 'Drafts decided · resuming' }; }
     if (run.mailedAt && !run.report) return { tone: 'working', text: 'Making the approved writes' };
-    return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: job.stage === 'active' ? 'Re-planning' : 'Planning', implementation: reviewCode(job) ? 'Working' : 'Working on the PR', publish: 'Committing & opening the PR', repair: 'Fixing the PR', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };
+    return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: run.ask ? 'Answering you' : job.stage === 'active' ? 'Re-planning' : 'Planning', implementation: reviewCode(job) ? 'Working' : 'Working on the PR', publish: 'Committing & opening the PR', repair: 'Fixing the PR', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };
   }
   if (sub && heldByReplan(job, sub)) return { tone: 'muted', text: job.replan.red ? 'Held for the fix' : 'Held for the plan change' };
   // The human said they had started; no agent and no clock runs against it, so

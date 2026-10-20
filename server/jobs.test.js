@@ -796,7 +796,7 @@ test('every idea has one way in: the planner, which takes a step\'s idea into th
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api')); await f.tick();
   change(f, null, 'Also cover SSO'); await f.tick();
   assert.equal(f.store.get(f.job.id).replan.feedback, 'Also cover SSO');
-  assert.throws(() => change(f, 'api', 'Rename it'), /Wait for the planning step/, 'one planner at a time');
+  assert.throws(() => change(f, 'api', 'Rename it'), /Wait for the wrangler to finish/, 'one planner at a time');
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub)); await f.tick();
   const proposal = f.store.get(f.job.id).replan.proposal;
   assert.deepEqual(changeView(f.store.get(f.job.id), null), { at: 'proposal', ref: proposal.id });
@@ -2250,7 +2250,7 @@ test('a running job takes a plan change as a proposal: frozen work is locked, re
   assert.match(prompt, /ALREADY RUNNING/); assert.match(prompt, /- api \(pr\) "Deliver api": done\/done · FROZEN/);
   assert.match(prompt, /Frozen \(.*\): api\./); assert.match(prompt, /- web .*a step is running/); assert.match(prompt, /Requested change: Drop docs/);
   assert.match(prompt, /Feedback on, or a question about, what a live sub-job already produced.*`forward` when its session is open on review, else `rework`.*never write it into a later sub-job/i);
-  assert.throws(() => change(f, null, 'again'), /Wait for the planning/);
+  assert.throws(() => change(f, null, 'again'), /Wait for the wrangler/);
 
   const proposal = (subs) => plan(subs);
   assert.throws(() => f.report({ kind: 'plan', plan: proposal([{ ...spec('api'), brief: 'Redo api' }, spec('web')]) }, planner), /api has already landed/);
@@ -2650,4 +2650,97 @@ test('a PR may land on its own base; an old plan has none, and no other kind may
   assert.equal(planSchema.parse(plan({ repo: '/repo', base: ' release/2.x ' })).subJobs[0].base, 'release/2.x');
   assert.throws(() => planSchema.parse(plan({ repo: '/repo', base: '-D' })), /branch name/);
   assert.throws(() => planSchema.parse(plan({ kind: 'session', base: 'next' })), /only a PR lands on a branch/);
+});
+
+// ---- The job's conversation with the wrangler (job-talk.js) ----
+const talk = (f) => (f.store.get(f.job.id).talk || []).map((m) => [m.from, m.kind || null, m.text, m.sub || null]);
+
+test('a question is answered in the job\'s conversation: an ask run that holds nothing and proposes nothing', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, 'api', 'Why did the api step take so long?');
+  let job = f.store.get(f.job.id);
+  assert.equal(job.replan ?? null, null, 'no plan change: nothing is held');
+  assert.deepEqual(talk(f), [['human', null, 'Why did the api step take so long?', 'api']]);
+  assert.throws(() => change(f, null, 'Add a CLI'), /Wait for the wrangler to answer/, 'one question at a time');
+  await f.tick();
+  const asker = plannerOf(f);
+  assert.equal(asker.run.ask, job.talk[0].id, 'an ask run, tied to the question');
+  const prompt = jobPrompt(f.store.get(f.job.id), null, asker.run);
+  assert.match(prompt, /^Answer a question about this running job/);
+  assert.match(prompt, /ASKED YOU A QUESTION/); assert.match(prompt, /The question: About “Deliver api” \(api, implementation\/\w+\): Why did the api step/);
+  assert.match(prompt, /read_session_transcript/); assert.match(prompt, /kind:"reply"/);
+  assert.match(prompt, /The human \(on api\): "Why did the api step take so long\?"/, 'the conversation so far rides along');
+  f.report({ kind: 'reply', text: 'It waited on a slow test suite.' }, asker);
+  job = f.store.get(f.job.id);
+  assert.deepEqual(talk(f).at(-1), ['wrangler', 'answer', 'It waited on a slow test suite.', 'api'], 'answered on the step it was asked on');
+  assert.equal(job.ask, null); assert.equal(job.replan ?? null, null);
+  f.report({ kind: 'reply', text: 'It waited on a slow test suite.' }, asker);
+  await f.tick();
+  assert.equal(f.store.get(f.job.id).runs.find((r) => r.id === asker.run.id).stopped, true, 'the answer ends the run');
+  assert.equal(f.store.get(f.job.id).error, null);
+});
+
+test('a change idea goes straight to a proposal, drawn in the conversation as a card that records what became of it', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'Add a CLI after web'); await f.tick();
+  assert.deepEqual(talk(f), [['human', null, 'Add a CLI after web', null]]);
+  const planner = plannerOf(f);
+  assert.equal(planner.run.ask, undefined, 'a plan change, as before');
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli', ['web'])]), diagnosis: { summary: 'Adds the CLI once web lands.' } }, planner);
+  let card = f.store.get(f.job.id).talk.at(-1);
+  assert.deepEqual([card.from, card.kind, card.proposalId, card.text, card.outcome], ['wrangler', 'proposal', planner.run.id, 'Adds the CLI once web lands.', undefined]);
+  assert.deepEqual(card.changes, [{ mark: 'added', title: 'Deliver cli' }]);
+  await f.tick();
+  f.store.action(f.job.id, 'discard-replan');
+  change(f, null, 'Add a CLI after web'); await f.tick();
+  const again = plannerOf(f);
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli', ['web'])]) }, again);
+  f.store.action(f.job.id, 'approve-replan', { proposalId: again.run.id });
+  card = f.store.get(f.job.id).talk.at(-1);
+  assert.equal(card.outcome, 'approved');
+
+  assert.deepEqual(f.store.get(f.job.id).talk.filter((m) => m.kind === 'proposal').map((m) => m.outcome), ['discarded', 'approved']);
+});
+
+test('a question that asks for a change is proposed by its ask run, folding into a proposal already waiting', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'Add a CLI after web'); await f.tick();
+  const first = plannerOf(f);
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli', ['web'])]) }, first); await f.tick();
+  change(f, null, 'Can you also add docs?'); await f.tick();
+  const asker = plannerOf(f);
+  assert.ok(asker.run.ask, 'a question, even while a proposal waits');
+  assert.match(jobPrompt(f.store.get(f.job.id), null, asker.run), /A plan change you proposed is waiting/);
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli', ['web']), spec('docs')]) }, asker);
+  const job = f.store.get(f.job.id);
+  assert.equal(job.ask, null);
+  assert.equal(job.replan.proposal.id, asker.run.id);
+  assert.match(job.replan.feedback, /^Earlier: Add a CLI after web\n\nNow: Can you also add docs\?$/);
+  assert.deepEqual(job.talk.filter((m) => m.kind === 'proposal').map((m) => m.outcome || null), ['revised', null]);
+});
+
+test('a plan change whose idea was only a question answers it and drops the change', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'Tell me how web is going'); await f.tick();
+  const planner = plannerOf(f);
+  assert.match(jobPrompt(f.store.get(f.job.id), null, planner.run), /If those words are only a question.*kind:"reply"/);
+  f.report({ kind: 'reply', text: 'Web is still being written.' }, planner);
+  const job = f.store.get(f.job.id);
+  assert.equal(job.replan, null, 'nothing waits on the human');
+  assert.deepEqual(talk(f).at(-1), ['wrangler', 'answer', 'Web is still being written.', null]);
+});
+
+test('a question the wrangler could not answer is said in the conversation; the job never stops for it', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'What is left?'); await f.tick();
+  const asker = plannerOf(f);
+  f.alive.delete(asker.sid); await f.tick();
+  const job = f.store.get(f.job.id);
+  assert.equal(job.error, null); assert.equal(job.ask, null);
+  assert.equal(talk(f).at(-1)[1], 'error');
+  assert.match(talk(f).at(-1)[2], /^Could not answer: Session stopped without a receipt/);
+  change(f, null, 'What is left now?'); await f.tick();
+  f.report({ kind: 'blocked', summary: 'No access to the repo' }, plannerOf(f));
+  assert.deepEqual(talk(f).at(-1).slice(1, 3), ['error', 'Could not answer: No access to the repo']);
+  assert.equal(f.store.get(f.job.id).error, null);
 });

@@ -39,7 +39,7 @@ test('the shipped registry is the two Writes pages, review defaults, See it work
   const idea = UPDATES.find((u) => u.id === 'new-idea');
   const drawn = (i) => { const d = document.createElement('div'); d.innerHTML = idea.figure(i); return d; };
   const at = (i) => { const d = drawn(i); return { plate: d.querySelector('.wn-ideas-plate .job-plate'), sky: d.querySelector('.wn-ideas-plate .gx')?.dataset, chat: d.querySelector('.wn-ideas-chat .job-idea-thread') }; };
-  assert.match(at(0).chat.textContent, /Planner is reading the idea/, 'an idea opens on the planner reading it');
+  assert.match(at(0).chat.textContent, /The wrangler is reading the idea/, 'an idea opens on the planner reading it');
   assert.ok(at(0).plate.classList.contains('idea'));
   assert.deepEqual([0, 1, 2, 3].map((i) => at(i).sky.stage), ['0', '1', '0', '2'], 'its sky brightens as the planner asks, then suggests');
   assert.match(at(1).plate.querySelector('.job-plate-stub').textContent, /Your reply/);

@@ -190,7 +190,7 @@ export function plateAsk(job) {
   // An idea waiting on you: the planner's question, or the job it suggests.
   const idea = ideaStage(job);
   if (idea === 'suggested') { const { plan } = liveSuggestion(job).suggest; return { ...whole('Job suggested', 'Review', [kindCountLabel(plan.subJobs), repoLine({ plan })].filter(Boolean).join(' · ')), icon: ICONS.eye }; }
-  if (idea === 'reply') return { ...whole('Your reply', 'Reply', 'The planner asked you'), icon: ICONS.note };
+  if (idea === 'reply') return { ...whole('Your reply', 'Reply', 'The wrangler asked you'), icon: ICONS.note };
   if (!live(job)) return job.plan ? whole('Plan ready', 'Review plan', kindCountLabel(job.plan.subJobs)) : whole(jobLabel(job), 'Open');
   const lead = leadSub(job, state);
   if (!lead) return whole(jobLabel(job), replanProposed(job) ? 'Review' : 'Open');

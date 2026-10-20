@@ -11,7 +11,8 @@ import { fallbackTitle } from './job-title.js';
 import { dropSub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea } from './job-idea.js';
-import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
+import { discardReplan, proposeReplan, proposeOptions, approveReplan, requestReplan } from './job-replan.js';
+import { answerAsk, answerReplan, askToReplan, askFailed } from './job-talk.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
 
@@ -79,7 +80,7 @@ function approve(j, input) {
 function cancelJob(j, now) {
   if (j.stage === 'done') throw new Error('Job has already finished');
   if (j.cancelledAt) throw new Error('Job is already cancelled');
-  j.cancelledAt = now; j.paused = false; j.error = null; j.blocked = null; j.replan = null;
+  j.cancelledAt = now; j.paused = false; j.error = null; j.blocked = null; j.replan = null; j.ask = null;
   for (const s of j.subJobs) if (!['cleanup', 'done'].includes(s.stage)) dropSub(s, now);
 }
 // A running job's review checkpoints, switched from the detail footer. Every gate
@@ -315,7 +316,7 @@ export class JobStore {
         const plan = acceptIdea(j, payload.messageId, Date.now());
         if (!reviewPlan(j)) approve(j, plan);
         else { j.plan = withStoryCreates(planSchema.parse(plan)); j.repos = planRepos(j.plan); }
-        record(j, null, 'accept-idea', null, `Created the job from the planner's suggestion: ${quoted(j.title)}`);
+        record(j, null, 'accept-idea', null, `Created the job from the wrangler's suggestion: ${quoted(j.title)}`);
         return;
       }
       if (action === 'pause') { j.paused = true; return; }
@@ -530,7 +531,15 @@ export class JobStore {
       // A session parked on its ready receipt is answering the human. A reply
       // keeps it parked; a fresh ready is a new round of the same run.
       if (report.kind === 'reply') {
-        if (r.phase === 'planning') { if (!j.cancelledAt) plannerReply(j, r, report, Date.now()); return; }
+        // A planner's reply is a turn in a New idea's conversation, or an answer in a
+        // running job's (job-talk.js): to a question, or to an idea that was only one.
+        if (r.phase === 'planning') {
+          if (j.cancelledAt) return;
+          if (r.ask) answerAsk(j, r, report, Date.now());
+          else if (j.stage === 'active') answerReplan(j, r, report, Date.now());
+          else plannerReply(j, r, report, Date.now());
+          return;
+        }
         return this._reply(j, r, s, report);
       }
       const parked = r.parkedFor === 'ready' && r.parkedAt && !r.mailedAt;
@@ -596,6 +605,8 @@ export class JobStore {
   }
   _applyReceipt(j, r, s, report, proof = null, meta = {}) {
     if (report.kind === 'plan' && j.stage === 'active') {
+      // A question that turned out to ask for a change is proposed as one.
+      if (r.ask) askToReplan(j, r, requestReplan, Date.now());
       // Discarded while the planner worked: kept on the run, applied nowhere.
       if (j.replan) {
         proposeReplan(j, r, report, Date.now());
@@ -615,6 +626,7 @@ export class JobStore {
       record(j, sub, 'declare-red', null, `Declared ${quoted(sub.title)} red to you`);
       return;
     }
+    if (report.kind === 'blocked' && !s && r.ask) { askFailed(j, r, report.summary, Date.now()); return; }
     if (report.kind === 'blocked' && !s && j.replan?.red) {
       failRedReplan(j, r, report.summary, Date.now());
       return;
