@@ -70,6 +70,46 @@ test('a job created without review flags takes the saved review defaults; a flag
   ]);
 });
 
+const usualPickHost = (usualPick) => {
+  _resetForTests();
+  const { host } = fakeHost();
+  runnerFor(host).tick = async () => {};
+  host.stores.jobs.settings({ usualPick });
+  return host;
+};
+const pick = (j) => ({ agent: j.agent, model: j.model, effort: j.effort });
+const created = async (host, args) => {
+  const res = await tool('create_job').handler({ host, caller: 'sid' }, { ...newJob, start: false, ...args });
+  return host.stores.jobs.get(JSON.parse(res.content[0].text).jobId);
+};
+
+test('create_job with no model creates a job whose model is the usual pick', async () => {
+  const host = usualPickHost({ agent: 'claude', model: 'opus', effort: 'high' });
+  const job = await created(host, {});
+  assert.deepEqual(pick(job), { agent: 'claude', model: 'opus', effort: 'high' });
+  host.stores.jobs.action(job.id, 'start', {});
+  const run = host.stores.jobs.claim(job.id, null, 'planning');
+  assert.deepEqual([run.model, run.effort], ['opus', 'high'], 'its steps launch with --model, not the org default');
+  host.stores.jobs.settings({ usualPick: null });
+  assert.deepEqual(pick(await created(host, {})), { agent: 'claude', model: '', effort: '' }, 'no usual pick is the agent\'s own default');
+});
+
+test('an explicit model passed to create_job is kept', async () => {
+  const host = usualPickHost({ agent: 'claude', model: 'opus', effort: 'high' });
+  assert.deepEqual(pick(await created(host, { model: 'sonnet' })), { agent: 'claude', model: 'sonnet', effort: '' }, 'the usual effort belongs to the usual model');
+  assert.deepEqual(pick(await created(host, { model: 'sonnet', effort: 'low' })), { agent: 'claude', model: 'sonnet', effort: 'low' });
+  assert.deepEqual(pick(await created(host, { model: '' })), { agent: 'claude', model: '', effort: '' }, 'an empty model asks for the agent default');
+  assert.deepEqual(pick(await created(host, { effort: 'max' })), { agent: 'claude', model: 'opus', effort: 'max' });
+});
+
+test('a codex job ignores a claude usual pick\'s model', async () => {
+  const host = usualPickHost({ agent: 'claude', model: 'opus', effort: 'high' });
+  assert.deepEqual(pick(await created(host, { agent: 'codex' })), { agent: 'codex', model: '', effort: '' });
+  host.stores.jobs.settings({ usualPick: { agent: 'codex', model: 'gpt-6-sol', effort: 'high' } });
+  assert.deepEqual(pick(await created(host, {})), { agent: 'codex', model: 'gpt-6-sol', effort: 'high' }, 'an omitted agent takes the usual one too');
+  assert.deepEqual(pick(await created(host, { agent: 'claude' })), { agent: 'claude', model: '', effort: '' });
+});
+
 test('job-create creates a named task and stores it on the job', async () => {
   _resetForTests();
   const { host, tasks } = fakeHost();
