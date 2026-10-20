@@ -44,7 +44,8 @@ jobs:
 
       - run: npm ci
 
-      # Only its loader and host-API modules are imported, so no install scripts.
+      # No install scripts: the smoke boot opens no terminal, and node-pty ships a
+      # linux-x64 prebuild for the import.
       - run: npm ci --ignore-scripts
         working-directory: agent-wrangler
 
@@ -53,3 +54,10 @@ jobs:
       - run: node scripts/validate-manifest.mjs
 
       - run: npm test
+
+      # Boots agent-wrangler main with this checkout copied in as extensions/jobs
+      # and drives it over the control WS and /mcp. No session is started; fails
+      # on a quarantine, a missing frame or a missing tool.
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - run: scripts/boot-smoke.sh

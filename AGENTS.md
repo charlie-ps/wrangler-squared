@@ -311,3 +311,7 @@ text as public as the rest of this repo.
 - `AW_REPO=<wrangler checkout on the API branch> node scripts/validate-manifest.mjs`
   runs the real loader over this repo: discovery + import scan, `validateManifest`,
   `loadExtensions` with the core tool/handler names, `buildHostApi`.
+- `AW_REPO=<npm ci'd wrangler checkout> scripts/boot-smoke.sh` boots that wrangler
+  on a fresh data dir and free port with this checkout copied in as
+  `extensions/jobs`, then runs `scripts/dev-smoke.mjs`, which exits 1 on any
+  failed expectation (quarantine, missing frame or tool). CI runs it last.
