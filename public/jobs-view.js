@@ -3,7 +3,7 @@ import { ICONS } from './icons.js';
 import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound } from './jobs.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener } from './job-graph.js';
-import { assignScenes, plateHtml, placePopHtml } from './job-plates.js';
+import { assignScenes, plateHtml, placePopHtml, askActs } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, releaseSkies, spinTo } from './job-skylines.js';
 import { THEMES, themeOf, optionsOf, applyTheme, setCurrentTheme } from './themes.js';
@@ -1640,7 +1640,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const chip = e.target.closest('[data-place]'); if (chip) return openPlacePop(chip);
     const go = e.target.closest('[data-ask]');
     // One click per decision: a sent one disables the stub until the next tick redraws it.
-    if (go) { if (['merge', 'approve-write', 'skip-write'].includes(go.dataset.ask)) { go.parentElement.querySelectorAll('button').forEach((b) => { b.disabled = true; }); boardHtml = null; } return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask, go.dataset.session); }
+    if (go) { if (askActs(go.dataset.ask)) { go.parentElement.querySelectorAll('button').forEach((b) => { b.disabled = true; }); boardHtml = null; } return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask, go.dataset.session); }
     const el = e.target.closest('[data-job]'); if (el) return openDetail(el.getAttribute('data-job'), el.getAttribute('data-sub'));
     // Anywhere else on a plate (the sky, the gaps between chips) opens the job, as the title does.
     const plate = e.target.closest('.job-plate'); if (plate && !e.target.closest('a,button')) openDetail(plate.dataset.board, '');
