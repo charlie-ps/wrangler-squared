@@ -563,6 +563,7 @@ export class JobStore {
   _reply(j, r, s, report) {
     if (r.parkedFor !== 'ready' || !s?.ready) throw new Error('A reply answers the human after you reported ready; there is nothing to answer');
     if (report.suggest) throw new Error('Only a new idea\'s planner suggests a job');
+    if (report.escalate) throw new Error('Only the wrangler answering a step\'s conversation escalates it');
     if (r.parkedAt && !r.mailedAt) {
       if (JSON.stringify(r.lastReply) === JSON.stringify(report)) return;
       throw new Error('You already answered; wait for mail from the human');

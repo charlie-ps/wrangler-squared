@@ -26,7 +26,7 @@ const nextId = (job, now) => `msg_${now.toString(36)}${ideaThread(job).length.to
 // of the last reply is safe, a different one while parked is refused.
 export function plannerReply(job, run, report, now) {
   if (!inConversation(job)) throw new Error('A planning reply is for a new idea\'s conversation; report the plan instead');
-  if (report.shots || report.run || report.running) throw new Error('A planning reply is text, with an optional suggest:{title, plan}');
+  if (report.shots || report.run || report.running || report.escalate) throw new Error('A planning reply is text, with an optional suggest:{title, plan}');
   if (run.parkedFor === 'idea' && run.parkedAt && !run.mailedAt) {
     if (JSON.stringify(run.lastReply) === JSON.stringify(report)) return false;
     throw new Error('You already replied; wait for mail with the human\'s answer');

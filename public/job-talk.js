@@ -8,7 +8,8 @@ import { proseHtml } from './job-idea.js';
 // answered, and each plan change it proposed as a card that says what became of
 // it. Several can be answering at once, each with its own box under it; the box
 // below them all starts a new one. The job dialog shows all of them, a step's
-// dialog only what was said on that step. Pure markup; jobs-view.js draws and
+// dialog only what was said on that step: a conversation started there shows on
+// the job too only once its wrangler escalated it. Pure markup; jobs-view.js draws and
 // wires the boxes. Every word is escaped.
 
 export const WRANGLER_NAME = 'The wrangler';
@@ -56,7 +57,8 @@ function groupHtml(job, { convo, messages }, sub, boxFor) {
   const onJob = !sub;
   const step = onJob && convo?.sub ? job.subJobs.find((s) => s.id === convo.sub)?.title || convo.sub : '';
   const state = convo && askPending(job, convo) ? `<span class="job-talk-tag tone-working">${convoRunning(job, convo) ? 'Answering' : 'Queued'}</span>` : '';
-  const head = `<header class="job-talk-convo-head"><b>${convo ? `Conversation ${convoNumber(job, convo)}` : 'From the wrangler'}</b>${step ? `<small>on ${esc(step)}</small>` : ''}${state}</header>`;
+  const raised = convo?.sub && convo.escalatedAt ? `<span class="job-talk-tag" title="The wrangler judged it the whole job's, so the job's list shows it too">${onJob ? 'Escalated' : 'Also on the job'}</span>` : '';
+  const head = `<header class="job-talk-convo-head"><b>${convo ? `Conversation ${convoNumber(job, convo)}` : 'From the wrangler'}</b>${step ? `<small>on ${esc(step)}</small>` : ''}${raised}${state}</header>`;
   return `<div class="job-talk-convo" data-convo="${esc(convo?.id || '')}">${head}${messages.map((m) => messageHtml(job, m, onJob)).join('')}${workingHtml(job, convo)}${convo && boxFor ? boxFor(convo) : ''}</div>`;
 }
 
