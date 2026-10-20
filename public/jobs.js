@@ -23,7 +23,6 @@ export const offBase = (job, sub) => isPrSub(sub) && !!sub.base && sub.base !== 
 // its result (server/job-store.js), so it alone does not make the switch matter.
 export const reviewedSession = (sub) => isSessionSub(sub) && !sub.stories;
 export const hasSessionSubs = (job) => job.subJobs.some(reviewedSession);
-export const hasHumanSubs = (job) => job.subJobs.some(isHumanSub);
 // New idea's conversation (mirrors server/job-idea.js). Its stage is the planner's turn
 // (`thinking`, also while a reply waits to be mailed) or the human's: a reply to answer,
 // or a job it suggests.
@@ -53,8 +52,8 @@ const several = (n, one, many) => n === 1 ? one : `${n} ${many}`;
 export const CHECKPOINTS = [
   { field: 'reviewPlan', icon: 'doc', name: 'Plan', unit: 'plan', you: 'You approve the plan before any ticket, PR or session starts', auto: 'Work starts as soon as the plan is drafted',
     wait: () => 'The plan is waiting for your approval.', yes: () => 'Approve the plan and start', done: () => 'Plan approved, work starting' },
-  { field: 'reviewCode', icon: 'code', name: 'Code', unit: 'PR', you: 'You see each PR working and read its diff before it’s committed', auto: 'The agent commits and opens the PR without a diff review',
-    wait: (n) => `${several(n, 'A diff is', 'diffs are')} waiting for your review.`, yes: (n) => `Commit and open ${several(n, 'the PR', 'PRs')}`, done: (n) => `${several(n, 'The diff is', 'diffs are')} being committed and opened as PRs` },
+  { field: 'reviewCode', icon: 'code', name: 'Local verification', unit: 'PR', you: 'You see each PR working locally (screenshots, live service, diff) before it’s committed', auto: 'The agent commits and opens the PR without you seeing it run',
+    wait: (n) => `${several(n, 'A PR is', 'PRs are')} working locally and waiting for you to verify ${n === 1 ? 'it' : 'them'}.`, yes: (n) => `Commit and open ${several(n, 'the PR', 'PRs')}`, done: (n) => `${several(n, 'The diff is', 'diffs are')} being committed and opened as PRs` },
   { field: 'reviewMerge', icon: 'merge', name: 'Merge', unit: 'PR', you: 'You approve each PR once its checks pass', auto: 'PRs merge once checks pass, unless a reviewer leaves blocking comments',
     wait: (n) => `${several(n, 'A PR has', 'PRs have')} passing checks and ${n === 1 ? 'is' : 'are'} waiting for Approve merge.`, yes: (n) => `Merge ${several(n, 'the PR', 'PRs')}`, done: (n) => `${several(n, 'The PR merges', 'PRs merge')} on the next poll, unless a reviewer leaves blocking comments` },
   { field: 'reviewSessions', icon: 'robot', name: 'Session results', unit: 'session receipt', you: 'You approve each session’s receipt before it counts as done', auto: 'A session counts as done once it reports',
@@ -282,6 +281,13 @@ export const cancelledDependencies = (job, sub) => [...(triggerDropped(job, sub)
 // session or human task once it reached done.
 export const dependencySatisfied = (dep) => isPrSub(dep) ? !!dep?.deployed : dep.stage === 'done' && !dep.cancelledAt;
 export const pendingDependencies = (job, sub) => sub.after.map((id) => job.subJobs.find((s) => s.id === id)).filter((d) => !dependencySatisfied(d));
+// Mirrors server/job-prompts.js upstreamOf from the other end: an approval note
+// is read only by an agent step that has this one in its transitive `after`.
+export const noteReaders = (job, sub) => {
+  const byId = new Map(job.subJobs.map((s) => [s.id, s]));
+  const reaches = (s, seen = new Set()) => (s?.after || []).some((id) => id === sub.id || (!seen.has(id) && seen.add(id) && reaches(byId.get(id), seen)));
+  return job.subJobs.filter((s) => s.id !== sub.id && !s.cancelledAt && !isWriteSub(s) && !isHumanSub(s) && reaches(s));
+};
 // A session parked on its ready receipt (server/job-parked.js) is only waiting on
 // the human, so it is not a running step until a message to it is in flight.
 const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null) && !(r.parkedFor === 'ready' && !sub?.answering) && !(r.parkedFor === 'idea' && ideaStage(job) !== 'thinking'));
@@ -327,7 +333,6 @@ export const deploymentStalled = (sub) => sub?.stage === 'deployment' && !!sub.d
 export const mergeHeldByComments = (job, sub) => sub?.stage === 'pr' && !job.reviewMerge && sub.pr?.checkStatus === 'passing' && redComments(sub) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 // Mirrors server/job-store.js approve-merge: nothing merges before its prerequisites deploy.
 export const mergeApprovable = (job, sub) => sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && (job.reviewMerge || redComments(sub)) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
-export const sessionReviewLabel = (job) => checkpointLabel(checkpoint('reviewSessions'), youReview(job, 'reviewSessions'));
 export const hasWrites = (job) => (job.subJobs?.length ? job.subJobs : job.plan?.subJobs || []).some(isWriteSub);
 // The checkpoints a job's own flags show: Session results and Writes only where
 // the job has a sub-job they could stop.
@@ -360,35 +365,46 @@ export const proposalOptions = (proposal) => [proposal, ...(proposal?.alternativ
 // What an action says it does and what it is pinned to, in words; the node it
 // acts on carries `actionMark` in the graph (job-graph.js MARKS).
 export const actionMark = (a) => (a.type === 'mark' ? `mark-${a.position}` : a.type);
-const PIN_NOUN = { head: 'head', merge: 'merge', stage: 'stage' };
-export const pinLine = (pin) => !pin ? '' : pin.at === 'round' ? `to its open session · pinned to round ${pin.round || 1}` : pin.at === 'red' ? 'pinned to this failure' : `pinned to ${PIN_NOUN[pin.at] || pin.at} ${String(pin.ref ?? 'none').slice(0, 9)}`;
+// The pin is why an approval can be refused, not something to read: it is the
+// change line's tooltip.
+const PIN_MOVED = { round: 'that review has moved on', head: 'its PR has new commits', merge: 'its merge has changed', stage: 'it has moved on', red: 'its failure has changed' };
+export const pinLine = (pin) => !pin ? '' : `Not applied if ${PIN_MOVED[pin.at] || 'it has moved on'} by the time you approve`;
 export function actionLine(a, plan) {
-  const title = (id) => plan.subJobs.find((s) => s.id === id)?.title || id;
+  const title = (id) => `“${plan.subJobs.find((s) => s.id === id)?.title || id}”`;
   const name = title(a.sub);
-  if (a.type === 'accept-red') return { text: `Accept red: ${name}`, detail: a.pin?.at === 'merge' ? 'count the merge as landed' : 'merge as it stands' };
-  if (a.type === 'retry') return { text: `Retry this step: ${name}`, detail: a.note || 'start it again as it is' };
-  if (a.type === 'recover') return { text: `Recover: ${name}`, detail: `lands when “${title(a.fix)}” deploys` };
-  if (a.type === 'mark') return { text: `Mark ${a.position === 'merged' ? 'merged' : 'done'}: ${name}`, detail: a.evidence || '' };
-  if (a.type === 'forward') return { text: `Forward: ${name}`, detail: `“${a.note || ''}”` };
-  return { text: `Rework: ${name}`, detail: a.note || '' };
+  if (a.type === 'accept-red') return { text: a.pin?.at === 'merge' ? `Counts ${name} as landed despite its failing run after merge` : `Merges ${name} despite its failing checks`, detail: a.note || '' };
+  if (a.type === 'retry') return { text: `Starts ${name} again as it is`, detail: a.note || '' };
+  if (a.type === 'recover') return { text: `Fixes ${name} with a new PR, ${title(a.fix)}`, detail: '' };
+  if (a.type === 'mark') return { text: a.position === 'merged' ? `Marks ${name} as merged elsewhere` : `Marks ${name} as done`, detail: a.evidence || '' };
+  if (a.type === 'forward') return { text: `Sends your message to the agent that built ${name}`, detail: `“${a.note || ''}”` };
+  return { text: `Sends ${name} back to be redone`, detail: a.note || '' };
+}
+// What editing a sub-job's plan fields (server/job-replan.js EDITABLE, plus
+// base) changes about it, in the human's words rather than the field names.
+const EDIT_EFFECT = { brief: 'what it is asked to do', show: 'what it shows you', check: 'how it is checked', after: 'when it starts', base: 'which branch it lands on',
+  action: 'what it writes', place: 'where it writes', on: 'when it runs', by: 'which step makes it', review: 'whether you review it first', why: 'why it is there' };
+export function editLine(edit, plan) {
+  const name = `“${plan.subJobs.find((s) => s.id === edit.id)?.title || edit.id}”`;
+  const effects = [...new Set(edit.fields.map((f) => EDIT_EFFECT[f]).filter(Boolean))];
+  if (!effects.length) return `Renames it to ${name}`;
+  return `Changes ${name}: ${effects.length === 1 ? effects[0] : `${effects.slice(0, -1).join(', ')} and ${effects.at(-1)}`}`;
 }
 // Every idea goes to one recipient, the planner, which the board calls "the
 // wrangler" (server/job-change.js): a question is answered in the job's
 // conversation (server/job-talk.js), and anything else is sorted into feedback
 // for a live step and changes to the plan, a proposal the human approves. `to`
-// names it on the box, `mark` is its initial, `hint` says what happens to the
-// idea from where it was typed.
-const WRANGLER = { to: 'The wrangler', mark: 'W', placeholder: 'Ask the wrangler, or say what to change…', hint: 'A question is answered here. A change becomes a proposal you approve.' };
-const STEP = { ...WRANGLER, placeholder: 'Ask about this step, or say what to change…', hint: 'About this step. A question is answered here; feedback goes back to the step and anything else into the plan, once you approve.' };
+// names it on the box, `mark` is its initial.
+const WRANGLER = { to: 'The wrangler', mark: 'W', placeholder: 'Ask the wrangler, or say what to change…' };
+const STEP = { ...WRANGLER, placeholder: 'Ask about this step, or say what to change…' };
 const CHANGE_ROUTE = {
-  plan: { ...WRANGLER, placeholder: 'Add an idea for the wrangler…', hint: 'Redraws the plan for you to review.' },
-  proposal: { ...WRANGLER, placeholder: 'Ask about this proposal, or add to it…', hint: 'A question is answered here. Anything else redraws the proposal, keeping what it already carries.' },
+  plan: { ...WRANGLER, placeholder: 'Add an idea for the wrangler…' },
+  proposal: { ...WRANGLER, placeholder: 'Ask about this proposal, or add to it…' },
 };
 export function changeRoute(at, job = null, sub = null) {
-  if (sub && job && redDeclared(job, sub)) return { ...WRANGLER, hint: 'Gets everything already tried, and proposes a fix for you to approve.' };
+  if (sub && job && redDeclared(job, sub)) return WRANGLER;
   if (CHANGE_ROUTE[at]) return CHANGE_ROUTE[at];
   if (!sub) return WRANGLER;
-  if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…', hint: 'About this step. A question is answered here; feedback goes to its open session and anything else into the plan, once you approve.' };
+  if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…' };
   return STEP;
 }
 // A running job's conversations with the wrangler (mirrors server/job-talk.js): a
@@ -417,7 +433,6 @@ export const convoNumber = (job, convo) => convosOf(job).indexOf(convo) + 1;
 export const convoRunning = (job, convo) => job.runs.some((r) => !r.stopped && r.convo === convo.id);
 // A planning run that is a question's (an ask run) holds nothing and approves nothing.
 export const planningRun = (job) => job.runs.some((r) => !r.stopped && !r.subJobId && !r.ask);
-export const changeHint = (at, job = null, sub = null) => changeRoute(at, job, sub).hint;
 // What the human is looking at, and the exact thing in it, which Request changes
 // pins its idea to. Mirrors server/job-change.js changeView: the server refuses a
 // request whose pin no longer matches. Null means nothing is left to change.
@@ -453,6 +468,7 @@ function eventTitle(sub) {
   if (isWriteSub(sub) && sub.state === 'failed') return `${placeShort(sub)} refused the write`;
   return 'Needs attention';
 }
+const flat = (text) => String(text || '').replace(/\s+/g, ' ').trim();
 // What happened, in one line.
 export function eventFor(job, sub) {
   if (!sub) return job.error ? { title: 'Job needs attention', detail: job.error } : null;
@@ -460,8 +476,13 @@ export function eventFor(job, sub) {
   if (sub.cancelledAt && !sub.error) return null;
   // The failure itself stays as the event; `fix` is what Wrangler has done about it.
   const base = { title: eventTitle(sub), detail: sub.error };
-  if (sub.error && !job.error && redDeclared(job, sub)) { const d = sub.red.declared; return { ...base, fix: { kind: 'declared', title: 'Declared red', detail: d.summary, tried: d.tried || [], ask: d.ask || '', auto: !!d.auto, options: !!job.replan?.proposal?.escalation } }; }
-  if (sub.error && !job.error && redFixing(job, sub)) return { ...base, fix: { kind: 'fixing', title: 'Fixing', detail: 'Wrangler is replanning this step. It holds this sub-job and the ones after it; everything else carries on.', n: job.replan.red.n || 1 } };
+  // An escalation's error is its own summary cut short: the declaration alone says it, in full.
+  if (sub.error && !job.error && redDeclared(job, sub)) {
+    const d = sub.red.declared;
+    const fix = { kind: 'declared', title: 'Declared red', detail: d.summary, tried: d.tried || [], ask: d.ask || '', by: d.by || (d.auto ? 'auto' : 'planner'), options: !!job.replan?.proposal?.escalation };
+    return { ...base, ...(flat(d.summary).startsWith(flat(sub.error)) ? { detail: '' } : {}), fix };
+  }
+  if (sub.error && !job.error && redFixing(job, sub)) return { ...base, fix: { kind: 'fixing', title: 'Fixing', n: job.replan.red.n || 1 } };
   if (sub.error && !job.error && redFixReady(job, sub)) return { ...base, fix: { kind: 'ready', title: 'Fix ready', detail: job.replan.proposal.diagnosis?.summary || job.replan.proposal.label || 'Wrangler proposed a fix. Review it.', waits: job.reviewRed ?? true } };
   if (sub.error) return { title: eventTitle(sub), detail: sub.error };
   if (deploymentStalled(sub)) return { title: 'Nothing deployed', detail: `No post-merge run has started for merge commit ${(sub.pr?.mergeCommit || '').slice(0, 8)}.` };
@@ -550,6 +571,7 @@ export function jobStatus(job, sub) {
   if (sub?.cancelledAt) { const word = sub.superseded ? 'Superseded' : sub.notNeeded ? 'Not needed' : 'Dropped'; return { tone: sub.stage === 'done' ? 'done' : 'muted', text: sub.stage === 'done' ? word : `${word} · cleaning up` }; }
   if (!sub && job.cancelledAt) return { tone: job.stage === 'done' ? 'done' : 'muted', text: job.stage === 'done' ? 'Cancelled' : 'Cancelled · cleaning up' };
   if (job.paused) return { tone: 'muted', text: 'Paused' };
+  if (budgetHeld(job)) return { tone: 'muted', text: 'Paused for budget' };
   if (sub && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return { tone: 'needs', text: triggerDropped(job, sub) ? 'Trigger dropped' : 'Depends on a dropped sub-job' };
   if (isWriteSub(sub)) return writeStatusLine(job, sub);
   const idea = !sub && ideaStage(job);
@@ -589,8 +611,12 @@ export function jobStatus(job, sub) {
   if (sub.observationError) return { tone: 'needs', text: 'Pipeline polling will retry' };
   // Accepted red: the runner merges, or finishes the landing, on its next tick.
   if (redAccepted(sub)) return { tone: 'working', text: sub.stage === 'pr' ? (sub.mergeRequestedHead ? 'Merge requested' : 'Merging with red checks') : 'Red run accepted · landing' };
-  if (sub.stage === 'pr') return { tone: sub.pr?.checkStatus === 'passing' || sub.pr?.behind ? 'working' : 'muted', text: sub.mergeRequestedHead ? 'Merge requested' : sub.pr?.behind ? 'Behind base · updating branch' : sub.pr?.checkStatus === 'awaiting-review' ? 'GitHub review required' : 'Watching checks' };
-  if (sub.stage === 'deployment') return sub.recoveredBy ? { tone: 'muted', text: 'Awaiting fix' } : { tone: 'muted', text: 'Watching post-merge runs' };
+  // Watching runs is Wrangler at work; a red run or a GitHub review is not.
+  if (sub.stage === 'pr') {
+    const text = sub.mergeRequestedHead ? 'Merge requested' : sub.pr?.behind ? 'Behind base · updating branch' : sub.pr?.checkStatus === 'awaiting-review' ? 'GitHub review required' : 'Watching checks';
+    return { tone: sub.pr?.behind || (!redPipeline(sub) && text !== 'GitHub review required') ? 'working' : 'muted', text };
+  }
+  if (sub.stage === 'deployment') return sub.recoveredBy ? { tone: 'muted', text: 'Awaiting fix' } : { tone: redPipeline(sub) ? 'muted' : 'working', text: 'Watching post-merge runs' };
   // Fix here on an open PR under code review: the work restarts on the next tick.
   if (sub.stage === 'implementation' && sub.pr) return { tone: 'working', text: 'Fix queued' };
   if (sub.stage === 'done') return { tone: 'done', text: isPrSub(sub) ? 'Delivered' : isSessionSub(sub) ? 'Completed' : 'Done' };
@@ -635,6 +661,13 @@ export function dependencyLine(job, sub) {
 // transcript its cards have owned. `~` for a Codex estimate, exactly as a session
 // card reads it (cards.js). Empty for null/0 — a backlog job that has spent nothing
 // shows no price rather than an authoritative-looking $0.00.
+// Paused at its spend limit (server/job-budget.js), until Add $X or a new limit in Settings.
+// Mirrors server/jobs-schema.js DEFAULT_SPEND_LIMIT: what Settings shows while none is saved.
+export const DEFAULT_SPEND_LIMIT = 100;
+export const budgetHeld = (job) => !!job.budgetPaused && !job.cancelledAt && job.stage !== 'done';
+export const dollars = (usd) => `$${Number.isInteger(usd) ? usd : usd.toFixed(2)}`;
+export const topUpLabel = (job) => `Add ${dollars(job.spendStep ?? 0)}`;
+export const budgetLine = (job) => `${dollars(Math.max(job.usd ?? 0, job.budgetPaused?.usd ?? 0))} of ${job.spendLimit == null ? 'no limit' : dollars(job.spendLimit)}`;
 export const jobCostLabel = (usd, estimated) => typeof usd === 'number' && usd > 0 ? `${estimated ? '~' : ''}$${usd.toFixed(2)}` : '';
 export const JOB_COST_TITLE = 'Total price of this job: planning, every implementation step, CI repairs and PR comment triage';
 export const SUB_COST_TITLE = 'Price of this sub-job: every step it ran, its CI repairs and its comment triage';
@@ -654,6 +687,17 @@ export function storyLabel(story, stories = []) {
 export const receiptHtml = (checks = []) => `<ul class="job-receipt">${checks.map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul>`;
 // A session's milestone (`on`) orders it like `after`, so it is a wave past its trigger.
 export const edgesOf = (sub) => [...sub.after, ...(isSessionSub(sub) && sub.on && !sub.after.includes(sub.on.sub) ? [sub.on.sub] : [])];
+// Every step `id` waits on, directly or through another, as id → hops (1 is a
+// direct prerequisite; breadth-first, so a step reached both ways counts as 1).
+// Writes are not steps. `edges` lets a drawn graph walk its own connectors.
+export function prerequisitesOf(subs, id, edges = edgesOf) {
+  const byId = new Map(subs.filter((s) => !isWriteSub(s)).map((s) => [s.id, s])), hops = new Map(), queue = [[id, 0]];
+  while (queue.length) {
+    const [at, n] = queue.shift(), sub = byId.get(at);
+    for (const p of sub ? edges(sub) : []) if (p !== id && byId.has(p) && !hops.has(p)) { hops.set(p, n + 1); queue.push([p, n + 1]); }
+  }
+  return hops;
+}
 export function dependencyLevels(plan) {
   const levels = new Map();
   function level(sub, visiting = new Set()) {

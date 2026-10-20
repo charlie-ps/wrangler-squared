@@ -27,6 +27,13 @@ test('a running job offers its PR and story links, Pause (or Resume when paused)
   assert.ok(!ids({ ...running, paused: true }).includes('pause'));
 });
 
+test('an idea still in conversation cancels as an idea; a planned one as a job', () => {
+  const idea = { ...backlog, stage: 'planning', idea: { thread: [] } };
+  assert.equal(jobMenuItems(idea).at(-1).label, 'Cancel idea');
+  assert.equal(jobMenuItems({ ...idea, plan }).at(-1).label, 'Cancel job');
+  assert.equal(jobMenuItems(backlog).at(-1).label, 'Cancel job');
+});
+
 test('a done or cancelled job keeps only what reads it', () => {
   assert.deepEqual(ids(done), ['open', 'copy-ref', 'copy-id', '—', 'link', 'link']);
   assert.deepEqual(ids({ ...backlog, cancelledAt: 1 }), ['open', 'copy-ref', 'copy-id']);

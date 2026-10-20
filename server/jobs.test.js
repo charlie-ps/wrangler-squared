@@ -3,19 +3,23 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { JobStore, migrateJobs, MERGE_IS_DELIVERY } from './job-store.js';
-import { JobRunner, IDLE_RECEIPT_GRACE_MS } from './job-runner.js';
+import { JobRunner, IDLE_RECEIPT_GRACE_MS, shortError } from './job-runner.js';
 import { JobRuntime, CleanupRefused } from './job-runtime.js';
 import { jobPrompt } from './job-prompts.js';
 import { JobGithub, prSummary } from './job-github.js';
 import { normaliseComments, commentsBlockMerge } from './job-comments.js';
 import { jobCreateHandler, makeJobCreateHandler, jobActionHandler, jobSettingsHandler } from './handlers.js';
 import { _resetForTests, runnerFor } from './jobs.js';
-import { jobReportTool, getJobContextTool } from './tools.js';
+import { jobReportTool, getJobContextTool, sendStepIdeaTool } from './tools.js';
 import { changeView } from './job-change.js';
 import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 
+const execFileP = promisify(execFile);
+const execGit = (cwd, args) => execFileP('git', ['-C', cwd, ...args]).then((r) => r.stdout.trim());
 const input = { title: 'Reliable sign-in', intent: 'Customers can sign in reliably', repos: ['/repo'], reviewMerge: true };
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', after, brief: `Implement ${id}`, ...extra });
 const sessionSpec = (id, after = []) => ({ id, kind: 'session', title: `Run ${id}`, storyId: 'story', after, brief: `Do ${id} on this machine` });
@@ -124,7 +128,7 @@ async function atPr(f, p = plan()) {
 test('store persists settings, plans and live claims across restart', async (t) => {
   const f = fixture(t); await f.approve();
   f.store.settings({ concurrency: 4 });
-  assert.equal(f.store.snapshot().version, 5);
+  assert.equal(f.store.snapshot().version, 6);
   assert.deepEqual(new JobStore(f.store.file).snapshot(), f.store.snapshot());
   assert.equal(f.store.get(f.job.id).runs.filter((r) => !r.stopped).length, 1);
 });
@@ -143,14 +147,46 @@ test('usualPick persists across restart, merges like any setting, and is validat
   assert.equal(f.store.snapshot().settings.usualPick.model, 'opus', 'a rejected patch changes nothing');
 });
 
-test('backdrop defaults to the sky, persists the Wrangler background across restart, and rejects anything else', (t) => {
+test('theme defaults to Wrangler, persists across restart, keeps Space\'s plate art per theme, and rejects an unknown one', (t) => {
   const f = fixture(t);
-  assert.equal(f.store.snapshot().settings.backdrop, 'sky');
-  f.store.settings({ backdrop: 'wrangler' }); f.store.settings({ concurrency: 3 });
-  assert.equal(new JobStore(f.store.file).snapshot().settings.backdrop, 'wrangler');
-  assert.throws(() => f.store.settings({ backdrop: 'nebula' }));
-  const { backdrop, ...old } = f.store.snapshot().settings;
-  assert.equal(settingsSchema.parse(old).backdrop, 'sky', 'settings saved before it existed parse to the sky');
+  assert.equal(f.store.snapshot().settings.theme, 'wrangler');
+  assert.deepEqual(f.store.snapshot().settings.themeOptions, { space: { plateArt: 'quiet' } });
+  f.store.settings({ themeOptions: { space: { plateArt: 'full' } } }); f.store.settings({ theme: 'space' });
+  const back = new JobStore(f.store.file).snapshot().settings;
+  assert.equal(back.theme, 'space'); assert.equal(back.themeOptions.space.plateArt, 'full', 'an option saved while another theme was on is kept');
+  assert.throws(() => f.store.settings({ theme: 'nebula' }));
+  assert.throws(() => f.store.settings({ themeOptions: { space: { plateArt: 'peek' } } }), 'the old hover mode is only read from old settings');
+  assert.equal(f.store.snapshot().settings.theme, 'space', 'a rejected patch changes nothing');
+});
+
+test('settings saved before themes open in the Wrangler theme, keeping Space\'s plate art for later', (t) => {
+  const parse = (s) => { const { theme, themeOptions } = settingsSchema.parse(s); return { theme, themeOptions }; };
+  assert.deepEqual(parse({ backdrop: 'wrangler' }), { theme: 'wrangler', themeOptions: { space: { plateArt: 'quiet' } } });
+  assert.deepEqual(parse({ backdrop: 'sky', plateArt: 'full' }), { theme: 'wrangler', themeOptions: { space: { plateArt: 'full' } } });
+  assert.deepEqual(parse({ plateArt: 'peek' }), { theme: 'wrangler', themeOptions: { space: { plateArt: 'quiet' } } }, 'the dropped hover mode reads as the skyline');
+  assert.deepEqual(parse({}), { theme: 'wrangler', themeOptions: { space: { plateArt: 'quiet' } } }, 'settings from no earlier version get the default');
+  assert.equal(parse({ backdrop: 'wrangler', theme: 'space' }).theme, 'space', 'a saved theme wins over a stale backdrop');
+  const parsed = settingsSchema.parse({ backdrop: 'wrangler', plateArt: 'full' });
+  assert.equal('backdrop' in parsed || 'plateArt' in parsed, false, 'the old keys are dropped');
+  // The store reads jobs.json as written, so the board gets the theme before anything is saved again.
+  const f = fixture(t);
+  fs.writeFileSync(f.store.file, JSON.stringify({ version: 5, settings: { concurrency: 3, backdrop: 'wrangler', plateArt: 'full' }, jobs: [] }));
+  const loaded = new JobStore(f.store.file).snapshot().settings;
+  assert.equal(loaded.theme, 'wrangler'); assert.deepEqual(loaded.themeOptions, { space: { plateArt: 'full' } });
+  assert.equal(loaded.backdrop, undefined); assert.equal(loaded.concurrency, 3);
+});
+
+test('a version-5 board on Space opens in Wrangler once; Space picked since is kept', (t) => {
+  const f = fixture(t);
+  fs.writeFileSync(f.store.file, JSON.stringify({ version: 5, settings: { theme: 'space', themeOptions: { space: { plateArt: 'full' } } }, jobs: [] }));
+  const reset = new JobStore(f.store.file);
+  assert.equal(reset.snapshot().settings.theme, 'wrangler');
+  assert.deepEqual(reset.snapshot().settings.themeOptions, { space: { plateArt: 'full' } }, 'Space\'s options are kept');
+  reset.settings({ theme: 'space' });
+  assert.equal(JSON.parse(fs.readFileSync(f.store.file, 'utf8')).version, 6);
+  assert.equal(new JobStore(f.store.file).snapshot().settings.theme, 'space', 'the reset happens once');
+  fs.writeFileSync(f.store.file, JSON.stringify({ version: 6, settings: { theme: 'space' }, jobs: [] }));
+  assert.equal(new JobStore(f.store.file).snapshot().settings.theme, 'space');
 });
 
 // --- Migration (version 1 -> 2) ---
@@ -171,14 +207,14 @@ const legacy = {
   }],
 };
 
-test('a version-1 file loads as version 5: after/brief replace dependsOn/instructions and every removed field is gone', async (t) => {
+test('a version-1 file loads as version 6: after/brief replace dependsOn/instructions and every removed field is gone', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-jobs-v1-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'jobs.json');
   fs.writeFileSync(file, JSON.stringify(legacy));
   const store = new JobStore(file);
   const job = store.get('job_old');
-  assert.equal(store.snapshot().version, 5);
+  assert.equal(store.snapshot().version, 6);
   assert.equal(store.snapshot().settings.maxRunMinutes, undefined);
   for (const key of ['amendmentAuthority', 'amendments', 'recoveryOf']) assert.equal(job[key], undefined, key);
   assert.equal(job.reviewCode, true, 'the version-1 flag meant the same thing and is kept');
@@ -194,8 +230,8 @@ test('a version-1 file loads as version 5: after/brief replace dependsOn/instruc
   // The file itself is untouched until the next ordinary write.
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 1);
   store.action('job_old', 'pause');
-  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 5);
-  assert.throws(() => migrateJobs({ version: 6, jobs: [] }), /refusing to discard jobs/);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 6);
+  assert.throws(() => migrateJobs({ version: 7, jobs: [] }), /refusing to discard jobs/);
   assert.throws(() => migrateJobs({ version: 1, jobs: {} }), /refusing to discard jobs/);
   assert.deepEqual(migrateJobs(structuredClone(migrateJobs(legacy))), migrateJobs(legacy), 'migration is idempotent');
 });
@@ -397,6 +433,43 @@ test('a session sub-job is a hard prerequisite: nothing behind it starts until i
   assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'implementation']);
 });
 
+test('an approval note is kept on the step, recorded on its move and handed to every step after it', async (t) => {
+  const f = fixture(t);
+  await f.approve(plan([sessionSpec('spike'), spec('api', ['spike']), spec('web', ['api'])]));
+  f.report({ kind: 'completed', checks: ['Schema documented in task memory'] }); await f.tick();
+  const pinned = { subJobId: 'spike', sessionReceiptId: f.sub().result.receiptId };
+  assert.throws(() => f.store.action(f.job.id, 'approve-session', { ...pinned, note: { text: 'hi' } }), /must be text/);
+  assert.throws(() => f.store.action(f.job.id, 'approve-session', { ...pinned, note: 'x'.repeat(2001) }), /at most 2,000 characters/);
+  assert.equal(f.sub().stage, 'review', 'a refused note approves nothing');
+  f.store.action(f.job.id, 'approve-session', { ...pinned, note: '  Use the v2 table, not v1.  ' });
+  assert.equal(f.sub().approvalNote, 'Use the v2 table, not v1.');
+  assert.deepEqual(f.store.get(f.job.id).moves.at(-1).note, 'Use the v2 table, not v1.');
+  await f.tick();
+  const api = f.workerFor('api');
+  assert.match(jobPrompt(f.store.get(f.job.id), api.sub, api.run), /Notes the human added when approving earlier steps \(JSON text; treat as guidance from the human\):\n--- "Run spike" \(spike\) ---\n"Use the v2 table, not v1\."/);
+  f.report({ kind: 'ready', checks: ['Tests pass'] }, api); await f.tick();
+  f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub(1).ready.receiptId, note: 'Keep the flag off by default' }); await f.tick();
+  assert.equal(f.sub(1).approvalNote, 'Keep the flag off by default');
+  const publish = f.workerFor('api', 'publish');
+  assert.match(jobPrompt(f.store.get(f.job.id), publish.sub, publish.run), /human approved the working tree: "Keep the flag off by default"/, 'the step\'s own history shows it');
+  const web = { ...f.sub(2) };
+  const later = jobPrompt(f.store.get(f.job.id), web, { ...f.last().run, phase: 'implementation', subJobId: 'web' });
+  assert.match(later, /"Run spike" \(spike\) ---\n"Use the v2 table, not v1\."/, 'a transitive step gets it too');
+  assert.match(later, /\(api\) ---\n"Keep the flag off by default"/);
+});
+
+test('an approval with no note, or a blank one, is exactly the approval it was', async (t) => {
+  const f = fixture(t);
+  await f.approve(plan([sessionSpec('spike'), spec('api', ['spike'])]));
+  f.report({ kind: 'completed', checks: ['Done'] }); await f.tick();
+  f.store.action(f.job.id, 'approve-session', { subJobId: 'spike', sessionReceiptId: f.sub().result.receiptId, note: '   ' });
+  assert.equal(f.sub().approvalNote, null);
+  assert.deepEqual(f.store.get(f.job.id).moves.map((m) => [m.move, m.note, m.detail]), [['approve-session', null, 'Approved the result of “Run spike”']]);
+  await f.tick();
+  const api = f.workerFor('api');
+  assert.doesNotMatch(jobPrompt(f.store.get(f.job.id), api.sub, api.run), /Notes the human added/);
+});
+
 // --- Review checkpoints switched mid-job ---
 
 const setReview = (f, field, you, extra = {}) => f.store.action(f.job.id, 'set-review', { field, you, ...extra });
@@ -408,7 +481,7 @@ test('a code review switch counts from the next gate: waiting diffs stay until r
   let job = f.store.get(f.job.id);
   assert.equal(job.reviewCode, false);
   assert.deepEqual([job.subJobs[0].stage, job.subJobs[0].state], ['review', 'verified'], 'a diff already waiting is not let through unasked');
-  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['set-review', null, 'Switched Code to Auto']]);
+  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['set-review', null, 'Switched Local verification to Auto']]);
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('web'));
   assert.equal(f.sub(1).state, 'approved', 'the run kept its uncommitted prompt; its receipt is approved as it lands');
   assert.ok(f.sub(1).ready.approvedAt);
@@ -417,6 +490,7 @@ test('a code review switch counts from the next gate: waiting diffs stay until r
   setReview(f, 'reviewCode', false, { release: true });
   assert.deepEqual([f.sub().state, !!f.sub().ready.approvedAt], ['approved', true]);
   assert.deepEqual(f.store.get(f.job.id).moves.slice(-2).map((m) => [m.move, m.subJobId]), [['approve-code', 'api'], ['set-review', null]]);
+  assert.deepEqual([f.store.get(f.job.id).moves.at(-2).note, f.sub().approvalNote], [null, null], 'a bulk release carries no words');
   const revision = f.store.get(f.job.id).revision;
   setReview(f, 'reviewCode', false);
   assert.equal(f.store.get(f.job.id).moves.length, 3, 'switching to what it already is records nothing');
@@ -602,6 +676,111 @@ test('a failing post-merge run names the workflow and creates no second job', as
   assert.equal(f.sub().stage, 'deployment');
   assert.equal(f.store.snapshot().jobs.length, 1, 'the fix is a move on this job, never a recovery job');
   assert.equal(f.sub().deployed, undefined);
+});
+
+// The runner's deployment poll on a real JobGithub over a fake `gh`: `onCommit`
+// is what `gh run list --commit merge1` prints, `later` the workflow's later runs
+// on the branch, `contains(head)` whether that head's commit contains the merge.
+function ghOver(f, world) {
+  const gh = new JobGithub(async (_bin, args) => {
+    if (args.includes('--commit')) return JSON.stringify(world.onCommit);
+    if (args[0] === 'run') return JSON.stringify(world.later || []);
+    return world.contains(args[1].split('...')[1]) ? 'ahead' : 'diverged';
+  });
+  f.github.deployment = (sub) => gh.deployment(sub);
+}
+const pushRun = (over) => ({ headBranch: 'main', event: 'push', workflowName: 'Deploy', status: 'completed', attempt: 1, databaseId: 10, headSha: 'merge1', url: 'https://github.example.com/run', ...over });
+// A red sub-job is polled every two minutes; two ticks always reach the next poll.
+const poll = async (f) => { await f.tick(); await f.tick(); };
+
+test('a failed post-merge run stays red but watched, and a re-run attempt that passes reaches deployed without Retry', async (t) => {
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], contains: () => false };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick();
+  await f.tick();
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  assert.equal(f.sub().nextPollAt - f.clockNow(), 120000, 'a red deployment is polled, more slowly');
+  world.onCommit = [pushRun({ attempt: 2, status: 'in_progress', conclusion: '' })]; await poll(f);
+  assert.equal(f.sub().deploymentResult.status, 'pending');
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'the failure stays on the board while the re-run is in flight');
+  world.onCommit = [pushRun({ attempt: 2, conclusion: 'success' })]; await poll(f);
+  const sub = f.sub();
+  assert.equal(sub.error, null); assert.deepEqual(sub.deployed.checks, ['Post-merge runs passed']); assert.equal(sub.deployed.commit, 'merge1');
+  assert.equal(f.launched.filter((w) => w.sub?.id === 'api' && w.run.phase !== 'implementation').length, 0, 'no Retry, no session');
+  await f.tick(); assert.equal(f.sub().stage, 'done'); assert.deepEqual(f.cleaned, ['api']);
+  // With a check in the plan, the green re-run sends it to verify like any green run.
+  const g = fixture(t); await atPr(g, plan([spec('api', [], { check: 'helm list shows auth in prod' })]));
+  const gWorld = { onCommit: [pushRun({ conclusion: 'failure' })], contains: () => false };
+  ghOver(g, gWorld);
+  g.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await g.tick(); await g.tick();
+  assert.match(g.sub().error, /Post-merge run failed/);
+  gWorld.onCommit = [pushRun({ attempt: 2, conclusion: 'success' })]; await poll(g);
+  assert.equal(g.sub().error, null); assert.equal(g.last().run.phase, 'verify');
+});
+
+test('a failed run on the merge commit is cleared by a later run that contains the merge and passes', async (t) => {
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], later: [], contains: (head) => head === 'next' };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  world.later = [pushRun({ databaseId: 11, headSha: 'next', status: 'in_progress', conclusion: '' })]; await poll(f);
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'a successor still running is not a verdict on a red run');
+  world.later = [pushRun({ databaseId: 11, headSha: 'next', conclusion: 'success' })]; await poll(f);
+  assert.equal(f.sub().error, null);
+  assert.deepEqual(f.sub().deploymentResult.runs[0], { workflow: 'Deploy', runId: 11, url: 'https://github.example.com/run', status: 'passing', conclusion: 'success', supersedes: 10, commit: 'next' });
+  assert.deepEqual(f.sub().deployed.checks, ['Post-merge runs passed']); assert.equal(f.sub().stage, 'cleanup');
+});
+
+test('a red post-merge run Retry never saw still waits on Accept red or recover when nothing passes after it', async (t) => {
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], later: [pushRun({ databaseId: 11, headSha: 'sibling', conclusion: 'success' })], contains: () => false };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  await poll(f); await poll(f);
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'a green run on a commit without the merge clears nothing');
+  assert.equal(f.sub().deployed, undefined);
+  acceptRed(f, 'api', 'unrelated'); await f.tick();
+  assert.deepEqual(f.sub().deployed.checks, ['Post-merge run accepted red: unrelated']);
+});
+
+test('a red post-merge run nobody acts on is polled at 2, then 5, then 15 minutes, and not at all after six hours until Retry', async (t) => {
+  const f = fixture(t); await atPr(f);
+  ghOver(f, { onCommit: [pushRun({ conclusion: 'failure' })], later: [], contains: () => false });
+  const polled = []; const deployment = f.github.deployment;
+  f.github.deployment = (sub) => { polled.push(f.clockNow()); return deployment(sub); };
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  const since = f.sub().redSince;
+  assert.equal(since, f.clockNow()); assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  while (f.clockNow() - since < 7 * 3600000) await f.tick();
+  const gaps = polled.slice(1).map((at, i) => [at - since, at - polled[i]]);
+  const gapAt = (from, to) => [...new Set(gaps.filter(([age]) => age > from && age <= to).map(([, gap]) => Math.ceil(gap / 60000)))];
+  assert.deepEqual(gapAt(0, 30 * 60000), [3], 'first half hour: every 2 minutes (the next 61s tick after)');
+  assert.deepEqual(gapAt(31 * 60000, 2 * 3600000), [6], 'to two hours: every 5 minutes');
+  assert.deepEqual(gapAt(2.5 * 3600000, 6 * 3600000), [16], 'to six hours: every 15 minutes');
+  assert.ok(polled.every((at) => at - since < 6 * 3600000), 'nothing after six hours');
+  assert.ok(polled.length < 60, `${polled.length} polls over seven hours, bounded`);
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy', 'still red on the board');
+  const before = polled.length;
+  f.store.action(f.job.id, 'retry', { subJobId: 'api' }); await f.tick();
+  assert.equal(polled.length, before + 1, 'Retry watches it again'); assert.equal(f.sub().redSince, f.clockNow(), 'from a fresh start');
+  assert.equal(f.sub().nextPollAt - f.clockNow(), 120000);
+});
+
+test('a green run on a revert of the merge still contains it, so it reads as deployed: run evidence, not liveness', async (t) => {
+  // Pinned on purpose: `deployed` means a run that built the merge passed. A
+  // revert after it is a later change somebody chose, which no run can tell
+  // apart from a fix by containment alone.
+  const f = fixture(t); await atPr(f);
+  const world = { onCommit: [pushRun({ conclusion: 'failure' })], later: [], contains: (head) => head === 'revert1' };
+  ghOver(f, world);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); await f.tick();
+  assert.equal(f.sub().error, 'Post-merge run failed: Deploy');
+  world.later = [pushRun({ databaseId: 11, headSha: 'revert1', conclusion: 'success' })]; await poll(f);
+  assert.equal(f.sub().error, null);
+  assert.equal(f.sub().deploymentResult.runs[0].commit, 'revert1');
+  assert.deepEqual(f.sub().deployed.checks, ['Post-merge runs passed']);
 });
 
 test('Accept red on an open PR merges the pinned head instead of repairing it; a new push is judged afresh', async (t) => {
@@ -943,6 +1122,27 @@ test('a Discard the disk no longer matches is spent: the fresh refusal replaces 
   assert.throws(() => f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'h3', fingerprint: 'fp1' }), /cannot be pinned/);
 });
 
+test('a Discard of a folder git could not remove is marked so the runtime deletes it whole, and says so in history', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api')]));
+  dropIt(f, 'api');
+  const refusal = { path: '/worktree/api', branch: 'branch-api', head: 'h1', fingerprint: 'fp1', pinned: true, cause: 'unremovable', error: 'error: failed to delete', commits: [], commitCount: 0, files: [], fileCount: 0 };
+  f.runtime.cleanup = async () => { throw new CleanupRefused('refused', refusal); };
+  await f.tick();
+  f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'h1', fingerprint: 'fp1' });
+  assert.deepEqual([f.sub().discard.cause, f.sub().discard.fingerprint], ['unremovable', 'fp1']);
+  assert.equal(f.store.get(f.job.id).moves.at(-1).detail, 'Chose to delete the leftover folder /worktree/api and branch branch-api, from “Deliver api”');
+});
+
+test('a failed git command in cleanup shows git\'s own reason on the board, not just the command line', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api')]));
+  dropIt(f, 'api');
+  const failure = await promisify(execFile)('git', ['symbolic-ref', 'HEAD'], { cwd: process.env.AW_DATA_DIR }).catch((e) => e);
+  f.runtime.cleanup = async () => { throw failure; };
+  await f.tick();
+  assert.equal(f.sub().error, 'Command failed: git symbolic-ref HEAD: fatal: not a git repository (or any of the parent directories): .git');
+  assert.equal(shortError(new Error('Plain\nsecond line')), 'Plain', 'an error with no stderr keeps its first line');
+});
+
 test('cancelling before there are sub-jobs stops the planner quietly, ignores its late plan and finishes without launching anything', async (t) => {
   const f = fixture(t); let planningCleanups = 0;
   f.runtime.cleanupPlanning = async () => { planningCleanups++; };
@@ -1064,6 +1264,17 @@ test('idle ticks and exhausted claims do not rewrite state or trigger extra grap
   f.store.action(f.job.id, 'start'); await f.tick(); assert.equal(rebuilt, 1);
   const running = f.store.data; assert.equal(f.store.claim(f.job.id, null, 'planning'), null); assert.equal(f.store.data, running);
   await f.tick(); assert.equal(rebuilt, 1);
+});
+
+test('a tick over many idle jobs never deep-clones the store, and allowed() still honours both pause flags', async (t) => {
+  const f = fixture(t); for (let n = 0; n < 30; n++) f.store.create(input);
+  let clones = 0; const snapshot = f.store.snapshot.bind(f.store); f.store.snapshot = () => { clones++; return snapshot(); };
+  await f.tick(); assert.equal(clones, 0);
+  const data = f.store.data; assert.ok(data.jobs.length > 30);
+  assert.equal(f.runner.allowed(f.job.id), true);
+  f.store.action(f.job.id, 'pause'); assert.equal(f.runner.allowed(f.job.id), false);
+  assert.equal(f.runner.allowed(data.jobs.at(-1).id), true, 'a per-job pause is that job\'s own');
+  f.store.settings({ paused: true }); assert.equal(f.runner.allowed(data.jobs.at(-1).id), false);
 });
 
 test('tick overlap does not duplicate side effects and paused-in-flight polling cannot merge', async (t) => {
@@ -1622,7 +1833,7 @@ test('a version-3 file migrates its Jira writes to writes to a Jira place, then 
     subJobs: [{ ...spec('api'), stage: 'pr', state: 'watching', sessions: [], repairs: [] }, { ...p.subJobs[1], stage: 'jira', state: 'writing', jiraKey: 'AUTH-123', sessions: [], repairs: [] }],
     runs: [{ id: 'run_w', subJobId: null, phase: 'jira', writes: ['w'], sessionId: 'sid', stopped: false, report: null }] }] });
   const [job] = data.jobs;
-  assert.equal(data.version, 5);
+  assert.equal(data.version, 6);
   for (const list of [job.subJobs, job.plan.subJobs, job.previousPlan.subJobs]) assert.deepEqual([list[1].kind, list[1].place], ['write', { type: 'jira' }]);
   assert.deepEqual([job.subJobs[1].stage, job.subJobs[1].state, job.subJobs[1].error], ['write', 'failed', 'This write predates session-owned writes; drop it or redo it by hand']);
   assert.equal(job.subJobs[0].kind, undefined, 'a PR is untouched');
@@ -1898,10 +2109,12 @@ test('a job created without a title starts under its description and takes the g
   const id = host.broadcasts[0].jobId;
   assert.equal(host.broadcasts[0].event, 'job-created', 'the create does not wait for a title');
   assert.equal(f.store.get(id).title, 'Customers can sign in reliably');
+  assert.equal(f.store.get(id).titlePending, true, 'the board draws a loader until Haiku answers');
   const { revision } = f.store.get(id); const rebuilds = host.rebuilds;
   answer({ text: 'Reliable SSO sign-in', liveSessionId: 'live-1', error: null });
   await new Promise(setImmediate);
   assert.equal(f.store.get(id).title, 'Reliable SSO sign-in');
+  assert.equal(f.store.get(id).titlePending, undefined);
   assert.equal(f.store.get(id).revision, revision, 'a title is not a plan revision');
   assert.equal(host.rebuilds, rebuilds + 1);
   assert.deepEqual(billed, [], 'no card yet, so nothing to bill');
@@ -1914,11 +2127,32 @@ test('a failed title generation keeps the fallback, and a supplied title is neve
   let calls = 0;
   const handler = makeJobCreateHandler({ run: async () => { calls++; return { text: null, liveSessionId: 'live-1', error: new Error('boom') }; } });
   await handler.handler({ job: { intent: 'Make sign-in reliable' } }, host);
+  const rebuilds = host.rebuilds;
   await new Promise(setImmediate);
   assert.equal(f.store.get(host.broadcasts[0].jobId).title, 'Make sign-in reliable');
+  assert.equal(f.store.get(host.broadcasts[0].jobId).titlePending, undefined, 'a failure ends the wait, never a stuck loader');
+  assert.equal(host.rebuilds, rebuilds + 1, 'and the board hears so');
   await handler.handler({ job: input }, host);
   await new Promise(setImmediate);
   assert.equal(calls, 1); assert.equal(f.store.get(host.broadcasts[1].jobId).title, 'Reliable sign-in');
+  assert.equal(f.store.get(host.broadcasts[1].jobId).titlePending, undefined, 'a supplied title waits on nothing');
+});
+
+test('an empty title answer ends the wait under the fallback', async (t) => {
+  const f = fixture(t);
+  const host = fakeHost(f);
+  stubRunner(t, host);
+  const handler = makeJobCreateHandler({ run: async () => ({ text: '   ', liveSessionId: null, error: null }) });
+  await handler.handler({ job: { intent: 'Make sign-in reliable' } }, host);
+  await new Promise(setImmediate);
+  const job = f.store.get(host.broadcasts[0].jobId);
+  assert.deepEqual([job.title, job.titlePending], ['Make sign-in reliable', undefined]);
+});
+
+test('a restart drops a pending title: the Haiku run it waited on died with the process', (t) => {
+  const f = fixture(t);
+  const job = f.store.create({ intent: 'Make sign-in reliable' }, { titlePending: true });
+  assert.equal(new JobStore(f.store.file).get(job.id).titlePending, undefined);
 });
 
 test('a generated title replaces only the title it was generated for', (t) => {
@@ -1989,7 +2223,7 @@ function reviewGithub(raw = reviewRequiredPr, { classic = { contexts: ['tests'] 
   const calls = [];
   const gh = new JobGithub(async (_bin, args) => {
     calls.push(args);
-    if (args[0] === 'repo') return JSON.stringify({ nameWithOwner: 'org/repo' });
+    if (args[0] === 'repo') return JSON.stringify({ nameWithOwner: 'org/repo', viewerPermission: 'ADMIN' });
     if (args[0] === 'pr') return JSON.stringify(raw);
     if (args[1].includes('/rules/branches/')) return JSON.stringify([rules]);
     if (args[1].includes('/check-runs?')) return JSON.stringify([{ check_runs: runs }]);
@@ -2231,6 +2465,48 @@ test('a cancelled post-merge run is judged by the later run on the same branch t
   assert.equal((await gh.deployment(sub)).status, 'pending', 'an unreplaced cancellation holds back a green sibling');
 });
 
+test('a failed post-merge run is judged by the NEWEST completed later run that contains the merge', async () => {
+  const sub = { repo: '/repo', pr: { mergeCommit: 'merged', base: 'main' } };
+  const base = { headBranch: 'main', event: 'push', status: 'completed', attempt: 1, workflowName: 'Build' };
+  const failed = { ...base, databaseId: 10, headSha: 'merged', conclusion: 'failure' };
+  const red = { ...base, databaseId: 11, headSha: 'next', conclusion: 'failure' };
+  const green = { ...base, databaseId: 12, headSha: 'after', conclusion: 'success' };
+  const running = { ...base, databaseId: 13, headSha: 'latest', status: 'in_progress', conclusion: '' };
+  let later = [];
+  const gh = new JobGithub(async (_bin, args) => args.includes('--commit') ? JSON.stringify([failed])
+    : args[0] === 'run' ? JSON.stringify(later) : 'ahead');
+  assert.equal((await gh.deployment(sub)).status, 'failing', 'nothing after it: still red');
+  later = [red, green, running];
+  let result = await gh.deployment(sub);
+  assert.equal(result.status, 'passing', 'a later red run is not the last word when a newer one passed');
+  assert.equal(result.runs[0].runId, 12); assert.equal(result.runs[0].supersedes, 10); assert.equal(result.runs[0].commit, 'after');
+  later = [green, { ...red, databaseId: 14 }];
+  result = await gh.deployment(sub);
+  assert.equal(result.status, 'failing', 'passed then failed is red: the newest completed run decides');
+  assert.equal(result.runs[0].runId, 14);
+  later = [red, { ...green, databaseId: 15, conclusion: 'cancelled' }];
+  assert.equal((await gh.deployment(sub)).runs[0].runId, 11, 'a cancelled successor is skipped for the one before it');
+});
+
+test('a later run on a commit that does not contain the merge never supersedes a failed or cancelled one', async () => {
+  const sub = { repo: '/repo', pr: { mergeCommit: 'merged', base: 'main' } };
+  const base = { headBranch: 'main', event: 'push', status: 'completed', attempt: 1, workflowName: 'Build' };
+  const sibling = { ...base, databaseId: 12, headSha: 'sibling', conclusion: 'success' };
+  const compared = [];
+  let onCommit = [{ ...base, databaseId: 10, headSha: 'merged', conclusion: 'failure' }];
+  const gh = new JobGithub(async (_bin, args) => {
+    if (args.includes('--commit')) return JSON.stringify(onCommit);
+    if (args[0] === 'run') return JSON.stringify([sibling]);
+    compared.push(args[1]); return 'diverged';
+  });
+  let result = await gh.deployment(sub);
+  assert.equal(result.status, 'failing'); assert.equal(result.runs[0].runId, 10); assert.equal(result.runs[0].supersedes, undefined);
+  assert.deepEqual(compared, ['repos/{owner}/{repo}/compare/merged...sibling'], 'containment was asked, and said no');
+  onCommit = [{ ...base, databaseId: 10, headSha: 'merged', conclusion: 'cancelled' }];
+  result = await gh.deployment(sub);
+  assert.equal(result.status, 'pending'); assert.equal(result.runs[0].status, 'cancelled');
+});
+
 // --- Changing the plan of a running job ---
 
 test('a running job takes a plan change as a proposal: frozen work is locked, removed work is cancelled, new work held until approval', async (t) => {
@@ -2250,6 +2526,10 @@ test('a running job takes a plan change as a proposal: frozen work is locked, re
   assert.match(prompt, /ALREADY RUNNING/); assert.match(prompt, /- api \(pr\) "Deliver api": done\/done · FROZEN/);
   assert.match(prompt, /Frozen \(.*\): api\./); assert.match(prompt, /- web .*a step is running/); assert.match(prompt, /Requested change: Drop docs/);
   assert.match(prompt, /Feedback on, or a question about, what a live sub-job already produced.*`forward` when its session is open on review, else `rework`.*never write it into a later sub-job/i);
+  assert.match(prompt, /The summary is at most four sentences: first what is wrong or what the human asked, then what approving your recommended option does/);
+  assert.match(prompt, /A label says what happens if they pick it.*its why says what they get and what they give up/);
+  assert.match(prompt, /for the human, who has not read the code, the plan or this prompt.*never file or function names, sub-job ids, or the plan's own words: brief, show, check, context, round, forward, rework, frozen, pinned/);
+  assert.match(prompt, /call it that \(the agent that built it\), never a reviewer\. Paths, ids, commands, plan lines and runs go in evidence/);
   assert.throws(() => change(f, null, 'again'), /Wait for the wrangler/);
 
   const proposal = (subs) => plan(subs);
@@ -2459,6 +2739,52 @@ test('a conflicting update is treated as DIRTY and sent to repair; transient fai
   assert.notEqual(g.last().run.phase, 'repair'); assert.equal(g.sub().branchUpdate.failedHead, undefined);
 });
 
+test('a BEHIND accepted-red head is updated, not --admin merged, and the acceptance follows the new head', async (t) => {
+  const f = fixture(t); f.store.settings({ maxRepairs: 0 }); await atPr(f);
+  const updated = []; f.github.updateBranch = async (s) => { updated.push(s.pr.head); };
+  f.setPr({ checkStatus: 'failing', checks: [{ name: 'e2e', state: 'FAILURE' }] }); await f.tick();
+  acceptRed(f, 'api', 'flaky');
+  f.setPr({ mergeState: 'BEHIND', behind: false, dirty: false }); await f.tick();
+  assert.deepEqual(updated, ['head1']); assert.deepEqual(f.merged, []);
+  f.setPr({ head: 'head2', mergeState: 'BLOCKED' }); await f.tick();
+  assert.equal(f.sub().acceptedRed.ref, 'head2'); assert.equal(f.sub().mergeApprovedHead, 'head2');
+  assert.deepEqual(f.merged, ['head2']);
+  const g = fixture(t); g.store.settings({ maxRepairs: 0 }); await atPr(g);
+  g.github.updateBranch = async () => { throw new Error('should not update'); };
+  g.setPr({ checkStatus: 'failing' }); await g.tick(); acceptRed(g, 'api');
+  g.setPr({ mergeState: 'BEHIND', dirty: true }); await g.tick();
+  assert.equal(g.sub().branchUpdate, undefined, 'a conflicted head is not updated');
+});
+
+test('a merge that needs admin rights the viewer lacks sets a sub-job error; a transient failure still retries', async (t) => {
+  const f = fixture(t); await atPr(f);
+  f.github.merge = async () => { throw Object.assign(new Error('Merging this PR needs admin rights on the repository.'), { needsAdmin: true }); };
+  f.setPr({ checkStatus: 'passing' }); await f.tick();
+  assert.match(f.sub().error, /needs admin rights/); assert.equal(f.sub().observationError ?? null, null);
+  const g = fixture(t); await atPr(g);
+  g.github.merge = async () => { throw new Error('network down'); };
+  g.setPr({ checkStatus: 'passing' }); await g.tick();
+  assert.match(g.sub().observationError, /network down/); assert.ok(!g.sub().error);
+});
+
+test('merge refuses --admin for a viewer without admin permission, or when GitHub refuses the bypass', async () => {
+  const redPr = { ...rawPr, mergeStateStatus: 'BLOCKED', statusCheckRollup: [{ name: 'e2e', conclusion: 'FAILURE' }] };
+  const { gh, sub, calls } = reviewGithub(redPr);
+  sub.pr.mergeWithAdmin = false; sub.acceptedRed = { ref: 'head1', note: null, at: 1 };
+  const run = gh.run;
+  gh.run = async (bin, args, cwd) => (args[0] === 'repo' && args.includes('viewerPermission') ? JSON.stringify({ viewerPermission: 'WRITE' }) : run(bin, args, cwd));
+  await assert.rejects(gh.merge(sub), (e) => e.needsAdmin && /needs admin rights/.test(e.message));
+  assert.ok(!calls.some((a) => a[1] === 'merge'));
+  const h = reviewGithub(redPr); h.sub.pr.mergeWithAdmin = false; h.sub.acceptedRed = { ref: 'head1', note: null, at: 1 };
+  const run2 = h.gh.run;
+  h.gh.run = async (bin, args, cwd) => { if (args[1] === 'merge') throw Object.assign(new Error('x'), { stderr: 'the base branch policy prohibits the merge; --admin is not permitted' }); return run2(bin, args, cwd); };
+  await assert.rejects(h.gh.merge(h.sub), (e) => e.needsAdmin);
+  const k = reviewGithub(redPr); k.sub.pr.mergeWithAdmin = false; k.sub.acceptedRed = { ref: 'head1', note: null, at: 1 };
+  const run3 = k.gh.run;
+  k.gh.run = async (bin, args, cwd) => { if (args[1] === 'merge') throw new Error('network down'); return run3(bin, args, cwd); };
+  await assert.rejects(k.gh.merge(k.sub), (e) => !e.needsAdmin && /network down/.test(e.message));
+});
+
 test('a PR that stays behind gives up after repeated updates', async (t) => {
   const f = fixture(t); await atPr(f);
   let n = 0; f.github.updateBranch = async () => { n++; };
@@ -2504,13 +2830,31 @@ test('a planner\'s receipt may carry a diagnosis, ranked options and actions; th
     alternatives: [{ label: 'Accept the failed run', plan: plan([spec('api'), spec('web', ['api'])]), actions: [{ type: 'accept-red', sub: 'api' }] }] }, planner);
   const proposal = f.store.get(f.job.id).replan.proposal;
   assert.deepEqual([proposal.label, proposal.diagnosis.summary, proposal.alternatives.length, proposal.actions[0].pin], ['Recover with a PR', 'The migration is not idempotent', 1, { at: 'merge', ref: 'm1' }]);
-  const moveMerge = (ref) => f.store.update(f.job.id, (j) => { j.subJobs[0].pr.mergeCommit = ref; });
-  moveMerge('m2');
-  assert.throws(() => f.store.action(f.job.id, 'approve-replan', { proposalId: proposal.id, option: 1 }), /has moved since this was proposed/);
-  moveMerge('m1');
   f.store.action(f.job.id, 'approve-replan', { proposalId: proposal.id, option: 1 });
   const job = f.store.get(f.job.id);
   assert.deepEqual([job.subJobs[0].acceptedRed.ref, job.subJobs[0].recoveredBy, job.subJobs.some((s) => s.id === 'fix')], ['m1', undefined, false]);
+});
+
+test('a proposal whose step merged before approval goes back to the planner, and the history says so', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  f.alive.delete(f.workerFor('api').sid); await f.tick();
+  f.store.update(f.job.id, (j) => { Object.assign(j.subJobs[0], { stage: 'pr', state: 'watching', pr: { url: PR_URL, head: 'h1', checkStatus: 'passing' } }); });
+  change(f, 'api', 'Rename the flag'); await f.tick();
+  const planner = plannerOf(f);
+  f.report({ kind: 'plan', plan: plan([spec('api', [], { brief: 'Implement api with the renamed flag' }), spec('web')]) }, planner);
+  const proposal = f.store.get(f.job.id).replan.proposal;
+  f.alive.delete(planner.sid); await f.tick();
+  f.store.update(f.job.id, (j) => { Object.assign(j.subJobs[0], { stage: 'deployment', mergedAt: Date.now() }); });
+  f.store.action(f.job.id, 'approve-replan', { proposalId: proposal.id });
+  const job = f.store.get(f.job.id);
+  assert.equal(job.replan.proposal, null);
+  assert.deepEqual(job.moves.slice(-2).map((m) => [m.move, m.subJobId, m.detail]), [
+    ['replan-sent-back', null, 'Sent the plan change back to the wrangler: “Deliver api” has merged since it was proposed'],
+    ['replan-sent-back', 'api', '“Deliver api” has merged since the plan change was proposed, so it went back to the wrangler']]);
+  await f.tick();
+  const again = plannerOf(f);
+  assert.notEqual(again.run.id, planner.run.id, 'a fresh planning run picks it up');
+  assert.match(jobPrompt(f.store.get(f.job.id), null, again.run), /Rename the flag[\s\S]*“Deliver api” \(api\) has merged/);
 });
 
 // ---- Red steps (job-red.js): a red step goes up one level before it goes to the human ----
@@ -2662,11 +3006,14 @@ test('a retry the wrangler suggests waits for the human even under Wrangler repl
   assert.equal(redJob(f).subJobs[0].error, null);
 });
 
-test('a retry the wrangler suggested is refused once the step has failed differently', async (t) => {
+test('a retry the wrangler suggested goes back to it once the step has failed differently', async (t) => {
   const f = await lockedApi(t);
   f.report({ kind: 'plan', plan: redJob(f).plan, diagnosis: { summary: 'A fetch race' }, actions: [{ type: 'retry', sub: 'api' }] }, plannerOf(f));
   f.store.update(f.job.id, (j) => { j.subJobs[0].error = 'Command failed: git worktree add'; });
-  assert.throws(() => f.store.action(f.job.id, 'approve-replan', { proposalId: redJob(f).replan.proposal.id, option: 0 }), /has moved since this was proposed \(failure/);
+  await f.tick();
+  f.store.action(f.job.id, 'approve-replan', { proposalId: redJob(f).replan.proposal.id, option: 0 });
+  assert.equal(redJob(f).replan.proposal, null, 'not applied');
+  assert.match(redJob(f).replan.feedback, /could not apply because the job moved under it: “Deliver api” \(api\) has moved \(failure /);
 });
 
 test('the red replan prompt says an unchanged plan declares the step red, so its summary never talks about approving', async (t) => {
@@ -2687,7 +3034,7 @@ test('out of tries, a step is declared red with every attempt listed; a declared
   const job = redJob(f);
   assert.equal(job.replan, null); assert.equal(f.launched.filter((w) => w.run.red).length, 1);
   const declared = job.subJobs[0].red.declared;
-  assert.deepEqual([declared.auto, declared.tried], [true, ['Replan 1: Raised the e2e timeout']]);
+  assert.deepEqual([declared.auto, declared.by, declared.tried], [true, 'auto', ['Replan 1: Raised the e2e timeout']]);
   assert.match(declared.summary, /used its 1 automatic try on this step/);
   assert.match(job.moves.at(-1).detail, /Declared “Deliver api” red to you: 1 automatic try used/);
   await f.tick(); await f.tick();
@@ -2704,7 +3051,7 @@ test('the planner escalates with options: the step is declared red and the optio
   f.report({ kind: 'escalate', summary: 'login-flow.spec is flaky on main and quarantining it needs QA sign-off', tried: ['Reran e2e twice', 'Added a wait'], ask: 'Merge #1 with the red check, or hold it?',
     options: [{ label: 'Accept red and merge', plan: redJob(f).plan, actions: [{ type: 'accept-red', sub: 'api' }] }, { label: 'Hold for QA', plan: redJob(f).plan, actions: rework('Wait for QA') }] }, planner);
   const job = redJob(f);
-  assert.deepEqual([job.subJobs[0].red.declared.ask, job.subJobs[0].red.declared.tried.slice(-2)], ['Merge #1 with the red check, or hold it?', ['Reran e2e twice', 'Added a wait']]);
+  assert.deepEqual([job.subJobs[0].red.declared.ask, job.subJobs[0].red.declared.by, job.subJobs[0].red.declared.tried.slice(-2)], ['Merge #1 with the red check, or hold it?', 'planner', ['Reran e2e twice', 'Added a wait']]);
   assert.equal(job.replan.proposal.escalation.sub, 'api'); assert.equal(job.replan.proposal.alternatives.length, 1);
   assert.equal(job.replan.proposal.diagnosis.summary, job.subJobs[0].red.declared.summary);
   f.store.action(f.job.id, 'approve-replan', { proposalId: job.replan.proposal.id, option: 0 });
@@ -2726,7 +3073,7 @@ test('a step agent may declare its own step red, or ask for a replan: blocked an
   g.report({ kind: 'escalate', summary: 'Production creds are needed to test this', tried: ['Looked in the vault'], ask: 'Can you supply a read-only key?' });
   await g.tick(); await g.tick();
   job = g.store.get(g.job.id);
-  assert.equal(job.subJobs[0].red.declared.ask, 'Can you supply a read-only key?');
+  assert.deepEqual([job.subJobs[0].red.declared.ask, job.subJobs[0].red.declared.by], ['Can you supply a read-only key?', 'agent']);
   assert.ok(!job.replan, 'declared by its own agent: nobody is sent after it');
   assert.equal(g.launched.filter((w) => w.run.phase === 'planning').length, 1, 'only the first plan');
   assert.throws(() => g.report({ kind: 'replan', summary: 'x' }, g.launched.find((w) => w.run.phase === 'planning')), /already submitted|must submit/);
@@ -2769,6 +3116,219 @@ test('a PR may land on its own base; an old plan has none, and no other kind may
   assert.equal(planSchema.parse(plan({ repo: '/repo', base: ' release/2.x ' })).subJobs[0].base, 'release/2.x');
   assert.throws(() => planSchema.parse(plan({ repo: '/repo', base: '-D' })), /branch name/);
   assert.throws(() => planSchema.parse(plan({ kind: 'session', base: 'next' })), /only a PR lands on a branch/);
+});
+
+test('an unpushed commit on local main leaves merged sub-jobs done and one notice for the checkout', async (t) => {
+  const git = (cwd, ...args) => execGit(cwd, args);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-main-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const origin = path.join(dir, 'origin.git'), repo = path.join(dir, 'repo'), other = path.join(dir, 'other');
+  await execFileP('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+  await execFileP('git', ['clone', '-q', origin, repo]);
+  const commit = async (cwd, file, message) => { fs.writeFileSync(path.join(cwd, file), `${message}\n`); await git(cwd, 'add', file); await git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', message); };
+  await commit(repo, 'README.md', 'Initial');
+  await git(repo, 'push', '-q', 'origin', 'HEAD:main');
+  await execFileP('git', ['clone', '-q', origin, other]);
+  // Two PRs land on origin while another session has a commit of its own on local main.
+  for (const n of [1, 2]) { await commit(other, `pr${n}.js`, `Merged PR ${n}`); await git(other, 'push', '-q', 'origin', 'HEAD:main'); }
+  await commit(repo, 'local.js', 'Unpushed work from another session');
+  const localHead = await git(repo, 'rev-parse', 'HEAD');
+
+  const f = fixture(t); await f.approve(plan([spec('api', [], { repo }), spec('web', [], { repo })])); f.alive.clear(); await f.tick();
+  assert.equal(settingsSchema.parse(f.store.data.settings).updateMain, true, 'on by default, for every job');
+  const spawned = [];
+  const real = new JobRuntime({ host: { sessions: { get: () => null, spawn: async (o) => { spawned.push(o); return { sessionId: 's_fix' }; } } } });
+  f.runtime.cleanup = (j, s, o) => real.cleanup(j, { ...s, worktree: null }, o);
+  for (const k of ['retryMain', 'resolveMain', 'mainCaughtUp']) f.runtime[k] = (...a) => real[k](...a);
+  for (const id of ['api', 'web']) {
+    markDone(f, id, 'Merged');
+    f.store.update(f.job.id, (j) => { j.subJobs.find((s) => s.id === id).pr = { url: `${PR_URL}${id}`, head: 'h', base: 'main' }; });
+  }
+  await f.tick();
+  const job = f.store.get(f.job.id);
+  assert.deepEqual(job.subJobs.map((s) => [s.id, s.stage, s.state, s.error || null]), [['api', 'done', 'done', null], ['web', 'done', 'done', null]], 'the update never blocks a sub-job');
+  assert.equal(job.mainNotices.length, 1, 'one checkout, one notice');
+  const [notice] = job.mainNotices;
+  assert.equal(notice.path, fs.realpathSync(repo));
+  assert.equal(notice.reason, 'diverged');
+  assert.deepEqual(notice.subs, ['api', 'web']);
+  assert.deepEqual(notice.localOnly.map((c) => c.subject), ['Unpushed work from another session']);
+  assert.deepEqual(notice.incoming.map((c) => c.subject), ['Merged PR 2', 'Merged PR 1']);
+  assert.equal(await git(repo, 'rev-parse', 'HEAD'), localHead, 'the human\'s commit is never moved');
+  assert.deepEqual(new JobStore(f.store.file).get(f.job.id).mainNotices, job.mainNotices, 'kept across a restart');
+  assert.deepEqual(notice.resolutions.map((r) => r.id), ['rebase', 'branch'], 'stashing cannot reconcile commits, so it is not offered');
+
+  // A resolution button: refused unless offered, then spawned on the next tick in the checkout.
+  assert.throws(() => f.store.action(f.job.id, 'resolve-main', { path: notice.path, resolution: 'stash' }), /does not apply/);
+  f.store.action(f.job.id, 'resolve-main', { path: notice.path, resolution: 'rebase' });
+  assert.throws(() => f.store.action(f.job.id, 'resolve-main', { path: notice.path, resolution: 'branch' }), /already working/);
+  await f.tick();
+  assert.equal(spawned.length, 1);
+  const [s] = spawned;
+  assert.equal(s.cwd, notice.path);
+  assert.equal(s.worktree, undefined, 'the human\'s own checkout, not a worktree');
+  assert.match(s.intent, /The human chose one fix: Rebase & push\. Do exactly that/);
+  assert.match(s.intent, /git rebase --autostash origin\/main/);
+  assert.match(s.intent, /Local commits not on origin \(1\):\n {2}- [0-9a-f]{12} "Unpushed work from another session"/);
+  assert.match(s.intent, /New on origin\/main \(2\):/);
+  assert.equal(f.store.get(f.job.id).mainNotices[0].resolving.sessionId, 's_fix');
+  await f.tick();
+  assert.equal(spawned.length, 1, 'one session per press');
+  assert.equal(f.store.get(f.job.id).mainNotices.length, 1, 'kept while main is still behind');
+
+  // The session does its one fix; the next tick sees main level with origin and clears the notice.
+  await git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'pull', '-q', '--rebase', 'origin', 'main');
+  await git(repo, 'push', '-q', 'origin', 'main');
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-main', { path: notice.path }), /no longer needs updating/);
+
+  // Retry, once the human has fixed it by hand, clears it too.
+  await git(other, 'pull', '-q', 'origin', 'main');
+  await commit(other, 'pr3.js', 'Merged PR 3'); await git(other, 'push', '-q', 'origin', 'HEAD:main');
+  fs.writeFileSync(path.join(repo, 'README.md'), 'edited\n');
+  const stuck = await real.retryMain(notice);
+  assert.equal(stuck.reason, 'dirty');
+  f.store.update(f.job.id, (j) => { j.mainNotices = [{ ...stuck, subs: ['api'], at: 1, retrying: false, resolutions: [{ id: 'stash' }] }]; });
+  await git(repo, 'checkout', '--', 'README.md');
+  f.store.action(f.job.id, 'retry-main', { path: notice.path });
+  assert.equal(f.store.get(f.job.id).mainNotices[0].retrying, true);
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+});
+
+test('a resolution session that cannot start says why and offers the buttons again', async (t) => {
+  const f = fixture(t);
+  f.store.update(f.job.id, (j) => { j.mainNotices = [{ path: '/home/me/repo', base: 'main', reason: 'dirty', dirty: [{ path: 'a.js', change: 'modified' }], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 2, subs: ['api'], at: 1, retrying: false, resolutions: [{ id: 'stash' }] }]; });
+  f.runtime.resolveMain = async () => { throw new Error('no such directory'); };
+  f.store.action(f.job.id, 'resolve-main', { path: '/home/me/repo', resolution: 'stash' });
+  await f.tick();
+  const [n] = f.store.get(f.job.id).mainNotices;
+  assert.equal(n.resolving, null);
+  assert.equal(n.resolveError, 'no such directory');
+  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /Asked an agent to stash & update in \/home\/me\/repo/);
+});
+
+test('Dismiss forgets a checkout notice and records it; a failed Retry keeps it with the new state', async (t) => {
+  const f = fixture(t);
+  const notice = { path: '/home/me/repo', base: 'main', reason: 'dirty', dirty: [{ path: 'a.js', change: 'modified' }], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 0, subs: ['api'], at: 1, retrying: false };
+  f.store.update(f.job.id, (j) => { j.mainNotices = [notice]; });
+  f.runtime.retryMain = async (n) => ({ ...n, reason: 'diverged', localCount: 1, localOnly: [{ sha: 'abc', subject: 'Local' }] });
+  f.store.action(f.job.id, 'retry-main', { path: notice.path });
+  await f.tick();
+  const [kept] = f.store.get(f.job.id).mainNotices;
+  assert.equal(kept.reason, 'diverged'); assert.equal(kept.retrying, false); assert.deepEqual(kept.subs, ['api']);
+  f.store.action(f.job.id, 'dismiss-main', { path: notice.path });
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /Left \/home\/me\/repo as it was/);
+});
+
+test('Ask an agent queues one helper per press, the tick spawns it as a plain session briefed with the step, and it is never a step', async (t) => {
+  const f = fixture(t);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-helper-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  await f.approve(plan([spec('api', [], { repo: dir })]));
+  await f.tick();
+  f.store.update(f.job.id, (j) => { j.subJobs[0].pr = { url: PR_URL, head: 'h', base: 'main', checkStatus: 'pending' }; });
+  const before = f.store.get(f.job.id);
+  const spawned = [];
+  const real = new JobRuntime({ host: { sessions: { spawn: async (o) => { spawned.push(o); return { sessionId: `s_help${spawned.length}` }; } } } });
+  f.runtime.spawnHelper = (...a) => real.spawnHelper(...a);
+
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  assert.throws(() => f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' }), /already starting/, 'a second press before the tick is refused');
+  await f.tick();
+  assert.equal(spawned.length, 1);
+  const [s] = spawned;
+  assert.equal(s.cwd, dir, 'the step\'s own checkout');
+  assert.equal(s.worktree, undefined); assert.equal(s.addDirs, undefined);
+  assert.match(s.intent, /This is the human's own session and they drive it/);
+  assert.match(s.intent, /"title": "Deliver api"/);
+  assert.match(s.intent, new RegExp(`Pull request: ${PR_URL}`));
+  assert.doesNotMatch(s.intent, /runId/);
+  let job = f.store.get(f.job.id);
+  const sub = job.subJobs[0];
+  assert.deepEqual(sub.helpers.map((h) => h.sessionId), ['s_help1']);
+  assert.deepEqual(sub.sessions, before.subJobs[0].sessions, 'not one of the step\'s sessions: cleanup would archive it');
+  assert.equal(job.runs.length, before.runs.length, 'no run, so no job_report, worker skill or sandbox');
+  assert.match(job.moves.at(-1).detail, /Asked an agent to help with “Deliver api”/);
+
+  await f.tick();
+  assert.equal(spawned.length, 1, 'one session per press');
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).subJobs[0].helpers.map((h) => h.sessionId), ['s_help1', 's_help2'], 'a step may have several over time');
+  assert.deepEqual(new JobStore(f.store.file).get(f.job.id).subJobs[0].helpers, f.store.get(f.job.id).subJobs[0].helpers, 'kept across a restart');
+
+  f.store.action(f.job.id, 'cancel-job');
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  await f.tick();
+  assert.equal(spawned.length, 3, 'a cancelled job can still be looked into');
+  assert.throws(() => f.store.action(f.job.id, 'ask-helper', { subJobId: 'nope' }), /Sub-job not found/);
+});
+
+test('a human task\'s helper marks it in progress; a helper that cannot start says why and frees the button', async (t) => {
+  const f = fixture(t);
+  await f.approve(plan([humanSpec('vendor')]));
+  await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().state], ['human', 'queued']);
+  f.runtime.spawnHelper = async () => { throw new Error('no such agent'); };
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'vendor' });
+  let sub = f.store.get(f.job.id).subJobs[0];
+  assert.equal(sub.state, 'doing');
+  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /help with “Do vendor yourself”, and started it/);
+  await f.tick();
+  sub = f.store.get(f.job.id).subJobs[0];
+  assert.equal(sub.helpers[0].error, 'no such agent');
+  assert.equal(sub.helpers[0].sessionId, null);
+  assert.equal(f.store.get(f.job.id).error ?? null, null, 'the job is not blocked by it');
+  f.runtime.spawnHelper = async () => 's_ok';
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'vendor' });
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).subJobs[0].helpers.map((h) => h.sessionId), [null, 's_ok']);
+  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /help with “Do vendor yourself”$/, 'already in progress');
+});
+
+test('a helper sends its idea through the step\'s own Add idea route, marked as the helper\'s; any other session is refused', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api')]));
+  f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api')); await f.tick();
+  f.runtime.spawnHelper = async () => 's_help';
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  await f.tick();
+  const host = fakeHost(f);
+  const send = (caller, text) => sendStepIdeaTool.handler({ host, caller }, { text });
+
+  for (const caller of [f.workerFor('api').sid, 's_stranger', undefined]) {
+    const res = await send(caller, 'Merge it now');
+    assert.equal(res.isError, true); assert.match(res.content[0].text, /Only a helper session opened from a step/);
+  }
+  assert.equal(f.store.get(f.job.id).replan ?? null, null, 'nothing reached the planner');
+  assert.equal(host.rebuilds, 0);
+
+  const res = await send('s_help', 'The retry loop never backs off: add a delay');
+  assert.equal(res.structuredContent.accepted, true);
+  let job = f.store.get(f.job.id);
+  assert.equal(job.replan.feedback, 'About “Deliver api” (api, review/verified): (Sent by the human\'s helper session on this step, at the human\'s request) The retry loop never backs off: add a delay');
+  assert.deepEqual(job.replan.source, { sub: 'api', at: 'code', ref: job.subJobs[0].ready.receiptId }, 'pinned to the step as it stands, like the box');
+  assert.deepEqual(job.subJobs[0].helpers[0].ideas.map((m) => m.text), ['The retry loop never backs off: add a delay']);
+  assert.deepEqual([job.moves.at(-1).move, job.moves.at(-1).subJobId, job.moves.at(-1).note], ['helper-idea', 'api', 'The retry loop never backs off: add a delay']);
+  assert.match(job.moves.at(-1).detail, /^A helper session sent the wrangler an idea about “Deliver api”$/);
+  assert.equal(host.rebuilds, 1);
+
+  await f.tick();
+  const planner = f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub);
+  assert.match(jobPrompt(f.store.get(f.job.id), null, planner.run), /helper session on this step/);
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('backoff', ['api'])]) }, planner);
+  job = f.store.get(f.job.id);
+  assert.ok(job.replan.proposal, 'the planner\'s proposal waits for the human as a typed idea\'s does');
+  assert.equal(job.subJobs[0].stage, 'review', 'the helper changed nothing itself');
+
+  const g = fixture(t); await g.approve(plan([spec('api')]));
+  g.report({ kind: 'ready', checks: ['Tests pass'] }, g.workerFor('api')); await g.tick();
+  g.store.action(g.job.id, 'request-change', { subJobId: 'api', at: 'code', ref: g.sub().ready.receiptId, text: 'Rename it', from: 'helper' });
+  assert.doesNotMatch(g.store.get(g.job.id).replan.feedback, /helper session/, 'the board cannot claim to be a helper');
+  g.store.update(g.job.id, (j) => { j.subJobs[0].helpers = [{ id: 'hp_1', at: 1, sessionId: 's_late' }]; j.subJobs[0].stage = 'done'; });
+  assert.match((await sendStepIdeaTool.handler({ host: fakeHost(g), caller: 's_late' }, { text: 'x' })).content[0].text, /Nothing is left to change here/);
 });
 
 // ---- The job's conversation with the wrangler (job-talk.js) ----

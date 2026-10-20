@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { initialPick, switchPick } from './model-picker.js';
-import { describe, startGalaxy, plateArt, plateThumb } from './model-plates.js';
+import { initialPick, switchPick, offeredAgents } from './model-picker.js';
+import { describe, weakModel, startGalaxy, plateArt, plateThumb } from './model-plates.js';
 
 const claude = { id: 'claude', label: 'Claude', efforts: ['low', 'high', 'max'].map((value) => ({ value })), models: [{ value: 'fable' }, { value: 'opus', default: true }, { value: 'sonnet' }] };
 const codex = { id: 'codex', label: 'Codex', efforts: ['low', 'high', 'max', 'ultra'].map((value) => ({ value })), models: [
@@ -38,6 +38,17 @@ test('the 1M suffix becomes a context badge rather than part of the name', () =>
   assert.equal(long.name, 'Claude Sonnet'); assert.equal(long.short, 'Sonnet'); assert.equal(long.ctx, '1M');
   assert.equal(d(claude, 'claude-sonnet-5-5').ctx, '200K');
   assert.equal(d(claude, 'claude-opus-5-5[1m]').name, 'Claude Opus 5.5');
+});
+
+test('context comes from the host’s window or label, and the [1m] guess only when neither says', () => {
+  assert.equal(d(claude, 'opus', { label: 'Opus 5.5 · 1M context' }).ctx, '1M', 'a 1M alias with no suffix');
+  assert.equal(d(claude, 'fable', { label: 'Fable 5.1 · 1M context' }).ctx, '1M');
+  assert.equal(d(claude, 'sonnet', { label: 'Sonnet 5.5 · 200K context' }).ctx, '200K');
+  assert.equal(d(claude, 'sonnet[1m]', { label: 'Sonnet 5.5 · 1M context' }).ctx, '1M');
+  assert.equal(d(claude, 'opus', { contextWindow: 1_000_000 }).ctx, '1M');
+  assert.equal(d(claude, 'haiku', { contextWindow: 200_000, label: 'Haiku 4.5 · 1M context' }).ctx, '200K', 'contextWindow wins over the label');
+  assert.equal(d(claude, 'opus', { label: 'Opus 5.5' }).ctx, '200K', 'no window and no suffix: the old guess');
+  assert.equal(d(claude, 'opus[1m]', { label: 'Opus' }).ctx, '1M');
 });
 
 test('Claude plates are self-contained SVG: preview carries id and title, the tray the title, the band neither', () => {
@@ -99,6 +110,16 @@ test('an unknown agent gets index cards, and catalog strings are escaped in the 
   assert.equal(empty.plate, 'card', 'an agent with no models still describes');
 });
 
+test('weakModel flags anything below Opus 5.5, Fable 5.1 or GPT-6 Astra, reading a bare opus or fable alias as current', () => {
+  const weak = (agent, value) => weakModel(agent, { value });
+  for (const v of ['opus', 'fable', 'opus[1m]', 'claude-opus-5-5', 'claude-opus-6', 'claude-opus-5-10', 'claude-fable-5-1', 'claude-fable-6[1m]']) assert.equal(weak(claude, v), false, v);
+  for (const v of ['sonnet', 'sonnet[1m]', 'haiku', 'opusplan', 'claude-opus-5', 'claude-opus-4-7', 'claude-fable-5', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001']) assert.equal(weak(claude, v), true, v);
+  for (const v of ['gpt-6-astra', 'gpt-6.1-astra', 'gpt-7-astra']) assert.equal(weak(codex, v), false, v);
+  for (const v of ['gpt-5.5-astra', 'gpt-6.1-sol', 'gpt-6-luna', 'gpt-6-terra', 'gpt-6']) assert.equal(weak(codex, v), true, v);
+  assert.equal(weak({ id: 'gemini', label: 'Gemini' }, 'gemini-3-pro'), true, 'an unknown agent warns');
+  assert.equal(weakModel(claude, { value: '' }), false, 'no pick, no warning');
+});
+
 test('initialPick opens on your usual while the catalog has it, else on the first agent’s default', () => {
   assert.deepEqual(initialPick(agents, { agent: 'codex', model: 'gpt-6-luna', effort: 'high' }), { agent: 'codex', model: 'gpt-6-luna', effort: 'high' });
   assert.deepEqual(initialPick(agents, { agent: 'codex', model: 'gpt-6-luna', effort: 'max' }), { agent: 'codex', model: 'gpt-6-luna', effort: '' }, 'luna stops at high');
@@ -136,4 +157,13 @@ test('a galaxy runs exactly one animation loop, stops on demand, and ends when i
     startGalaxy(canvas(), { seed: 'x', numeral: '6' }, 1);
     assert.equal(pending.size, 0, 'reduced motion draws one still frame');
   } finally { Object.assign(globalThis, { requestAnimationFrame: prev.raf, cancelAnimationFrame: prev.caf, matchMedia: prev.mm }); }
+});
+
+test('the picker never offers opusplan, and a usual of opusplan opens on opus', () => {
+  const withPlan = [{ ...claude, models: [...claude.models, { value: 'opusplan', label: 'Opus plan · Sonnet execution' }] }, codex];
+  const offered = offeredAgents(withPlan);
+  assert.deepEqual(offered[0].models.map((m) => m.value), ['fable', 'opus', 'sonnet']);
+  assert.equal(offered[1], codex, 'other agents pass through untouched');
+  assert.equal(withPlan[0].models.length, 4, 'the catalog itself is not changed');
+  assert.deepEqual(initialPick(offered, { agent: 'claude', model: 'opusplan', effort: 'high' }), { agent: 'claude', model: 'opus', effort: 'high' });
 });

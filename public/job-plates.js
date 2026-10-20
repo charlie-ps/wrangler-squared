@@ -2,18 +2,24 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml, inflowHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLevels, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, ideaStage, liveSuggestion, ideaOpen, ideaThread } from './jobs.js';
-import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub } from './job-state.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, budgetHeld, ideaStage, liveSuggestion, ideaOpen } from './jobs.js';
+import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, mainWaiting } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 import { runningDotHtml } from './job-running.js';
+import { titleLoaderHtml } from './job-idea.js';
+import { planLayout } from './job-graph.js';
 
 // The board as a wall of night skies: each job's plan is drawn into a quiet sky
 // over its own Gargantua sky (job-skylines.js), lit in the colour of the job's state,
 // and the plate's foot is either the one thing the job needs from you (a ticket
 // stub with its button) or a status line. Behind the skyline sits a launch-page
-// scene (public/model-plates.js) picked for the job; the `plateArt` setting picks
+// scene (public/model-plates.js) picked for the job; Space's plate art option picks
 // one or the other: the sky (quiet) or the scene (full). Hovering never swaps them.
-export const PLATE_ART = ['quiet', 'full'];
+// A theme with no art of its own (public/themes.js plateArt) draws `plain`: the plan
+// on the theme's ground, in its --jt-ink tokens, with nothing painted or animated.
+export const PLATE_ART = ['quiet', 'full', 'plain'];
+// The ink class a mark at (x, y) takes: scene-aware only when the scene is always up.
+const inkOf = (art, scene, lvl) => (x, y) => (art === 'full' ? inkFor(scene, lvl, x, y) : art === 'plain' ? 'pl' : 'lt');
 
 // Haiku's ivory page is the loudest plate on a dark board, so it comes up least.
 const WEIGHT = { opus: 3, sonnet: 3, fable: 2, haiku: 1 };
@@ -93,25 +99,25 @@ const KIND_NAME = { pr: 'Pull request', session: 'Agent session', human: 'Your t
 // below) it out of the edges' way. Every node opens its sub-job. Also reports the
 // `floor`: the lowest point (plate units) a node or label reaches, which the
 // quiet sky keeps its cap and brightness clear of.
-function skyGraphHtml(job, scene, lvl, full) {
-  const plan = planOf(job), steps = stepsOf(job), levels = dependencyLevels({ subJobs: steps });
-  // Wave order, so the nodes read (and tab) left to right as the plan runs.
-  const subs = [...steps].sort((a, b) => levels.get(a.id) - levels.get(b.id));
-  const writes = plan.subJobs.filter(isWriteSub);
-  const waves = Math.max(...levels.values()) + 1, pos = new Map(), out = [];
-  // Light ink on the night sky; scene-aware only when the scene is always up.
-  const ink = (x, y) => (full ? inkFor(scene, lvl, x, y) : 'lt');
-  for (let w = 0; w < waves; w++) {
-    const col = subs.filter((s) => levels.get(s.id) === w), x = waves === 1 ? 160 : 56 + 208 * w / (waves - 1);
-    const span = Math.min(84, (col.length - 1) * 28);
-    col.forEach((s, i) => pos.set(s.id, [x, col.length === 1 ? 70 : 70 - span / 2 + span * i / (col.length - 1), col.length]));
-  }
+function skyGraphHtml(job, scene, lvl, art) {
+  const plan = planOf(job), { waves, rows, grid } = planLayout(plan);
+  // The dialog's columns and order, so the nodes read (and tab) left to right as the plan runs.
+  const subs = rows.flatMap((col) => col.filter((it) => !it.pass).map((it) => it.sub));
+  const writes = plan.subJobs.filter(isWriteSub), pos = new Map(), out = [];
+  const ink = inkOf(art, scene, lvl);
+  // The dialog's rows (and the half-row lanes between them), spread around y=70.
+  const span = Math.min(84, (grid.rows - 1) * 28), colX = (w) => waves === 1 ? 160 : 56 + 208 * w / (waves - 1);
+  const rowY = (r) => grid.rows === 1 ? 70 : 70 - span / 2 + span * r / (grid.rows - 1);
+  rows.forEach((col, w) => { const n = col.filter((it) => !it.pass).length; for (const it of col) if (!it.pass) pos.set(it.key, [colX(w), rowY(grid.at.get(it.key)), n]); });
   const byId = new Map(subs.map((s) => [s.id, s]));
+  // A link that skips waves runs along its dialog lane, so it passes between the tiles it skips, not over them.
+  const curve = ([ax, ay], [bx, by]) => { const bend = Math.max(16, (bx - ax) / 2); return `C${ax + bend},${ay} ${bx - bend},${by} ${bx},${by}`; };
   for (const s of subs) for (const id of edgesOf(s).filter((a) => pos.has(a))) {
-    const [ax, ay] = pos.get(id), [bx, by] = pos.get(s.id), bend = Math.max(16, (bx - ax) / 2), dep = byId.get(id);
+    const [ax, ay] = pos.get(id), [bx, by] = pos.get(s.id), dep = byId.get(id), lane = grid.lanes.get(`${id}>${s.id}`);
     const kind = !s.after.includes(id) ? 'on' : isPrSub(dep) ? 'deploy' : '';
     const lit = kind !== 'on' && live(job) && dependencySatisfied(dep) && stateSolid(stateOf(job, s));
-    out.push(`<path class="edge ${kind} ${lit ? 'lit' : ''} ${ink((ax + bx) / 2, (ay + by) / 2)}" d="M${ax + 8},${ay} C${ax + bend},${ay} ${bx - bend},${by} ${bx - 8},${by}"/>`);
+    const pts = [[ax + 8, ay], ...(lane ? lane.cols.map((w) => [colX(w), rowY(lane.r) + lane.k * 3]) : []), [bx - 8, by]];
+    out.push(`<path class="edge ${kind} ${lit ? 'lit' : ''} ${ink((ax + bx) / 2, (ay + by) / 2)}" data-from="${esc(id)}" data-to="${esc(s.id)}" d="M${pts[0]} ${pts.slice(1).map((p, i) => curve(pts[i], p)).join(' ')}"/>`);
   }
   let floor = 0;
   const open = (s) => live(job) ? `data-job="${esc(job.id)}" data-sub="${esc(s.id)}" tabindex="0" role="button"` : '';
@@ -123,7 +129,7 @@ function skyGraphHtml(job, scene, lvl, full) {
     const halo = ['running', 'needs'].includes(state) ? `<circle class="halo" cx="${x}" cy="${y}" r="6"/>` : '';
     const tag = labels && k <= 2 ? `<text class="lbl ${ink(x, y + 15)}" x="${x}" y="${y + 17}" text-anchor="middle">${KIND_TAG[kind]}${n ? ` #${esc(n)}` : ''}</text>` : '';
     floor = Math.max(floor, y + 6, tag ? y + 20 : 0);
-    out.push(`<g class="node ${kind} ${stateSolid(state) ? state : 'hollow'} ${state} tone-${STATES[state].tone} ${ink(x, y)}" data-state="${state}" ${open(s)} aria-label="${esc(`${s.title}: ${line}`)}"><title>${esc(tip)}</title>${halo}${SHAPES[kind](x, y)}${tag}<circle cx="${x}" cy="${y}" r="13" fill="transparent"/></g>`);
+    out.push(`<g class="node ${kind} ${stateSolid(state) ? state : 'hollow'} ${state} tone-${STATES[state].tone} ${ink(x, y)}" data-state="${state}" data-node="${esc(s.id)}" ${open(s)} aria-label="${esc(`${s.title}: ${line}`)}"><title>${esc(tip)}</title>${halo}${SHAPES[kind](x, y)}${tag}<circle cx="${x}" cy="${y}" r="13" fill="transparent"/></g>`);
     const moons = writes.filter((w) => w.by === s.id);
     if (!moons.length) continue;
     const beside = !subs.some((o) => edgesOf(o).includes(s.id)), up = y - 14 >= 32;
@@ -179,6 +185,9 @@ export function plateAsk(job) {
   const tone = state === 'failing' ? 'bad' : 'warn';
   const whole = (label, button, detail = '') => ({ tone, label, detail, button, icon: state === 'failing' ? ICONS.x : ICONS.doc, act: 'open', sub: '' });
   if (job.error) return whole('Needs attention', 'Open');
+  // At its spend limit nothing of the job moves until the human adds to it. The
+  // figures and Add $X stay in the job's own dialog: the board never shows the limit.
+  if (budgetHeld(job)) return { ...whole('Paused for budget', 'Open'), tone: 'warn', icon: ICONS.pause };
   // An agent stuck on a prompt outranks anything else waiting on you, and is
   // answered on its own card whether or not the job rolls up to "needs you".
   const prompts = promptsWaiting(job);
@@ -186,7 +195,10 @@ export function plateAsk(job) {
     const [p] = prompts;
     return { tone, label: 'Prompt waiting', detail: `${promptWhere(job, p)}${prompts.length > 1 ? ` +${prompts.length - 1}` : ''}`, button: 'Answer', icon: ICONS.terminal, act: 'session', sub: p.sub?.id || '', session: p.sessionId };
   }
-  if (!['needs', 'failing'].includes(state)) return null;
+  if (!['needs', 'failing'].includes(state)) {
+    const [m, ...more] = mainWaiting(job);
+    return m ? { tone: 'warn', label: jobLabel(job), detail: `${tildify(m.path)}${more.length ? ` +${more.length}` : ''}`, button: 'Resolve', icon: ICONS.branch, act: 'open', sub: '' } : null;
+  }
   // An idea waiting on you: the planner's question, or the job it suggests.
   const idea = ideaStage(job);
   if (idea === 'suggested') { const { plan } = liveSuggestion(job).suggest; return { ...whole('Job suggested', 'Review', [kindCountLabel(plan.subJobs), repoLine({ plan })].filter(Boolean).join(' · ')), icon: ICONS.eye }; }
@@ -221,6 +233,16 @@ export function plateAsk(job) {
   return ask(job.cancelledAt ? jobLabel(job) : subLabel(job, lead), deploymentStalled(lead) ? 'Resolve' : 'Open', ICONS.eye);
 }
 
+// A stub's button either does it now (merges, posts, skips: outward and not undone
+// from here) or opens something to read first. They must not look alike, so the
+// kind comes from `act`, never the label: a filled pill leading with what it does,
+// or an outlined one trailing an arrow. jobs-view.js runAsk is the other reader.
+export const askActs = (act) => ['merge', 'approve-write', 'skip-write'].includes(act);
+const goHtml = (job, ask) => {
+  const acts = askActs(ask.act);
+  return `<button type="button" class="job-plate-go ${acts ? 'acts' : 'opens'}" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}"${ask.session ? ` data-session="${esc(ask.session)}"` : ''}>${acts ? (ask.act === 'merge' ? ICONS.merge : ICONS.check) : ''}<span>${esc(ask.button)}</span>${acts ? '' : ICONS.arrow}</button>`;
+};
+
 const ago = (at) => { const m = Math.max(1, Math.round((Date.now() - at) / 60000)); return m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`; };
 function repoLine(job) {
   const repos = job.repos?.length ? job.repos : [...new Set(planOf(job).subJobs.filter((s) => isPrSub(s) && s.repo).map((s) => s.repo))];
@@ -232,38 +254,38 @@ function repoLine(job) {
 // suggests. Its chrome stays idle until something waits on you.
 const IDEA_SKY = { thinking: 0, reply: 1, suggested: 2 };
 const ideaSkyHtml = (job) => inflowHtml(job.id, IDEA_SKY[ideaStage(job)] ?? 0);
-function ideaPlateHtml(job) {
-  const ask = plateAsk(job), tone = ask ? ask.tone : 'idle', said = ideaThread(job).length + 1;
+function ideaPlateHtml(job, art) {
+  const ask = plateAsk(job), tone = ask ? ask.tone : 'idle';
   const foot = ask
-    ? `<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span><button type="button" class="job-plate-go" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}"${ask.session ? ` data-session="${esc(ask.session)}"` : ''}>${esc(ask.button)}</button></div>`
+    ? `<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span>${goHtml(job, ask)}</div>`
     : `<div class="job-plate-foot"><span class="job-plate-glyph">${stateIconHtml(jobState(job))}</span><span class="job-status">${esc(jobLabel(job))}</span></div>`;
   return `<article class="job-plate idea tone-${tone} ${jobState(job)} ${ask ? 'stubbed' : ''}" data-board="${esc(job.id)}">
-    <div class="job-plate-art">${ideaSkyHtml(job)}<div class="job-plate-tag lt"><span class="job-idea-mark">Idea</span></div></div>
-    <div class="job-plate-body"><div class="job-plate-where"><span>${job.createdAt ? `${ago(job.createdAt)} ago` : ''}</span><span class="job-plate-idea">${said} message${said === 1 ? '' : 's'}</span></div>
-      <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="Open the conversation">${esc(job.title)}</button></div>
+    <div class="job-plate-art">${art === 'plain' ? '' : ideaSkyHtml(job)}<div class="job-plate-tag ${art === 'plain' ? 'pl' : 'lt'}"><span class="job-idea-mark">Idea</span></div></div>
+    <div class="job-plate-body"><div class="job-plate-where"><span>${job.createdAt ? `${ago(job.createdAt)} ago` : ''}</span></div>
+      <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="Open the conversation">${job.titlePending ? titleLoaderHtml('small') : esc(job.title)}</button></div>
     ${foot}</article>`;
 }
 
-// `collapse`: the idea this job was is still drawn over its art, and the board folds it
-// into its point (jobs.css .collapsing) as the job's own sky rises from under it.
-export function plateHtml(job, scene, art = 'quiet', { collapse = false } = {}) {
-  if (ideaOpen(job)) return ideaPlateHtml(job);
+// `forming`: the stage of the idea's sky this job was (job-skylines.js inflowHtml), still drawn
+// over its art while the board collapses it into the job's black hole (job-forming.js).
+export function plateHtml(job, scene, art = 'quiet', { forming = null } = {}) {
+  if (ideaOpen(job)) return ideaPlateHtml(job, art);
   const state = jobState(job), ask = plateAsk(job), lvl = levelOf(job), subs = planOf(job).subJobs, work = stepsOf(job);
-  const full = art === 'full', tone = ask ? ask.tone : STATES[state].tone, ink = (x, y) => (full ? inkFor(scene, lvl, x, y) : 'lt');
+  const full = art === 'full', plain = art === 'plain', tone = ask ? ask.tone : STATES[state].tone, ink = inkOf(art, scene, lvl);
   const cost = jobCostLabel(job.usd, job.usdEstimated);
   const steps = work.filter((s) => !s.cancelledAt), landed = steps.filter((s) => s.stage === 'done').length;
   const when = live(job) && steps.length > 1 && !['done', 'dropped'].includes(state) ? `${landed} of ${steps.length} landed` : '';
   const empty = job.stage === 'planning' && !job.plan && !job.cancelledAt ? 'Planning' : 'Not planned yet';
   const tip = [subs.length ? kindCountLabel(subs) : '', reviewFlagsLabel(job)].filter(Boolean).join(' · ');
   const foot = ask
-    ? `${ask.film ? filmHtml(job, ask.film) : ''}<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span>${ask.alt ? `<button type="button" class="job-plate-alt" data-ask="${esc(ask.alt.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.alt.label)}</button>` : ''}<button type="button" class="job-plate-go" data-ask="${esc(ask.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}"${ask.session ? ` data-session="${esc(ask.session)}"` : ''}>${esc(ask.button)}</button></div>`
+    ? `${ask.film ? filmHtml(job, ask.film) : ''}<div class="job-plate-stub"><span class="job-plate-ask">${ask.icon}<span class="job-status">${esc(ask.label)}</span></span><span class="job-plate-detail">${esc(ask.detail)}</span>${ask.alt ? `<button type="button" class="job-plate-alt" data-ask="${esc(ask.alt.act)}" data-job="${esc(job.id)}" data-sub="${esc(ask.sub)}">${esc(ask.alt.label)}</button>` : ''}${goHtml(job, ask)}</div>`
     : `<div class="job-plate-foot"><span class="job-plate-glyph">${stateIconHtml(state)}</span><span class="job-status">${esc(jobLabel(job))}</span>${when ? `<span class="job-plate-when">${esc(when)}</span>` : ''}</div>`;
-  const repo = repoLine(job), graph = work.length ? skyGraphHtml(job, scene, lvl, full) : null;
+  const repo = repoLine(job), graph = work.length ? skyGraphHtml(job, scene, lvl, art) : null;
   const dim = !stateSolid(state);
   return `<article class="job-plate tone-${ask ? ask.tone : STATES[state].tone} ${state} ${ask ? 'stubbed' : ''}" data-board="${esc(job.id)}" data-scene="${scene}">
-    <div class="job-plate-art ${full && (scene === 'haiku' || scene === 'fable') ? 'ink-dark' : ''}${collapse ? ' collapsing' : ''}">${collapse ? inflowHtml(job.id, 2) : ''}${full ? `<svg class="scene" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${sceneArt(scene, job.id, lvl)}</svg><div class="scrim"></div>` : skyHtml(job.id, tone, lvl, graph ? graph.floor : 82, dim)}
+    <div class="job-plate-art ${full && (scene === 'haiku' || scene === 'fable') ? 'ink-dark' : ''}${forming != null && !plain ? ' forming' : ''}">${forming != null && !plain ? inflowHtml(job.id, forming) : ''}${plain ? '' : full ? `<svg class="scene" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${sceneArt(scene, job.id, lvl)}</svg><div class="scrim"></div>` : skyHtml(job.id, tone, lvl, graph ? graph.floor : 82, dim)}
       ${repo ? `<div class="job-plate-tag ${ink(160, 14)}">${esc(repo)}</div>` : ''}${graph ? graph.svg : `<div class="job-plate-unplanned ${ink(160, 75)}">${empty}</div>`}</div>
     <div class="job-plate-body"><div class="job-plate-where"><span>${job.createdAt ? `${ago(job.createdAt)} ago` : ''}</span>${runningDotHtml(job)}${cost ? `<span class="job-plate-cost" title="${esc(JOB_COST_TITLE)}${job.usdEstimated ? ' · includes an estimate for Codex sessions' : ''}">${esc(cost)}</span>` : ''}</div>
-      <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="${esc(tip)}">${esc(job.title)}</button>${placesHtml(job)}</div>
+      <button type="button" class="job-plate-open" data-job="${esc(job.id)}" data-sub="" title="${esc(tip)}">${job.titlePending ? titleLoaderHtml('small') : esc(job.title)}</button>${placesHtml(job)}</div>
     ${foot}</article>`;
 }

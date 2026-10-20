@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { gateAction, stampActions, checkActions, applyActions } from './job-actions.js';
+import { gateAction, stampActions, checkActions, applyActions, forwardsOnly, changeView } from './job-actions.js';
 import { proposeReplan, approveReplan, optionsOf } from './job-replan.js';
-import { changeView } from './job-change.js';
 import { reportSchema } from './jobs-schema.js';
 import { buildSubJob } from './job-store.js';
 import { autoApplicable } from './job-red.js';
+import { requestChange } from './job-change.js';
 
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, kind: 'pr', repo: '/repo', storyId: 'story', after, brief: `Implement ${id}`, ...extra });
 const PR = 'https://github.com/o/r/pull/1';
@@ -123,8 +123,14 @@ test('a proposal carries ranked options, each merged and stamped; approving the 
   assert.match(detail, /1 action/);
   const moved = structuredClone(j);
   subOf(moved, 'api').pr.head = 'h2';
-  assert.throws(() => approveReplan(moved, 'run_1', { now: 6, buildSubJob }), /has moved since this was proposed/);
-  assert.ok(moved.replan, 'a refused approval leaves the proposal to be looked at again');
+  assert.equal(approveReplan(moved, 'run_1', { now: 6, buildSubJob }).sentBack, true, 'a moved head can never be approved: it goes back to the planner');
+  assert.equal(subOf(moved, 'api').acceptedRed, undefined);
+  assert.equal(moved.replan.proposal, null);
+  assert.match(moved.replan.feedback, /“Deliver api” \(api\) has moved \(head h1 is now h2\)/);
+  const busy = structuredClone(j);
+  busy.runs.push({ id: 'run_r', subJobId: 'api', stopped: false });
+  assert.throws(() => approveReplan(busy, 'run_1', { now: 6, buildSubJob }), /Wait for the step on “Deliver api” to stop/, 'a step still running has not moved: that refusal stands');
+  assert.ok(busy.replan.proposal, 'a refused approval leaves the proposal to be looked at again');
 });
 
 test('a receipt whose second option breaks a rule is refused whole', () => {
@@ -189,8 +195,9 @@ test('a forward or rework on the step the idea came from is refused once that vi
   j.replan.source.ref = 'run_i#2';
   proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'x' }] }, 2);
   Object.assign(subOf(j, 'api'), parkedOf(3));
-  assert.throws(() => approveReplan(j, 'run_p', { now: 3, buildSubJob }), /has moved since/);
+  assert.equal(approveReplan(j, 'run_p', { now: 3, buildSubJob }).sentBack, true);
   assert.equal(subOf(j, 'api').thread, undefined);
+  assert.deepEqual(j.replan.source, { sub: 'api', at: 'code', ref: 'run_i#3' }, 'the planner may act on the round the human now has in front of them');
 });
 
 test('a retry pins to the failure it was written about, refuses a step that is not red, and starts it again as the human\'s Retry would', () => {
@@ -221,4 +228,71 @@ test('a red step\'s fix never applies a forward by itself', () => {
   j.replan = { feedback: 'x', at: 1, proposal: null, previous: null };
   proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'x' }] }, 2);
   assert.equal(autoApplicable({ ...j, reviewPlan: false }, j.replan.proposal), false);
+});
+
+test('only a proposal of forwards and nothing else skips the human: any plan change, other action, option or escalation waits', () => {
+  const j = parkedJob({ web: redOf() });
+  const of = (report) => { j.replan = { feedback: 'x', at: 1, proposal: null, previous: null }; proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), ...report }, 2); return forwardsOnly(j.replan.proposal); };
+  const fwd = { type: 'forward', sub: 'api', note: 'x' };
+  assert.equal(of({ actions: [fwd] }), true);
+  assert.equal(of({ actions: [] }), false, 'a diagnosis alone is for the human to read');
+  assert.equal(of({ actions: [fwd, { type: 'rework', sub: 'web', note: 'y' }] }), false);
+  assert.equal(of({ actions: [fwd], plan: { ...empty(j), subJobs: [...empty(j).subJobs, spec('docs')] } }), false, 'a plan edit');
+  assert.equal(of({ actions: [fwd], alternatives: [{ label: 'Or', plan: empty(j), actions: [] }] }), false);
+  assert.equal(forwardsOnly({ ...j.replan.proposal, actions: [fwd], alternatives: [], escalation: { sub: 'api' } }), false);
+});
+
+// The job moved under a proposal the human is about to approve: what it edits or
+// acts on has since landed. No press could ever approve it, so it goes back.
+const openPrOf = () => ({ stage: 'pr', state: 'watching', pr: { url: PR, head: 'h1', checkStatus: 'passing' } });
+const ideaOn = (j, id, text) => { const sub = subOf(j, id); requestChange(j, sub, { ...changeView(j, sub), text }, { now: 1 }); };
+const land = (j, id, patch) => Object.assign(subOf(j, id), patch);
+
+test('Unit test: brief edit on a PR that merges before approval goes back to the planner', () => {
+  const j = job([spec('api'), spec('web')], { api: openPrOf() });
+  ideaOn(j, 'api', 'Rename the flag');
+  proposeReplan(j, { id: 'run_p' }, { plan: { ...empty(j), subJobs: [spec('api', [], { brief: 'Implement api with the renamed flag' }), spec('web')] } }, 2);
+  land(j, 'api', { stage: 'deployment', mergedAt: 3, pr: { ...subOf(j, 'api').pr, mergeCommit: 'm1' } });
+  const back = approveReplan(j, 'run_p', { now: 4, buildSubJob });
+  assert.equal(back.sentBack, true);
+  assert.deepEqual(back.lines.map((l) => l.detail), ['“Deliver api” has merged since the plan change was proposed, so it went back to the wrangler']);
+  assert.equal(back.detail, 'Sent the plan change back to the wrangler: “Deliver api” has merged since it was proposed');
+  assert.equal(subOf(j, 'api').brief, 'Implement api', 'nothing of the stale proposal is applied');
+  assert.equal(j.replan.proposal, null, 'the planner runs again');
+  assert.match(j.replan.feedback, /^Earlier: About “Deliver api” \(api, pr\/watching\): Rename the flag\n\nNow: Wrangler, not the human: .*“Deliver api” \(api\) has merged\./s);
+  assert.equal(j.replan.previous.subJobs[0].brief, 'Implement api with the renamed flag', 'the planner reads what it proposed');
+  assert.deepEqual(j.replan.source, { sub: 'api', at: 'step', ref: 'deployment/watching' });
+
+  const k = job([spec('api')], { api: openPrOf() });
+  ideaOn(k, 'api', 'Tighten the error');
+  proposeReplan(k, { id: 'run_p' }, { plan: empty(k), actions: [{ type: 'rework', sub: 'api', note: 'Tighten the error' }] }, 2);
+  land(k, 'api', { stage: 'deployment', mergedAt: 3 });
+  assert.equal(approveReplan(k, 'run_p', { now: 4, buildSubJob }).sentBack, true, 'a rework on a PR that merged meanwhile goes back too');
+  assert.deepEqual(k.replan.previousActions, [{ type: 'rework', sub: 'api', note: 'Tighten the error' }]);
+  assert.equal(subOf(k, 'api').fixRequested, null);
+});
+
+test('Unit test: mark-done on a deploying step that finishes goes back to the planner', () => {
+  const j = job([spec('api'), spec('web', ['api'])], { api: { stage: 'deployment', state: 'watching', pr: { url: PR, head: 'h1', mergeCommit: 'm1' }, deploymentResult: { status: 'pending' } } });
+  ideaOn(j, 'api', 'The deploy is done, I checked');
+  proposeReplan(j, { id: 'run_p' }, { plan: empty(j), actions: [{ type: 'mark', sub: 'api', position: 'done', evidence: 'Deploy run 7' }] }, 2);
+  assert.deepEqual(j.replan.proposal.actions[0].pin, { at: 'stage', ref: 'deployment' });
+  land(j, 'api', { stage: 'cleanup', state: 'queued', deployed: { at: 3, checks: ['Deploy passed'], commit: 'm1' } });
+  const back = approveReplan(j, 'run_p', { now: 4, buildSubJob });
+  assert.equal(back.sentBack, true);
+  assert.match(back.detail, /“Deliver api” has landed since it was proposed/);
+  assert.deepEqual(subOf(j, 'api').deployed.checks, ['Deploy passed'], 'the real delivery stands, not the mark');
+  assert.match(j.replan.feedback, /“Deliver api” \(api\) has landed/);
+  assert.deepEqual(j.replan.source, { sub: 'api', at: 'step', ref: 'deployment/watching' }, 'a finished step has no view to re-pin to');
+});
+
+test('a proposal refused for a rule the job did not move into still refuses, and stays', () => {
+  const j = job([spec('api'), spec('web')], { api: openPrOf() });
+  j.replan = { feedback: 'x', at: 1, proposal: null };
+  proposeReplan(j, { id: 'run_p' }, { plan: empty(j), actions: [{ type: 'rework', sub: 'api', note: 'x' }] }, 2);
+  j.runs.push({ id: 'run_r', subJobId: 'api', stopped: false });
+  assert.throws(() => approveReplan(j, 'run_p', { now: 3, buildSubJob }), /Wait for the step on “Deliver api” to stop/);
+  assert.equal(j.replan.proposal.id, 'run_p');
+  const { sentBack } = approveReplan(Object.assign(j, { runs: [] }), 'run_p', { now: 3, buildSubJob });
+  assert.equal(sentBack, undefined);
 });

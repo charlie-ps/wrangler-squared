@@ -5,10 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { JobRuntime, LAUNCH_GRACE_MS, CleanupRefused, parseStatus } from './job-runtime.js';
+import { JobRuntime, LAUNCH_GRACE_MS, CleanupRefused, parseStatus, queueFetches } from './job-runtime.js';
 import { DATA_DIR } from './data-dir.js';
 import { fakeHost } from './test-helpers.js';
 import { runFile } from './job-github.js';
+import { settingsSchema, jobInputSchema } from './jobs-schema.js';
+import { resolutionsFor, resolvePrompt } from './job-main.js';
 
 // What survives of agent-wrangler's job-runtime.test.js (`job-system` branch)
 // once the runtime talks to the host façade instead of a SessionManager: the launch
@@ -41,6 +43,52 @@ function fakeRun({ head = '', remote = '', log = '', overrides = {} } = {}) {
   };
   return { calls, run };
 }
+
+test('fetches into one checkout run one after another; other commands and checkouts do not wait', async () => {
+  const log = [];
+  const gates = new Map();
+  const run = queueFetches((bin, args, cwd) => {
+    const name = `${args[0]} ${args[1] || ''} ${cwd}`.replace('  ', ' ');
+    log.push(`start ${name}`);
+    return new Promise((resolve, reject) => gates.set(name, () => { log.push(`end ${name}`); (args[1] === 'bad' ? reject(new Error('cannot lock ref')) : resolve('')); }));
+  });
+  const open = (name) => { gates.get(name)(); gates.delete(name); };
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+  const first = run('git', ['fetch', 'bad'], '/repo/a');
+  const second = run('git', ['fetch', 'origin'], '/repo/a/');
+  const other = run('git', ['fetch', 'origin'], '/repo/b');
+  const status = run('git', ['status'], '/repo/a');
+  await tick();
+  assert.deepEqual(log.sort(), ['start fetch bad /repo/a', 'start fetch origin /repo/b', 'start status /repo/a']);
+  log.length = 0;
+  open('fetch bad /repo/a');
+  await assert.rejects(first, /cannot lock ref/);
+  await tick();
+  assert.deepEqual(log, ['end fetch bad /repo/a', 'start fetch origin /repo/a/'], 'the second starts only once the first has ended, even after it failed');
+  for (const name of [...gates.keys()]) open(name);
+  await Promise.all([second, other, status]);
+});
+
+test('a runtime queues its own fetches: two launches into one repo never fetch at once', async () => {
+  let inFlight = 0;
+  let most = 0;
+  const run = async (bin, args) => {
+    if (bin === 'gh') return JSON.stringify({ defaultBranchRef: { name: 'main' } });
+    if (args[0] === 'fetch') {
+      most = Math.max(most, ++inFlight);
+      await new Promise((r) => setTimeout(r, 20));
+      inFlight--;
+    }
+    return 'base';
+  };
+  const spawned = [];
+  const runtime = new JobRuntime({ host: { sessions: { spawn: async (o) => { spawned.push(o.worktree); return { sessionId: `s${spawned.length}` }; } } } }, run);
+  const job = { id: 'job_1', agent: 'claude' };
+  const launch = (id) => runtime.launch(job, { id, repo: '/repo/a' }, { phase: 'implementation' }, () => {});
+  await Promise.all([launch('one'), launch('two')]);
+  assert.equal(most, 1);
+  assert.equal(spawned.length, 2);
+});
 
 test('stop archives the card, then refuses to release the slot while the session is still working', async () => {
   const { host, archived, sessions } = fakeHost();
@@ -152,7 +200,7 @@ test('a session step gets the same scratch workspace as planning: no repository,
     assert.deepEqual(spawned[0].addDirs, [checkouts], phase);
     assert.deepEqual(prepared, ['s_1', undefined], 'the wrangler cut nothing, so there is no record to report');
     // And nothing git-shaped to undo afterwards: no worktree, no branch, no PR.
-    await runtime.cleanup({ updateMain: true }, { id: 'spike', kind: 'session', sessions: ['s_1'], pr: null, worktree: undefined });
+    await runtime.cleanup({}, { id: 'spike', kind: 'session', sessions: ['s_1'], pr: null, worktree: undefined }, { updateMain: true });
   });
 });
 
@@ -215,8 +263,8 @@ test('cleanup preserves a worktree that moved on since verification, and a branc
   const dir = fs.mkdtempSync(path.join(DATA_DIR, 'worktree-'));
   const wt = { path: dir, repoRoot: '/repo', branch: 'job-api' };
   for (const [ref, head] of [['refs/heads/somewhere-else', 'verified'], ['refs/heads/job-api', 'newer']]) {
-    const f = fakeRun({ log: `${head}\tLocal work`, overrides: { 'symbolic-ref': () => ref, 'rev-parse': (args) => args[1] === '--abbrev-ref' ? 'origin/main' : args[1] === '--verify' ? 'tracked' : head } });
-    await assert.rejects(runtimeWith(host, { run: f.run }).cleanupWorktree(wt, 'verified'), /preserve it for review/);
+    const f = fakeRun({ log: `${head}\tLocal work`, overrides: { 'symbolic-ref': () => ref, 'rev-parse': (args, cwd) => args[1] === '--abbrev-ref' ? 'origin/main' : args[1] === '--verify' ? 'tracked' : args[1] === '--show-toplevel' ? cwd : head } });
+    await assert.rejects(runtimeWith(host, { run: f.run }).cleanupWorktree(wt, 'verified'), ref.endsWith('/job-api') ? /would be lost/ : /changed since verification/);
     assert.ok(!f.calls.some((c) => c[0] === 'worktree'), 'nothing is removed once the tree has changed');
   }
   const held = fakeRun({ overrides: { worktree: () => 'worktree /elsewhere\nbranch refs/heads/job-api' } });
@@ -296,7 +344,7 @@ test('cleanup of a cancelled sub-job archives its sessions, keeps unpushed commi
   const cancelled = { ...merged, cancelledAt: 1, pr: null, sessions: ['sid', 'already', 'purged'],
     worktree: { ...merged.worktree, path: missing() } };
   const f = fakeRun({ head: 'base' });
-  await runtimeWith(host, { run: f.run }).cleanup({ updateMain: true }, cancelled);
+  await runtimeWith(host, { run: f.run }).cleanup({}, cancelled, { updateMain: true });
   assert.deepEqual(archived, ['sid'], 'an archived card is not re-stamped and a purged one is not adopted back');
   assert.deepEqual(f.calls.at(-1), ['update-ref', '-d', 'refs/heads/job-api', 'base'], 'a cancelled sub-job never pushed, so the base it was cut from is what may be deleted');
   assert.ok(!f.calls.some((c) => ['merge', 'ls-remote', 'push'].includes(c[0])), 'nothing merged: main and origin are left alone');
@@ -313,23 +361,104 @@ test('cleanup of a PR sub-job marked done by hand before it ever got a PR falls 
   assert.ok(!f.calls.some((c) => ['ls-remote', 'push'].includes(c[0])), 'no PR ever existed, so there is no origin branch to touch');
 });
 
-test('updateMain fast-forwards the main checkout only when it is clean and on the PR base', async () => {
+// The human's checkout and a PR landing on origin behind its back, in real git:
+// the update reads status, logs and ancestry the fake cannot stand in for.
+async function mainCheckout() {
+  const dir = fs.mkdtempSync(path.join(DATA_DIR, 'main-checkout-'));
+  const git = (cwd, ...args) => exec('git', ['-C', cwd, ...args]).then((r) => r.stdout.trim());
+  const origin = path.join(dir, 'origin.git'), repo = path.join(dir, 'repo'), other = path.join(dir, 'other');
+  await exec('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+  await exec('git', ['clone', '-q', origin, repo]);
+  const commit = async (cwd, file, message) => { fs.writeFileSync(path.join(cwd, file), `${message}\n`); await git(cwd, 'add', file); await git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', message); };
+  await commit(repo, 'README.md', 'Initial');
+  await git(repo, 'push', '-q', 'origin', 'HEAD:main');
+  await exec('git', ['clone', '-q', origin, other]);
+  const land = async (message) => { await commit(other, `${message.replace(/\W+/g, '-')}.js`, message); await git(other, 'push', '-q', 'origin', 'HEAD:main'); };
+  const sub = { id: 'api', repo, worktree: null, sessions: [], pr: { url: 'u', head: 'h', base: 'main' } };
+  return { git, repo, commit, land, sub, head: (ref = 'main') => git(repo, 'rev-parse', ref), originHead: () => git(other, 'rev-parse', 'HEAD') };
+}
+
+test('updateMain on a clean checkout of main fast-forwards it quietly', async () => {
+  const m = await mainCheckout();
+  await m.land('Merged PR 1');
+  const result = await runtimeWith(fakeHost().host).cleanup({}, m.sub, { updateMain: true });
+  assert.deepEqual(result.main, { path: fs.realpathSync(m.repo), result: { ok: true } });
+  assert.equal(await m.head(), await m.originHead());
+});
+
+test('with Keep local main updated off, cleanup leaves the checkout behind', async () => {
+  const m = await mainCheckout();
+  const before = await m.head();
+  await m.land('Merged PR 1');
+  assert.deepEqual(await runtimeWith(fakeHost().host).cleanup({}, m.sub, { updateMain: false }), {});
+  assert.equal(await m.head(), before);
+});
+
+test('Keep local main updated is a global setting, on by default; a job carries none', () => {
+  assert.equal(settingsSchema.parse({}).updateMain, true);
+  assert.equal(settingsSchema.parse({ updateMain: false }).updateMain, false);
+  assert.equal(jobInputSchema.parse({ intent: 'x', updateMain: false }).updateMain, undefined, 'a job saved with the old toggle carries nothing now');
+});
+
+test('a resolution prompt is the one fix, then the divergence as quoted data', () => {
+  const n = { path: '/home/me/repo', base: 'main', reason: 'dirty', dirty: [{ path: 'a "b".js', change: 'modified' }], dirtyCount: 3, localOnly: [], localCount: 0, incoming: [{ sha: 'a'.repeat(40), subject: 'Merged PR 1' }], incomingCount: 1 };
+  assert.deepEqual(resolutionsFor(n).map((r) => r.id), ['stash']);
+  assert.deepEqual(resolutionsFor({ ...n, localCount: 1 }).map((r) => r.id), ['rebase', 'branch']);
+  assert.deepEqual(resolutionsFor({ ...n, reason: 'failed', dirtyCount: 0 }), []);
+  const p = resolvePrompt(n, 'stash');
+  assert.match(p, /^Wrangler² could not fast-forward the local main branch in \/home\/me\/repo/);
+  assert.match(p, /The human chose one fix: Stash & update\. Do exactly that/);
+  assert.match(p, /git stash push --include-untracked/);
+  assert.doesNotMatch(p, /git rebase/, 'only that resolution');
+  assert.match(p, /Uncommitted files \(3\):\n {2}- "a \\"b\\".js" \(modified\)\n {2}- … and 2 more/);
+  assert.match(p, /New on origin\/main \(1\):\n {2}- aaaaaaaaaaaa "Merged PR 1"/);
+});
+
+test('updateMain on a checkout on another branch moves main without touching the tree', async () => {
+  const m = await mainCheckout();
+  await m.git(m.repo, 'checkout', '-q', '-b', 'feature');
+  fs.writeFileSync(path.join(m.repo, 'scratch.txt'), 'mine\n');
+  await m.land('Merged PR 1');
+  const result = await runtimeWith(fakeHost().host).cleanup({}, m.sub, { updateMain: true });
+  assert.deepEqual(result.main.result, { ok: true }, 'a dirty tree on another branch is no obstacle: fetch moves the ref alone');
+  assert.equal(await m.head('main'), await m.originHead());
+  assert.equal(await m.git(m.repo, 'branch', '--show-current'), 'feature');
+  assert.equal(fs.readFileSync(path.join(m.repo, 'scratch.txt'), 'utf8'), 'mine\n');
+});
+
+test('updateMain on another branch with local-only commits on main leaves main and says why', async () => {
+  const m = await mainCheckout();
+  await m.commit(m.repo, 'local.js', 'Unpushed on main');
+  const before = await m.head();
+  await m.git(m.repo, 'checkout', '-q', '-b', 'feature');
+  await m.land('Merged PR 1');
+  const { result } = (await runtimeWith(fakeHost().host).cleanup({}, m.sub, { updateMain: true })).main;
+  assert.equal(result.reason, 'diverged');
+  assert.deepEqual(result.localOnly.map((c) => c.subject), ['Unpushed on main']);
+  assert.deepEqual(result.incoming.map((c) => c.subject), ['Merged PR 1']);
+  assert.equal(await m.head('main'), before);
+});
+
+test('updateMain on a dirty checkout of main leaves it, listing the files and origin\'s new commits', async () => {
+  const m = await mainCheckout();
+  fs.writeFileSync(path.join(m.repo, 'README.md'), 'edited\n');
+  const before = await m.head();
+  await m.land('Merged PR 1');
+  const { path: where, result } = (await runtimeWith(fakeHost().host).cleanup({}, m.sub, { updateMain: true })).main;
+  assert.equal(where, fs.realpathSync(m.repo));
+  assert.equal(result.reason, 'dirty');
+  assert.deepEqual(result.dirty, [{ change: 'modified', path: 'README.md' }]);
+  assert.equal(result.dirtyCount, 1);
+  assert.deepEqual(result.incoming.map((c) => c.subject), ['Merged PR 1']);
+  assert.equal(await m.head(), before);
+  assert.equal(fs.readFileSync(path.join(m.repo, 'README.md'), 'utf8'), 'edited\n');
+});
+
+test('updateMain never throws: an unresolvable checkout is a notice, not a red sub-job', async () => {
   const { host } = fakeHost();
-  const repo = fs.mkdtempSync(path.join(DATA_DIR, 'main-checkout-'));
-  await exec('git', ['init', '-q', repo]);
-  const sub = { ...merged, repo, worktree: null };
-  const state = (dirty, branch) => ({ overrides: { status: () => dirty, branch: () => branch } });
-  for (const [dirty, branch] of [[' M src/app.js', 'main'], ['', 'other']]) {
-    const f = fakeRun(state(dirty, branch));
-    await assert.rejects(runtimeWith(host, { run: f.run }).cleanup({ updateMain: true }, sub), /update it manually/);
-    assert.ok(!f.calls.some((c) => c[0] === 'merge'));
-  }
-  const clean = fakeRun(state('', 'main'));
-  await runtimeWith(host, { run: clean.run }).cleanup({ updateMain: true }, sub);
-  assert.deepEqual(clean.calls.at(-2), ['fetch', 'origin']);
-  assert.deepEqual(clean.calls.at(-1), ['merge', '--ff-only', 'refs/remotes/origin/main'], 'a fast-forward or nothing: a merge commit on main is never this extension\'s to make');
-  const nowhere = fakeRun(state('', 'main'));
-  await assert.rejects(runtimeWith(host, { run: nowhere.run }).cleanup({ updateMain: true }, { ...sub, repo: missing() }), /Cannot resolve main checkout/);
+  const result = await runtimeWith(host, { run: fakeRun().run }).cleanup({}, { ...merged, repo: missing(), worktree: null }, { updateMain: true });
+  assert.equal(result.main.result.reason, 'failed');
+  assert.match(result.main.result.error, /Cannot resolve the main checkout/);
 });
 
 test('cleanupPlanning stops the planning and write steps and removes the worktrees they were given', async () => {
@@ -390,17 +519,16 @@ test('a base missing on origin fails the launch naming the branch, and spawns no
 });
 
 test('updateMain leaves main alone when the job landed on a non-default base', async () => {
-  const { host } = fakeHost();
-  const repo = fs.mkdtempSync(path.join(DATA_DIR, 'main-checkout-'));
-  await exec('git', ['init', '-q', repo]);
-  const sub = { id: 'api', repo, worktree: null, sessions: [], pr: { url: 'u', head: 'h', base: 'next' } };
-  const defaultIs = (name) => ({ overrides: { status: () => '', branch: () => 'main', repo: () => JSON.stringify({ defaultBranchRef: { name } }) } });
-  const away = fakeRun(defaultIs('main'));
-  await runtimeWith(host, { run: away.run }).cleanup({ updateMain: true, base: 'next' }, sub);
-  assert.ok(!away.calls.some((c) => c[0] === 'merge' || c[0] === 'fetch'), 'no surprise fast-forward');
-  const home = fakeRun({ overrides: { status: () => '', branch: () => 'next', repo: () => JSON.stringify({ defaultBranchRef: { name: 'next' } }) } });
-  await runtimeWith(host, { run: home.run }).cleanup({ updateMain: true, base: 'next' }, sub);
-  assert.deepEqual(home.calls.at(-1), ['merge', '--ff-only', 'refs/remotes/origin/next'], 'a base that IS the default still fast-forwards');
+  const m = await mainCheckout();
+  await m.land('Merged PR 1');
+  const before = await m.head();
+  const sub = { ...m.sub, pr: { ...m.sub.pr, base: 'next' } };
+  const away = await runtimeWith(fakeHost().host, { run: async (bin, args, cwd) => bin === 'gh' ? JSON.stringify({ defaultBranchRef: { name: 'main' } }) : runFile(bin, args, cwd) }).cleanup({ base: 'next' }, sub, { updateMain: true });
+  assert.equal(away.main, null, 'no surprise fast-forward');
+  assert.equal(await m.head(), before);
+  const home = await runtimeWith(fakeHost().host, { run: async (bin, args, cwd) => bin === 'gh' ? JSON.stringify({ defaultBranchRef: { name: 'main' } }) : runFile(bin, args, cwd) }).cleanup({ base: 'main' }, m.sub, { updateMain: true });
+  assert.deepEqual(home.main.result, { ok: true }, 'a base that IS the default still fast-forwards');
+  assert.equal(await m.head(), await m.originHead());
 });
 
 // A real origin, clone and job worktree, because the refusal rules read real git
@@ -527,6 +655,118 @@ test('a planning worktree\'s scratch files are not grounds to refuse: the job ha
 });
 
 const refusalOf = (r, opts) => r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, opts).then(() => assert.fail('expected a refusal'), (e) => { assert.ok(e instanceof CleanupRefused, e.message); return e.refusal; });
+
+test('a detached-HEAD worktree is refused with its Discard, naming the cause and the path, even with nothing to lose', async () => {
+  const r = await gitRepo();
+  await r.git(r.wt.path, 'checkout', '-q', '--detach', 'HEAD');
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused, e.message);
+  assert.equal(e.message, `Worktree at ${r.wt.path} is on a detached HEAD, not on job-api; preserve it for review`);
+  assert.deepEqual([e.refusal.cause, e.refusal.state, e.refusal.pinned, e.refusal.head, e.refusal.branchHead], ['detached', null, true, r.wt.cleanupHead, r.wt.cleanupHead]);
+  assert.ok(fs.existsSync(r.wt.path) && await r.branchExists());
+});
+
+test('Discard on a detached tree removes it and the branch it left behind, at the heads shown', async () => {
+  const r = await gitRepo();
+  await r.commit(r.wt.path, 'a.js', 'On the branch');
+  await r.git(r.wt.path, 'checkout', '-q', '--detach', r.wt.cleanupHead);
+  await r.commit(r.wt.path, 'b.js', 'On the detached HEAD');
+  const shown = await refusalOf(r);
+  assert.deepEqual(shown.commits.map((c) => c.subject).sort(), ['On the branch', 'On the detached HEAD'], 'the branch ref\'s commits are listed too');
+  await r.commit(r.wt.path, 'c.js', 'After the human looked');
+  const stale = await refusalOf(r, { discard: shown });
+  assert.equal(stale.commitCount, 3);
+  assert.ok(fs.existsSync(r.wt.path) && await r.branchExists(), 'nothing is deleted on a stale discard');
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: stale });
+  assert.equal(fs.existsSync(r.wt.path), false);
+  assert.equal(await r.branchExists(), false);
+});
+
+test('a worktree left mid-rebase is refused with the rebase and its conflict shown, and Discard clears it', async () => {
+  const r = await gitRepo();
+  await r.commit(r.wt.path, 'README.md', 'Branch edit');
+  await r.commit(r.repo, 'README.md', 'Main edit');
+  await r.git(r.repo, 'push', '-q', 'origin', 'HEAD:main');
+  await r.git(r.wt.path, 'fetch', '-q', 'origin');
+  await assert.rejects(r.git(r.wt.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'rebase', 'refs/remotes/origin/main'), /conflict/i);
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused, e.message);
+  assert.match(e.message, new RegExp(`^Worktree at ${r.wt.path} is on a detached HEAD with a rebase in progress, not on job-api \\(1 commit not on origin/main, 1 uncommitted file\\)`));
+  assert.deepEqual([e.refusal.state, e.refusal.files], ['rebase', [{ change: 'conflicted', path: 'README.md' }]]);
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: e.refusal });
+  assert.equal(fs.existsSync(r.wt.path), false);
+  assert.equal(await r.branchExists(), false);
+});
+
+test('a worktree git cannot read is refused with git\'s reason and no Discard, and nothing is removed', async () => {
+  const r = await gitRepo();
+  fs.writeFileSync(path.join(r.wt.path, '.git'), 'gitdir: /nowhere\n');
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused, e.message);
+  assert.match(e.message, new RegExp(`^Worktree at ${r.wt.path} could not be read by git \\(fatal: .+\\); preserve it for review$`));
+  assert.deepEqual([e.refusal.cause, e.refusal.pinned], ['unreadable', false]);
+  await assert.rejects(r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: { head: null, fingerprint: undefined } }), CleanupRefused);
+  assert.ok(fs.existsSync(path.join(r.wt.path, 'README.md')));
+});
+
+test('a worktree git cannot delete is kept with git\'s reason, and its Discard deletes the whole folder and branch', async () => {
+  const r = await gitRepo();
+  // An ignored directory git may delete but cannot: what a process still
+  // writing there looks like to `git worktree remove`.
+  fs.appendFileSync(path.join(r.repo, '.git', 'info', 'exclude'), 'locked/\n');
+  const locked = path.join(r.wt.path, 'locked');
+  fs.mkdirSync(locked); fs.writeFileSync(path.join(locked, 'out.log'), 'busy\n'); fs.chmodSync(locked, 0o555);
+  try {
+    const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+    assert.ok(e instanceof CleanupRefused, e.message);
+    assert.match(e.message, new RegExp(`^Worktree at ${r.wt.path} could not be removed \\(error: failed to delete .+\\); preserve it for review$`));
+    assert.deepEqual([e.refusal.cause, e.refusal.pinned, e.refusal.path, e.refusal.branch, e.refusal.head], ['unremovable', true, r.wt.path, 'job-api', r.wt.cleanupHead]);
+    assert.match(e.refusal.error, /^error: failed to delete/);
+    assert.ok(await r.branchExists(), 'the branch is kept with the tree');
+    // Git had already dropped its own record of the tree, so a Retry finds the
+    // same leftover, with the same pin.
+    const again = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+    assert.deepEqual([again.refusal?.cause, again.refusal?.fingerprint], ['unremovable', e.refusal.fingerprint], again.message);
+    assert.ok(fs.existsSync(path.join(locked, 'out.log')), 'nothing is deleted unasked');
+  } finally { fs.chmodSync(locked, 0o755); }
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: { head: e.refusal.head, fingerprint: e.refusal.fingerprint, cause: 'unremovable' } });
+  assert.equal(fs.existsSync(r.wt.path), false);
+  assert.equal(await r.branchExists(), false);
+});
+
+test('a half-deleted worktree inside its parent checkout is the same refusal on Retry, and its Discard spares the parent', async () => {
+  const r = await gitRepo();
+  await r.git(r.repo, 'worktree', 'remove', r.wt.path);
+  const inside = path.join(r.repo, 'worktrees.noindex', 'job-api');
+  await r.git(r.repo, 'worktree', 'add', '-q', inside, 'job-api');
+  await r.git(r.repo, 'checkout', '-q', '-b', 'elsewhere');
+  await r.commit(inside, 'wip.js', 'Unpushed work');
+  // What a failed delete leaves: its .git file gone, some of its files not.
+  fs.rmSync(path.join(inside, '.git'));
+  const wt = { ...r.wt, path: inside };
+  const e = await r.runtime.cleanupWorktree(wt, wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused, e.message);
+  assert.match(e.message, /could not be removed \(no longer its own worktree: git reads it as .+\/repo\); preserve it for review$/);
+  assert.deepEqual([e.refusal.cause, e.refusal.pinned, e.refusal.path, e.refusal.commitCount, e.refusal.commits[0].subject], ['unremovable', true, inside, 1, 'Unpushed work']);
+  await assert.rejects(r.runtime.cleanupWorktree(wt, wt.cleanupHead, { discard: { head: e.refusal.head, fingerprint: 'stale', cause: 'unremovable' } }), /changed after you chose to discard/);
+  assert.ok(fs.existsSync(path.join(inside, 'README.md')), 'a stale Discard deletes nothing');
+  assert.ok(await r.branchExists());
+  await r.runtime.cleanupWorktree(wt, wt.cleanupHead, { discard: { head: e.refusal.head, fingerprint: e.refusal.fingerprint, cause: 'unremovable' } });
+  assert.equal(fs.existsSync(inside), false);
+  assert.equal(await r.branchExists(), false);
+  assert.equal(await r.git(r.repo, 'worktree', 'list', '--porcelain').then((t) => t.includes(inside)), false, 'git\'s record is pruned');
+  assert.equal(await r.git(r.repo, 'symbolic-ref', '--short', 'HEAD'), 'elsewhere');
+  assert.ok(fs.existsSync(path.join(r.repo, 'README.md')), 'the parent checkout is untouched');
+});
+
+test('a leftover Discard never deletes the folder holding the repository', async () => {
+  const r = await gitRepo();
+  const e = await r.runtime.cleanupWorktree({ ...r.wt, path: path.dirname(r.repo) }, r.wt.cleanupHead).catch((e) => e);
+  assert.equal(e.refusal?.cause, 'unremovable', e.message);
+  await assert.rejects(r.runtime.cleanupWorktree({ ...r.wt, path: path.dirname(r.repo) }, r.wt.cleanupHead, { discard: { head: e.refusal.head, fingerprint: e.refusal.fingerprint, cause: 'unremovable' } }), /holds the repository itself/);
+  assert.ok(fs.existsSync(path.join(r.repo, 'README.md')));
+});
 
 test('a Discard does not cover a change only to what is staged', async () => {
   const r = await gitRepo();

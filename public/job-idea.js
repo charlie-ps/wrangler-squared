@@ -22,12 +22,12 @@ export function proseHtml(text) {
   const out = [];
   for (const block of String(text || '').trim().split(/\n\s*\n/)) {
     let list = null, para = [];
-    const flush = () => { if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`); para = []; if (list) out.push(`<${list.tag}>${list.items.map((i) => `<li>${i.map(inline).join('<br>')}</li>`).join('')}</${list.tag}>`); list = null; };
+    const flush = () => { if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`); para = []; if (list) out.push(`<${list.tag}${list.start > 1 ? ` start="${list.start}"` : ''}>${list.items.map((i) => `<li>${i.map(inline).join('<br>')}</li>`).join('')}</${list.tag}>`); list = null; };
     for (const raw of block.split('\n')) {
       const line = raw.trim();
       if (!line) continue;
       const tag = ITEM.ol.test(line) ? 'ol' : ITEM.ul.test(line) ? 'ul' : null;
-      if (tag) { if (para.length || list?.tag !== tag) flush(); (list ||= { tag, items: [] }).items.push([line.replace(ITEM[tag], '')]); }
+      if (tag) { if (para.length || list?.tag !== tag) flush(); (list ||= { tag, start: parseInt(line, 10), items: [] }).items.push([line.replace(ITEM[tag], '')]); }
       else if (list && /^\s/.test(raw)) list.items.at(-1).push(line);
       else { if (list) flush(); para.push(line); }
     }
@@ -67,10 +67,10 @@ export function suggestionHtml(job, msg, state = 'live') {
   const steps = work.map((s) => `<li>${kindChipHtml(s)}<span>${esc(s.title)}</span><small>${esc(stepNote(plan, s))}</small></li>`).join('');
   const done = state === 'done', stale = state === 'stale';
   const label = done ? 'Creating the job' : 'Create job';
-  const review = job.reviewPlan ?? true;
+  // The press is the plan approval, whatever Plan review says (job-store.js accept-idea).
   const fine = stale ? '<b>Replaced by a newer reply</b> · the wrangler suggests again once it answers.'
-    : done ? `<b>${review ? 'Plan ready for review' : 'Job starting'}</b> · it takes this idea's place on the board.`
-      : review ? '<b>Plan on You review</b> · you approve it before Jira or PRs.' : '<b>Plan on Auto</b> · the job starts as soon as you press.';
+    : done ? '<b>Job starting</b> · it takes this idea\'s place on the board.'
+      : '<b>Creating it approves this plan</b> · the job starts as soon as you press; your other checkpoints still apply.';
   return `<div class="job-launch tone-warn ${state}" data-board="${esc(msg.id)}" data-launch="${esc(msg.id)}">
     <div class="job-launch-text"><span class="job-launch-kicker"><i></i>Suggested job</span><h3 class="job-launch-title">${esc(title)}</h3><div class="job-launch-meta">${meta}</div><ol class="job-launch-steps">${steps}</ol></div>
     <button type="button" class="job-launch-go" data-accept-idea="${esc(msg.id)}" data-spin="14" aria-label="${esc(`Create job: ${title}`)}" ${state === 'live' ? '' : 'aria-disabled="true"'}>
@@ -80,7 +80,12 @@ export function suggestionHtml(job, msg, state = 'live') {
     <div class="job-launch-fine"><span>${fine}</span>${state === 'live' ? '<button type="button" class="job-launch-refine" data-idea-refine>Keep refining</button>' : ''}</div></div>`;
 }
 
-const humanHtml = (text, at, extra = '') => `<div class="job-sent ${extra}"><div class="job-sent-bubble"><span>${esc(text)}</span></div><span class="job-sent-meta">You${at ? ` · ${esc(time(at))}` : ''}</span></div>`;
+const humanHtml = (text, at, extra = '', pics = '') => `<div class="job-sent ${extra}"><div class="job-sent-bubble">${pics}<span>${esc(text)}</span></div><span class="job-sent-meta">You${at ? ` · ${esc(time(at))}` : ''}</span></div>`;
+// Kept pictures are placeholders the dialog fills from a job-images frame (jobs-view.js
+// hydrateStrips): `names` are the frame's keys, the job's own as stored, a message's `idea:<file>`.
+export const imageStripHtml = (job, names = [], cls = '') => names.length ? `<div class="job-image-strip${cls ? ` ${cls}` : ''}" data-strip="${esc(job.id)}">${names.map((n, i) => `<button type="button" class="job-image-thumb" data-image="${esc(n)}" aria-label="Enlarge image ${i + 1}"><span class="job-image-num">${i + 1}</span></button>`).join('')}</div>` : '';
+const keptPics = (job, names) => imageStripHtml(job, names, 'job-sent-strip');
+const pendingPics = (urls = []) => urls.length ? `<span class="job-sent-imgs">${urls.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
 const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh ? ' fresh' : ''}" data-msg="${esc(m.id)}"><span class="job-idea-orb" aria-hidden="true"></span><div><div class="job-idea-who">The wrangler<time>${esc(time(m.at))}</time></div><div class="job-idea-body">${proseHtml(m.text)}</div>${launch}</div></div>`;
 
 // `pending` is the reply this tab just sent, drawn until the thread holds it; `firing`
@@ -88,30 +93,43 @@ const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh 
 // `fresh(id)` says whether a message is new to this dialog, so only it fades in.
 export function ideaThreadHtml(job, { pending = null, firing = null, fresh = () => false } = {}) {
   const thread = ideaThread(job), live = liveSuggestion(job);
-  const rows = [humanHtml(job.intent, job.createdAt)];
+  const rows = [humanHtml(job.intent, job.createdAt, '', keptPics(job, job.images))];
   for (const m of thread) {
-    if (m.from === 'human') { rows.push(humanHtml(m.text, m.at)); continue; }
+    if (m.from === 'human') { rows.push(humanHtml(m.text, m.at, '', keptPics(job, (m.images || []).map((i) => `idea:${i.file}`)))); continue; }
     const state = !m.suggest ? null : m.acceptedAt || firing?.state === 'sent' && firing.id === m.id ? 'done' : firing?.id === m.id ? 'firing' : m === live ? 'live' : 'stale';
     rows.push(plannerHtml(job, m, state ? suggestionHtml(job, m, state) : '', fresh(m.id)));
   }
   const held = pending && !thread.some((m) => m.from === 'human' && m.text === pending.text && m.at >= pending.at - 60000);
-  if (held) rows.push(humanHtml(pending.text, pending.at, `fresh ${pending.state === 'failed' ? 'failed' : 'sending'}`));
+  if (held) rows.push(humanHtml(pending.text, pending.at, `fresh ${pending.state === 'failed' ? 'failed' : 'sending'}`, pendingPics(pending.images)));
   if (ideaStage(job) === 'thinking' || held && pending.state !== 'failed') rows.push(`<div class="job-idea-thinking"><span class="job-idea-orb small" aria-hidden="true"></span><span class="job-idea-shine">${thread.length ? 'The wrangler is thinking…' : 'The wrangler is reading the idea…'}</span></div>`);
   return `<div class="job-idea-thread" aria-live="polite">${rows.join('')}</div>`;
 }
 
-export function ideaComposerHtml(draft = '') {
+// `tray` is the change box's own picture tray (jobs-view.js askTrayHtml), so a
+// screenshot pastes, drops and attaches here as it does on a step.
+export function ideaComposerHtml(draft = '', tray = '') {
   return `<div class="job-change job-idea-composer is-open" data-idea-composer>
-    <div class="job-change-row"><span class="job-change-to" title="Who hears it"><span class="job-idea-orb small" aria-hidden="true"></span>To the wrangler</span><textarea rows="1" maxlength="8000" placeholder="Reply, or ask for a change to the suggestion…" aria-label="Reply to the wrangler">${esc(draft)}</textarea><button type="button" class="job-change-go" data-idea-send aria-label="Send to the wrangler" title="Send (↵)" ${draft.trim() ? '' : 'disabled'}>${ICONS.send}</button></div>
-    <div class="job-change-foot"><span>Resumes the same conversation. A reply after a suggestion replaces it.</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
+    <ul class="job-change-tray" ${tray ? '' : 'hidden'}>${tray}</ul>
+    <div class="job-change-row"><span class="job-change-to" title="Who hears it"><span class="job-idea-orb small" aria-hidden="true"></span>To the wrangler</span><textarea rows="1" maxlength="8000" placeholder="Reply, or ask for a change to the suggestion…" aria-label="Reply to the wrangler">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-idea-send aria-label="Send to the planner" title="Send (↵)" ${draft.trim() ? '' : 'disabled'}>${ICONS.send}</button></div>
+    <p class="job-change-error" role="alert" hidden></p>
+    <div class="job-change-foot"><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 }
+
+// Haiku is still naming the job (server `titlePending`): two faint bars stand where
+// the title will land, so the clipped description never shows as a title first.
+export const titleLoaderHtml = (cls = '') => `<span class="job-title-loader ${cls}" role="status" aria-label="Naming this idea…"><i></i><i></i></span>`;
+const fadingLoader = '<span class="job-title-loader" aria-hidden="true"><i></i><i></i></span>';
+// How long the loader and the landed title cross-fade (jobs.css h2.titled).
+export const TITLE_FADE_MS = 1100;
 
 // The whole dialog body for an idea still being talked through. `cost` and `actions`
 // are the job dialog's own (price chip, Cancel), passed in.
-export function ideaViewHtml(job, { cost = '', actions = '', error = '', pending = null, firing = null, fresh, draft = '' } = {}) {
+// `titled`: ms since the title replaced the loader while the two still cross-fade, else false.
+export function ideaViewHtml(job, { cost = '', actions = '', error = '', pending = null, firing = null, fresh, draft = '', tray = '', titled = false } = {}) {
   const stage = ideaStage(job) || 'thinking';
+  const title = job.titlePending ? `<h2 class="pending" aria-busy="true">${titleLoaderHtml()}</h2>` : titled !== false ? `<h2 class="titled" style="--fade-at:-${titled}ms"><span>${esc(job.title)}</span>${fadingLoader}</h2>` : `<h2>${esc(job.title)}</h2>`;
   return `<div class="job-idea">
-    <header class="job-idea-band" data-spin="24">${inflowHtml(job.id, STAGE_SKY[stage] ?? 0)}<div><div class="job-idea-kicker"><span class="job-idea-mark">Idea · talking with the wrangler</span></div><h2>${esc(job.title)}</h2></div>${cost}</header>${error}
+    <header class="job-idea-band" data-spin="24">${inflowHtml(job.id, STAGE_SKY[stage] ?? 0)}<div>${title}</div>${cost}</header>${error}
     ${ideaThreadHtml(job, { pending, firing, fresh })}
-    <div class="job-idea-dock">${ideaComposerHtml(draft)}${actions ? `<div class="job-actions">${actions}</div>` : ''}</div></div>`;
+    <div class="job-idea-dock">${ideaComposerHtml(draft, tray)}${actions ? `<div class="job-actions">${actions}</div>` : ''}</div></div>`;
 }

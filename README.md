@@ -1,7 +1,9 @@
 # Wrangler²
 
-The Agent Wrangler **automated jobs** system as an installable
-[extension](https://github.com/PortSwigger/agent-wrangler).
+**A new way of working with AI.** Wrangler² breaks work into AI sessions and PRs,
+provides proof that changes work, and allows you to get more done in parallel. It
+installs as an [extension](https://github.com/PortSwigger/agent-wrangler) for
+Agent Wrangler.
 
 A job starts from an outcome. A planning session turns it into an ordered set of
 PRs (and, where a step is not a repository change, an agent session on this
@@ -40,12 +42,27 @@ It returns the `jobId`; without `start` the job waits in the backlog, and with i
 planning still stops for a human to approve the plan. Job-step sessions do not
 see the tool, so a job cannot start further jobs.
 
+A **job spend limit** in Automation settings (its Automation tab, dollars, cents allowed;
+$100 unless you change it, empty for none) caps what any one job may spend. A job's limit is that figure
+times one plus the number of times it has been topped up, worked out live, so a
+new figure reaches every job in flight: raise it and a job paused for budget
+carries on, lower it and one already over pauses. A job that reaches its limit is
+**paused for budget**: no new step, repair, replan, comment triage or mail to a
+parked session starts, and every session of it that is working is interrupted
+(one Escape per card per 15 seconds while it is still over). A plain Resume does
+not lift it; **Add $X** in the job's dialog (the board's plate says only
+"Paused for budget", never the limit) raises its limit by one more X and the
+interrupted sessions are mailed to carry on. Spend is the usage scan's per-card
+price with each live card's own price off the ~4s board graph folded in. An
+interrupt lands between model turns: a single long reply is not cut mid-stream,
+so a job can finish over its limit by up to one turn.
+
 ## Status
 
-Functionally complete against host API **1.31.0**: 1.4 added the worktree,
+Functionally complete against host API **1.38.0**: 1.4 added the worktree,
 `addDirs`, `taskId` and PR-automation spawn options this extension depends on,
 1.6 the `usage:read` and `sessions:bill` capabilities behind the per-job price,
-1.7 the `view` badge that puts the needs-you count on the rail button, 1.8 the client `api.openSession` the Jobs view opens a step's card with, 1.12 the `codexPolicy` hook behind a Codex job's sandbox mode, 1.25 the client `api.agents()` the New job form reads its models and efforts from, 1.27 the client `api.openDiff` behind Review code in Wrangler, and 1.31 the `images:keep` capability and `images` spawn option behind a job's attached images. Every feature the in-core system had is either wired
+1.7 the `view` badge that puts the needs-you count on the rail button, 1.8 the client `api.openSession` the Jobs view opens a step's card with, 1.12 the `codexPolicy` hook behind a Codex job's sandbox mode, 1.25 the client `api.agents()` the New job form reads its models and efforts from, 1.27 the client `api.openDiff` behind Review code in Wrangler, and 1.31 the `images:keep` capability and `images` spawn option behind a job's attached images, and 1.38 the `files:view` capability and client `api.openFile` / `api.files` behind Open on a file place. Every feature the in-core system had is either wired
 through the extension `host` façade or is one of the open host-API gaps listed in
 **`docs/PORTING.md`**, which is the map: what came from where, what stands in
 for what, and which gap blocks which feature. `grep -rn 'TODO(host-api' server
@@ -53,11 +70,11 @@ public` is the live list of gaps.
 
 ## Install
 
-Requires an agent-wrangler on `main` (host API `^1.31.0`). In the wrangler's
+Requires an agent-wrangler on `main` (host API `^1.38.0`). In the wrangler's
 Extensions tab, install from this repository's git URL, consent to the
 capabilities disclosed in `package.json`'s `wranglerExtension` block, then
 restart the wrangler. The extension asks for `sessions:read`, `sessions:spawn`,
-`sessions:archive`, `sessions:bill`, `tasks:read`, `tasks:write`, `usage:read`,
+`sessions:archive`, `sessions:bill`, `sessions:wake`, `sessions:interrupt`, `tasks:read`, `tasks:write`, `usage:read`,
 `board:rebuild` and `board:broadcast`.
 
 Adding Task support widens the extension's requested capabilities. Updating an

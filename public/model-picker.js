@@ -1,5 +1,5 @@
 import { esc } from './util.js';
-import { describe, plateArt, plateThumb, startGalaxy, themeOf, dotFor, starfield, clearGlyphCache } from './model-plates.js';
+import { describe, weakModel, plateArt, plateThumb, startGalaxy, themeOf, dotFor, starfield, clearGlyphCache } from './model-plates.js';
 
 // New job's agent/model/effort picker: a ticket in the sidebar (the current
 // model's art and name), an inline effort meter under it, and a cabinet that
@@ -8,6 +8,9 @@ import { describe, plateArt, plateThumb, startGalaxy, themeOf, dotFor, starfield
 // which the caller writes into the hidden inputs the form already submits.
 
 const modelsOf = (a) => a?.models || [];
+// Every session runs in auto permission mode, so plan mode never starts and opusplan is just Sonnet; plain opus replaces it.
+export const offeredAgents = (agents) => agents.map((a) => (a.id === 'claude' ? { ...a, models: modelsOf(a).filter((m) => m.value !== 'opusplan') } : a));
+const upgradeUsual = (u) => (u?.agent === 'claude' && u.model === 'opusplan' ? { ...u, model: 'opus' } : u);
 const effortsOf = (a, m) => (m?.efforts?.length ? (a.efforts || []).filter((e) => m.efforts.includes(e.value)) : a?.efforts || []);
 const defaultOf = (a) => (modelsOf(a).find((m) => m.default) || modelsOf(a)[0])?.value || '';
 const offers = (a, m, effort) => !!effort && effortsOf(a, m).some((e) => e.value === effort);
@@ -16,6 +19,7 @@ const offers = (a, m, effort) => !!effort && effortsOf(a, m).some((e) => e.value
 // that agent AND model (its effort only if that model still offers it); a usual
 // that has gone is ignored, and the first agent's default is used.
 export function initialPick(agents, usual) {
+  usual = upgradeUsual(usual);
   const ua = agents.find((x) => x.id === usual?.agent), um = modelsOf(ua).find((x) => x.value === usual?.model);
   if (ua && um) return { agent: ua.id, model: um.value, effort: offers(ua, um, usual.effort) ? usual.effort : '' };
   const a = agents[0];
@@ -38,6 +42,7 @@ const claudeFacts = (d, m, effort) => `<p class="pick-pdesc">${esc(d.desc)}</p>
   <div class="pick-rows"><div><span>Model ID</span><i></i><code>${esc(m.value)}</code></div><div><span>Context</span><i></i><span>${d.ctx ? `${esc(d.ctx)} tokens` : 'Per phase'}</span></div><div><span>Effort</span><i></i><span>${esc(effort ? effort.label || effort.value : 'Auto')}</span></div></div>`;
 
 export function mountModelPicker(el, { agents, usual, cover, onChange }) {
+  agents = offeredAgents(agents); usual = upgradeUsual(usual);
   const legend = el.querySelector('legend')?.outerHTML || '';
   const find = (id) => agents.find((a) => a.id === id);
   const modelOf = (a, v) => modelsOf(a).find((x) => x.value === v) || { value: v || '' };
@@ -74,7 +79,7 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
       <div class="pick-meter"><span class="pick-lab">Effort</span>
         <div class="pick-bars" role="radiogroup" aria-label="Effort"><button type="button" class="pick-bar auto${e ? '' : ' on'}" role="radio" aria-checked="${!e}" data-effort="" title="Leave it to the agent" tabindex="${e ? -1 : 0}">AUTO</button>${bars}</div>
         <span class="pick-val">${esc(cur ? cur.label || cur.value : 'auto')}</span></div>
-      <div class="pick-usual">${usualHtml}</div>`;
+      <div class="pick-usual">${usualHtml}</div>${weakModel(a, m) ? `<div class="pick-weak" role="note" title="Wrangler² plans and reviews best on Opus 5.5, Fable 5.1, GPT-6 Astra or newer">Wrangler² performance will suffer with ${esc(d.short)}</div>` : ''}`;
     galaxies(el.querySelector('.pick-band'), d, level, 'ticket');
     onChange({ ...pick });
   }
@@ -172,14 +177,14 @@ export function mountModelPicker(el, { agents, usual, cover, onChange }) {
     // The catalog can change under an open dialog: a pick the new one no longer has
     // falls back to your usual, and an unchanged catalog costs nothing.
     agentsChanged(next) {
-      if (disposed || sameCatalog(agents, next)) return;
+      if (disposed || sameCatalog(agents, next = offeredAgents(next))) return;
       agents = next;
       const a = find(pick.agent);
       if (!a || !modelsOf(a).some((m) => m.value === pick.model)) pick = initialPick(agents, usual);
       else if (pick.effort && !offers(a, modelOf(a, pick.model), pick.effort)) pick = { ...pick, effort: '' };
       closeCabinet(false); renderTicket();
     },
-    setUsual(u) { usual = u; renderTicket(); },
+    setUsual(u) { usual = upgradeUsual(u); renderTicket(); },
     rerender() { clearGlyphCache(); renderTicket(); if (cab) openCabinet(cab.dataset.agent, cab.dataset.preview); },
     dispose() { disposed = true; clearTimeout(hoverT); stopAll('ticket'); stopAll('cab'); cab?.remove(); cab = null; dlg?.removeEventListener('cancel', onCancel); },
   };

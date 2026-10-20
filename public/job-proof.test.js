@@ -99,21 +99,31 @@ test('the viewer says where a shot was taken, shows a reason in full, and a run 
   assert.match(proofViewerHtml(job, sub(), { i: 99 }, cache), /4 of 4/, 'an index past the end lands on the last item');
 });
 
-test('a multi-shot item labels its own shots apart from the strip of checks, and a file named twice is one shot', () => {
+test('a multi-shot check is a stack with its count, open it is a tray of its shots in its place among the checks, and a file named twice is one shot', () => {
   const cache = new EvidenceCache();
   const four = sub({ ready: { round: 1, checks: ['Wizard', 'B', 'C'], proof: [{ text: 'Wizard', shots: ['1', '2', '3', '4', '2'].map((n) => shot(`w${n}.png`)) }, { text: 'B', shots: [shot('b.png'), shot('b.png')] }, { text: 'C', run: { cmd: 'npm test', out: 'ok', exit: 0 } }] } });
   assert.deepEqual(shotsOf(four.ready.proof[0]).map((s) => s.file), ['w1.png', 'w2.png', 'w3.png', 'w4.png']);
   assert.deepEqual(filmFiles(four, 9), ['w1.png', 'w2.png', 'w3.png', 'w4.png', 'b.png']);
   const html = proofViewerHtml(job, four, { i: 0, j: 2 }, cache);
   assert.equal((html.match(/data-proof-shot=/g) || []).length, 4, 'four real shots');
-  assert.equal((html.match(/data-proof-go=/g) || []).length, 3, 'three checks');
-  assert.equal((html.match(/class="job-proof-pick/g) || []).length, 7, 'shots + checks, nothing more');
-  assert.match(html, /<small>Shots in this check · 3 of 4<\/small><div class="job-proof-shots">.*<small>All checks · 3<\/small><div class="job-proof-strip">/s);
-  assert.match(html, /aria-label="Shot 3 of 4"/);
-  assert.match(proofListHtml(job, four), /<small>\+3<\/small>/, 'one thumbnail at rest, and how many more');
+  assert.equal((html.match(/data-proof-go=/g) || []).length, 2, 'the open check is its tray, the others are checks');
+  assert.equal((html.match(/class="job-proof-pick/g) || []).length, 6, 'shots + other checks, nothing repeated');
+  assert.match(html, /<small>Checks · 3<\/small><div class="job-proof-strip"><div class="job-proof-tray" role="group" aria-label="Wizard · 4 shots">(<button[^>]*data-proof-shot[^>]*>.*?<\/button>){4}<small>3\/4<\/small><\/div><button[^>]*data-proof-go="1"/s, 'the tray comes first, where its check is');
+  assert.match(html, /class="job-proof-pick sel" data-proof-shot="2" aria-label="Shot 3 of 4"/);
+  assert.doesNotMatch(html, /Shots in this check|All checks|job-proof-count/);
   const single = proofViewerHtml(job, four, { i: 1 }, cache);
-  assert.doesNotMatch(single, /job-proof-shots|job-proof-row|All checks/, 'a file named twice is not a second shot, so no row of its own');
+  assert.match(single, /<button type="button" class="job-proof-pick stack " data-proof-go="0" aria-label="Wizard · 4 shots"[^>]*>.*<b class="job-proof-count" aria-hidden="true">4<\/b><\/button>/s, 'closed, the check says how many shots it holds');
+  assert.match(single, /class="job-proof-pick  sel" data-proof-go="1" aria-label="B"/, 'a file named twice is not a second shot, so no stack');
+  assert.doesNotMatch(single, /data-proof-shot|job-proof-tray/);
   assert.equal((single.match(/class="job-proof-pick/g) || []).length, 3);
+  assert.match(proofListHtml(job, four), /<small>\+3<\/small>/, 'one thumbnail at rest, and how many more');
+});
+
+test('a job whose checks each have one shot keeps one plain strip', () => {
+  const html = proofViewerHtml(job, sub({ ready: { round: 1, checks: [], proof: [{ text: 'A', shots: [shot('a.png')] }, { text: 'B', shots: [shot('b.png')] }, { text: 'C', couldNot: 'no' }] } }), { i: 0 }, new EvidenceCache());
+  assert.match(html, /<div class="job-proof-strip"><button/);
+  assert.doesNotMatch(html, /job-proof-row|job-proof-tray|job-proof-count|stack|data-proof-shot/);
+  assert.equal((html.match(/data-proof-go=/g) || []).length, 3);
 });
 
 test('the viewer shows the thumbnail soft until the full file arrives, a clip as a video, and the cache fills from frames', () => {
