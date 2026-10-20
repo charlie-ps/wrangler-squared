@@ -2811,6 +2811,33 @@ test('several conversations at once: each has its own wrangler run, and each run
   assert.deepEqual(job.talk.filter((m) => m.kind === 'answer').map((m) => [m.convo, m.text]), [[job.convos[1].id, 'Web waits on a slow suite.'], [job.convos[0].id, 'Only web.']]);
 });
 
+test('a question asked on a step is that step\'s: its wrangler is told which, and escalates it to the job only when it judges so', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, 'web', 'Why is this slow?');
+  change(f, 'api', 'Is this deployed?');
+  await f.tick();
+  const [slow, deployed] = f.launched.filter((w) => w.run.ask);
+  let job = f.store.get(f.job.id);
+  const prompt = jobPrompt(job, null, slow.run);
+  assert.match(prompt, /started from the view of sub-job web "Deliver web", which the human had open: read "this", "it" and "here" as that sub-job/);
+  assert.match(prompt, /shows only on that sub-job's view\. If your answer matters to the job as a whole[^\n]*escalate:true/);
+  assert.match(prompt, /kind:"reply", text:"your answer", escalate\?:true/);
+  f.report({ kind: 'reply', text: 'Web waits on api, which every later step needs too.', escalate: true }, slow);
+  f.report({ kind: 'reply', text: 'Not yet.' }, deployed);
+  job = f.store.get(f.job.id);
+  assert.deepEqual(job.convos.map((c) => [c.sub, !!c.escalatedAt]), [['web', true], ['api', false]], 'only the one its wrangler escalated');
+
+  change(f, null, 'What is left?'); await f.tick();
+  const jobAsker = plannerOf(f);
+  assert.doesNotMatch(jobPrompt(f.store.get(f.job.id), null, jobAsker.run), /started from the view of sub-job|escalate\?:true/, 'a job\'s conversation is the job\'s already');
+  f.report({ kind: 'reply', text: 'Web.', escalate: true }, jobAsker);
+  assert.equal(f.store.get(f.job.id).convos.at(-1).escalatedAt, undefined);
+
+  change(f, 'api', 'Split this in two', f.store.get(f.job.id).convos[1].id); await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('api2'), spec('web')]) }, plannerOf(f));
+  assert.ok(f.store.get(f.job.id).convos[1].escalatedAt, 'a plan change it proposes is the job\'s, so the job lists it');
+});
+
 test('a message sent before the wrangler replies reaches the same running session, not a new run', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   change(f, null, 'What is left?');

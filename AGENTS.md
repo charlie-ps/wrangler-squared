@@ -164,7 +164,12 @@ feature).
   runs, so Approve change stays live while one answers. Every conversation ends in
   its own box (`boxHtml`, `data-change-convo`), and the box below them all starts a
   new one; pasted pictures and the sent bubble belong to the box they were used in
-  (`askImages[].box`, `askSent.convo`). A step's dialog shows only what was said on it. A job
+  (`askImages[].box`, `askSent.convo`). A conversation opened from a step
+  (`convo.sub`) is that step's: its wrangler's prompt names the step
+  (`stepConvoLine`), and it shows ONLY on that step's dialog until the wrangler
+  escalates it (`reply {escalate:true}`, or any proposal it draws, `escalate` →
+  `convo.escalatedAt`); then the job's list shows it too (`talkFor`, client-side
+  only). A step's dialog shows only what was said on it. A job
   saved with the old single `job.ask` is migrated on load (`migrateTalk`). Open PR #209
   keeps a step's sent ideas on `job.replan.asks`; once both land, the step dialog
   should draw them from the thread, not twice.

@@ -290,6 +290,13 @@ const otherWranglers = (job, convo) => {
   const drawing = job.replan && !job.replan.proposal && job.replan.convo !== convo ? `- A plan change is being drawn${job.replan.red && !job.replan.red.human ? ` for red step ${job.replan.red.sub}` : ''}: ${JSON.stringify(job.replan.feedback.slice(0, 600))}.` : '';
   return others.length || drawing ? lines('Other wranglers are at work on this job at the same time, each in its own conversation with the human. Their questions are listed only so you know of them: do NOT answer them, and do not mention them unless your answer depends on one. Answer only what was said in YOUR conversation.', ...others, drawing) : '';
 };
+// A conversation started on a step is about that step and shows only on it, until
+// its wrangler escalates it to the job's list (job-talk.js).
+const stepConvoLine = (job, convo) => {
+  const sub = convo?.sub && job.subJobs.find((s) => s.id === convo.sub);
+  if (!sub) return '';
+  return `This conversation was started from the view of sub-job ${sub.id} ${JSON.stringify(sub.title)}, which the human had open: read "this", "it" and "here" as that sub-job, and say so in your answer. ${convo.escalatedAt ? 'It is already shown in the job\'s own list of conversations as well as on that sub-job.' : 'It shows only on that sub-job\'s view. If your answer matters to the job as a whole (it reaches other sub-jobs, the plan or the job\'s outcome), add escalate:true to your reply so it also shows in the job\'s list; a plan change you propose shows there anyway.'}`;
+};
 // A question answered in the thread drops this plan change, so only a fresh one may.
 const mayAnswer = (job) => !job.replan.red && !job.replan.previous && !job.replan.previousActions?.length;
 const replanBlock = (job, run) => lines(
@@ -301,8 +308,9 @@ const replanBlock = (job, run) => lines(
   job.replan.red ? '' : talkLines(job, job.replan.convo),
   otherWranglers(job, job.replan.convo),
   sourceLine(job, job.replan),
+  job.replan.red ? '' : stepConvoLine(job, convoById(job, job.replan.convo)),
   `Requested change: ${job.replan.feedback}`,
-  mayAnswer(job) ? `If those words are only a question and nothing should change, answer it instead of proposing: ${reportCall(run, 'kind:"reply", text:"your answer, plain words, at most 4000 characters"')} The board shows it in the job's conversation and no plan change is made.` : '',
+  mayAnswer(job) ? `If those words are only a question and nothing should change, answer it instead of proposing: ${reportCall(run, `kind:"reply", text:"your answer, plain words, at most 4000 characters"${convoById(job, job.replan.convo)?.sub ? ', escalate?:true' : ''}`)} The board shows it in the job's conversation and no plan change is made.` : '',
 );
 // A question in one of the job's conversations (job-talk.js): answered, not
 // planned. The board calls the planner "the wrangler", so that is who the human is
@@ -315,9 +323,10 @@ const askBlock = (job, run, convo) => lines(
   talkLines(job, convo.id),
   otherWranglers(job, convo.id),
   sourceLine(job, convo.pending),
+  stepConvoLine(job, convo),
   ...convo.pending.asks.map((a, i) => `${i ? 'Then the human added' : 'The question'}: ${a.feedback}`),
   'Find out before you answer, READ-ONLY: get_job_context gives every run with its sessionId, read_session_transcript reads a step\'s session (open the raw transcriptPath it returns when the detail matters), `gh pr view`/`gh pr diff` read a PR, and a step\'s worktree is on disk. Change nothing anywhere.',
-  `Then answer in plain words (short paragraphs, a list where it helps, at most 4000 characters), saying what you know and how you know it: ${reportCall(run, 'kind:"reply", text:"your answer"')} No plan change is made and nothing is held. Anything more the human says before you reply reaches you here by mail: answer all of it in that one reply.`,
+  `Then answer in plain words (short paragraphs, a list where it helps, at most 4000 characters), saying what you know and how you know it: ${reportCall(run, `kind:"reply", text:"your answer"${convo.sub ? ', escalate?:true' : ''}`)} No plan change is made and nothing is held. Anything more the human says before you reply reaches you here by mail: answer all of it in that one reply.`,
   'If the human is really asking for a change ("can you make it…?", "should we drop step 3?" meant as "do"), do not ask permission: propose it as a plan change, with the rules below, and report the plan receipt instead of a reply.',
   ...proposalRules(job),
 );

@@ -57,7 +57,13 @@ const ownConvo = (job, run) => {
   return convo;
 };
 const where = (convo) => convo.sub || convo.pending?.source?.sub;
-const textOnly = (report) => { if (report.suggest || report.shots || report.run || report.running) throw new Error('An answer is text only: job_report {kind:"reply", text}'); };
+const textOnly = (report) => { if (report.suggest || report.shots || report.run || report.running) throw new Error('An answer is text only: job_report {kind:"reply", text, escalate?}'); };
+// A conversation started on a step shows only there until its wrangler judges it
+// the job's (a reply's `escalate`) or proposes a plan change, which is the job's
+// by nature: then the job's list shows it too.
+export function escalate(convo, now) {
+  if (convo?.sub && !convo.escalatedAt) convo.escalatedAt = now;
+}
 
 // The answer lands in the thread and ends the run. Anything the human said that
 // never reached it starts the conversation's next run.
@@ -65,6 +71,7 @@ export function answerAsk(job, run, report, now) {
   const convo = ownConvo(job, run);
   textOnly(report);
   say(job, { from: 'wrangler', kind: 'answer', text: report.text, convo: convo.id, replyTo: run.ask, ...(where(convo) ? { sub: where(convo) } : {}) }, now);
+  if (report.escalate) escalate(convo, now);
   const left = unsentAsks(convo);
   convo.pending = left.length ? { ...convo.pending, at: now, asks: left } : null;
   run.report = report;
@@ -89,6 +96,7 @@ export function answerReplan(job, run, report, now) {
   if (r.red || r.previous || r.previousActions?.length) throw new Error('This plan change carries an earlier proposal or a red step: report a plan');
   textOnly(report);
   say(job, { from: 'wrangler', kind: 'answer', text: report.text, ...(r.convo ? { convo: r.convo } : {}), ...(r.source?.sub ? { sub: r.source.sub } : {}) }, now);
+  if (report.escalate) escalate(convoById(job, r.convo), now);
   job.replan = null;
   run.report = report;
   run.reportedAt = now;
@@ -109,6 +117,7 @@ export function noteProposal(job, proposal, now) {
   say(job, { from: 'wrangler', kind: 'proposal', proposalId: proposal.id, text: proposal.diagnosis?.summary || proposal.why || proposal.label || '',
     changes: changesOf(job, proposal), options: 1 + (proposal.alternatives?.length || 0), ...(red ? { red } : {}), ...(job.replan?.convo ? { convo: job.replan.convo } : {}),
     ...(job.replan?.source?.sub ? { sub: job.replan.source.sub } : red ? { sub: red } : {}) }, now);
+  escalate(convoById(job, job.replan?.convo), now);
 }
 // approved, discarded, or revised (a newer idea went into it).
 export function closeProposal(job, proposalId, outcome, now) {

@@ -1397,7 +1397,7 @@ test('the box is a conversation with the wrangler: a question and its answer in 
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'done', deployed: { at: 1, checks: ['ok'] } }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
   job.talk = [{ id: 't1', at: 1, from: 'human', text: 'Why is <b>web</b> slow?', sub: 'web', convo: 'c1' }];
-  job.convos = [{ id: 'c1', at: 1, sub: 'web', pending: { at: 1, asks: [{ messageId: 't1', feedback: 'About web: Why is web slow?', sentAt: 1 }], source: { sub: 'web', at: 'step', ref: 'implementation/queued' } } }];
+  job.convos = [{ id: 'c1', at: 1, sub: 'web', escalatedAt: 1, pending: { at: 1, asks: [{ messageId: 't1', feedback: 'About web: Why is web slow?', sentAt: 1 }], source: { sub: 'web', at: 'step', ref: 'implementation/queued' } } }];
   job.runs = [{ id: 'ask1', subJobId: null, phase: 'planning', stopped: false, ask: 't1', convo: 'c1' }];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
@@ -1433,13 +1433,13 @@ test('several conversations at once: one section each, both answering, each with
   const pending = (id) => ({ at: 1, asks: [{ messageId: id, feedback: 'x', sentAt: 1 }] });
   job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'human', text: 'Why is web slow?', sub: 'web', convo: 'c2' },
     { id: 't3', at: 3, from: 'wrangler', kind: 'answer', text: 'Web waits on api.', sub: 'web', convo: 'c2' }];
-  job.convos = [{ id: 'c1', at: 1, pending: pending('t1') }, { id: 'c2', at: 2, sub: 'web', pending: null }];
+  job.convos = [{ id: 'c1', at: 1, pending: pending('t1') }, { id: 'c2', at: 2, sub: 'web', escalatedAt: 3, pending: null }];
   job.runs = [{ id: 'a1', subJobId: null, phase: 'planning', stopped: false, ask: 't1', convo: 'c1' }, { id: 'w1', subJobId: 'api', phase: 'implementation', stopped: false }];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
   const convos = () => [...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo')];
   assert.match(f.q('#job-dialog .job-talk-head').textContent, /Conversations with the wrangler/);
-  assert.deepEqual(convos().map((c) => c.querySelector('.job-talk-convo-head').textContent), ['Conversation 1Answering', 'Conversation 2on Deliver web']);
+  assert.deepEqual(convos().map((c) => c.querySelector('.job-talk-convo-head').textContent), ['Conversation 1Answering', 'Conversation 2on Deliver webEscalated']);
   assert.deepEqual(convos().map((c) => [c.querySelector('.job-change').dataset.changeConvo, c.querySelector('textarea').placeholder]),
     [['c1', 'Add to your question…'], ['c2', 'Reply in this conversation…']], 'a box in each, saying where its words go');
   const boxes = [...f.q('#job-dialog').querySelectorAll('.job-change')];
@@ -1457,6 +1457,31 @@ test('several conversations at once: one section each, both answering, each with
   assert.equal(jobStatus(job, job.subJobs[0]).text === 'Held for the plan change', false, 'its steps keep running');
   f.view.openDetail('job1', 'web');
   assert.deepEqual(convos().map((c) => c.dataset.convo), ['c2'], 'a step shows only what was said on it');
+});
+
+test('a question asked on a step stays on that step until the wrangler escalates it, then the job lists it too', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'human', text: 'Why is this slow?', sub: 'web', convo: 'c2' },
+    { id: 't3', at: 3, from: 'wrangler', kind: 'answer', text: 'Web waits on api.', sub: 'web', convo: 'c2' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }, { id: 'c2', at: 2, sub: 'web', pending: null }];
+  job.runs = [];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const convos = () => [...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo')].map((c) => [c.dataset.convo, c.querySelector('.job-talk-convo-head').textContent]);
+  assert.deepEqual(convos(), [['c1', 'Conversation 1']], 'the step\'s conversation is not on the job');
+  f.view.openDetail('job1', 'web');
+  assert.deepEqual(convos(), [['c2', 'Conversation 2']], 'only on its step');
+  f.view.openDetail('job1', 'api');
+  assert.equal(f.q('#job-dialog .job-talk'), null);
+
+  job.convos[1].escalatedAt = 3;
+  f.view.openDetail('job1');
+  assert.deepEqual(convos(), [['c1', 'Conversation 1'], ['c2', 'Conversation 2on Deliver webEscalated']]);
+  f.view.openDetail('job1', 'web');
+  assert.deepEqual(convos(), [['c2', 'Conversation 2Also on the job']]);
+  f.view.openDetail('job1', 'api');
+  assert.equal(f.q('#job-dialog .job-talk'), null, 'never on another step');
 });
 
 test('a change idea goes straight to a proposal card in the same thread, with its changes lined up and what became of it', (t) => {

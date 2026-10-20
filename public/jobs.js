@@ -390,13 +390,17 @@ export function changeRoute(at, job = null, sub = null) {
   if (at === 'code' && job && readyRun(job, sub)) return { ...STEP, placeholder: 'Ask about it, or say what to change…', hint: 'About this step. A question is answered here; feedback goes to its open session and anything else into the plan, once you approve.' };
   return STEP;
 }
-// A running job's conversations with the wrangler (mirrors server/job-talk.js):
-// all of them on the job, a step's own messages on that step. A conversation is
-// pending while its wrangler has something of the human's left to answer.
+// A running job's conversations with the wrangler (mirrors server/job-talk.js): a
+// step's on that step only, and on the job too once its wrangler escalated it; the
+// rest on the job. A conversation is pending while its wrangler has something of
+// the human's left to answer.
 export const talkOf = (job) => job?.talk || [];
 export const convosOf = (job) => job?.convos || [];
 export const askPending = (job, convo = null) => !job?.cancelledAt && (convo ? !!convo.pending : convosOf(job).some((c) => c.pending));
-export const talkFor = (job, sub) => sub ? talkOf(job).filter((m) => m.sub === sub.id) : talkOf(job);
+export function talkFor(job, sub) {
+  const convo = (m) => m.convo ? convosOf(job).find((c) => c.id === m.convo) : null;
+  return talkOf(job).filter(sub ? (m) => m.sub === sub.id || convo(m)?.sub === sub.id : (m) => !convo(m)?.sub || convo(m).escalatedAt);
+}
 // The conversations a view shows, in the order they started, each with its
 // messages; a message from no conversation (a red step's card) is grouped apart.
 export function convoGroups(job, sub) {

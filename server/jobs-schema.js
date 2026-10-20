@@ -493,8 +493,10 @@ export const reportSchema = z.discriminatedUnion('kind', [
   // Answers a human who wrote to a session parked on its ready receipt (job-store.js):
   // the run stays parked, the tree and the round unchanged. From a new idea's planner
   // it is a turn in the conversation instead (job-idea.js), and may suggest a job.
+  // From the wrangler answering a step's conversation, `escalate` also shows it on
+  // the job (job-talk.js).
   receipt({ kind: z.literal('reply'), text: z.string().trim().min(1).max(4000), shots: z.array(shotSchema).min(1).max(4).optional(), run: runProofSchema.optional(), running: runningSchema.optional(),
-    suggest: suggestionSchema.optional() }),
+    suggest: suggestionSchema.optional(), escalate: z.boolean().optional() }),
   receipt({ kind: z.literal('published'), url: prUrlSchema }),
   receipt({ kind: z.literal('repaired'), changes: checksSchema, checks: checksSchema }),
   receipt({ kind: z.literal('deployed'), checks: checksSchema }),
