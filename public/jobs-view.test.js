@@ -411,6 +411,32 @@ test('a job session archived when its step stopped is offered as a restore, not 
   f.q('#job-session').click(); assert.deepEqual(f.sessions, ['s2'], 'the latest run, live or archived');
 });
 
+test('a step with several sessions lists each one in Open session\'s caret, newest first', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1', 's2', 's3'] }];
+  job.runs = [{ id: 'r1', subJobId: 'api', phase: 'implementation', sessionId: 's1', startedAt: 1, stopped: true }, { id: 'r2', subJobId: 'api', phase: 'publish', sessionId: 's2', startedAt: 2, stopped: true }];
+  f.onBoard.add('s3'); f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('#job-session').textContent, 'Open session');
+  const items = [...f.q('#job-dialog').querySelectorAll('[data-step-session]')];
+  assert.deepEqual(items.map((b) => b.dataset.stepSession), ['s3', 's2', 's1']);
+  assert.match(items[0].textContent, /^Session 3Open$/, 'no run for it: numbered');
+  assert.match(items[1].textContent, /^Publish · .+Restore$/);
+  assert.match(items[2].textContent, /^Implementation · .+Restore$/);
+  f.q('#job-dialog [data-keep="session-menu"]').open = true; f.q('#job-dialog [data-keep="session-menu"]').dispatchEvent(new f.window.Event('toggle'));
+  f.view.update(f.data); assert.equal(f.q('#job-dialog [data-keep="session-menu"]').open, true, 'a tick leaves it open');
+  f.q('[data-step-session="s1"]').click(); assert.deepEqual(f.sessions, ['s1']);
+  assert.equal(f.q('#job-dialog').open, false);
+});
+
+test('a step with one session keeps the plain Open session button', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1'] }];
+  f.onBoard.add('s1'); f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('#job-session').textContent, 'Open session');
+  assert.equal(f.q('#job-dialog .job-session-split'), null);
+  assert.equal(f.q('#job-dialog [data-step-session]'), null);
+});
+
 test('Review code in Wrangler opens the latest run already on the board, else the latest', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'review', worktree: { path: '/wt/api' }, sessions: ['s1', 's2', 's3'] }];
