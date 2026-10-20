@@ -1,6 +1,6 @@
 import { esc } from './util.js';
 import { ICONS, PULL_REQUEST_ICON, TICKET_ICON } from './icons.js';
-import { isPrSub, isWriteSub, placesOf, prNumber, webUrl } from './jobs.js';
+import { inConversation, isPrSub, isWriteSub, placesOf, prNumber, webUrl } from './jobs.js';
 import { jobLabel } from './job-state.js';
 
 // A plate's right-click menu, modelled on core's session card menu (agent-wrangler
@@ -56,7 +56,7 @@ export function jobMenuItems(job) {
     { id: 'copy-id', label: 'Copy job ID', icon: ICONS.copy },
     ...(links.length ? [{ sep: true }, ...links] : []),
     ...(control.length ? [{ sep: true }, ...control] : []),
-    ...(finished(job) ? [] : [{ sep: true }, { id: 'cancel', label: 'Cancel job', icon: ICONS.stop, danger: true }]),
+    ...(finished(job) ? [] : [{ sep: true }, { id: 'cancel', label: inConversation(job) ? 'Cancel idea' : 'Cancel job', icon: ICONS.stop, danger: true }]),
   ];
 }
 

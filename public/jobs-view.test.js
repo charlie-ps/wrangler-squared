@@ -269,6 +269,16 @@ test('a change being typed is not redrawn away by a live tick, and an escaped ag
   assert.ok(!f.q('#job-dialog').innerHTML.includes('<b>protos</b>'));
 });
 
+test('an idea still in conversation asks to cancel the idea, and sends the same cancel as a job', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; Object.assign(job, { plan: null, idea: { thread: [] }, runs: [{ id: 'r1', subJobId: null, phase: 'planning', stopped: false, parkedFor: 'idea', parkedAt: 2 }] });
+  f.view.update(f.data);
+  f.q('.job-plate-open[data-job="job1"]').click();
+  assert.match(f.q('#job-cancel').textContent, /Cancel idea/);
+  f.q('#job-cancel').click();
+  assert.deepEqual([f.q('#job-dialog h2').textContent, f.q('[data-cancel-job]').textContent], ['Cancel this idea?', 'Cancel idea']);
+  f.q('[data-cancel-job]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', action: 'cancel-job' }, 'the same action as any job');
+});
 test('Cancel job is confirmed first, sends only the job action, and a cancelled job reads as cancelled rather than delivered', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', checkStatus: 'pending' } }, { ...sub('web', ['api']), stage: 'implementation' }, { ...sub('docs'), stage: 'done', deployed: { checks: ['Merged'], at: 1 } }];
@@ -278,6 +288,7 @@ test('Cancel job is confirmed first, sends only the job action, and a cancelled 
   assert.equal(f.sent.length, 0, 'cancelling needs a confirmation first');
   const text = () => f.q('#job-dialog').textContent;
   assert.deepEqual([...f.q('#job-dialog').querySelectorAll('.job-cancel-counts li')].map((li) => li.textContent), ['Drops 2 sub-jobs', 'PR #1 stays open on GitHub', 'Worktrees with unsaved work are kept']);
+  assert.deepEqual([f.q('#job-dialog h2').textContent, f.q('[data-cancel-job]').textContent], ['Cancel this job?', 'Cancel job']);
   assert.ok(f.q('#job-cancel-form'), 'a form, so a live graph tick leaves the question alone');
   f.q('#job-move-back').click(); assert.ok(f.q('#job-cancel'), 'backing out returns to the detail view');
   f.q('#job-cancel').click(); f.q('[data-cancel-job]').click();
