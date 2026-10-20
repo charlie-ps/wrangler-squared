@@ -1604,3 +1604,11 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-talk-card footer { display:flex; gap:8px; }
 .job-talk-card footer button { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; font-size:12.5px; }
 .job-talk-working { padding-left:0; }
+/* Several conversations at once (job-talk.js): one section each, ending in its own box. */
+.job-talk-convo { display:grid; gap:12px; padding:10px 12px; border-radius:10px; box-shadow:inset 0 0 0 1px var(--border-muted); }
+.job-talk-convo-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; }
+.job-talk-convo-head b { font-weight:600; }
+.job-talk-convo-head small { color:var(--fg-muted); }
+.job-talk-tag.tone-working { color:var(--st-warn-fg); background:color-mix(in srgb, var(--st-warn) 18%, transparent); }
+.job-talk-convo .job-talk-box { margin:0; }
+.job-change-to small { margin-left:6px; color:var(--fg-muted); font-weight:400; }

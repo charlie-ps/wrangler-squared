@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaStage, ideaOpen, readyRun, reworkRound, talkFor, askPending, planningRun } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, jobCards, jobNeedsReview, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaStage, ideaOpen, readyRun, reworkRound, talkFor, askPending, planningRun, convosOf } from './jobs.js';
 import { talkHtml } from './job-talk.js';
 import { ideaViewHtml, ideaThreadHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
@@ -348,6 +348,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // What "Ask about this" starts the Request changes box with, once.
   let askDraft = null;
   // Pictures pasted, dropped or picked into an idea box, staged as they land (api.images.stage); sent with the idea.
+  // Each is the box's it went into (`box`: its conversation's id, '' for a new one).
   let askImages = [];
   // The idea last sent from this dialog, drawn as a bubble above its box until the
   // dialog moves on: `state` is sending, sent or failed (the job-action frames).
@@ -679,7 +680,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (!list.length) return '';
     return more('history', `${ICONS.wrench}History <small>${list.length}</small>`, `<ul class="job-move-log">${list.slice().reverse().map((m) => `<li><span>${esc(m.detail || m.move)}</span><small>${esc(when(m.at))}</small></li>`).join('')}</ul>`, 'job-moves-history');
   }
-  const askTrayHtml = () => askImages.map((i) => `<li class="job-image ${i.name ? '' : 'uploading'}"><img src="${esc(i.url)}" alt=""><button type="button" class="job-image-remove" data-ask-image="${i.id}" aria-label="Remove image" title="Remove">×</button></li>`).join('');
+  const askTrayHtml = (key) => askImages.filter((i) => i.box === key).map((i) => `<li class="job-image ${i.name ? '' : 'uploading'}"><img src="${esc(i.url)}" alt=""><button type="button" class="job-image-remove" data-ask-image="${i.id}" aria-label="Remove image" title="Remove">×</button></li>`).join('');
   function clearAskImages() { for (const i of askImages) URL.revokeObjectURL(i.url); askImages = []; }
   function clearAskSent() { for (const u of askSent?.images || []) URL.revokeObjectURL(u); askSent = null; }
   let askSeq = 0;
@@ -687,13 +688,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // with the idea, and kept by the server (server/handlers.js prepare).
   function wireAskImages(box) {
     const text = box.querySelector('textarea'), send = box.querySelector('[data-change-send]'), tray = box.querySelector('.job-change-tray'), file = box.querySelector('.job-change-attach input');
+    const key = box.dataset.changeConvo || '', mine = () => askImages.filter((i) => i.box === key);
     const sync = () => {
-      send.disabled = !text.value.trim() || askImages.some((i) => !i.name);
-      box.classList.toggle('has-text', !!text.value.trim()); box.classList.toggle('has-img', askImages.length > 0);
+      send.disabled = !text.value.trim() || mine().some((i) => !i.name);
+      box.classList.toggle('has-text', !!text.value.trim()); box.classList.toggle('has-img', mine().length > 0);
       text.style.height = 'auto'; if (text.scrollHeight) text.style.height = `${Math.min(text.scrollHeight, 160)}px`;
     };
     const paint = () => {
-      tray.innerHTML = askTrayHtml(); tray.hidden = !askImages.length;
+      tray.innerHTML = askTrayHtml(key); tray.hidden = !mine().length;
       tray.querySelectorAll('[data-ask-image]').forEach((b) => b.onclick = () => { const i = askImages.find((x) => String(x.id) === b.dataset.askImage); if (i) URL.revokeObjectURL(i.url); askImages = askImages.filter((x) => x !== i); paint(); });
       sync();
     };
@@ -701,10 +703,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const { sources } = imageSources(dt);
       if (!sources.length) return;
       e?.preventDefault();
-      for (const source of sources.slice(0, Math.max(0, MAX_ASK_IMAGES - askImages.length))) (async () => {
+      for (const source of sources.slice(0, Math.max(0, MAX_ASK_IMAGES - mine().length))) (async () => {
         try {
           const blob = blobOf(await frameOf(source));
-          const item = { id: ++askSeq, name: null, url: URL.createObjectURL(blob) };
+          const item = { id: ++askSeq, box: key, name: null, url: URL.createObjectURL(blob) };
           askImages.push(item); paint();
           try { item.name = (await stageImage(blob)).name; } catch { askImages = askImages.filter((x) => x !== item); URL.revokeObjectURL(item.url); }
           paint();
@@ -722,8 +724,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // What was sent, above the box it came from: the words and pictures lift into a
   // bubble, and the line under it says who has it once the server took it. Once the
   // conversation shows the message itself, its row there is the receipt instead.
-  function askSentHtml(job, sub) {
-    if (!askSent || askSent.subId !== (sub?.id ?? null)) return '';
+  function askSentHtml(job, sub, key = '') {
+    if (!askSent || askSent.subId !== (sub?.id ?? null) || (askSent.convo || '') !== key) return '';
     const held = (m) => m.from === 'human' && m.text === askSent.text && m.at >= askSent.at - 60000;
     if (askSent.state === 'sent' && (sub?.thread?.some(held) || talkFor(job, sub).some(held))) return '';
     const s = askSent, fresh = s.drawn !== s.state; s.drawn = s.state;
@@ -734,25 +736,34 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       : `<span class="job-sent-meta"><span class="job-sent-sending">Sending to ${esc(s.to.toLowerCase())}…</span></span>`;
     return `<div class="job-sent ${s.state}${fresh ? ' fresh' : ''}" data-sent-state="${s.state}"><div class="job-sent-bubble">${pics}<span>${esc(s.text)}</span></div>${meta}</div>`;
   }
-  // The one box an idea goes in through, on every step, review and proposal. It is
-  // pinned to the thing in view (`at`, `ref`, read when this was drawn): the server
-  // refuses it if that has since changed. Not a <form>, so a tick's redraw is held
-  // back only while something is typed (renderBoards), never by the box's presence.
-  // At rest it is one line naming who hears it; focus, words or a picture open it.
-  // Above it, the conversation with the wrangler (job-talk.js) it feeds.
-  function changeBoxHtml(job, sub) {
-    const view = changeView(job, sub), sent = talkHtml(job, sub) + askSentHtml(job, sub);
-    // Every idea goes to the wrangler: while it is answering a question or drawing
-    // a proposal it takes no other, and once one waits any box adds to it. A step
-    // Wrangler is fixing is the wrangler's for now.
-    if (!view || (sub && redFixing(job, sub)) || (replanPending(job) && !job.replan.proposal) || askPending(job)) return sent;
-    const route = changeRoute(view.at, job, sub), draft = askDraft && askDraft.subId === sub?.id ? askDraft.text : '';
+  // The box an idea goes in through, on every step, review and proposal: one under
+  // each conversation with the wrangler (job-talk.js), which writes to it, and one
+  // at the foot that starts a new one. Each is pinned to the thing in view (`at`,
+  // `ref`, read when this was drawn): the server refuses it if that has since
+  // changed. Not a <form>, so a tick's redraw is held back only while something is
+  // typed (renderBoards), never by a box's presence. At rest it is one line naming
+  // who hears it; focus, words or a picture open it.
+  function boxHtml(job, sub, view, convo) {
+    const key = convo?.id || '';
+    const base = changeRoute(view.at, job, sub), draft = askDraft && askDraft.subId === sub?.id && (askDraft.convo || '') === key ? askDraft.text : '';
+    // Said before its wrangler replies, it goes to that wrangler.
+    const route = !convo ? base : askPending(job, convo) ? { ...base, placeholder: 'Add to your question…', hint: 'Goes to the wrangler answering this conversation, before it replies.' }
+      : { ...base, placeholder: 'Reply in this conversation…', hint: 'Continues this conversation. A question is answered here; a change becomes a proposal you approve.' };
+    const where = convo || view.at === 'plan' || !convosOf(job).length ? '' : 'New conversation';
     // Something went wrong: what to say is the decision, so the box starts open.
-    const open = sub && subState(job, sub) === 'failing';
-    return `${sent}<div class="job-change${open ? ' is-open' : ''}" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}" data-change-to="${esc(route.to)}" data-change-hint="${esc(route.hint)}">
-      <ul class="job-change-tray" ${askImages.length ? '' : 'hidden'}>${askTrayHtml()}</ul>
-      <div class="job-change-row"><span class="job-change-to" title="Who hears it"><i>${esc(route.mark || route.to[0])}</i>${esc(route.to)}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="Add idea for ${esc(route.to.toLowerCase())}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to.toLowerCase())}" title="Send (⌘↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
+    const open = !convo && sub && subState(job, sub) === 'failing';
+    const mine = askImages.some((i) => i.box === key);
+    return `${askSentHtml(job, sub, key)}<div class="job-change${open ? ' is-open' : ''}${convo ? ' job-talk-box' : ''}" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}" data-change-convo="${esc(key)}" data-change-to="${esc(route.to)}" data-change-hint="${esc(route.hint)}">
+      <ul class="job-change-tray" ${mine ? '' : 'hidden'}>${askTrayHtml(key)}</ul>
+      <div class="job-change-row"><span class="job-change-to" title="Who hears it"><i>${esc(route.mark || route.to[0])}</i>${esc(route.to)}${where ? `<small>${esc(where)}</small>` : ''}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="${convo ? 'Reply in this conversation' : `Add idea for ${esc(route.to.toLowerCase())}`}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to.toLowerCase())}" title="Send (⌘↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
       <div class="job-change-foot"><span>${esc(route.hint)}</span><span>Paste or drop a screenshot</span><kbd>⌘↵ to send</kbd></div></div>`;
+  }
+  function changeBoxHtml(job, sub) {
+    const view = changeView(job, sub);
+    // A step Wrangler is fixing is the wrangler's for now.
+    const open = view && !(sub && redFixing(job, sub));
+    const talk = talkHtml(job, sub, open && view.at !== 'plan' ? (convo) => boxHtml(job, sub, view, convo) : null);
+    return open ? `${talk}${boxHtml(job, sub, view, null)}` : talk + askSentHtml(job, sub);
   }
   // One control for reading the diff: Wrangler's own view, the desktop IDE in its menu.
   const reviewCodeHtml = (sub) => `<span class="job-split"><button id="job-diff" title="Review code in Wrangler">${ICONS.code}Review code</button>${sub.worktree?.path ? `<details class="job-split-more" data-keep="review-menu" ${openMore.has('review-menu') ? 'open' : ''}><summary aria-label="More ways to review code" title="More ways to review code">${ICONS.caret}</summary><div class="job-split-menu"><button id="job-ide" title="Review code in ${esc(ideApp())}">In ${esc(ideApp())}</button></div></details>` : ''}</span>`;
@@ -1192,7 +1203,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     proofView = null;
     renderDetail();
     askDraft = null;
-    const box = dialog.querySelector('.job-change textarea');
+    const box = dialog.querySelector('.job-change[data-change-convo=""] textarea');
     if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
   });
   function wireProofViewer(job, sub) {
@@ -1350,11 +1361,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const text = box.querySelector('textarea'), send = box.querySelector('[data-change-send]');
       send.onclick = () => {
         if (!text.value.trim() || send.disabled) return;
-        const images = askImages.map((i) => i.name).filter(Boolean);
-        action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim(), ...(images.length ? { images } : {}) });
+        const key = box.dataset.changeConvo || '', mine = askImages.filter((i) => i.box === key);
+        const images = mine.map((i) => i.name).filter(Boolean);
+        action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim(), ...(box.dataset.changeConvo ? { convo: box.dataset.changeConvo } : {}), ...(images.length ? { images } : {}) });
         clearAskSent();
-        askSent = { jobId: job.id, subId: sub?.id ?? null, text: text.value.trim(), images: askImages.map((i) => i.url), to: box.dataset.changeTo, hint: box.dataset.changeHint, at: Date.now(), state: 'sending' };
-        askImages = []; text.value = '';
+        askSent = { jobId: job.id, subId: sub?.id ?? null, convo: key, text: text.value.trim(), images: mine.map((i) => i.url), to: box.dataset.changeTo, hint: box.dataset.changeHint, at: Date.now(), state: 'sending' };
+        askImages = askImages.filter((i) => i.box !== key); text.value = '';
         renderDetail();
       };
       wireAskImages(box);
@@ -1591,7 +1603,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   function changeFailed(msg) {
     if (askSent?.state !== 'sending' || msg.jobId !== askSent.jobId || (msg.subJobId ?? null) !== askSent.subId) return false;
-    Object.assign(askSent, { state: 'failed', error: msg.error }); askDraft = { subId: askSent.subId ?? undefined, text: askSent.text };
+    Object.assign(askSent, { state: 'failed', error: msg.error }); askDraft = { subId: askSent.subId ?? undefined, convo: askSent.convo, text: askSent.text };
     if (dialog.open) renderDetail();
     askDraft = null;
     return true;

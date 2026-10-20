@@ -1,13 +1,15 @@
 import { esc } from './util.js';
 import { ICONS } from './icons.js';
-import { talkFor, askPending, replanPending } from './jobs.js';
+import { convoGroups, askPending, replanPending, convoNumber, convoRunning } from './jobs.js';
 import { proseHtml } from './job-idea.js';
 
-// A running job's conversation with the wrangler (server/job-talk.js), drawn above
-// the Add idea box: what the human asked, what the wrangler answered, and each
-// plan change it proposed as a card that says what became of it. The job dialog
-// shows all of it, a step's dialog only what was said on that step. Pure markup;
-// jobs-view.js wires the card's button. Every word is escaped.
+// A running job's conversations with the wrangler (server/job-talk.js), drawn above
+// the Add idea box, one section each: what the human asked, what the wrangler
+// answered, and each plan change it proposed as a card that says what became of
+// it. Several can be answering at once, each with its own box under it; the box
+// below them all starts a new one. The job dialog shows all of them, a step's
+// dialog only what was said on that step. Pure markup; jobs-view.js draws and
+// wires the boxes. Every word is escaped.
 
 export const WRANGLER_NAME = 'The wrangler';
 const time = (at) => at ? new Date(at).toLocaleTimeString(undefined, { timeStyle: 'short' }) : '';
@@ -42,18 +44,28 @@ function messageHtml(job, m, onJob) {
   return wranglerHtml(m, `<div class="job-idea-body">${proseHtml(m.text)}</div>`, m.kind === 'error' ? 'error' : '');
 }
 
-// What the wrangler is doing now, if it concerns this view: answering a question,
-// or drawing a proposal for an idea the human sent.
-function workingHtml(job, sub) {
-  const mine = (src) => !sub || src?.sub === sub.id;
-  const text = askPending(job) && mine(job.ask.source) ? `${WRANGLER_NAME} is looking into it…`
-    : replanPending(job) && !job.replan.proposal && !(job.replan.red && !job.replan.red.human) && mine(job.replan.source) ? `${WRANGLER_NAME} is drawing a proposal…` : '';
+// What this conversation's wrangler is doing now: answering, or drawing a
+// proposal for an idea the human sent in it.
+function workingHtml(job, convo) {
+  const text = convo && askPending(job, convo) ? `${WRANGLER_NAME} ${convoRunning(job, convo) ? 'is looking into it' : 'will look into it'}…`
+    : replanPending(job) && !job.replan.proposal && !(job.replan.red && !job.replan.red.human) && (job.replan.convo || null) === (convo?.id || null) ? `${WRANGLER_NAME} is drawing a proposal…` : '';
   return text ? `<div class="job-idea-thinking job-talk-working"><span class="job-idea-orb small" aria-hidden="true"></span><span class="job-idea-shine">${text}</span></div>` : '';
 }
 
-export function talkHtml(job, sub = null) {
-  const msgs = talkFor(job, sub);
-  const working = workingHtml(job, sub);
-  if (!msgs.length && !working) return '';
-  return `<section class="job-talk" aria-label="Conversation with the wrangler" aria-live="polite"><h4 class="job-talk-head">${ICONS.note}Conversation with the wrangler</h4>${msgs.map((m) => messageHtml(job, m, !sub)).join('')}${working}</section>`;
+function groupHtml(job, { convo, messages }, sub, boxFor) {
+  const onJob = !sub;
+  const step = onJob && convo?.sub ? job.subJobs.find((s) => s.id === convo.sub)?.title || convo.sub : '';
+  const state = convo && askPending(job, convo) ? `<span class="job-talk-tag tone-working">${convoRunning(job, convo) ? 'Answering' : 'Queued'}</span>` : '';
+  const head = `<header class="job-talk-convo-head"><b>${convo ? `Conversation ${convoNumber(job, convo)}` : 'From the wrangler'}</b>${step ? `<small>on ${esc(step)}</small>` : ''}${state}</header>`;
+  return `<div class="job-talk-convo" data-convo="${esc(convo?.id || '')}">${head}${messages.map((m) => messageHtml(job, m, onJob)).join('')}${workingHtml(job, convo)}${convo && boxFor ? boxFor(convo) : ''}</div>`;
+}
+
+// `boxFor(convo)` draws that conversation's own box (jobs-view.js), or nothing
+// where the view takes no idea.
+export function talkHtml(job, sub = null, boxFor = null) {
+  const groups = convoGroups(job, sub);
+  const loose = groups.some((g) => !g.convo) ? '' : workingHtml(job, null);
+  if (!groups.length && !loose) return '';
+  const many = groups.filter((g) => g.convo).length > 1;
+  return `<section class="job-talk" aria-label="Conversations with the wrangler" aria-live="polite"><h4 class="job-talk-head">${ICONS.note}${many ? 'Conversations' : 'Conversation'} with the wrangler</h4>${groups.map((g) => groupHtml(job, g, sub, boxFor)).join('')}${loose}</section>`;
 }
