@@ -381,15 +381,15 @@ export class JobStore {
         record(j, null, 'top-up', null, `Added ${usd(x)}: the spend limit is now ${usd(limitOf(this.data.settings, j))}`);
         return;
       }
-      // A draft idea (job-idea.js): its words change until Start, which may carry
-      // the last unsaved edit so the conversation opens on what was on screen.
+      // A draft idea (job-idea.js) changes until Start, which may carry the dialog's
+      // fields so the conversation opens on what was on screen.
       if (action === 'edit-draft') {
-        if (editDraft(j, payload)) record(j, null, 'edit-draft', null, 'Edited the draft idea');
+        if (editDraft(j, payload.job)) record(j, null, 'edit-draft', null, 'Edited the draft idea');
         return;
       }
       if (action === 'start') {
         if (j.stage !== 'backlog') throw new Error('Job has already started');
-        if (isDraft(j) && (payload.intent != null || payload.title != null) && editDraft(j, payload)) record(j, null, 'edit-draft', null, 'Edited the draft idea');
+        if (isDraft(j) && payload.job && editDraft(j, payload.job)) record(j, null, 'edit-draft', null, 'Edited the draft idea');
         j.stage = 'planning'; return;
       }
       if (action === 'discard-replan') {

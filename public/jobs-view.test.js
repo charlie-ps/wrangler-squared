@@ -3145,33 +3145,38 @@ test('an emptied spend limit saves as no limit, and a saved one is shown as it i
   assert.equal(form.elements.spendLimit.value, '', 'null is no limit, never the default');
 });
 
-test('a draft idea reads Draft on its plate and opens on its own words to edit: Save stores them, a tick keeps unsaved edits, Start sends them', (t) => {
-  const f = fixture(t);
-  f.data.jobs = [{ id: 'd1', title: 'Nag <me>', intent: 'PRs sit green', repos: [], stage: 'backlog', idea: { thread: [] }, plan: null, subJobs: [], runs: [], moves: [], revision: 0 }];
+test('a draft idea reads Draft on its plate and reopens New idea prefilled: Save as draft and Start send its fields to the draft', (t) => {
+  const f = fixture(t, undefined, { getTasks: () => [{ id: 't1', name: 'Nags' }] });
+  const pic = 'paste-1700000000000-aaaa1111.png';
+  f.data.jobs = [{ id: 'd1', title: 'Nag <me>', intent: 'PRs sit green', repos: [], stage: 'backlog', idea: { thread: [] }, plan: null, subJobs: [], runs: [], moves: [], revision: 0,
+    agent: 'codex', model: 'gpt-5.6-sol', effort: 'high', reviewPlan: false, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true, sandbox: 'full', writableDirs: [], images: [pic], shareImages: false, taskId: 't1' }];
   f.view.update(f.data);
   const shownIn = (filter) => { f.q(`[data-filter="${filter}"]`).click(); return !!f.q('[data-board="d1"]'); };
   assert.deepEqual(['all', 'ideas', 'needs', 'backlog'].map(shownIn), [false, false, false, true], 'a draft is in the backlog alone');
   assert.equal(f.q('[data-board="d1"] .job-status').textContent, 'Draft');
   f.q('[data-board="d1"] .job-plate-open').click();
-  const dialog = f.q('#job-dialog');
-  const [title, intent] = dialog.querySelectorAll('[data-draft-field]');
-  assert.deepEqual([title.value, intent.value], ['Nag <me>', 'PRs sit green'], 'escaped into the boxes, read back as typed');
-  assert.equal(dialog.querySelector('.job-change'), null, 'no Add idea box: an idea for the planner would start it');
-  const save = dialog.querySelector('[data-draft-save]');
-  assert.equal(save.disabled, true, 'nothing to save yet');
-  intent.value = 'Plates nag when a PR sits green for a day'; intent.dispatchEvent(f.event('input'));
-  assert.equal(save.disabled, false);
+  const form = f.q('#job-create-form');
+  assert.ok(form, 'the New idea form itself, not a separate editor');
+  assert.deepEqual([form.elements.title.value, form.elements.intent.value, form.elements.taskId.value, form.elements.agent.value, form.elements.shareImages.checked], ['Nag <me>', 'PRs sit green', 't1', 'codex', false]);
+  assert.deepEqual(f.sent.at(-1), { type: 'job-images', id: 'd1' }, 'its kept pictures are asked for');
+  assert.equal(form.querySelectorAll('.job-images-tray .job-image').length, 1);
+  form.elements.intent.value = 'Plates nag when a PR sits green for a day';
   f.data.jobs[0].revision++; f.view.update(f.data);
-  assert.equal(dialog.querySelector('[name="intent"]').value, 'Plates nag when a PR sits green for a day', 'a tick does not wipe an unsaved edit');
-  save.click();
-  assert.deepEqual({ ...f.sent.at(-1), subJobId: null }, { type: 'job-action', id: 'd1', subJobId: null, action: 'edit-draft', intent: 'Plates nag when a PR sits green for a day' });
-  intent.value = 'Plates nag after a day, louder after two'; intent.dispatchEvent(f.event('input'));
-  dialog.querySelector('[data-draft-start]').click();
-  assert.deepEqual({ ...f.sent.at(-1), subJobId: null }, { type: 'job-action', id: 'd1', subJobId: null, action: 'start', intent: 'Plates nag after a day, louder after two' }, 'only what was edited: a title named meanwhile is not sent back');
-  f.view.created({ event: 'job-action-complete', action: 'start', jobId: 'd1' });
-  assert.equal(dialog.open, true, 'a started idea stays open to turn into its conversation');
+  assert.equal(f.q('#job-create-form').elements.intent.value, 'Plates nag when a PR sits green for a day', 'a tick leaves the form alone');
+  form.dispatchEvent(Object.assign(f.event('submit'), { submitter: form.querySelector('[value="backlog"]') }));
+  const saved = f.sent.at(-1);
+  assert.deepEqual([saved.type, saved.id, saved.action, saved.job.intent, saved.job.images, saved.job.taskId, saved.job.reviewPlan, 'title' in saved.job], ['job-action', 'd1', 'edit-draft', 'Plates nag when a PR sits green for a day', [pic], 't1', false, false], 'a title left as it opened is not sent back');
   f.view.created({ event: 'job-action-complete', action: 'edit-draft', jobId: 'd1' });
-  assert.equal(dialog.open, true, 'a saved draft stays open on its boxes');
+  assert.equal(f.q('#job-dialog').open, false, 'saving closes it, as Save as draft does on a new idea');
+  f.q('[data-board="d1"] .job-plate-open').click();
+  const again = f.q('#job-create-form');
+  again.elements.title.value = 'Nag me';
+  again.dispatchEvent(f.event('submit'));
+  assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).job.title], ['start', 'Nag me'], 'Enter starts it with what is on screen');
+  f.view.created({ event: 'job-action-complete', action: 'start', jobId: 'd1' });
+  assert.equal(f.q('#job-dialog').open, true, 'held open until the snapshot has it planning');
+  f.data.jobs[0].stage = 'planning'; f.view.update(f.data);
+  assert.ok(f.q('#job-dialog [data-idea-composer]'), 'then it opens on its conversation');
 });
 
 test('Start on a backlog job that is not an idea still closes its dialog', (t) => {

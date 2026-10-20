@@ -213,10 +213,13 @@ text as public as the rest of this repo.
   is mailed by the runner (`deliverIdea`, `ideaMail`). `accept-idea {messageId}` is pinned to the newest
   message: it applies the suggestion exactly as a plan receipt (Plan review still applies), and settle()
   then ends the parked run quietly because the job is no longer `inConversation`. Save as draft
-  creates the same idea job unstarted (`isDraft`: `backlog`, so the runner claims nothing): its title and
-  words change by `edit-draft` (`editDraft`, checked as `jobInputSchema` checks them; a typed title ends
-  `titlePending`), and `start` may carry the boxes' unsaved edits so the conversation opens on them. The
-  draft dialog has no Add idea box, which would reach the planner, and the board lists a draft under Backlog alone. A fresh planning run
+  creates the same idea job unstarted (`isDraft`: `backlog`, so the runner claims nothing). Opening a draft
+  reopens New idea's own form prefilled (`createJob(draft)`, with a Title field), never a job dialog, so it
+  has no Add idea box, which would reach the planner. Its Save as draft and Start planning send the form's
+  fields as `edit-draft` / `start` `{job}`: `job-create.js settleDraft` settles the Task and keeps only new
+  pictures as a create does (dropped ones are released once the store accepts), and `editDraft` applies
+  `DRAFT_FIELDS`, checked as `jobInputSchema` checks them; a typed title ends `titlePending`, and a title
+  left as it opened is not sent. The board lists a draft under Backlog alone. A fresh planning run
   (a retry) reads the whole thread from its prompt, so `claim` marks unsent messages sent. The chat
   dialog redraws on ticks even with the cursor in its empty reply box; only new messages fade in.
 - **What the agent leaves running is the agent's; tearing it down is ours** (`server/job-running.js`).

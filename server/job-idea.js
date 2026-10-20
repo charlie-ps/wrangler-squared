@@ -30,17 +30,25 @@ export function liveSuggestion(job) {
 export const UNSENT_IDEA = 'The human wrote again while you were working and it is on its way to you by mail: read your mail, then reply or report the plan';
 const nextId = (job, now) => `msg_${now.toString(36)}${ideaThread(job).length.toString(36)}`;
 
-// Edit a draft's words, checked as New idea checks them. A title the human types
-// ends the wait for Haiku's, which then never replaces it (job-store.js retitle).
-// Returns whether anything changed.
-export function editDraft(job, { title, intent } = {}) {
+// What New idea sets, so what a draft's dialog (New idea again, public/jobs-view.js
+// createJob) may change until Start.
+export const DRAFT_FIELDS = ['title', 'intent', 'agent', 'model', 'effort', 'reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites', 'reviewRed', 'taskId', 'images', 'shareImages', 'sandbox', 'writableDirs'];
+
+// Edit a draft, checked as New idea checks it; a field left out keeps its value. A
+// title the human types ends the wait for Haiku's, which then never replaces it
+// (job-store.js retitle). Returns whether anything changed.
+export function editDraft(job, fields = {}) {
   if (!isDraft(job)) throw new Error('Only a draft idea can be edited; this one has started');
-  const next = jobInputSchema.pick({ title: true, intent: true }).safeParse({ title: title ?? job.title, intent: intent ?? job.intent });
-  if (!next.success) throw new Error(next.error.issues[0].path[0] === 'title' ? 'Give the idea a title of up to 180 characters on one line' : 'Write the idea first (up to 16,000 characters)');
-  const changed = next.data.title !== job.title || next.data.intent !== job.intent;
-  if (next.data.title !== job.title) delete job.titlePending;
-  Object.assign(job, next.data);
-  return changed;
+  const given = Object.fromEntries(DRAFT_FIELDS.filter((k) => fields?.[k] !== undefined).map((k) => [k, fields[k]]));
+  const next = jobInputSchema.safeParse({ ...Object.fromEntries(DRAFT_FIELDS.map((k) => [k, job[k]])), ...given });
+  if (!next.success) {
+    const { path: [field], message } = next.error.issues[0];
+    throw new Error(field === 'title' ? 'Give the idea a title of up to 180 characters on one line' : field === 'intent' ? 'Write the idea first (up to 16,000 characters)' : message);
+  }
+  const changed = DRAFT_FIELDS.filter((k) => JSON.stringify(next.data[k]) !== JSON.stringify(job[k]));
+  if (changed.includes('title')) delete job.titlePending;
+  for (const k of changed) job[k] = next.data[k];
+  return changed.length > 0;
 }
 
 // The planner's turn. It parks the run until the human answers; an identical retry

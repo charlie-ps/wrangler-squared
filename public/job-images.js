@@ -35,13 +35,15 @@ export function openZoom(src, label, doc = globalThis.document) {
 // with) and shown from a local object URL, so the thumbnail never waits on the
 // server. `busy()` is what holds Start planning back: a job created while a
 // picture is still travelling would silently lose it.
-export function createJobImages({ root, field = root, input, attach, fileInput, stage, onChange = () => {}, frameOf = sourceToFrame, document: doc = globalThis.document }) {
+// `kept` are pictures a draft idea already holds: named, so never uploaded again, and
+// drawn once `show` brings their bytes.
+export function createJobImages({ root, field = root, input, attach, fileInput, stage, kept = [], onChange = () => {}, frameOf = sourceToFrame, document: doc = globalThis.document }) {
   const tray = root.querySelector('.job-images-tray');
   const panel = root.querySelector('.job-images-panel');
   const countEl = root.querySelector('.job-images-count');
   const errorEl = root.querySelector('.job-images-error');
-  let items = [];
   let seq = 0;
+  let items = kept.map(({ name, url }) => ({ id: ++seq, filename: 'Attached image', name, url: url || '' }));
   // Sources still being decoded: they hold a slot and block planning before a tile exists.
   let converting = 0;
   let disposed = false;
@@ -170,6 +172,10 @@ export function createJobImages({ root, field = root, input, attach, fileInput, 
   return {
     names: () => items.filter((i) => i.name).map((i) => i.name),
     busy: () => converting > 0 || items.some((i) => !i.name),
+    show(name, url) {
+      const item = items.find((i) => i.name === name && !i.url);
+      if (item && url) { item.url = url; render(); }
+    },
     // Pending uploads are dropped on the floor: the dialog they belong to is gone.
     dispose() {
       disposed = true;

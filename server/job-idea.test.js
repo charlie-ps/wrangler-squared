@@ -271,12 +271,12 @@ test('a draft idea runs nothing until Start; its title and words are edited in p
   for (let i = 0; i < 3; i++) await f.tick();
   assert.deepEqual([f.launched.length, f.get().runs.length, f.get().stage], [0, 0, 'backlog'], 'no planner run while a draft');
   const before = f.get().revision;
-  f.store.action(f.job.id, 'edit-draft', { title: 'Nag me about green PRs', intent: '  Plates nag when a PR sits green for a day.  ' });
-  assert.deepEqual([f.get().title, f.get().intent], ['Nag me about green PRs', 'Plates nag when a PR sits green for a day.']);
+  f.store.action(f.job.id, 'edit-draft', { job: { title: 'Nag me about green PRs', intent: '  Plates nag when a PR sits green for a day.  ', reviewCode: false, sandbox: 'full' } });
+  assert.deepEqual([f.get().title, f.get().intent, f.get().reviewCode, f.get().sandbox], ['Nag me about green PRs', 'Plates nag when a PR sits green for a day.', false, 'full'], 'every field New idea sets');
   assert.equal(f.get().revision, before + 1);
   assert.equal(f.get().moves.at(-1).move, 'edit-draft');
-  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { intent: '   ' }), /Write the idea first/);
-  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { title: 'Two\nlines' }), /title of up to 180/);
+  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { job: { intent: '   ' } }), /Write the idea first/);
+  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { job: { title: 'Two\nlines' } }), /title of up to 180/);
   assert.equal(f.get().intent, 'Plates nag when a PR sits green for a day.', 'a refused edit changes nothing');
   await f.tick();
   assert.equal(f.launched.length, 0, 'an edit starts nothing');
@@ -284,29 +284,46 @@ test('a draft idea runs nothing until Start; its title and words are edited in p
 
 test('Start on a draft carries its unsaved words, and the planner reads the edited idea', async (t) => {
   const f = fixture(t);
-  f.store.action(f.job.id, 'start', { intent: 'Plates nag when a PR sits green for a day.' });
+  f.store.action(f.job.id, 'start', { job: { intent: 'Plates nag when a PR sits green for a day.' } });
   await f.tick();
   assert.equal(f.get().stage, 'planning');
   assert.equal(f.get().intent, 'Plates nag when a PR sits green for a day.');
   assert.match(jobPrompt(f.get(), null, f.last().run), /Plates nag when a PR sits green for a day\./);
   assert.ok(inConversation(f.get()));
-  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { intent: 'Too late' }), /has started/);
+  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { job: { intent: 'Too late' } }), /has started/);
 });
 
 test('only an idea in the backlog is a draft: a job from create_job or a cancelled idea is not edited', (t) => {
   const f = fixture(t);
   const plain = f.store.create({ intent: 'Ship it' });
-  assert.throws(() => f.store.action(plain.id, 'edit-draft', { intent: 'Other' }), /Only a draft idea/);
+  assert.throws(() => f.store.action(plain.id, 'edit-draft', { job: { intent: 'Other' } }), /Only a draft idea/);
   f.store.action(f.job.id, 'cancel-job');
-  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { intent: 'Other' }), /cancelled/);
+  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { job: { intent: 'Other' } }), /cancelled/);
 });
 
 test('a title typed on a draft ends the wait for the generated one, which never replaces it', (t) => {
   const f = fixture(t);
   const job = f.store.create({ intent: 'PRs sit green for ages' }, { idea: { thread: [] }, titlePending: true });
   const fallback = job.title;
-  f.store.action(job.id, 'edit-draft', { title: 'My own title' });
+  f.store.action(job.id, 'edit-draft', { job: { title: 'My own title' } });
   assert.equal(f.store.get(job.id).titlePending, undefined);
   assert.equal(f.store.retitle(job.id, fallback, 'Haiku title'), false);
   assert.equal(f.store.get(job.id).title, 'My own title');
+});
+
+const OLD = 'paste-1700000000000-aaaa1111.png', NEW = 'paste-1700000000001-bbbb2222.png';
+test('a draft saved from New idea\'s form settles its task and pictures as a create does', async (t) => {
+  const f = fixture(t, { images: [OLD] });
+  const staged = new Set([NEW]), kept = new Set([OLD]), tasks = [];
+  const host = { stores: { jobs: f.store }, tasks: { create: ({ name }) => { tasks.push(name); return { id: `t_${tasks.length}` }; }, get: (id) => ({ id }) }, images: { keep: (n) => staged.has(n) && !!kept.add(n), remove: (n) => kept.delete(n) }, broadcasts: [], log: () => {}, rebuild: async () => {}, broadcast: (p) => host.broadcasts.push(p) };
+  _resetForTests(); t.after(_resetForTests);
+  runnerFor(host).tick = async () => {};
+  await jobActionHandler.handler({ id: f.job.id, action: 'edit-draft', newTaskName: 'Nags', job: { intent: '', images: [NEW] } }, host);
+  assert.match(host.broadcasts.at(-1).error, /Write the idea first/);
+  assert.deepEqual([tasks, [...kept]], [[], [OLD]], 'a refused edit creates no task and keeps no picture');
+  await jobActionHandler.handler({ id: f.job.id, action: 'edit-draft', newTaskName: 'Nags', job: { intent: 'Nag me', images: [NEW] } }, host);
+  assert.deepEqual(host.broadcasts.at(-1), { event: 'job-action-complete', jobId: f.job.id, action: 'edit-draft' });
+  assert.deepEqual([f.get().taskId, f.get().images, [...kept]], ['t_1', [NEW], [NEW]], 'the new picture kept, the removed one released');
+  await jobActionHandler.handler({ id: f.job.id, action: 'start', job: { intent: 'Nag me today', images: [NEW], taskId: 't_1' } }, host);
+  assert.deepEqual([f.get().stage, f.get().intent, [...kept]], ['planning', 'Nag me today', [NEW]]);
 });

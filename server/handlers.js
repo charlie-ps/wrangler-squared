@@ -1,6 +1,6 @@
 import { execFile as defaultExecFile } from 'node:child_process';
 import { access as defaultAccess } from 'node:fs/promises';
-import { kick, makeCreateJob } from './job-create.js';
+import { kick, makeCreateJob, settleDraft } from './job-create.js';
 import { settingsSchema } from './jobs-schema.js';
 import { runFile } from './job-github.js';
 import { thumbnailOf, readEvidence, keepAskImages, readIdeaImage } from './job-evidence.js';
@@ -71,15 +71,21 @@ export const jobActionHandler = {
     const { refused, ...msg } = await prepare(raw, host);
     const ids = { jobId: msg.id, action: msg.action, ...(msg.subJobId ? { subJobId: msg.subJobId } : {}) };
     if (refused) { host.broadcast({ event: 'job-action-failed', ...ids, error: refused }); return; }
+    let draft = null;
+    if (['edit-draft', 'start'].includes(msg.action)) {
+      try { draft = settleDraft(host, msg); } catch (e) { host.broadcast({ event: 'job-action-failed', ...ids, error: e?.message || String(e) }); return; }
+    }
     // A refusal goes out as a frame rather than a throw, which never reaches the
     // board: the footer's checkpoint buttons snap back and say why.
-    try { host.stores.jobs.action(msg.id, msg.action, msg); } catch (e) {
+    try { host.stores.jobs.action(msg.id, msg.action, draft?.msg || msg); } catch (e) {
+      draft?.release();
       // The tree moved under the approval: the parked session is asked to report
       // ready again (job-parked.js), and the human is told why nothing happened.
       if (e?.code === TREE_MOVED) { try { host.stores.jobs.action(msg.id, 'tree-moved', msg); await host.rebuild(); kick(host).catch(() => {}); } catch { /* the refusal below still says it */ } }
       host.broadcast({ event: 'job-action-failed', ...ids, ...(msg.field ? { field: msg.field } : {}), error: e?.message || String(e) });
       return;
     }
+    draft?.commit();
     await host.rebuild();
     host.broadcast({ event: 'job-action-complete', ...ids });
     kick(host).catch((e) => host.log('job-action tick failed', e));
