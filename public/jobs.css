@@ -813,7 +813,6 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-mark-accept-red .job-mark,.job-mark-recover .job-mark,.job-mark-mark-done .job-mark,.job-mark-mark-merged .job-mark { color:var(--wf); background:color-mix(in srgb, var(--wf) 16%, var(--surface)); font-weight:600; }
 .job-mark-rework .job-mark,.job-mark-forward .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
 li.job-mark-act { color:var(--wf); }
-li small.pinned { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg-subtle); margin-left:6px; }
 .job-triage { background:var(--surface-2); border-radius:12px; padding:12px 14px; display:grid; gap:8px; margin:0 0 14px; font-size:13px; }
 .job-triage header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .job-triage header .icon { color:var(--wf); }
@@ -822,6 +821,12 @@ li small.pinned { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color
 .job-triage ul { margin:0; padding:0; list-style:none; display:flex; flex-wrap:wrap; gap:6px; }
 .job-triage li { display:inline-flex; gap:6px; align-items:center; padding:3px 9px; border:1px solid var(--border-muted); border-radius:999px; font-size:11.5px; color:var(--fg-muted); }
 .job-triage li span { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--blue-fg); }
+.job-triage-more { margin:0 -10px; }
+.job-triage-more>summary { padding:4px 10px; }
+.job-triage-more[open] { background:none; }
+.job-triage-more ul { flex-direction:column; gap:4px; margin-top:4px; }
+.job-triage-more li { display:block; padding:0; border:0; border-radius:0; font-size:12px; overflow-wrap:anywhere; }
+.job-triage-more li span { margin-right:6px; }
 fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin:0 0 14px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:8px; }
 .job-options legend { font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-subtle); margin-bottom:8px; padding:0; }
 .job-option { display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px; align-items:start; padding:10px 12px; border:1px solid var(--border-muted); border-radius:12px; cursor:pointer; font-size:13px; background:var(--surface); }
@@ -830,6 +835,7 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-option b { font-weight:600; }
 .job-option small { color:var(--fg-muted); font-size:12px; line-height:1.4; }
 .job-option.sel { border-color:var(--blue); background:color-mix(in srgb, var(--blue) 10%, var(--surface)); }
+.job-option-only { grid-template-columns:minmax(0,1fr); cursor:default; margin:0 0 14px; }
 .job-option-rec { font-size:10.5px; font-weight:600; color:var(--blue-fg); margin-left:6px; }
 .job-replan-changes { margin:12px 0; padding-left:18px; font-size:13px; }
 .job-replan-changes small { color:var(--fg-muted); }
