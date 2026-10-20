@@ -1,7 +1,7 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound } from './jobs.js';
-import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml } from './job-idea.js';
+import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, askActs } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
@@ -891,10 +891,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   // Everything a plan says in prose, folded into one section: the stepper is the
   // decision, this is the reading behind it.
-  // The pictures a job was created with, as numbered thumbnails under the outcome. The
-  // markup is only placeholders: the bytes live server-side (images:keep) and are
-  // filled in from `imageCache` once a job-images frame has brought them.
-  const stripHtml = (job) => (job.images || []).length ? `<div class="job-image-strip" data-strip="${esc(job.id)}">${job.images.map((n, i) => `<button type="button" class="job-image-thumb" data-image="${esc(n)}" aria-label="Enlarge image ${i + 1}"><span class="job-image-num">${i + 1}</span></button>`).join('')}</div>` : '';
+  // The pictures a job was created with, as numbered thumbnails under the outcome, filled
+  // in from `imageCache` once a job-images frame has brought them.
+  const stripHtml = (job) => imageStripHtml(job, job.images);
   function hydrateStrips() {
     dialog.querySelectorAll('[data-strip]').forEach((strip) => {
       const missing = [];
