@@ -344,10 +344,11 @@ export const deploysLine = (sub) => sub?.deploys?.summary || '';
 // Which red pipeline Accept red would wave through, if any — the failing checks on
 // an open PR, or the failing post-merge run of a merged one — mirroring the
 // server's gates. Already accepted at this exact head or merge
-// commit means there is nothing left to accept.
+// commit means there is nothing left to accept. A PR a plan change moved behind
+// new work (`catchUp`) is not red: its checks run again once that work lands.
 export function redPipeline(sub) {
   if (!sub || !isPrSub(sub)) return null;
-  if (sub.stage === 'pr' && sub.pr?.checkStatus === 'failing' && !sub.pr.dirty && sub.acceptedRed?.ref !== sub.pr.head) return 'checks';
+  if (sub.stage === 'pr' && !sub.catchUp && sub.pr?.checkStatus === 'failing' && !sub.pr.dirty && sub.acceptedRed?.ref !== sub.pr.head) return 'checks';
   if (sub.stage === 'deployment' && !sub.recoveredBy && sub.deploymentResult?.status === 'failing' && sub.acceptedRed?.ref !== sub.pr?.mergeCommit) return 'post-merge';
   return null;
 }
@@ -494,11 +495,24 @@ export function redScope(job, id) {
 export const replanPending = (job) => !!job.replan && !job.cancelledAt;
 export const replanProposed = (job) => replanPending(job) && !!job.replan.proposal;
 export const isFrozen = (sub) => !!sub.cancelledAt || ['deployment', 'cleanup', 'done'].includes(sub.stage) || !!sub.mergedAt || !!sub.deployed;
-// While a change is pending every sub-job it may still touch is frozen where it
-// stands (server/job-store.js refuses its approvals and moves, the runner its
-// launches and merges); one with a step still running carries on.
+// Mirrors server/job-red.js touchedBy: what a waiting proposal edits, cancels or
+// acts on, in any of its options.
+export function touchedBy(proposal) {
+  const ids = new Set();
+  for (const o of proposal ? [proposal, ...(proposal.alternatives || [])] : []) {
+    for (const e of o.changes?.edited || []) ids.add(e.id);
+    for (const id of o.changes?.removed || []) ids.add(id);
+    for (const a of o.actions || []) ids.add(a.sub);
+  }
+  return ids;
+}
+// A plan change never pauses the job (server/job-red.js heldBy): only the step
+// the idea was typed on and the sub-jobs a waiting proposal touches are frozen
+// where they stand (server/job-store.js refuses their approvals and moves, the
+// runner their launches and merges), plus, for a red step's replan, that step
+// and what follows it. One with a step still running carries on.
 export const heldByReplan = (job, sub) => replanPending(job) && !!sub?.stage && !isFrozen(sub) && !sub.error && !liveRun(job, sub)
-  && (!redReplan(job) || redScope(job, redReplan(job).sub).has(sub.id));
+  && (job.replan.source?.sub === sub.id || touchedBy(job.replan.proposal).has(sub.id) || (!!redReplan(job) && redScope(job, redReplan(job).sub).has(sub.id)));
 export function jobNeedsReview(job, sub) {
   if (job.error) return true;
   if (sub?.error) return !redFixing(job, sub);

@@ -12,7 +12,7 @@ import { dropSub, retrySub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan, requestReplan } from './job-replan.js';
-import { answerAsk, answerReplan, askToReplan, askFailed, convoById, migrateTalk } from './job-talk.js';
+import { answerAsk, answerReplan, askToReplan, askFailed, replanFailed, convoById, migrateTalk } from './job-talk.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
 
@@ -283,9 +283,9 @@ export class JobStore {
       // Retry and Discard are what is left to do on a cancelled job: a refused
       // cleanup (a worktree with work not on GitHub) is still the human's to clear.
       if (j.cancelledAt && !['retry', 'discard-worktree'].includes(action)) throw new Error('Job was cancelled');
-      // A pending plan change freezes the job where it stands: a sub-job that
-      // moves on under the planner (approved, merged, marked done) is no longer
-      // the job the proposal was written against.
+      // A waiting proposal freezes the sub-jobs it touches where they stand: one
+      // that moves on under it (approved, merged, marked done) is no longer what
+      // the proposal was written against. The rest of the job carries on.
       if (j.replan && HELD_BY_REPLAN.has(action) && (!s || heldBy(j, s))) throw new Error('A plan change is pending. Approve or discard it first.');
       if (action === 'set-review') { setReview(j, payload, Date.now()); return; }
       // The one way an idea comes in (job-change.js): to the step's own agent
@@ -624,6 +624,7 @@ export class JobStore {
       failRedReplan(j, r, report.summary, Date.now());
       return;
     }
+    if (report.kind === 'blocked' && !s && replanFailed(j, r, report.summary, Date.now())) return;
     // With plan review off the planner's own receipt is the approval: the
     // planning run is still live here, which approvePlan would refuse. Under
     // review the human sees the create writes with the rest: a keyless story's

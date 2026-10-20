@@ -38,6 +38,38 @@ const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.parkedFor !
 // prerequisites, must not merge as if it met the new plan.
 const REWORKS = ['brief', 'after'];
 const hasCode = (sub) => isPrSub(sub) && (sub.stage === 'review' || (sub.stage === 'pr' && !!sub.pr));
+// An open PR that only gained prerequisites keeps its code: it waits for them,
+// then its branch takes them from the base and its checks run again, with no
+// agent (job-runner.js). A new brief still sends it back to work.
+const catchesUp = (sub, fields) => isPrSub(sub) && sub.stage === 'pr' && !!sub.pr?.url && fields.includes('after') && !fields.includes('brief');
+// Mirrors approveReplan's own test for a red step with no code (PR #220).
+const requeues = (sub, fields) => !!sub.error && !isWriteSub(sub) && fields.some((k) => REWORKS.includes(k));
+const landed = (dep) => !!dep && (isPrSub(dep) ? !!dep.deployed : dep.stage === 'done' && !dep.cancelledAt);
+// What approval does to each step the proposal adds or sends back, in the words
+// its card shows: when it starts, and what it waits for.
+function thenOf(job, merged, changes) {
+  const live = new Map(job.subJobs.map((s) => [s.id, s]));
+  const specOf = (id) => merged.subJobs.find((s) => s.id === id);
+  const after = (id) => {
+    const waits = (specOf(id).after || []).filter((d) => !landed(live.get(d))).map((d) => quoted(specOf(d)?.title || d));
+    return waits.length ? `after ${waits.join(', ')}` : 'now';
+  };
+  const then = {};
+  for (const id of changes.added) if (!isWriteSub(specOf(id))) then[id] = `Starts ${after(id)}`;
+  for (const { id, fields } of changes.edited) {
+    const sub = live.get(id);
+    if (catchesUp(sub, fields)) then[id] = `Keeps its PR · branch updated ${after(id)}`;
+    else if (hasCode(sub) && fields.some((k) => REWORKS.includes(k))) then[id] = `Back to work ${after(id)}`;
+    else if (requeues(sub, fields)) then[id] = `Re-queued · starts ${after(id)}`;
+  }
+  return then;
+}
+function catchUp(sub, now) {
+  sub.error = null; sub.blocked = null; sub.mergeApprovedHead = null; sub.fixRequested = null;
+  if (sub.red) sub.red = { ...sub.red, held: null, declared: null };
+  sub.catchUp = { at: now }; sub.state = 'watching'; sub.nextPollAt = 0;
+  return `Sent ${quoted(sub.title)} to wait for its new prerequisites, then update its branch`;
+}
 
 // The proposal laid over the current plan: what each sub-job becomes, and the
 // merged plan approval would install. Throws the first rule the proposal breaks,
@@ -168,7 +200,7 @@ export function proposeReplan(job, run, report, now) {
 export function proposeOptions(job, run, options, extra, now) {
   const option = (o) => {
     const { plan: merged, changes } = mergeReplan(job, o.plan);
-    return { label: o.label || null, why: o.why || null, plan: o.plan, merged, changes, actions: stampActions(job, o.actions, merged, changes) };
+    return { label: o.label || null, why: o.why || null, plan: o.plan, merged, changes, then: thenOf(job, merged, changes), actions: stampActions(job, o.actions, merged, changes) };
   };
   const [first, ...rest] = options.map(option);
   job.replan = { ...job.replan, proposal: { id: run.id, ...first, ...extra, alternatives: rest, at: now } };
@@ -181,8 +213,8 @@ export const optionsOf = (proposal) => [proposal, ...(proposal.alternatives || [
 // Pinned to the proposal the human read, and merged again against the job as it
 // is now: something may have landed since, which is fine unless the proposal
 // changes it. An edit under a live step would change the brief out from under
-// the session working to it; launches are held while a proposal waits, so the
-// step finishes and the human approves again.
+// the session working to it; a step the proposal touches does not launch while
+// it waits, so the step finishes and the human approves again.
 export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 }) {
   const proposal = job.replan?.proposal;
   if (!proposal || proposal.id !== proposalId) throw new Error('The proposal changed. Review the latest version before approving.');
@@ -209,9 +241,16 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
     // already exists: it stays there for Accept.
     if (isWriteSub(sub) && ['write', 'review'].includes(sub.stage) && !(isMakeWrite(sub) && sub.result)) { sub.stage = 'write'; sub.state = 'queued'; sub.error = null; sub.blocked = null; delete sub.writeApprovedAt; delete sub.draft; }
     lines.push({ sub, detail: `Plan change edited ${quoted(spec.title)} (${fields.join(', ')})` });
+    if (catchesUp(sub, fields)) { lines.push({ sub, detail: catchUp(sub, now) }); continue; }
     // The rework launches once the new prerequisites have landed (job-runner.js).
     if (hasCode(sub) && fields.some((k) => REWORKS.includes(k))) {
       lines.push({ sub, detail: reworkSub(job, sub, `${job.replan.feedback}\n\nNew brief: ${spec.brief}`, now) });
+    } else if (sub.error && !isWriteSub(sub) && fields.some((k) => REWORKS.includes(k))) {
+      // A step that went red before writing any code starts over on its new
+      // brief, once its new prerequisites land, as Retry would send it.
+      sub.error = null; sub.blocked = null; sub.state = 'queued';
+      if (sub.red) sub.red = { ...sub.red, held: null, declared: null };
+      lines.push({ sub, detail: `Sent ${quoted(sub.title)} back to wait for its new brief` });
     }
   }
   // Installed first: a story's create dropped here unlinks the story on it.

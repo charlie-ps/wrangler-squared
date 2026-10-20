@@ -835,7 +835,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const proposal = job.replan.proposal;
     const options = proposalOptions(proposal);
     const picked = pickedOption(job);
-    const { merged, changes, actions = [] } = options[picked];
+    const { merged, changes, actions = [], then = {} } = options[picked];
     const liveSub = (id) => job.subJobs.find((x) => x.id === id);
     const acting = new Map(actions.map((a) => [a.sub, a]));
     const markOf = (s) => acting.has(s.id) ? actionMark(acting.get(s.id)) : changes.frozen.includes(s.id) ? 'frozen' : changes.removed.includes(s.id) ? 'removed' : changes.added.includes(s.id) ? 'added' : changes.edited.some((e) => e.id === s.id) ? 'edited' : 'kept';
@@ -843,8 +843,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const pr = (id) => { const s = liveSub(id); return s?.pr?.url ? ` · ${link(s.pr.url, `PR #${prNumber(s)}`)} stays open on GitHub` : ''; };
     // One label column, so every title starts at the same place (the thread's card, job-talk.js, reads the same).
     const row = (cls, label, body) => `<li class="job-talk-change ${cls}"><span class="job-mark">${esc(label)}</span><span class="job-talk-change-title">${body}</span></li>`;
-    const items = [...changes.added.map((id) => row('job-mark-added', 'New', esc(title(id)))),
-      ...changes.edited.map((e) => row('job-mark-edited', 'Edited', `${esc(title(e.id))} <small>${esc(e.fields.join(', '))}</small>`)),
+    // What approval does to it (server/job-replan.js thenOf): when it starts, and behind what.
+    const thenOf = (id) => (then[id] ? `<span class="job-talk-then">${esc(then[id])}</span>` : '');
+    const items = [...changes.added.map((id) => row('job-mark-added', 'New', `${esc(title(id))}${thenOf(id)}`)),
+      ...changes.edited.map((e) => row('job-mark-edited', 'Edited', `${esc(title(e.id))} <small>${esc(e.fields.join(', '))}</small>${thenOf(e.id)}`)),
       ...changes.removed.map((id) => row('job-mark-removed', 'Will be cancelled', `${esc(title(id))}${pr(id)}`)),
       ...actions.map((a) => { const l = actionLine(a, merged); const at = l.text.indexOf(': '); return row(`job-mark-act job-mark-${actionMark(a)}`, at > 0 ? l.text.slice(0, at) : l.text, `${esc(at > 0 ? l.text.slice(at + 2) : '')} <small>${esc(l.detail)}</small><small class="pinned">${esc(pinLine(a.pin))}</small>`); })];
     const d = proposal.diagnosis;

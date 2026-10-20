@@ -49,6 +49,26 @@ test('an approved brief or landing-order change sends code already written back 
   assert.equal(at(k, 'b').fixRequested, null); assert.match(at(k, 'b').note, /^Land b after a/);
 });
 
+test('an approved brief or after change sends a blocked step with no code back to wait on it; any other edit leaves it red', () => {
+  const blocked = { error: 'Blocked: needs a fix first', blocked: { summary: 'Needs a fix first', kind: 'blocked', phase: 'session', at: 1 }, red: { attempts: [{ outcome: 'proposed' }], held: 'r', declared: { ref: 'r' } } };
+  const subs = [session('s'), spec('p'), session('t')];
+  const at = (j, id) => j.subJobs.find((x) => x.id === id);
+  const j = job(subs, [live(subs[0], { stage: 'session', state: 'failed', ...structuredClone(blocked) }), live(subs[1], { state: 'failed', ...structuredClone(blocked) }),
+    live(subs[2], { stage: 'session', state: 'failed', ...structuredClone(blocked) })]);
+  j.replan = { feedback: 'Land a fix first', proposal: { id: 'p1', plan: { context: '', subJobs: [spec('fix'), session('s', { after: ['fix'] }), spec('p', [], { brief: 'Implement p on the fix' }),
+    session('t', { title: 'Renamed t' })] } } };
+  const { lines } = approveReplan(j, 'p1', { now: 5, buildSubJob: (p, s) => live(s) });
+  for (const id of ['s', 'p']) {
+    const s = at(j, id);
+    assert.deepEqual([s.state, s.error, s.blocked], ['queued', null, null], `${id} waits on its prerequisites again`);
+    assert.deepEqual([s.red.held, s.red.declared, s.red.attempts.length], [null, null, 1], 'the decision about the old red is gone; its history is kept');
+  }
+  assert.equal(at(j, 's').stage, 'session'); assert.deepEqual(at(j, 's').after, ['fix']);
+  assert.equal(at(j, 'p').stage, 'implementation'); assert.equal(at(j, 'p').brief, 'Implement p on the fix');
+  assert.deepEqual([at(j, 't').title, at(j, 't').state, at(j, 't').error], ['Renamed t', 'failed', 'Blocked: needs a fix first'], 'a new title asks nothing of the step');
+  assert.deepEqual(lines.map((l) => l.detail).filter((d) => !/^Plan change/.test(d)), ['Sent “Run s” back to wait for its new brief', 'Sent “Deliver p” back to wait for its new brief']);
+});
+
 const write = (id, by, action, extra = {}) => ({ id, kind: 'write', place: { type: 'jira' }, title: `Write ${id}`, storyId: 's', after: [], by, action, ...extra });
 const session = (id, extra = {}) => ({ id, title: `Run ${id}`, kind: 'session', after: [], brief: `Do ${id}`, ...extra });
 const liveOf = (subs) => subs.map((s) => live(s, s.kind === 'write' ? { stage: 'write' } : s.kind === 'session' ? { stage: 'session' } : {}));

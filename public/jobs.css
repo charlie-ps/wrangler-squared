@@ -1599,6 +1599,7 @@ body.light:has(#jobs[data-backdrop="wrangler"]) :is(.job-pick,.pick-cabinet) { -
 .job-talk-change .job-mark { justify-self:stretch; justify-content:center; }
 .job-talk-change-title { color:var(--fg); overflow-wrap:anywhere; }
 .job-talk-change-title small { margin-left:4px; color:var(--fg-muted); }
+.job-talk-then { display:block; margin-top:1px; font-size:12px; color:var(--fg-muted); }
 .job-talk-change.job-mark-removed .job-talk-change-title { text-decoration:line-through; color:var(--fg-muted); }
 .job-talk-none { margin:0; font-size:12.5px; color:var(--fg-muted); }
 .job-talk-card footer { display:flex; gap:8px; }

@@ -173,13 +173,28 @@ feature).
   saved with the old single `job.ask` is migrated on load (`migrateTalk`). Open PR #209
   keeps a step's sent ideas on `job.replan.asks`; once both land, the step dialog
   should draw them from the thread, not twice.
+- **A plan change never pauses the job** (`server/job-red.js heldBy`, mirrored as
+  `heldByReplan`). While the wrangler drafts, only the step the idea was typed on
+  (`job.replan.source.sub`) waits; once its proposal is up, so does every step it
+  edits, cancels or acts on in any option (`touchedBy`); a red replan adds its
+  `redScope`. Everything else launches, merges and gets approved, so a proposal
+  can go stale under it: `mergeReplan` at approval refuses that, as before. A replan
+  planner that dies or blocks says so in its conversation and drops the change
+  (`job-talk.js replanFailed`); only one with no conversation still sets
+  `job.error`. On approval (`approveReplan`) a red step whose brief or `after`
+  changed is re-queued (PR #220's hunk, kept byte-identical so the two merge cleanly), and an
+  open PR whose only change is `after` CATCHES UP instead of a rework:
+  `sub.catchUp` stops repairs and merges until its new prerequisites land, then the
+  runner updates its branch once. Each proposal carries `then` (`thenOf`), the
+  card's "Re-queued · starts after …" line, drawn in the thread and proposal view.
 - **Red steps go up one level before the human** (`server/job-red.js`). A sub-job
   with an `error` is sent to the planner by the runner's `triageRed` when
   `settings.maxReplans` > 0 (0 = the old "red waits for you"), one replan at a
   time, stamped `run.red` and counted per step; the replan carries `job.replan.red
   = {sub, auto, n}` and holds only that step and its dependants (`heldBy`, mirrored
   client-side as `heldByReplan`/`redScope`: use them, never `!job.replan`, for
-  per-sub gates). The sixth checkpoint `reviewRed` (true = "You decide", the
+  per-sub gates), plus whatever its proposal touches. The prompt lists the other red
+  steps so one cause gets one proposal. The sixth checkpoint `reviewRed` (true = "You decide", the
   default) only chooses whether the proposal waits; Accept red, Mark, Recover and
   Retry are never applied automatically. A red is DECLARED by `declareRed` (tries used up,
   `escalate`, a planner that blocked or died, an empty proposal) and its
