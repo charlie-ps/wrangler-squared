@@ -690,7 +690,8 @@ test('new idea is a brief beside a property sidebar, and the brief is the descri
   assert.equal(brief.querySelector('details'), null, 'no folded planning guidance or repository hints');
   assert.deepEqual([...brief.querySelectorAll('textarea')].map((e) => e.name), ['intent']);
   assert.equal(form.elements.repos, undefined); assert.equal(form.elements.planningPrompt, undefined);
-  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Sandbox', 'Images']);
+  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Images']);
+  assert.ok(props.querySelector('#job-sandbox').hidden, 'Claude has no Sandbox section');
   assert.deepEqual([...brief.querySelectorAll('legend')].map((l) => l.textContent), ['Review checkpoints']);
   for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'shareImages']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
   for (const name of ['reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites', 'reviewRed']) assert.ok(brief.contains(form.querySelector(`[name="${name}"]`)), `${name} is a tile under the brief`);
@@ -2184,9 +2185,11 @@ test('New job\'s Sandbox section follows the agent and round-trips its mode and 
   const sbx = () => f.q('#job-sandbox');
   assert.ok(f.q('.job-create-brief .job-review-grid .job-review-tiles .job-review[data-checkpoint="reviewWrites"]'), 'the checkpoints are tiles under the brief');
   assert.equal(f.q('.job-create-props .job-review'), null, 'and no longer in the side panel');
-  assert.match(sbx().textContent, /Not used by Claude/, 'Claude collapses the section to one row');
-  assert.equal(sbx().querySelector('.job-sbx'), null);
+  assert.ok(sbx().hidden, 'Claude hides the whole section');
+  assert.equal(sbx().querySelector('legend, .job-sbx'), null);
   click(f, '.pick-ticket'); click(f, '.pick-tab[data-agent=codex]'); click(f, '.pick-cell[data-value="gpt-5.6-sol"]');
+  assert.equal(sbx().hidden, false, 'Codex shows it again');
+  assert.equal(sbx().querySelector('legend').textContent, 'Sandbox');
   const pressed = () => sbx().querySelector('.job-sbx[aria-pressed=true]').dataset.mode;
   const launches = () => sbx().querySelector('.job-sbx-launch code').textContent;
   assert.equal(pressed(), 'auto', 'a new job auto-approves');
