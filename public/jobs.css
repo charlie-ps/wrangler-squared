@@ -292,9 +292,9 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-menu-item.danger { color:var(--red-fg); }
 .job-menu-item.danger:hover,.job-menu-item.danger:focus-visible,.job-menu-item.danger:focus { background:var(--danger-bg); color:var(--red-fg); }
 .job-menu-sep { height:1px; margin:3px 2px; background:var(--border-muted); }
-.job-plate-pop header { display:flex; align-items:center; gap:8px; padding:6px 8px 8px; border-bottom:1px solid var(--border-muted); margin-bottom:4px; font-size:13px; }
+.job-plate-pop header { display:flex; align-items:flex-start; gap:8px; padding:6px 8px 8px; border-bottom:1px solid var(--border-muted); margin-bottom:4px; font-size:13px; }
 .job-plate-pop header .icon { flex:none; }
-.job-plate-pop header b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.job-plate-pop header b { flex:1; min-width:0; overflow-wrap:anywhere; font-weight:600; }
 .job-plate-pop header a { flex:none; color:var(--blue-fg); font-size:12px; text-decoration:none; }
 .job-plate-pop header em { flex:none; white-space:nowrap; color:var(--fg-subtle); font-size:12px; }
 .job-plate-pop-write { display:flex; align-items:flex-start; gap:10px; width:100%; padding:8px; border:0; border-radius:10px; background:transparent; color:var(--fg); font:inherit; text-align:left; cursor:pointer; }
@@ -526,11 +526,11 @@ a.job-place-go:hover { background:var(--surface-2); color:var(--fg); }
 /* Zero-width margin box: the open pop overhangs its pill, centred, so the row
    never reflows and its neighbours stay where they were. */
 .job-place-pop { position:relative; z-index:3; display:flex; flex-direction:column; gap:2px; width:250px; box-sizing:border-box; margin:6px -125px 0; padding:6px; border:1px solid var(--border); border-radius:12px; background:var(--surface); box-shadow:0 10px 30px var(--shadow); }
-.job-place-head { display:flex; align-items:center; gap:7px; min-width:0; padding:5px 6px 7px; margin-bottom:3px; border-bottom:1px solid var(--border-muted); font-size:12px; }
+.job-place-head { display:flex; align-items:flex-start; gap:7px; min-width:0; padding:5px 6px 7px; margin-bottom:3px; border-bottom:1px solid var(--border-muted); font-size:12px; }
 .job-place-head .icon { flex:none; width:14px; height:14px; }
-.job-place-head b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.job-place-head b { flex:1; min-width:0; overflow-wrap:anywhere; font-weight:600; }
 .job-place-head a { flex:none; padding:3px 8px; border-radius:7px; background:color-mix(in srgb, var(--green) 15%, var(--surface)); color:var(--fg); font-size:11px; text-decoration:none; }
-.job-place-head em { flex:none; font-style:normal; font-size:11px; color:var(--fg-subtle); }
+.job-place-head em { flex:none; white-space:nowrap; font-style:normal; font-size:11px; color:var(--fg-subtle); }
 .job-place-path { display:flex; align-items:center; gap:6px; min-width:0; padding:0 6px 6px; }
 .job-place-path code { flex:1; min-width:0; overflow-wrap:anywhere; font-size:10.5px; color:var(--fg-muted); user-select:all; }
 .job-place-path button { flex:none; display:inline-flex; align-items:center; gap:4px; padding:2px 7px; border:1px solid var(--border); border-radius:7px; background:transparent; color:var(--fg); font:inherit; font-size:11px; cursor:pointer; }

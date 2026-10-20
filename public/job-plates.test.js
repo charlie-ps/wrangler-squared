@@ -151,3 +151,20 @@ test('a job paused for budget says so on its stub, but never shows its limit on 
   assert.equal(plateAsk({ ...held, budgetPaused: null }), null);
   assert.notEqual(plateAsk({ ...held, cancelledAt: 1, budgetPaused: { at: 1 } })?.label, 'Paused for budget', 'a cancelled job asks nothing of the budget');
 });
+
+test('a long place name is whole in both popover headers, which wrap it, and its pills keep a tooltip', async () => {
+  const name = 'Link to the running dev server for the checkout flow in the staging notes';
+  const write = { id: 'w', kind: 'write', place: { type: 'artifact' }, title: 'Make it', by: 's', after: [], action: { type: 'make', what: name }, stage: 'write', state: 'queued', sessions: [], repairs: [] };
+  const j = job({ subJobs: [sub('s', { kind: 'session', stage: 'session', sessions: [] }), write] });
+  const pop = placePopHtml(j, 0);
+  assert.ok(pop.includes(`<b>${name}</b>`), 'the plates popover header has the whole name');
+  assert.match(plateHtml(j, 'opus'), new RegExp(`class="job-plate-place[^"]*"[^>]*title="[^"]*${name}`), 'the plate chip has it as a tooltip');
+  const graph = planGraphHtml(j.plan || { subJobs: j.subJobs }, {});
+  assert.ok(graph.includes(`<b title="${name}">${name}</b>`), 'the graph popover header has the whole name');
+  assert.match(graph, new RegExp(`<summary title="[^"]*${name}`), 'the graph pill has it as a tooltip');
+  const css = (await import('node:fs')).readFileSync(new URL('./jobs.css', import.meta.url), 'utf8');
+  for (const sel of ['.job-plate-pop header b', '.job-place-head b']) {
+    const rule = css.match(new RegExp(`^${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))[1];
+    assert.ok(!/nowrap|ellipsis/.test(rule) && /overflow-wrap:anywhere/.test(rule), `${sel} wraps the name`);
+  }
+});
