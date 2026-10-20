@@ -809,7 +809,6 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-mark-removed .job-mark,li.job-mark-removed { color:var(--st-bad-fg); }
 .job-mark-removed .job-mark { background:color-mix(in srgb, var(--st-bad) 12%, var(--surface)); }
 .job-mark-removed .job-node-title { text-decoration:line-through; color:var(--fg-muted); }
-.job-mark-frozen { opacity:.7; }
 .job-mark-accept-red .job-mark,.job-mark-recover .job-mark,.job-mark-mark-done .job-mark,.job-mark-mark-merged .job-mark { color:var(--wf); background:color-mix(in srgb, var(--wf) 16%, var(--surface)); font-weight:600; }
 .job-mark-rework .job-mark,.job-mark-forward .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
 li.job-mark-act { color:var(--wf); }
@@ -837,8 +836,66 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-option.sel { border-color:var(--blue); background:color-mix(in srgb, var(--blue) 10%, var(--surface)); }
 .job-option-only { grid-template-columns:minmax(0,1fr); cursor:default; margin:0 0 14px; }
 .job-option-rec { font-size:10.5px; font-weight:600; color:var(--blue-fg); margin-left:6px; }
-.job-replan-changes { margin:12px 0; padding-left:18px; font-size:13px; }
-.job-replan-changes small { color:var(--fg-muted); }
+/* Every change is one row: what kind in a fixed column, then the step, so the
+   titles line up whether or not the row opens to its field diff. */
+.job-replan-changes { --kind-w:9.5em; margin:12px 0; padding:0; list-style:none; font-size:13px; display:grid; gap:2px; }
+.job-replan-changes > li, .job-replan-changes summary { display:grid; grid-template-columns:var(--kind-w) minmax(0,1fr); column-gap:12px; align-items:baseline; padding:3px 6px; border-radius:6px; }
+.job-replan-changes > li:has(> details) { display:block; padding:0; }
+.job-change-kind { display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:600; color:var(--dc, var(--fg-muted)); white-space:nowrap; }
+.job-change-kind::before { content:""; flex:none; width:8px; height:8px; border-radius:2px; outline:2px solid var(--dc, var(--fg-subtle)); outline-offset:1px; }
+.job-mark-added > .job-change-kind::before, .job-mark-removed > .job-change-kind::before { outline-style:dashed; }
+.job-replan-changes > li[class] { color:var(--fg); }
+.job-change-what { min-width:0; overflow-wrap:anywhere; }
+.job-change-what small { margin-left:6px; }
+.job-change-what small + small::before { content:"· "; }
+/* A proposal reads as a decision (jobs-view.js proposalHtml): one amber bar that
+   asks, with the buttons that answer, then a graph drawn as a diff. */
+.job-proposal-bar { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px 16px; align-items:center; margin:16px 0 4px; padding:12px 12px 12px 16px; border-radius:12px; background:color-mix(in srgb, var(--st-warn) 10%, var(--surface)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 40%, transparent), inset 4px 0 0 var(--st-warn); }
+.job-proposal-head { display:grid; gap:2px; min-width:0; }
+.job-proposal-title { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--st-warn-fg); }
+.job-proposal-title b { font-weight:600; }
+.job-dialog .job-proposal-hint { font-size:12px; color:var(--fg-muted); }
+.job-actions.job-proposal-cta { margin:0; justify-content:flex-end; }
+.job-actions.job-proposal-cta button.primary { padding:10px 16px; border-radius:12px; margin-right:0; }
+.job-proposal-bar .job-replan-ask { grid-column:1/-1; margin:0; background:var(--surface); }
+@media (max-width:640px) { .job-proposal-bar { grid-template-columns:1fr; } .job-actions.job-proposal-cta { justify-content:flex-start; } }
+/* Every changed node wears its colour as a ring; everything the change leaves alone fades back. */
+.job-mark-added { --dc:var(--st-ok); } .job-mark-edited { --dc:var(--st-run); } .job-mark-removed { --dc:var(--st-bad); }
+:is(.job-mark-rework,.job-mark-forward,.job-mark-accept-red,.job-mark-recover,.job-mark-mark-done,.job-mark-mark-merged) { --dc:var(--wf); }
+.job-node[class*="job-mark-"]:not(.job-mark-kept,.job-mark-frozen) .job-node-tile { outline:2px solid var(--dc); outline-offset:4px; }
+.job-node.job-mark-added .job-node-tile { outline-style:dashed; }
+.job-node.job-mark-removed .job-node-tile { opacity:.5; outline-style:dashed; }
+.job-node[class*="job-mark-"]:not(.job-mark-kept,.job-mark-frozen) .job-mark { font-weight:600; }
+.job-mark-rework .job-mark,.job-mark-forward .job-mark { color:var(--wf); background:color-mix(in srgb, var(--wf) 16%, var(--surface)); }
+li.job-mark-rework { color:var(--wf); }
+.job-graph .job-node:is(.job-mark-kept,.job-mark-frozen),.job-stack:has(> .job-node:is(.job-mark-kept,.job-mark-frozen)) > .job-places { opacity:.38; filter:grayscale(.85); }
+.job-places details:not(:has(.job-write:not(.job-mark-kept,.job-mark-frozen))) { opacity:.38; filter:grayscale(.85); }
+.job-node-was { font-size:11px; line-height:1.3; color:var(--st-bad-fg); text-decoration-color:var(--st-bad); max-width:20ch; margin-bottom:-2px; }
+.job-graph-edges path[data-diff="kept"],.job-graph-edges path[data-diff="kept"] + .job-edge-glyph { opacity:.35; }
+.job-graph-edges path[data-diff="added"] { stroke:var(--st-ok); stroke-width:2.5; }
+.job-graph-edges path[data-diff="gone"] { stroke:var(--st-bad); stroke-opacity:.6; }
+.job-dialog .job-diff-legend { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; margin:14px 0 0; font-size:12px; }
+.job-diff-key { display:inline-flex; align-items:center; gap:5px; }
+.job-diff-key b { color:var(--fg); font-weight:600; }
+.job-diff-key::before { content:""; width:9px; height:9px; border-radius:3px; outline:2px solid var(--dc); outline-offset:1px; }
+.job-diff-key.job-mark-added::before { outline-style:dashed; }
+.job-diff-key.job-mark-kept::before { outline:0; background:var(--fg-subtle); opacity:.5; }
+.job-diff-edges { display:inline-flex; align-items:center; gap:5px; margin-left:auto; }
+.job-diff-edges i { width:18px; border-top:2.5px solid var(--st-ok); margin-left:8px; }
+.job-diff-edges i.gone { border-color:color-mix(in srgb, var(--st-bad) 60%, transparent); }
+/* An edited step opens to what changed, field by field. */
+.job-replan-changes summary { cursor:pointer; list-style:none; }
+.job-replan-changes summary::-webkit-details-marker { display:none; }
+.job-replan-changes summary:hover { background:var(--surface-hover, color-mix(in srgb, var(--fg) 5%, transparent)); }
+.job-replan-changes summary .job-change-what::after { content:"Show changes ▸"; margin-left:8px; font-size:11.5px; color:var(--blue-fg, var(--fg-muted)); }
+.job-replan-changes details[open] summary .job-change-what::after { content:"Hide ▾"; }
+.job-edit-diff { display:grid; grid-template-columns:auto minmax(0,1fr); gap:4px 12px; margin:4px 0 10px calc(var(--kind-w) + 18px); padding:8px 12px; border-left:2px solid var(--dc); background:color-mix(in srgb, var(--dc) 6%, transparent); border-radius:0 8px 8px 0; font-size:12px; line-height:1.55; }
+.job-edit-diff dt { color:var(--fg-subtle); }
+.job-edit-diff dd { margin:0; color:var(--fg); overflow-wrap:anywhere; }
+.job-edit-diff del { color:var(--st-bad-fg); background:color-mix(in srgb, var(--st-bad) 14%, transparent); border-radius:3px; padding:0 2px; }
+.job-edit-diff ins { color:var(--st-ok-fg); background:color-mix(in srgb, var(--st-ok) 14%, transparent); text-decoration:none; border-radius:3px; padding:0 2px; }
+.job-edit-diff del + ins { margin-left:3px; }
+.job-replan-changes small { color:var(--fg-muted); font-size:12px; }
 .job-superseded { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--fg-muted) !important; }
 /* The intro (intro.js): the job dialog's surface, app bar, stepper and FAB, with
    a figure per step drawn from the same tiles, cards and chips as the board.

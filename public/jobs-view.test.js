@@ -1580,12 +1580,14 @@ test('a plan-change proposal locks landed work, marks removed work as cancelled 
   f.q('[data-board="job1"] .job-plate-open').click();
   const mark = (id) => f.q(`.job-node[data-node="${id}"] .job-mark`).textContent;
   assert.equal(mark('api'), 'Locked · already landed'); assert.ok(f.q('.job-node[data-node="api"] .job-mark svg'));
-  assert.equal(mark('web'), 'Will be cancelled'); assert.equal(mark('docs'), 'Edited'); assert.equal(mark('cli'), 'New');
+  assert.equal(mark('web'), 'Will be cancelled'); assert.equal(mark('docs'), 'Edited · title'); assert.equal(mark('cli'), 'New');
   assert.equal(f.q('.job-node[data-node="docs"] .job-node-title').textContent, 'Docs <b>v2</b>', 'agent text is escaped');
+  assert.equal(f.q('.job-node[data-node="docs"] .job-node-was').textContent, 'Deliver docs', 'a renamed step shows its old title');
   const removed = f.q('.job-replan-changes .job-mark-removed');
-  assert.match(removed.textContent, /Cancels “Deliver web” · PR #7 ↗ stays open on GitHub/);
-  assert.equal(f.q('.job-replan-changes .job-mark-added').textContent, 'Adds “Deliver cli”');
-  assert.equal(f.q('.job-replan-changes .job-mark-edited').textContent, 'Renames it to “Docs <b>v2</b>”', 'a title edit names the new title, escaped');
+  assert.equal(removed.querySelector('.job-change-kind').textContent, 'Will be cancelled');
+  assert.match(removed.querySelector('.job-change-what').textContent, /Deliver web PR #7 ↗ stays open on GitHub/);
+  assert.equal(f.q('.job-replan-changes .job-mark-added .job-change-what').textContent, 'Deliver cli');
+  assert.equal(f.q('.job-replan-changes .job-mark-edited summary .job-change-what').textContent, 'Renames it to “Docs <b>v2</b>”', 'a title edit names the new title, escaped');
   assert.equal(removed.querySelector('a').href, 'https://github.com/org/repo/pull/7');
   assert.equal(f.q('#job-dialog [data-node="cli"]').tagName, 'DIV', 'a proposed node opens nothing: it has no sub-job yet');
   f.q('[data-action="approve-replan"]').click();
@@ -2300,6 +2302,37 @@ test('a merged sub-job\'s idea goes to the planner; the box steps aside while th
   assert.deepEqual([f.q('.job-change').dataset.changeAt, f.q('.job-change-to').textContent], ['step', 'PPlanner']);
 });
 
+test('a plan change reads as a decision: one bar asks and holds both buttons, unchanged work fades and each edit says what it changes (charlie-ps/wrangler-squared#214)', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued' }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }, { ...sub('docs'), stage: 'implementation', state: 'queued' }];
+  job.plan = { ...plan, subJobs: [sub('api'), sub('web', ['api']), sub('docs')] };
+  const merged = { ...job.plan, subJobs: [sub('api'), sub('cli'), { ...sub('web', ['cli']), brief: 'Implement it, <b>paginate</b> and open the PR', show: ['Pages of 50'] }, sub('docs')] };
+  job.replan = { feedback: 'Put a CLI in front of web', at: 1, previous: null, proposal: { id: 'run_p', plan: merged, merged,
+    changes: { frozen: [], kept: ['api', 'docs'], edited: [{ id: 'web', fields: ['brief', 'show', 'after'] }], added: ['cli'], removed: [] } } };
+  f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
+  const bar = f.q('#job-dialog .job-proposal-bar');
+  assert.match(bar.querySelector('.job-proposal-title').textContent, /Plan change waiting for your decision/);
+  assert.match(bar.querySelector('.job-replan-ask').textContent, /You asked Put a CLI in front of web/);
+  assert.ok(bar.querySelector('[data-action="approve-replan"]') && bar.querySelector('[data-action="discard-replan"]'), 'the buttons sit in the bar that asks');
+  assert.equal(document.querySelectorAll('#job-dialog [data-action="approve-replan"]').length, 1, 'not repeated in the footer');
+  assert.equal(document.querySelectorAll('#job-dialog [data-action="discard-replan"]').length, 1);
+  assert.ok(bar.compareDocumentPosition(f.q('#job-dialog .job-graph')) & 4, 'the bar comes before the graph');
+  f.q('.job-proposal-bar [data-action="approve-replan"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_p' });
+  assert.equal(f.q('.job-diff-legend').textContent.replace(/\s+/g, ' ').trim(), '1 new1 edited2 unchangednew linkdropped link'.replace(/\s+/g, ' '));
+  assert.ok(f.q('.job-node[data-node="api"]').classList.contains('job-mark-kept'), 'unchanged work is marked to fade');
+  assert.equal(f.q('.job-node[data-node="web"] .job-mark').textContent, 'Edited · brief, show me, waits for');
+  const edge = (from, to) => f.q(`.job-graph-edges path[data-from="${from}"][data-to="${to}"]`)?.dataset.diff;
+  assert.equal(edge('cli', 'web'), 'added'); assert.equal(edge('api', 'web'), 'gone', 'a dropped link stays drawn, marked gone');
+  const diff = f.q('.job-replan-changes .job-mark-edited .job-edit-diff');
+  const rows = Object.fromEntries([...diff.querySelectorAll('dt')].map((dt) => [dt.textContent, dt.nextElementSibling]));
+  assert.deepEqual(Object.keys(rows), ['brief', 'show me', 'waits for']);
+  assert.equal(rows.brief.textContent, 'Implement itit, <b>paginate</b> and open the PR', 'agent text is escaped');
+  assert.deepEqual([rows.brief.querySelector('del').textContent, rows.brief.querySelector('ins').textContent], ['it', 'it, <b>paginate</b>'], 'only the changed words are marked');
+  assert.equal(rows['show me'].querySelector('ins').textContent, '+ Pages of 50');
+  assert.deepEqual([...rows['waits for'].children].map((e) => `${e.tagName} ${e.textContent}`), ['INS + Deliver cli', 'DEL − Deliver api']);
+});
+
 test('a proposal with a diagnosis, ranked options and actions: options switch the graph, actions are marks on the node, approve names the option', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   const pr = { url: 'https://github.com/org/repo/pull/7', head: 'h1', checkStatus: 'failing' };
@@ -2321,13 +2354,15 @@ test('a proposal with a diagnosis, ranked options and actions: options switch th
   assert.ok(!html().includes('<b>times out</b>') && !html().includes('<i>flake</i>'), 'agent text is escaped');
   assert.deepEqual([...document.querySelectorAll('.job-option b')].map((b) => b.textContent), ['Accept the red checksRecommended', 'Fix the flaky test first']);
   assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Accept red', 'the action is drawn on the node it acts on');
-  assert.equal(f.q('.job-replan-changes .job-mark-act').textContent, 'Merges “Deliver api” despite its failing checks');
-  assert.equal(f.q('.job-replan-changes .job-mark-act').title, 'Not applied if its PR has new commits by the time you approve');
+  const act = f.q('.job-replan-changes .job-mark-act');
+  assert.equal(act.querySelector('.job-change-kind').textContent, 'Accept red');
+  assert.equal(act.querySelector('.job-change-what').textContent, 'Merges “Deliver api” despite its failing checks');
+  assert.equal(act.title, 'Not applied if its PR has new commits by the time you approve');
   f.q('[data-action="approve-replan"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_p', option: 0 });
   const second = f.q('input[name="opt"][value="1"]'); second.checked = true; second.dispatchEvent(f.event('change'));
   assert.equal(f.q('.job-node[data-node="flake"] .job-mark').textContent, 'New');
-  assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Edited');
+  assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Edited · waits for');
   assert.equal(document.querySelectorAll('.job-replan-changes .job-mark-act').length, 0, 'the other option\'s action is not shown');
   assert.ok(f.q('.job-option.sel').textContent.includes('Fix the flaky test first'));
   f.q('[data-action="approve-replan"]').click();
@@ -2342,7 +2377,9 @@ test('a recover is a mark on the merged node that waits for its fix, and a propo
   job.replan = { feedback: 'Deploy failed', at: 1, previous: null, proposal: { id: 'run_q', plan: merged, merged, changes: { frozen: ['api'], kept: [], edited: [], added: ['fix'], removed: [] }, actions: [{ type: 'recover', sub: 'api', fix: 'fix', pin: { at: 'merge', ref: 'm1' } }] } };
   f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
   assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Waits for its fix');
-  assert.equal(f.q('.job-replan-changes .job-mark-act').textContent, 'Fixes “Deliver api” with a new PR, “Deliver fix”');
+  const act = f.q('.job-replan-changes .job-mark-act');
+  assert.equal(act.querySelector('.job-change-kind').textContent, 'Recover');
+  assert.equal(act.querySelector('.job-change-what').textContent, 'Fixes “Deliver api” with a new PR, “Deliver fix”');
   assert.equal(f.q('.job-option-only'), null, 'no label or why, nothing to read');
   job.replan.proposal = { ...job.replan.proposal, label: 'Fix it with a <b>new</b> PR', why: 'The deploy stays red until it lands.' }; f.view.update(f.data);
   assert.equal(f.q('.job-option-only').textContent, 'Fix it with a <b>new</b> PRThe deploy stays red until it lands.', 'a lone option still says what it does, escaped');
