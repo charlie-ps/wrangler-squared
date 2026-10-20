@@ -415,9 +415,10 @@ export class JobStore {
         if (!shown || s.stage !== 'cleanup' || s.discard) throw new Error('Nothing is waiting to be discarded');
         if (shown.pinned === false) throw new Error('This worktree cannot be pinned to what you saw (a submodule, or too much to check); clean it up by hand');
         if (payload.discardHead !== shown.head || payload.fingerprint !== shown.fingerprint) throw new Error('The worktree changed since you looked. Review it again before discarding.');
-        s.discard = { head: shown.head, fingerprint: shown.fingerprint, at: Date.now() };
+        s.discard = { head: shown.head, fingerprint: shown.fingerprint, at: Date.now(), ...(shown.cause === 'unremovable' && { cause: 'unremovable' }) };
         s.error = null; s.blocked = null;
-        record(j, s, 'discard-worktree', note, `Discarded ${lossLine(shown)} from ${quoted(s.title)}`);
+        record(j, s, 'discard-worktree', note, shown.cause === 'unremovable' ? `Chose to delete the leftover folder ${shown.path} and branch ${shown.branch}${shown.commitCount ? `, with ${lossLine(shown)}` : ''}, from ${quoted(s.title)}`
+          : `Discarded ${lossLine(shown)} from ${quoted(s.title)}`);
         return;
       }
       if (action === 'approve-session') {

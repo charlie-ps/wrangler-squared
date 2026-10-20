@@ -53,7 +53,7 @@ export async function removeWorktree({ worktreePath, repoRoot = '', force = true
     return { ok: true };
   } catch (e) {
     const stderr = (e.stderr || e.message || '').toString().trim();
-    throw Object.assign(new WorktreeError(`git worktree remove failed: ${stderr}`), { submodules: !force && /submodules/.test(stderr) });
+    throw Object.assign(new WorktreeError(`git worktree remove failed: ${stderr}`), { stderr, submodules: !force && /submodules/.test(stderr) });
   }
 }
 

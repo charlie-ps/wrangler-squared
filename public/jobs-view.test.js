@@ -2889,6 +2889,25 @@ test('a detached worktree says so and offers Discard; one git cannot read shows 
   assert.equal(f.q('#job-discard'), null);
 });
 
+test('a worktree git could not remove shows git\'s reason in plain words and offers Retry or a Discard of the whole folder', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active'; job.cancelledAt = 1;
+  const why = "error: failed to delete '/wt/api': Directory not empty";
+  const refusal = { path: '/wt/api', branch: 'job-api', base: 'main', head: 'cc47137aaaa', fingerprint: 'fp1', cause: 'unremovable', error: why, pinned: true, stale: false, commits: [], commitCount: 0, files: [], fileCount: 0 };
+  job.subJobs = [{ ...sub('api'), stage: 'cleanup', state: 'cancelled', cancelledAt: 1, worktree: { path: '/wt/api', branch: 'job-api' }, error: `Worktree at /wt/api could not be removed (${why}); preserve it for review`, cleanupRefusal: refusal }];
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  const text = f.q('#job-dialog').textContent;
+  assert.match(text, /Kept for you Cleanup could not remove this/);
+  assert.ok(text.includes(`Could not remove the worktree: ${why}`));
+  assert.match(text, /Something may still be running in \/wt\/api, such as a dev server, a build or an editor\. Stop it and Retry, or Discard to delete that folder with everything in it and the local branch job-api\./);
+  assert.doesNotMatch(text, /pin/i);
+  assert.doesNotMatch(text, /Branch job-api at/, 'no plain branch line under a cause');
+  assert.equal(f.q('#job-discard').textContent, 'Discard');
+  f.q('#job-discard').click();
+  assert.match(f.q('#job-dialog').textContent, /This deletes the folder \/wt\/api with everything in it, deletes the local branch job-api and tells git the worktree is gone/);
+  f.q('[data-discard]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'discard-worktree', discardHead: 'cc47137aaaa', fingerprint: 'fp1' });
+});
+
 test('every PR tile shows its worktree branch → where it lands, the override marked and long names truncated', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active'; job.base = 'next';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', base: 'release/2.x', worktree: { path: '/wt/api', branch: 'fix/api-2x', repoRoot: '/repo' } },

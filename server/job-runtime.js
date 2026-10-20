@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { runFile } from './job-github.js';
 import { jobPrompt, placeholderBranch, helperPrompt } from './job-prompts.js';
-import { removeWorktree, gitRepoRoot, stderrLine } from './git.js';
+import { removeWorktree, gitRepoRoot, stderrLine, WorktreeError } from './git.js';
 import { updateMainCheckout, resolvePrompt, caughtUp } from './job-main.js';
 import { targetOf } from './jobs-schema.js';
 import { checkoutsDir } from './data-dir.js';
@@ -47,6 +47,7 @@ export const expandRepo = (repo) => path.resolve(repo.startsWith('~/') ? path.jo
 export class CleanupRefused extends Error {
   constructor(message, refusal) { super(message); this.refusal = refusal; }
 }
+const samePath = (a, b) => { try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return false; } };
 const LOSS_LIST_CAP = 50;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const changeOf = (type, xy, sub) => type === '?' ? 'untracked' : sub?.[0] === 'S' ? 'submodule' : type === 'u' ? 'conflicted'
@@ -408,12 +409,19 @@ export class JobRuntime {
     // The branch value the tree's inspection answered for, so the ref is
     // compared again below only if it says something the tree did not.
     let covered = null;
-    if (fs.existsSync(wt.path)) {
-      const head = await this.run('git', ['rev-parse', 'HEAD'], wt.path).catch((e) => {
+    const opts = { expectedHead, mergedHead, base };
+    if (discard?.cause === 'unremovable') covered = await this.discardLeftover(wt, discard, opts);
+    else if (fs.existsSync(wt.path)) {
+      const head = await this.run('git', ['rev-parse', 'HEAD'], wt.path).catch(async (e) => {
         const why = stderrLine(e) || 'no HEAD';
+        if (!await this.listsWorktree(wt)) throw await this.leftover(wt, why, opts);
         throw new CleanupRefused(`Worktree at ${wt.path} could not be read by git (${why}); preserve it for review`, { path: wt.path, branch: wt.branch, head: null,
           cause: 'unreadable', error: why, pinned: false, commits: [], commitCount: 0, files: [], fileCount: 0 });
       });
+      // A tree git half-deleted (its .git file gone) inside the main checkout
+      // reads as that checkout, whose branch is not this one.
+      const top = await this.run('git', ['rev-parse', '--show-toplevel'], wt.path).catch(() => '');
+      if (!samePath(top, wt.path)) throw await this.leftover(wt, `no longer its own worktree: git reads it as ${top || 'nothing'}`, opts);
       // `-q` exits 1 quietly on a detached HEAD (a rebase stopped part-way, a
       // checkout of a commit): that is a refusal with its Discard, not a crash.
       const branch = await this.run('git', ['symbolic-ref', '-q', 'HEAD'], wt.path).catch(() => '');
@@ -432,7 +440,7 @@ export class JobRuntime {
         if (force || !e.submodules) throw e;
         if (await this.run('git', ['status', '--porcelain=v2', '-z', '--untracked-files=all'], wt.path) !== status) throw new Error('Worktree has changed since verification; preserve it for review');
         await removeWorktree({ worktreePath: wt.path, repoRoot: wt.repoRoot, force: true });
-      });
+      }).catch(async (e) => { throw e instanceof WorktreeError ? await this.leftover(wt, stderrLine(e) || e.message, opts) : e; });
     }
     const trees = await this.run('git', ['worktree', 'list', '--porcelain'], wt.repoRoot);
     if (trees.split('\n').includes(`branch ${ref}`)) throw new Error('Branch is in use by another worktree');
@@ -440,6 +448,46 @@ export class JobRuntime {
     if (!existing) return;
     if (existing !== covered) await this.assertDisposable(wt, { head: existing, status: '', files: [] }, expectedHead, { mergedHead, base, discard });
     await this.run('git', ['update-ref', '-d', ref, existing], wt.repoRoot);
+  }
+
+  async listsWorktree(wt) {
+    const trees = await this.run('git', ['worktree', 'list', '--porcelain'], wt.repoRoot).catch(() => '');
+    return trees.split('\n').some((l) => l.startsWith('worktree ') && samePath(l.slice('worktree '.length), wt.path));
+  }
+
+  // A folder git could not delete (something still writing there) or no longer
+  // tracks as a worktree. Its files cannot be listed, so its Discard deletes the
+  // whole folder and is pinned only to the branch tip and the commits it loses.
+  async leftover(wt, why, { expectedHead, mergedHead, base }) {
+    const tip = await this.run('git', ['for-each-ref', '--format=%(objectname)', `refs/heads/${wt.branch}`], wt.repoRoot) || null;
+    const retained = !tip || tip === expectedHead || (!!mergedHead && await this.isMergedAncestor(tip, mergedHead, wt.repoRoot));
+    const { target, commits, stale } = await this.lostCommits(wt, [tip], retained, base);
+    const fingerprint = crypto.createHash('sha256').update(['unremovable', wt.path, tip, target, stale, ...commits.map((c) => `${c.sha}:${c.pushed}`)].join('\0')).digest('hex').slice(0, 16);
+    return new CleanupRefused(`Worktree at ${wt.path} could not be removed (${why}); preserve it for review`, { path: wt.path, branch: wt.branch, base: target, head: tip,
+      fingerprint, pinned: true, stale, cause: 'unremovable', error: why, commits: commits.slice(0, LOSS_LIST_CAP), commitCount: commits.length, files: [], fileCount: 0 });
+  }
+
+  // The human's Discard of a leftover: the folder goes whole, never the
+  // checkout it sits in, then git's record of it. Returns the tip it covered,
+  // so the branch is deleted at that value by the caller.
+  async discardLeftover(wt, discard, opts) {
+    const shown = (await this.leftover(wt, 'discarded', opts)).refusal;
+    if (shown.head !== discard.head || shown.fingerprint !== discard.fingerprint) {
+      throw new CleanupRefused('Worktree changed after you chose to discard it; review it again', { ...shown, error: 'its branch moved after you chose to discard it' });
+    }
+    const root = fs.realpathSync(wt.repoRoot);
+    const dir = fs.existsSync(wt.path) ? fs.realpathSync(wt.path) : null;
+    if (dir && (dir === root || !path.relative(dir, root).startsWith('..'))) throw new Error(`Refusing to delete ${wt.path}: it holds the repository itself`);
+    if (dir) {
+      try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch (e) { throw await this.leftover(wt, e.message, opts); }
+    }
+    await this.run('git', ['worktree', 'prune'], wt.repoRoot);
+    return shown.head;
+  }
+
+  async lostCommits(wt, tips, retained, base) {
+    const target = retained ? base || null : base || await this.defaultBranch(wt.repoRoot);
+    return { target, ...(retained ? { commits: [], stale: false } : await this.unmergedCommits(wt.repoRoot, tips, target)) };
   }
 
   // Returns true when a Discard's pin matched (the caller may then force), false
@@ -458,8 +506,7 @@ export class JobRuntime {
     // compare, so a dirty tree is refused (with its Discard) even when origin's
     // default branch is unknowable.
     const retained = !detached && (head === expectedHead || (!!mergedHead && await this.isMergedAncestor(head, mergedHead, wt.repoRoot)));
-    const target = retained ? base || null : base || await this.defaultBranch(wt.repoRoot);
-    const { commits, stale } = retained ? { commits: [], stale: false } : await this.unmergedCommits(wt.repoRoot, tips, target);
+    const { target, commits, stale } = await this.lostCommits(wt, tips, retained, base);
     // Nothing to lose is disposable whatever the pin: a human who saved their
     // work after looking is not asked to Discard a clean tree again.
     if (!detached && !files.length && !commits.length && !stale) return false;
