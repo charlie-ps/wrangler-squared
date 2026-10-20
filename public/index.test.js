@@ -232,6 +232,39 @@ test('the IDE handler answers with a broadcast either way, and both land as a to
   assert.equal(toastText(el), 'Worktree no longer exists: /wt');
 });
 
+test('a failure toasts as an error that outlasts a success and can be dismissed; a success stays plain', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { el, c, dispatch } = mountClient();
+  c.update(el, null, graphWith([job()]));
+  dispatch({ event: 'job-action-complete', jobId: 'job_1' });
+  const ok = el.querySelector('.jobs-toast');
+  assert.equal(ok.classList.contains('jobs-toast-error'), false);
+  assert.equal(ok.getAttribute('role'), 'status');
+  assert.equal(ok.getAttribute('popover'), 'manual', 'a manual popover sits in the top layer, above an open modal');
+  assert.equal(ok.parentNode, el.querySelector('#jobs'), 'inside #jobs, so it wears the theme and hides with the host');
+  assert.equal(ok.querySelector('button'), null);
+  for (const frame of [
+    { event: 'job-create-failed', error: 'Task limit reached' },
+    { event: 'job-action-failed', jobId: 'job_1', action: 'approve-plan', error: 'Plan moved' },
+    { event: 'job-ide-failed', jobId: 'job_1', error: 'Worktree no longer exists' },
+  ]) {
+    dispatch(frame);
+    const bad = el.querySelector('.jobs-toast');
+    assert.ok(bad.classList.contains('jobs-toast-error'), frame.event);
+    assert.equal(bad.getAttribute('role'), 'alert');
+    assert.equal(bad.textContent, frame.error);
+  }
+  t.mock.timers.tick(3000);
+  assert.equal(toastText(el), 'Worktree no longer exists', 'an error outlasts a success toast');
+  el.querySelector('.jobs-toast-close').click();
+  assert.equal(toastText(el), null, 'Dismiss removes it at once');
+  dispatch({ event: 'job-ide-failed', jobId: 'job_1', error: 'Gone' });
+  t.mock.timers.tick(10000);
+  assert.equal(toastText(el), null, 'and it still clears itself');
+  dispatch({ event: 'job-action-failed', jobId: 'job_1', action: 'approve-plan', error: '<b>x</b>' });
+  assert.equal(el.querySelector('.jobs-toast b'), null, 'agent-written text is never markup');
+});
+
 // Core's onSession: select the card when the board has it, resume it first when
 // it does not. Both are api.openSession's job since host api 1.8; the view only
 // has to label the button right, off the graph's session list.

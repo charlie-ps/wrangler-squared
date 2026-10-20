@@ -2763,13 +2763,31 @@ test('a planner\'s receipt may carry a diagnosis, ranked options and actions; th
     alternatives: [{ label: 'Accept the failed run', plan: plan([spec('api'), spec('web', ['api'])]), actions: [{ type: 'accept-red', sub: 'api' }] }] }, planner);
   const proposal = f.store.get(f.job.id).replan.proposal;
   assert.deepEqual([proposal.label, proposal.diagnosis.summary, proposal.alternatives.length, proposal.actions[0].pin], ['Recover with a PR', 'The migration is not idempotent', 1, { at: 'merge', ref: 'm1' }]);
-  const moveMerge = (ref) => f.store.update(f.job.id, (j) => { j.subJobs[0].pr.mergeCommit = ref; });
-  moveMerge('m2');
-  assert.throws(() => f.store.action(f.job.id, 'approve-replan', { proposalId: proposal.id, option: 1 }), /has moved since this was proposed/);
-  moveMerge('m1');
   f.store.action(f.job.id, 'approve-replan', { proposalId: proposal.id, option: 1 });
   const job = f.store.get(f.job.id);
   assert.deepEqual([job.subJobs[0].acceptedRed.ref, job.subJobs[0].recoveredBy, job.subJobs.some((s) => s.id === 'fix')], ['m1', undefined, false]);
+});
+
+test('a proposal whose step merged before approval goes back to the planner, and the history says so', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  f.alive.delete(f.workerFor('api').sid); await f.tick();
+  f.store.update(f.job.id, (j) => { Object.assign(j.subJobs[0], { stage: 'pr', state: 'watching', pr: { url: PR_URL, head: 'h1', checkStatus: 'passing' } }); });
+  change(f, 'api', 'Rename the flag'); await f.tick();
+  const planner = plannerOf(f);
+  f.report({ kind: 'plan', plan: plan([spec('api', [], { brief: 'Implement api with the renamed flag' }), spec('web')]) }, planner);
+  const proposal = f.store.get(f.job.id).replan.proposal;
+  f.alive.delete(planner.sid); await f.tick();
+  f.store.update(f.job.id, (j) => { Object.assign(j.subJobs[0], { stage: 'deployment', mergedAt: Date.now() }); });
+  f.store.action(f.job.id, 'approve-replan', { proposalId: proposal.id });
+  const job = f.store.get(f.job.id);
+  assert.equal(job.replan.proposal, null);
+  assert.deepEqual(job.moves.slice(-2).map((m) => [m.move, m.subJobId, m.detail]), [
+    ['replan-sent-back', null, 'Sent the plan change back to the planner: “Deliver api” has merged since it was proposed'],
+    ['replan-sent-back', 'api', '“Deliver api” has merged since the plan change was proposed, so it went back to the planner']]);
+  await f.tick();
+  const again = plannerOf(f);
+  assert.notEqual(again.run.id, planner.run.id, 'a fresh planning run picks it up');
+  assert.match(jobPrompt(f.store.get(f.job.id), null, again.run), /Rename the flag[\s\S]*“Deliver api” \(api\) has merged/);
 });
 
 // ---- Red steps (job-red.js): a red step goes up one level before it goes to the human ----

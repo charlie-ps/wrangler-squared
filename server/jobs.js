@@ -2,6 +2,7 @@ import { JobRunner } from './job-runner.js';
 import { JobRuntime } from './job-runtime.js';
 import { JobGithub } from './job-github.js';
 import { JobSpendRefresh } from './job-spend-refresh.js';
+import { BudgetEnforcer } from './job-budget.js';
 
 // Composition root for the extension's server half — what agent-wrangler's
 // server/index.js did for the in-core job system (construct JobStore, JobRuntime,
@@ -24,6 +25,7 @@ export function runnerFor(host) {
       github: new JobGithub(),
       onChange: () => host.rebuild(),
       statusOf,
+      budget: budgetFor(host),
     });
     runner.runtime = runtime;
   }
@@ -39,6 +41,13 @@ export function spendFor(host) {
   return spend;
 }
 
+// What the spend limit reads and does (job-runner.js enforceBudget): the same
+// live-folded spend the board shows, and one interrupt cooldown per process.
+function budgetFor(host) {
+  const enforcer = new BudgetEnforcer({ host, workingOf: (sessionId) => working.has(sessionId) });
+  return { spend: (jobs) => spendFor(host).current(jobs), interrupt: (cards) => enforcer.interrupt(cards) };
+}
+
 // The card status of every session as of the last graph the contributor saw
 // (server/manifest.js `graph`). Core's runner read `lastGraph.sessions` directly;
 // the projection `host.sessions.get()` carries no status, so this cache is the
@@ -51,9 +60,11 @@ export function spendFor(host) {
 // background is reaped as receipt-less once IDLE_RECEIPT_GRACE_MS passes.
 const lastStatus = new Map();
 const dormant = new Set();
+const working = new Set();
 export function noteGraph(graph) {
-  lastStatus.clear(); dormant.clear();
+  lastStatus.clear(); dormant.clear(); working.clear();
   for (const s of graph?.sessions || []) {
+    if (s.status === 'working') working.add(s.sessionId);
     lastStatus.set(s.sessionId, s.status === 'idle' && s.hasBackgroundShell ? 'working' : s.status ?? null);
     if (s.dormant) dormant.add(s.sessionId);
   }
@@ -76,4 +87,4 @@ export function runForSession(store, sessionId) {
 export const isAutomated = (store, sessionId) => Boolean(runForSession(store, sessionId));
 
 // Test seam.
-export function _resetForTests() { runner = null; spend = null; lastStatus.clear(); dormant.clear(); }
+export function _resetForTests() { runner = null; spend = null; lastStatus.clear(); dormant.clear(); working.clear(); }

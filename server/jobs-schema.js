@@ -416,6 +416,7 @@ export const jobInputSchema = z.object({
   // (job-runtime.js writableDirsFor); ignored under Full access.
   writableDirs: z.array(folderPath).max(12).default([]),
 });
+export const DEFAULT_SPEND_LIMIT = 100;
 export const settingsSchema = z.preprocess(migrateTheme, z.object({
   concurrency: z.number().int().min(1).max(16).default(8),
   maxRepairs: z.number().int().min(0).max(5).default(2),
@@ -426,6 +427,11 @@ export const settingsSchema = z.preprocess(migrateTheme, z.object({
   // on the merge commit before the board flags it (job-runner.js).
   deploymentStaleMinutes: z.number().int().min(5).max(1440).default(30),
   paused: z.boolean().default(false),
+  // Per-job spend limit X in dollars (job-budget.js): a job may spend X × (1 + its
+  // top-ups). Absent (a settings file from before it, too) is DEFAULT_SPEND_LIMIT;
+  // null, the emptied field, is no limit. Cents are kept, anything finer rounded off.
+  spendLimit: z.preprocess((v) => (v === '' || v === null ? null : typeof v === 'number' ? Math.round(v * 100) / 100 : v),
+    z.number().positive().max(100000).nullable()).default(DEFAULT_SPEND_LIMIT),
   // The macOS application "Review code in …" hands a sub-job's worktree to
   // (`open -na <ideApp> --args <path>`, server/handlers.js). An app NAME, not a
   // command: nothing typed here ever reaches a shell.

@@ -21,7 +21,8 @@ const JOBS = [
     sub('routes', 'Wire the routes', { after: ['bucket'] })], { usd: 9.8, runs: [{ id: 'r2', subJobId: 'bucket', phase: 'implementation', stopped: false, status: 'working' }] }),
 ];
 
-// A picture sits inside the picker's own buttons, which may not hold a button or link.
+// A picture is only ever a preview: nothing in it is a button or link, and it is `inert`, so the
+// plates' focusable graph nodes are never reached by Tab.
 const inert = (html) => html.replace(/<(\/?)(?:button|a)\b/g, '<$1span');
 const mast = (size) => `<header class="jobs-mast"><div class="jobs-top"><div><div class="jobs-kicker">${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</div><h1>Wrangler²</h1></div>
   ${size === 'band' ? '' : '<div class="jobs-telemetry"><span class="jobs-beacon"><b>2</b>&nbsp;working</span><span class="jobs-bays"><i class="on"></i><i class="on"></i><i></i><i></i></span></div><div class="jobs-tools"><span class="jobs-newjob">New idea</span></div>'}</div></header>`;
@@ -29,7 +30,7 @@ const mast = (size) => `<header class="jobs-mast"><div class="jobs-top"><div><di
 export function previewHtml(theme, size, options) {
   const art = theme.plateArt(options), jobs = size === 'preview' ? JOBS : size === 'thumb' ? JOBS.slice(0, 1) : [];
   const plates = jobs.map((j, i) => inert(plateHtml({ ...j, id: `${j.id}-${size}` }, ['opus', 'sonnet'][i], art))).join('');
-  return `<div class="theme-mini ${size}" data-theme="${theme.id}" data-scheme="${theme.scheme}" data-plate-art="${art}" data-w="${WIDTH[size]}" style="width:${WIDTH[size]}px" aria-hidden="true">${size === 'thumb' ? '' : mast(size)}${plates ? `<div class="jobs-plates">${plates}</div>` : ''}</div>`;
+  return `<div class="theme-mini ${size}" data-theme="${theme.id}" data-scheme="${theme.scheme}" data-plate-art="${art}" data-w="${WIDTH[size]}" style="width:${WIDTH[size]}px" aria-hidden="true" inert>${size === 'thumb' ? '' : mast(size)}${plates ? `<div class="jobs-plates">${plates}</div>` : ''}</div>`;
 }
 
 // Zooms each picture under `host` to its box (again whenever the box resizes: the settings

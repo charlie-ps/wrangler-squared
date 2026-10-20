@@ -1,4 +1,4 @@
-import { usdByCard } from './job-spend.js';
+import { usdByCard, withLiveUsd } from './job-spend.js';
 
 // Per-job price, refreshed on its OWN slow cadence and never on the graph tick —
 // core's `refreshJobSpendIfStale` (job-system server/index.js) over the façade.
@@ -17,6 +17,7 @@ export class JobSpendRefresh {
     this.map = new Map();
     this.at = null; // when the last read settled; null is "never"
     this.inflight = null;
+    this.live = new Map();
   }
 
   byCard(jobs) {
@@ -31,6 +32,17 @@ export class JobSpendRefresh {
     }
     return this.map;
   }
+
+  // Every card's highest live price off the graph (manifest.js `graph`).
+  noteLive(sessions) {
+    for (const s of sessions || []) {
+      if (typeof s?.usd === 'number' && s.usd > (this.live.get(s.sessionId) ?? 0)) this.live.set(s.sessionId, s.usd);
+    }
+  }
+
+  // The scan's map with each live card's fresher price folded in: what the board
+  // shows and what the spend limit (job-budget.js) is held to.
+  current(jobs) { return withLiveUsd(this.byCard(jobs), this.live); }
 
   // The refresh in flight, if any — so a caller (a test, a graph consumer that
   // wants the price NOW) can wait for the map the next tick will serve.

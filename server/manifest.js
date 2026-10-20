@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { JobStore } from './job-store.js';
 import { withJobSpend, withRunStatus } from './job-spend.js';
 import { TOOLS, hideTool } from './tools.js';
+import { withSpendLimit } from './job-budget.js';
 import { HANDLERS } from './handlers.js';
 import { runnerFor, spendFor, noteGraph, isAutomated, runForSession } from './jobs.js';
 
@@ -49,9 +50,10 @@ export default {
   defaultEnabled: true,
   dir,
   // `sessions:wake` and `mail:send` resume a session parked on its drafts once
-  // the human has decided them (job-runtime.js resumeWithMail).
+  // the human has decided them (job-runtime.js resumeWithMail);
+  // `sessions:interrupt` stops a job's sessions at its spend limit (job-budget.js).
   requires: [
-    'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:bill', 'sessions:wake',
+    'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:bill', 'sessions:wake', 'sessions:interrupt',
     'mail:send', 'tasks:read', 'tasks:write',
     'usage:read', 'board:rebuild', 'board:broadcast', 'images:keep', 'files:view',
   ],
@@ -71,12 +73,15 @@ export default {
   // Every ~4s graph tick. `graph.sessions` is what carries each live run's card
   // status onto the run (withRunStatus) and what the runner's `statusOf` reads;
   // `jobs` is not a reserved key. The price is whatever map the last 60s spend
-  // refresh produced (job-spend-refresh.js) — `byCard` kicks the next one but is
-  // never awaited here, so the usage scan can never stall a rebuild.
+  // refresh produced (job-spend-refresh.js) with each live card's own price off
+  // this graph folded in — `byCard` kicks the next refresh but is never awaited
+  // here, so the usage scan can never stall a rebuild.
   graph: ({ host, graph }) => {
     noteGraph(graph);
+    const spend = spendFor(host);
+    spend.noteLive(graph.sessions);
     const snapshot = host.stores.jobs.data;
-    return { jobs: withRunStatus(withJobSpend(snapshot, spendFor(host).byCard(snapshot.jobs)), graph.sessions) };
+    return { jobs: withRunStatus(withSpendLimit(withJobSpend(snapshot, spend.current(snapshot.jobs))), graph.sessions) };
   },
 
   session: {

@@ -13,6 +13,7 @@ import { dropSub } from './job-sub-ops.js';
 import { requestChange, CHANGE_TEXT_MAX } from './job-change.js';
 import { resolutionsFor, resolutionLabel } from './job-main.js';
 import { queueHelper, helperFor } from './job-helper.js';
+import { limitStep, limitOf } from './job-budget.js';
 import { changeView } from './job-actions.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
@@ -34,6 +35,7 @@ const lossLine = (r) => [r.commitCount && `${r.commitCount} commit${r.commitCoun
 // alike: it is the one timeline the next session's prompt (job-prompts.js
 // history) and the detail view's History panel both read, so an approve or retry recorded
 // anywhere else would be invisible to the agent it most concerns.
+const usd = (n) => `$${n.toFixed(2)}`;
 const record = (j, s, move, note, detail) => (j.moves ||= []).push({ id: uid('mv'), at: Date.now(), subJobId: s?.id || null, move, note: note || null, detail });
 export const TREE_MOVED = 'TREE_MOVED';
 export const runnable = (run) => run && !run.stopped;
@@ -84,7 +86,7 @@ function approve(j, input) {
 function cancelJob(j, now) {
   if (j.stage === 'done') throw new Error('Job has already finished');
   if (j.cancelledAt) throw new Error('Job is already cancelled');
-  j.cancelledAt = now; j.paused = false; j.error = null; j.blocked = null; j.replan = null;
+  j.cancelledAt = now; j.paused = false; j.budgetPaused = null; j.error = null; j.blocked = null; j.replan = null;
   for (const s of j.subJobs) if (!['cleanup', 'done'].includes(s.stage)) dropSub(s, now);
 }
 // A running job's review checkpoints, switched from the detail footer. Every gate
@@ -365,7 +367,20 @@ export class JobStore {
         return;
       }
       if (action === 'pause') { j.paused = true; return; }
+      // Resume is the human's own pause only: a budget pause outlives it.
       if (action === 'resume') { j.paused = false; return; }
+      // Add $X (job-budget.js): one more X on this job's limit. Pinned to the count
+      // the human saw, so a double click adds once; the runner's next tick releases
+      // the job if it is now under.
+      if (action === 'top-up') {
+        const x = limitStep(this.data.settings);
+        if (x == null) throw new Error('No job spend limit is set');
+        if (j.stage === 'done') throw new Error('Job has finished');
+        if ((payload.topUps ?? 0) !== (j.topUps || 0)) throw new Error('The limit was already raised');
+        j.topUps = (j.topUps || 0) + 1;
+        record(j, null, 'top-up', null, `Added ${usd(x)}: the spend limit is now ${usd(limitOf(this.data.settings, j))}`);
+        return;
+      }
       if (action === 'start') {
         if (j.stage !== 'backlog') throw new Error('Job has already started');
         j.stage = 'planning'; return;
@@ -377,8 +392,8 @@ export class JobStore {
       }
       if (action === 'approve-replan') {
         const red = j.replan?.red;
-        this._approveReplan(j, payload.proposalId, Number.isInteger(payload.option) ? payload.option : 0);
-        if (red) holdRed(j, red.sub);
+        const { sentBack } = this._approveReplan(j, payload.proposalId, Number.isInteger(payload.option) ? payload.option : 0);
+        if (red && !sentBack) holdRed(j, red.sub);
         return;
       }
       if (action === 'retry') {
@@ -484,6 +499,19 @@ export class JobStore {
       throw new Error('Unknown job action');
     });
   }
+  // The spend limit's verdict (job-runner.js enforceBudget), written only on the edge.
+  budgetPause(jobId, { usd: spent, limit }) {
+    return this.update(jobId, (j) => {
+      j.budgetPaused = { at: Date.now(), usd: spent, limit };
+      record(j, null, 'budget-pause', null, `Paused at its spend limit: ${usd(spent)} of ${usd(limit)}`);
+    });
+  }
+  budgetRelease(jobId, { limit }) {
+    return this.update(jobId, (j) => {
+      j.budgetPaused = null;
+      record(j, null, 'budget-release', null, limit == null ? 'Released: no job spend limit is set' : `Released under its spend limit of ${usd(limit)}`);
+    });
+  }
   // Red handling's last rung: the automatic tries on this step are spent.
   declareOutOfTries(jobId, subId, limit) {
     return this.update(jobId, (j) => {
@@ -494,13 +522,13 @@ export class JobStore {
   }
   claim(jobId, subJobId, phase, extra = {}) {
     const job = this.data.jobs.find((j) => j.id === jobId);
-    if (!job || job.paused || job.cancelledAt || this.data.settings.paused
+    if (!job || job.paused || job.budgetPaused || job.cancelledAt || this.data.settings.paused
       || job.runs.some((r) => runnable(r) && r.subJobId === subJobId)
       || this.data.jobs.flatMap((j) => j.runs).filter(holdsSlot).length >= this.data.settings.concurrency) return null;
     return this.change((d) => {
       const j = d.jobs.find((j) => j.id === jobId);
       const active = d.jobs.flatMap((j) => j.runs).filter(holdsSlot);
-      if (!j || j.paused || j.cancelledAt || d.settings.paused || active.length >= d.settings.concurrency) return null;
+      if (!j || j.paused || j.budgetPaused || j.cancelledAt || d.settings.paused || active.length >= d.settings.concurrency) return null;
       if (j.runs.some((r) => runnable(r) && r.subJobId === subJobId)) return null;
       const run = { id: uid('run'), subJobId, phase, model: launchModel(j), effort: launchEffort(j), startedAt: Date.now(), sessionId: null, stopped: false, report: null, ...extra };
       // What its prompt tells it to draft, kept so a Writes switch mid-run
@@ -654,10 +682,11 @@ export class JobStore {
   // The one road an approved plan change takes, by the human's click or by Wrangler
   // itself under Red steps; the history reads the same either way.
   _approveReplan(j, proposalId, option, by = null) {
-    const { lines, detail, feedback: asked } = approveReplan(j, proposalId, { now: Date.now(), buildSubJob, option });
+    const { lines, detail, feedback: asked, sentBack } = approveReplan(j, proposalId, { now: Date.now(), buildSubJob, option });
     j.repos = planRepos(j.plan);
-    record(j, null, 'approve-replan', asked.slice(0, 180), by ? `${detail} (${by})` : detail);
-    for (const l of lines) record(j, l.sub, 'replan', null, l.detail);
+    record(j, null, sentBack ? 'replan-sent-back' : 'approve-replan', sentBack ? null : asked.slice(0, 180), by ? `${detail} (${by})` : detail);
+    for (const l of lines) record(j, l.sub, sentBack ? 'replan-sent-back' : 'replan', null, l.detail);
+    return { sentBack: !!sentBack };
   }
   _applyReceipt(j, r, s, report, proof = null, meta = {}) {
     if (report.kind === 'plan' && j.stage === 'active') {

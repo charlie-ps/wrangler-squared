@@ -112,7 +112,7 @@ export function stampActions(job, actions = [], plan, changes) {
 
 // The step the idea was typed on must still be what the human read there: a new
 // round, receipt or head since means the idea was about something else.
-function sourceHolds(job, sub) {
+export function sourceHolds(job, sub) {
   const source = job.replan?.source;
   if (source?.sub !== sub.id) return;
   const view = changeView(job, sub);
@@ -130,6 +130,37 @@ export function checkActions(job, actions = [], plan) {
 }
 const PIN_NOUN = { head: 'head', merge: 'merge commit', stage: 'stage', round: 'review' };
 const short = (ref) => String(ref ?? 'none').slice(0, 9);
+
+// Where a sub-job has gone since a proposal was written about it, in the words of
+// the history and the planner; null while it is where the proposal left it.
+export function landedAs(sub) {
+  if (sub.cancelledAt) return 'was dropped';
+  if (['cleanup', 'done'].includes(sub.stage)) return isPrSub(sub) ? 'has landed' : 'has finished';
+  if (isPrSub(sub) && (sub.stage === 'deployment' || sub.mergedAt)) return 'has merged';
+  if (sub.deployed || sub.writesOnly) return 'has finished';
+  return null;
+}
+
+// The actions whose sub-job moved since they were stamped (finished, merged, a new
+// head, round or stage), each with how. An action refused for anything else (a
+// step still running, say) is not here: that refusal is the human's to read.
+export function movedActions(job, actions = [], plan) {
+  const moved = [];
+  for (const a of actions) {
+    const sub = job.subJobs.find((s) => s.id === a.sub);
+    if (!sub) continue;
+    let pin = null;
+    try { pin = gateAction(job, a, plan).pin; } catch { /* judged below */ }
+    const was = `${PIN_NOUN[a.pin?.at] || 'state'} ${short(a.pin?.ref)}`;
+    const at = { head: sub.pr?.head, merge: sub.pr?.mergeCommit, stage: sub.stage, round: sub.ready?.receiptId }[a.pin?.at];
+    const how = pin && (pin.at !== a.pin?.at || pin.ref !== a.pin?.ref) ? `has moved (${was} is now ${short(pin.ref)})`
+      : pin ? (() => { try { sourceHolds(job, sub); return null; } catch { return 'has moved since the idea about it was sent'; } })()
+      : landedAs(sub) || (at !== undefined && String(at ?? '') !== String(a.pin?.ref ?? '') ? `has moved (${was} is now ${short(at)})` : null)
+        || (a.type === 'accept-red' && !liveRun(job, sub.id) && !redPin(sub) ? 'has no red pipeline left to accept' : null);
+    if (how) moved.push({ sub, how });
+  }
+  return moved;
+}
 
 // The human's own words to a step's open session, kept verbatim, and nothing
 // else: approving that would only repeat what they just wrote.

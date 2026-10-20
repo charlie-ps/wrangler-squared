@@ -91,6 +91,8 @@ export const jobSettingsHandler = {
   async handler(msg, host) {
     host.stores.jobs.settings(msg.patch);
     await host.rebuild();
+    // A new spend limit pauses or releases jobs in flight now, not on the next sweep.
+    if ('spendLimit' in (msg.patch || {})) kick(host).catch((e) => host.log('job-settings tick failed', e));
   },
 };
 

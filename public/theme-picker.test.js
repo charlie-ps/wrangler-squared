@@ -12,106 +12,92 @@ function fixture(t, value = 'space') {
   const dialog = document.querySelector('dialog'), el = document.querySelector('#pick');
   const settings = { themeOptions: { space: { plateArt: 'quiet' } } }, changes = [], options = [];
   const picker = mountThemePicker(el, {
-    themes: THEMES, value, cover: dialog, optionsOf: (th) => optionsOf(settings, th),
+    themes: THEMES, value, optionsOf: (th) => optionsOf(settings, th),
     onChange: (id) => changes.push(id),
     onOption: (th, key, v) => { options.push([th.id, key, v]); settings.themeOptions = { ...settings.themeOptions, [th.id]: { ...optionsOf(settings, th), [key]: v } }; },
   });
+  t.after(() => picker.dispose());
   const key = (target, k) => { const e = new window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }); target.dispatchEvent(e); return e; };
   const q = (s) => dialog.querySelector(s);
   return { window, dialog, el, picker, changes, options, key, q };
 }
 
-test('the ticket shows the current theme\'s art and name, with that theme\'s options under it', (t) => {
+test('every theme is a radio row with its name and scheme, the current one checked, beside a captioned preview of it', (t) => {
   const f = fixture(t);
-  const tk = f.q('.theme-ticket');
   assert.equal(f.el.querySelector('legend').textContent, 'Theme', 'the legend is kept');
-  assert.deepEqual([tk.dataset.theme, tk.dataset.scheme, tk.getAttribute('aria-expanded')], ['space', 'dark', 'false']);
-  assert.equal(tk.querySelector('.pick-tname').textContent, 'Space');
-  assert.deepEqual([tk.querySelector('.pick-band .theme-mini').dataset.theme, tk.querySelector('.pick-band h1').textContent], ['space', 'Wrangler²'], 'the band is the theme\'s own masthead');
+  const list = f.q('.theme-list');
+  assert.deepEqual([list.getAttribute('role'), list.getAttribute('aria-label')], ['radiogroup', 'Theme']);
+  assert.deepEqual([...list.querySelectorAll('.theme-choice')].map((c) => [c.getAttribute('role'), c.dataset.value, c.querySelector('b').textContent, c.querySelector('small').textContent, c.getAttribute('aria-checked'), c.tabIndex]),
+    [['radio', 'wrangler', 'Wrangler', 'LIGHT · DARK', 'false', -1], ['radio', 'space', 'Space', 'DARK', 'true', 0]]);
+  assert.deepEqual([...list.querySelectorAll('.theme-swatch')].map((s) => [s.dataset.theme, s.dataset.scheme]), [['wrangler', undefined], ['space', 'dark']], 'each swatch wears its own theme');
+  const fig = f.q('figure.theme-preview');
+  assert.equal(fig.querySelector('.theme-cap').textContent, 'Preview · Space');
+  assert.deepEqual([fig.querySelector('.theme-mini').dataset.theme, fig.querySelector('.theme-mini').className, fig.querySelector('h1').textContent], ['space', 'theme-mini preview', 'Wrangler²'], 'the preview is the theme\'s own board');
+  assert.equal(fig.querySelector('button,a,[role="radio"]'), null, 'nothing in the preview is a control');
+  assert.equal(fig.querySelector('.theme-mini').hasAttribute('inert'), true, 'and Tab never lands in it');
+  assert.match(fig.querySelector('.theme-blurb').textContent, /night sky/);
   assert.deepEqual([...f.el.querySelectorAll('[data-opt]')].map((b) => [b.textContent, b.getAttribute('aria-checked'), b.tabIndex]), [['Skylines', 'true', 0], ['Launch scenes', 'false', -1]]);
 });
 
-test('an option saves at once, and the arrow keys move along its segments', (t) => {
+test('an option saves at once, redraws the preview in it, and the arrow keys move along its segments', (t) => {
   const f = fixture(t);
   f.q('[data-opt="full"]').click();
   assert.deepEqual(f.options, [['space', 'plateArt', 'full']]);
   assert.equal(f.q('[data-opt="full"]').getAttribute('aria-checked'), 'true');
+  assert.equal(f.q('.theme-art .theme-mini').dataset.plateArt, 'full');
   assert.equal(document.activeElement, f.q('[data-opt="full"]'), 'focus stays on the choice');
   f.key(f.q('[data-opt="full"]'), 'ArrowLeft');
   assert.deepEqual(f.options.at(-1), ['space', 'plateArt', 'quiet']);
   f.q('[data-opt="quiet"]').click();
   assert.equal(f.options.length, 2, 'the current value is not saved again');
+  assert.deepEqual(f.changes, [], 'an option is not a theme');
 });
 
-test('the cabinet opens on the current theme, previews by arrow key and hover in the look it previews, and a click chooses', async (t) => {
+test('clicking a theme chooses it at once: its row is checked, the preview and options follow, and focus stays on it', (t) => {
   const f = fixture(t);
-  f.q('.theme-ticket').click();
-  const cab = f.q('.theme-cabinet');
-  assert.deepEqual([cab.getAttribute('role'), cab.dataset.theme, cab.dataset.scheme, cab.dataset.preview], ['dialog', 'space', 'dark', 'space']);
-  assert.equal(f.q('.theme-ticket').getAttribute('aria-expanded'), 'true');
-  assert.deepEqual([...cab.querySelectorAll('.pick-cell')].map((c) => [c.dataset.value, c.getAttribute('aria-checked'), c.querySelector('.pick-thumb').dataset.theme]), [['wrangler', 'false', 'wrangler'], ['space', 'true', 'space']]);
-  assert.equal(document.activeElement, cab.querySelector('.pick-cell[data-value="space"]'), 'focus lands on the current plate');
-  assert.equal(cab.querySelector('.pick-pname').textContent, 'Space');
-  assert.deepEqual([...cab.querySelectorAll('.pick-rows span:first-child')].map((s) => s.textContent), ['Scheme', 'Motion', 'Options']);
-  f.key(document.activeElement, 'ArrowLeft');
-  assert.deepEqual([cab.dataset.preview, cab.dataset.theme, cab.dataset.scheme], ['wrangler', 'wrangler', undefined], 'the cabinet wears the theme it previews');
-  assert.equal(document.activeElement, cab.querySelector('.pick-cell[data-value="wrangler"]'));
-  assert.equal(cab.querySelector('.pick-cell[data-value="space"]').getAttribute('aria-checked'), 'true', 'previewing is not choosing');
-  assert.deepEqual(f.changes, []);
-  f.key(document.activeElement, 'ArrowLeft');
-  assert.equal(cab.dataset.preview, 'wrangler', 'the first plate holds');
-  cab.querySelector('.pick-cell[data-value="space"]').dispatchEvent(new f.window.Event('pointerover', { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 120));
-  assert.equal(cab.dataset.preview, 'space', 'hover previews after a beat');
-  cab.querySelector('.pick-cell[data-value="wrangler"]').click();
+  f.q('.theme-choice[data-value="wrangler"]').click();
   assert.deepEqual(f.changes, ['wrangler']);
-  assert.equal(f.q('.theme-cabinet'), null);
   assert.equal(f.picker.value(), 'wrangler');
-  assert.deepEqual([f.q('.theme-ticket').dataset.theme, f.q('.theme-ticket').dataset.scheme], ['wrangler', undefined]);
-  assert.equal(document.activeElement, f.q('.theme-ticket'), 'focus returns to the ticket');
+  assert.deepEqual([...f.q('.theme-list').querySelectorAll('.theme-choice')].map((c) => [c.getAttribute('aria-checked'), c.tabIndex]), [['true', 0], ['false', -1]]);
+  assert.equal(document.activeElement, f.q('.theme-choice[data-value="wrangler"]'));
+  assert.deepEqual([f.q('.theme-art .theme-mini').dataset.theme, f.q('.theme-cap').textContent], ['wrangler', 'Preview · Wrangler']);
   assert.equal(f.el.querySelector('[data-opt]'), null, 'Wrangler has no options');
   assert.match(f.el.querySelector('.pick-usual').textContent, /light and dark mode/);
+  f.q('.theme-choice[data-value="wrangler"]').click();
+  assert.deepEqual(f.changes, ['wrangler'], 'choosing the current theme saves nothing');
+  f.q('.theme-choice[data-value="space"]').click();
+  assert.deepEqual(f.changes, ['wrangler', 'space']);
+  assert.deepEqual([...f.el.querySelectorAll('[data-opt]')].map((b) => b.textContent), ['Skylines', 'Launch scenes'], 'Space\'s option comes back');
 });
 
-test('Escape closes the cabinet and not the dialog around it', (t) => {
+test('the arrow keys move between themes and choose as they go, holding at either end', (t) => {
   const f = fixture(t);
-  f.q('.theme-ticket').click();
-  let escaped = false;
-  document.addEventListener('keydown', () => { escaped = true; });
-  const esc = f.key(f.q('.theme-cabinet .pick-cell'), 'Escape');
-  assert.equal(esc.defaultPrevented, true); assert.equal(escaped, false, 'it goes no further than the dialog');
-  assert.equal(f.q('.theme-cabinet'), null);
-  assert.equal(document.activeElement, f.q('.theme-ticket'));
-  f.q('.theme-ticket').click();
-  const cancel = new f.window.Event('cancel', { cancelable: true });
-  f.dialog.dispatchEvent(cancel);
-  assert.equal(cancel.defaultPrevented, true, 'the dialog\'s own Escape (cancel) only closes the cabinet');
-  assert.equal(f.q('.theme-cabinet'), null);
-  const next = new f.window.Event('cancel', { cancelable: true });
-  f.dialog.dispatchEvent(next);
-  assert.equal(next.defaultPrevented, false, 'with the cabinet shut, Escape closes the dialog');
+  const e = f.key(f.q('.theme-choice[data-value="space"]'), 'ArrowUp');
+  assert.equal(e.defaultPrevented, true);
+  assert.deepEqual(f.changes, ['wrangler']);
+  assert.equal(document.activeElement, f.q('.theme-choice[data-value="wrangler"]'));
+  f.key(document.activeElement, 'ArrowLeft');
+  assert.deepEqual(f.changes, ['wrangler'], 'the first theme holds');
+  f.key(document.activeElement, 'ArrowDown');
+  assert.deepEqual(f.changes, ['wrangler', 'space']);
+  assert.equal(document.activeElement, f.q('.theme-choice[data-value="space"]'));
+  f.key(document.activeElement, 'ArrowRight');
+  assert.deepEqual(f.changes, ['wrangler', 'space'], 'the last theme holds');
+  assert.equal(f.key(document.activeElement, 'Escape').defaultPrevented, false, 'Escape is left to the dialog');
 });
 
-test('the close button, a click outside and the ticket again all shut the cabinet; choosing the current theme saves nothing', (t) => {
-  const f = fixture(t);
-  f.q('.theme-ticket').click(); f.q('.theme-cabinet .pick-close').click();
-  assert.equal(f.q('.theme-cabinet'), null);
-  f.q('.theme-ticket').click(); f.dialog.querySelector('form').click();
-  assert.equal(f.q('.theme-cabinet'), null, 'a click elsewhere in the dialog');
-  f.q('.theme-ticket').click(); f.q('.theme-ticket').click();
-  assert.equal(f.q('.theme-cabinet'), null);
-  f.q('.theme-ticket').click(); f.q('.theme-cabinet .pick-cell[data-value="space"]').click();
-  assert.deepEqual(f.changes, []);
-});
-
-test('sync redraws the ticket for a theme chosen elsewhere, and dispose removes the cabinet', (t) => {
+test('sync redraws for a theme chosen elsewhere with focus kept on the checked theme, and a disposed picker draws nothing', (t) => {
   const f = fixture(t);
   f.picker.sync('wrangler');
-  assert.equal(f.q('.theme-ticket').dataset.theme, 'wrangler');
+  assert.equal(f.q('.theme-choice[aria-checked="true"]').dataset.value, 'wrangler');
   f.picker.sync('nebula');
-  assert.equal(f.q('.theme-ticket').dataset.theme, 'wrangler', 'an unknown id falls back to the first theme');
-  f.q('.theme-ticket').click();
+  assert.equal(f.q('.theme-choice[aria-checked="true"]').dataset.value, 'wrangler', 'an unknown id falls back to the first theme');
+  f.q('.theme-choice[data-value="wrangler"]').focus();
+  f.picker.sync('wrangler');
+  assert.equal(document.activeElement, f.q('.theme-choice[data-value="wrangler"]'), 'the same markup is not redrawn');
+  f.picker.sync('space');
+  assert.equal(document.activeElement, f.q('.theme-choice[data-value="space"]'), 'a redraw keeps focus on the checked theme');
   f.picker.dispose();
-  assert.equal(f.q('.theme-cabinet'), null);
-  assert.equal(f.dialog.classList.contains('theme-cab-open'), false);
+  f.picker.sync('wrangler');
+  assert.equal(f.q('.theme-choice[aria-checked="true"]').dataset.value, 'space', 'a disposed picker draws nothing');
 });
