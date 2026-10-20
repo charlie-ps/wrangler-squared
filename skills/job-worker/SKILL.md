@@ -85,8 +85,18 @@ One idea often mixes both, so read it sentence by sentence and sort each one:
   plan edit.
 - Both can share one proposal. One action per sub-job, so fold all of a step's
   feedback into one note.
-- An idea that reads two ways is ranked options, not a guess. A question no live
-  step can answer is answered in `diagnosis.summary` with the plan unchanged.
+- An idea that reads two ways is ranked options, not a guess.
+
+### A question from the human: answer it
+
+The board calls you "the wrangler", and its Add idea box is a conversation with
+you. An idea that reads as a question reaches you as one ("ASKED YOU A
+QUESTION"): find out read-only (`get_job_context` for runs and their session ids,
+`read_session_transcript` for a step's session, `gh pr diff` for a PR), then
+answer with `{kind:"reply", text}`. It is shown in the job's conversation; no plan
+changes and nothing is held. If the "question" really asks for a change, propose
+it as a plan change instead of asking permission. A plan change whose idea turns
+out to be only a question may also be answered with `reply`, which drops it.
 
 Example: "Not enough spacing before this line, and it's a bit tall, make sure
 that works in the UI. Also design the export button first, and land it on next."

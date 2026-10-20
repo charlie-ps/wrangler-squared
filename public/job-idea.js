@@ -13,12 +13,12 @@ const time = (at) => at ? new Date(at).toLocaleTimeString(undefined, { timeStyle
 const base = (p) => tildify(p).split('/').pop();
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-// The planner writes plain text: blank lines are paragraphs, a run of "1." or "-"
-// lines a list (an indented line under an item stays with it), `backticks` code.
-// Escaped before anything is marked up.
+// The wrangler writes plain text: blank lines are paragraphs, a run of "1." or "-"
+// lines a list (an indented line under an item stays with it), `backticks` code,
+// **double stars** bold. Escaped before anything is marked up.
 const ITEM = { ol: /^\d+[.)]\s+/, ul: /^[-*•]\s+/ };
 export function proseHtml(text) {
-  const inline = (s) => esc(s).replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  const inline = (s) => esc(s).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
   const out = [];
   for (const block of String(text || '').trim().split(/\n\s*\n/)) {
     let list = null, para = [];
@@ -68,7 +68,7 @@ export function suggestionHtml(job, msg, state = 'live') {
   const done = state === 'done', stale = state === 'stale';
   const label = done ? 'Creating the job' : 'Create job';
   const review = job.reviewPlan ?? true;
-  const fine = stale ? '<b>Replaced by a newer reply</b> · the planner suggests again once it answers.'
+  const fine = stale ? '<b>Replaced by a newer reply</b> · the wrangler suggests again once it answers.'
     : done ? `<b>${review ? 'Plan ready for review' : 'Job starting'}</b> · it takes this idea's place on the board.`
       : review ? '<b>Plan on You review</b> · you approve it before Jira or PRs.' : '<b>Plan on Auto</b> · the job starts as soon as you press.';
   return `<div class="job-launch tone-warn ${state}" data-board="${esc(msg.id)}" data-launch="${esc(msg.id)}">
@@ -81,7 +81,7 @@ export function suggestionHtml(job, msg, state = 'live') {
 }
 
 const humanHtml = (text, at, extra = '') => `<div class="job-sent ${extra}"><div class="job-sent-bubble"><span>${esc(text)}</span></div><span class="job-sent-meta">You${at ? ` · ${esc(time(at))}` : ''}</span></div>`;
-const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh ? ' fresh' : ''}" data-msg="${esc(m.id)}"><span class="job-idea-orb" aria-hidden="true"></span><div><div class="job-idea-who">Planner<time>${esc(time(m.at))}</time></div><div class="job-idea-body">${proseHtml(m.text)}</div>${launch}</div></div>`;
+const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh ? ' fresh' : ''}" data-msg="${esc(m.id)}"><span class="job-idea-orb" aria-hidden="true"></span><div><div class="job-idea-who">The wrangler<time>${esc(time(m.at))}</time></div><div class="job-idea-body">${proseHtml(m.text)}</div>${launch}</div></div>`;
 
 // `pending` is the reply this tab just sent, drawn until the thread holds it; `firing`
 // the suggestion pressed here, whose hole flares before the job replaces the idea;
@@ -96,14 +96,14 @@ export function ideaThreadHtml(job, { pending = null, firing = null, fresh = () 
   }
   const held = pending && !thread.some((m) => m.from === 'human' && m.text === pending.text && m.at >= pending.at - 60000);
   if (held) rows.push(humanHtml(pending.text, pending.at, `fresh ${pending.state === 'failed' ? 'failed' : 'sending'}`));
-  if (ideaStage(job) === 'thinking' || held && pending.state !== 'failed') rows.push(`<div class="job-idea-thinking"><span class="job-idea-orb small" aria-hidden="true"></span><span class="job-idea-shine">${thread.length ? 'Planner is thinking…' : 'Planner is reading the idea…'}</span></div>`);
+  if (ideaStage(job) === 'thinking' || held && pending.state !== 'failed') rows.push(`<div class="job-idea-thinking"><span class="job-idea-orb small" aria-hidden="true"></span><span class="job-idea-shine">${thread.length ? 'The wrangler is thinking…' : 'The wrangler is reading the idea…'}</span></div>`);
   return `<div class="job-idea-thread" aria-live="polite">${rows.join('')}</div>`;
 }
 
 export function ideaComposerHtml(draft = '') {
   return `<div class="job-change job-idea-composer is-open" data-idea-composer>
-    <div class="job-change-row"><span class="job-change-to" title="Who hears it"><span class="job-idea-orb small" aria-hidden="true"></span>To planner</span><textarea rows="1" maxlength="8000" placeholder="Reply, or ask for a change to the suggestion…" aria-label="Reply to the planner">${esc(draft)}</textarea><button type="button" class="job-change-go" data-idea-send aria-label="Send to the planner" title="Send (↵)" ${draft.trim() ? '' : 'disabled'}>${ICONS.send}</button></div>
-    <div class="job-change-foot"><span>Resumes the same planner session. A reply after a suggestion replaces it.</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
+    <div class="job-change-row"><span class="job-change-to" title="Who hears it"><span class="job-idea-orb small" aria-hidden="true"></span>To the wrangler</span><textarea rows="1" maxlength="8000" placeholder="Reply, or ask for a change to the suggestion…" aria-label="Reply to the wrangler">${esc(draft)}</textarea><button type="button" class="job-change-go" data-idea-send aria-label="Send to the wrangler" title="Send (↵)" ${draft.trim() ? '' : 'disabled'}>${ICONS.send}</button></div>
+    <div class="job-change-foot"><span>Resumes the same conversation. A reply after a suggestion replaces it.</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 }
 
 // The whole dialog body for an idea still being talked through. `cost` and `actions`
@@ -111,7 +111,7 @@ export function ideaComposerHtml(draft = '') {
 export function ideaViewHtml(job, { cost = '', actions = '', error = '', pending = null, firing = null, fresh, draft = '' } = {}) {
   const stage = ideaStage(job) || 'thinking';
   return `<div class="job-idea">
-    <header class="job-idea-band" data-spin="24">${inflowHtml(job.id, STAGE_SKY[stage] ?? 0)}<div><div class="job-idea-kicker"><span class="job-idea-mark">Idea · talking with the planner</span></div><h2>${esc(job.title)}</h2></div>${cost}</header>${error}
+    <header class="job-idea-band" data-spin="24">${inflowHtml(job.id, STAGE_SKY[stage] ?? 0)}<div><div class="job-idea-kicker"><span class="job-idea-mark">Idea · talking with the wrangler</span></div><h2>${esc(job.title)}</h2></div>${cost}</header>${error}
     ${ideaThreadHtml(job, { pending, firing, fresh })}
     <div class="job-idea-dock">${ideaComposerHtml(draft)}${actions ? `<div class="job-actions">${actions}</div>` : ''}</div></div>`;
 }

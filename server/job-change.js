@@ -1,16 +1,20 @@
 import { requestReplan } from './job-replan.js';
 import { changeView } from './job-actions.js';
 import { isDeclared } from './job-red.js';
+import { say, routesAsQuestion, startAsk } from './job-talk.js';
 
 export { changeView };
 
 // request-change: the one way a human's idea enters a job, from the plan, a code
 // review, a session's result, an open PR, a write, or a pending proposal. The
 // idea is pinned to what was on screen (`at` names the view, `ref` the exact
-// thing in it) and goes to one recipient, the planner, which sorts it into
-// actions on live steps (forward to an open session, rework) and plan edits: one
-// proposal the human approves (job-replan.js, job-actions.js). Pure over the job
-// draft job-store.js is about to persist, like job-replan.js.
+// thing in it) and goes to one recipient, the planner ("the wrangler" on the
+// board), which sorts it into actions on live steps (forward to an open session,
+// rework) and plan edits: one proposal the human approves (job-replan.js,
+// job-actions.js). On a running job every idea is also said in the job's
+// conversation (job-talk.js), and a question is answered there instead, with no
+// plan change and nothing held. Pure over the job draft job-store.js is about to
+// persist, like job-replan.js.
 
 const quoted = (title) => `“${title}”`;
 export const CHANGE_TEXT_MAX = 8000;
@@ -32,22 +36,31 @@ export function requestChange(job, sub, { at, ref, text, attachments }, { now })
     if (job.runs.some((r) => !r.stopped)) throw new Error('Wait for planning to finish');
     job.feedback = idea;
     job.previousPlan = job.plan || job.previousPlan; job.plan = null; job.error = null;
-    return { detail: 'Asked the planner to change the plan', route: 'planner' };
+    return { detail: 'Asked the wrangler to redraw the plan', route: 'planner' };
   }
+  if (job.ask) throw new Error('Wait for the wrangler to answer your question first');
   // Kept beside the round they were typed on (a code review), a step's pictures can
   // go on into its session's thread when the planner forwards the idea there.
   const source = sub ? { sub: sub.id, at: view.at, ref: view.ref } : null;
   const images = files.map(({ file, mime, path }) => ({ sub: sub?.id || null, round: view.at === 'code' ? sub.ready.round || 1 : null, file, mime, path }));
+  const said = { from: 'human', text: typed, ...(sub ? { sub: sub.id } : {}), ...(files.length ? { images: files.length } : {}) };
   // A declared red is the planner's: it has already tried, so the idea goes to it
   // with everything it found, and still holds only that step.
   if (sub && isDeclared(job, sub)) {
     const d = sub.red.declared;
+    say(job, said, now);
     requestReplan(job, `About ${quoted(sub.title)} (${sub.id}), which was declared red: ${d.summary}${d.tried?.length ? `\nTried: ${d.tried.join(' | ')}` : ''}${d.ask ? `\nThe decision asked of the human: ${d.ask}` : ''}\nThe human says: ${idea}`, now, { sub: sub.id, auto: false, human: true }, { source, images });
-    return { detail: `Sent the declared red on ${quoted(sub.title)} back to the planner`, route: 'planner' };
+    return { detail: `Sent the declared red on ${quoted(sub.title)} back to the wrangler`, route: 'planner' };
   }
-  // Anything else is a change of plan on a running job, even a word for one
-  // step's open session: the planner proposes, the human approves. A step's idea
-  // says where it came from.
-  requestReplan(job, sub ? `About ${quoted(sub.title)} (${sub.id}, ${sub.stage}${sub.state ? `/${sub.state}` : ''}): ${idea}` : idea, now, null, { source, images });
-  return { detail: sub ? `Sent the planner an idea about ${quoted(sub.title)}` : 'Asked the planner to change the plan', route: 'planner' };
+  // Anything else is a question, answered in the thread, or a change of plan on a
+  // running job, even a word for one step's open session: the planner proposes,
+  // the human approves. A step's idea says where it came from.
+  const feedback = sub ? `About ${quoted(sub.title)} (${sub.id}, ${sub.stage}${sub.state ? `/${sub.state}` : ''}): ${idea}` : idea;
+  if (job.stage === 'active' && routesAsQuestion(job, typed)) {
+    startAsk(job, say(job, said, now), { feedback, source, images }, now);
+    return { detail: sub ? `Asked the wrangler about ${quoted(sub.title)}` : 'Asked the wrangler', route: 'planner' };
+  }
+  requestReplan(job, feedback, now, null, { source, images });
+  say(job, said, now);
+  return { detail: sub ? `Sent the wrangler an idea about ${quoted(sub.title)}` : 'Asked the wrangler to change the plan', route: 'planner' };
 }

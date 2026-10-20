@@ -53,7 +53,7 @@ export function humanReply(job, text, now) {
 export function acceptIdea(job, messageId, now) {
   if (!inConversation(job)) throw new Error('This idea is no longer a conversation');
   const msg = liveSuggestion(job);
-  if (!msg || msg.id !== messageId) throw new Error('The planner\'s suggestion changed since you looked. Read the latest one and try again.');
+  if (!msg || msg.id !== messageId) throw new Error('The wrangler\'s suggestion changed since you looked. Read the latest one and try again.');
   msg.acceptedAt = now;
   job.title = msg.suggest.title;
   return msg.suggest.plan;

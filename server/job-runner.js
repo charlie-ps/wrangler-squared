@@ -8,6 +8,7 @@ import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from
 import { dropSub } from './job-sub-ops.js';
 import { draftsDecidedMail, threadMail, ideaMail } from './job-prompts.js';
 import { inConversation, unsentIdea } from './job-idea.js';
+import { askFailed } from './job-talk.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
 import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps } from './job-running.js';
 const shortError = (e) => String(e?.message || e).split('\n')[0].slice(0, 240);
@@ -95,7 +96,8 @@ export class JobRunner {
       // the review has moved on (approved, reworked, retried) or its card is gone:
       // the human can still approve the tree without it.
       const cancelled = job.cancelledAt || (run.subJobId && job.subJobs.find((s) => s.id === run.subJobId)?.cancelledAt)
-        || (run.phase === 'planning' && job.stage === 'active' && !job.replan) || run.phase === 'write'
+        // An ask run (job-talk.js) is the same once its question is gone.
+        || (run.phase === 'planning' && job.stage === 'active' && (run.ask ? job.ask?.messageId !== run.ask : !job.replan)) || run.phase === 'write'
         || (run.parkedFor === 'ready' && !run.report && (!waitsOnReview(job, run) || !(await this.runtime.exists(run))))
         // A new idea's planner is done talking once the idea is planned (its suggestion accepted).
         || (run.parkedFor === 'idea' && !run.report && !inConversation(job));
@@ -106,7 +108,7 @@ export class JobRunner {
         // away ends it.
         else if (run.parkedAt && !run.mailedAt) {
           if (await this.runtime.exists(run)) continue;
-          error = run.parkedFor === 'idea' ? 'The planner\'s session was closed while it waited for your reply. Retry to plan again.' : 'Session was closed while its drafts waited for review. Retry to run it again.';
+          error = run.parkedFor === 'idea' ? 'The wrangler\'s session was closed while it waited for your reply. Retry to plan again.' : 'Session was closed while its drafts waited for review. Retry to run it again.';
         }
         else if (!(await this.runtime.isAlive(run))) error = 'Session stopped without a receipt. Open it to see why, then retry.';
         else {
@@ -133,7 +135,9 @@ export class JobRunner {
           // history a later session reads (job-prompts.js) needs the run's.
           // A red step's planner that died is that step's to declare, not the job's:
           // `job.error` would hold every sub-job for one step's trouble.
-          if (error && !failRedReplan(j, r, error.replace(/\. .*$/, ''), this.now())) { r.error = error; (s || j).error = error; }
+          // An unanswered question is said in the thread; the job never stops for it.
+          if (error && r.ask) { r.error = error; askFailed(j, r, error.replace(/\. .*$/, ''), this.now()); }
+          else if (error && !failRedReplan(j, r, error.replace(/\. .*$/, ''), this.now())) { r.error = error; (s || j).error = error; }
           else if (error) r.error = error;
         });
       } catch (e) {
@@ -219,7 +223,8 @@ export class JobRunner {
       this.store.update(job.id, (j) => {
         const r = j.runs.find((r) => r.id === run.id);
         r.stopped = true;
-        (j.subJobs.find((s) => s.id === sub?.id) || j).error = shortError(e);
+        if (r.ask) askFailed(j, r, shortError(e), this.now());
+        else (j.subJobs.find((s) => s.id === sub?.id) || j).error = shortError(e);
       });
     }
   }
@@ -241,6 +246,11 @@ export class JobRunner {
     job = this.store.get(id);
     if (job.replan && !job.replan.proposal && !activeFor(job)) {
       await this.launch(job, null, 'planning', redStamp(job));
+      job = this.store.get(id);
+    }
+    // A question for the wrangler (job-talk.js): a planning run that holds nothing.
+    if (job.ask && !activeFor(job)) {
+      await this.launch(job, null, 'planning', { ask: job.ask.messageId });
       job = this.store.get(id);
     }
     for (const initial of job.subJobs) {
@@ -452,7 +462,7 @@ export class JobRunner {
       this.patchRun(id, run.id, (r) => { r.mailedAt = now; r.idleSince = null; });
       this.store.update(id, (j) => { for (const m of j.idea.thread) if (batch.some((b) => b.id === m.id)) m.sentAt = now; j.idea.error = null; });
     } catch (e) {
-      const note = `Could not send your reply to the planner: ${shortError(e)}`;
+      const note = `Could not send your reply to the wrangler: ${shortError(e)}`;
       if (job.idea.error !== note) this.store.update(id, (j) => { j.idea.error = note; });
     }
   }
