@@ -782,27 +782,24 @@ test('the Jobs view wears the saved theme: Space forces dark and paints its mast
   assert.equal(jobs.dataset.theme, 'wrangler', 'an unknown theme falls back to the default');
 });
 
-test('Automation settings picks the theme from a ticket and a cabinet, saving each choice at once', (t) => {
+test('Automation settings picks the theme from a radio list beside its preview, saving each choice at once', (t) => {
   const f = fixture(t), jobs = f.q('#jobs');
   f.data.settings.theme = 'space'; f.view.update(f.data);
   f.q('#jobs-settings').click();
   const form = f.q('#job-settings-form');
   assert.equal(form.elements.backdrop, undefined, 'no Background select'); assert.equal(form.elements.plateArt, undefined, 'no Plate art select');
-  const ticket = () => f.q('#job-theme-pick .theme-ticket');
-  assert.equal(ticket().dataset.theme, 'space'); assert.match(ticket().textContent, /Space/);
-  assert.deepEqual([...f.q('#job-theme-pick').querySelectorAll('[data-opt]')].map((b) => [b.textContent, b.getAttribute('aria-checked')]), [['Skylines', 'true'], ['Launch scenes', 'false']], 'Space\'s own option sits under its ticket');
+  const choice = (id) => f.q(`#job-theme-pick .theme-choice[data-value="${id}"]`), preview = () => f.q('#job-theme-pick .theme-art .theme-mini');
+  assert.deepEqual([...f.q('#job-theme-pick').querySelectorAll('.theme-choice')].map((c) => [c.dataset.value, c.getAttribute('aria-checked')]), [['wrangler', 'false'], ['space', 'true']], 'the default first');
+  assert.equal(preview().dataset.theme, 'space');
+  assert.deepEqual([...f.q('#job-theme-pick').querySelectorAll('[data-opt]')].map((b) => [b.textContent, b.getAttribute('aria-checked')]), [['Skylines', 'true'], ['Launch scenes', 'false']], 'Space\'s own option sits under the list');
   f.q('[data-opt="full"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-settings', patch: { themeOptions: { space: { plateArt: 'full' } } } });
   assert.equal(jobs.dataset.plateArt, 'full', 'applied before the snapshot confirms it');
-  ticket().click();
-  const cab = f.q('#job-dialog .theme-cabinet');
-  assert.deepEqual([...cab.querySelectorAll('.pick-cell')].map((c) => c.dataset.value), ['wrangler', 'space'], 'the default first');
-  assert.equal(document.activeElement, cab.querySelector('.pick-cell[data-value="space"]'));
-  cab.querySelector('.pick-cell[data-value="wrangler"]').click();
+  choice('wrangler').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-settings', patch: { theme: 'wrangler' } });
-  assert.equal(f.q('.theme-cabinet'), null);
   assert.equal(jobs.dataset.theme, 'wrangler'); assert.equal(f.q('#job-dialog').dataset.theme, 'wrangler', 'the dialog itself changes look');
-  assert.equal(ticket().dataset.theme, 'wrangler'); assert.equal(f.q('#job-theme-pick [data-opt]'), null, 'Wrangler has no options');
+  assert.equal(choice('wrangler').getAttribute('aria-checked'), 'true'); assert.equal(preview().dataset.theme, 'wrangler');
+  assert.equal(f.q('#job-theme-pick [data-opt]'), null, 'Wrangler has no options');
   assert.equal(f.q('#job-dialog').open, true, 'the dialog stays open');
   form.dispatchEvent(f.event('submit'));
   assert.equal('theme' in f.sent.at(-1).patch || 'themeOptions' in f.sent.at(-1).patch, false, 'Save settings leaves the theme alone');

@@ -1,12 +1,11 @@
 import { THEME_IDS, DEFAULT_THEME } from './theme-ids.js';
 import { mountMastSky } from './job-skylines.js';
 
-// The Jobs view's themes, in the cabinet's order. Each one is an entry here, a
+// The Jobs view's themes, in the picker's order. Each one is an entry here, a
 // [data-theme="<id>"] block of --jt-* tokens in jobs.css, and its id in theme-ids.js:
 //   scheme   'dark' forces the board's dark palette on #jobs and its dialogs ([data-scheme="dark"]);
 //            'host' follows the board's light or dark mode.
-//   facts    the ruled rows under the cabinet's preview.
-//   options  theme-only choices, drawn under the ticket and saved in settings.themeOptions[id];
+//   options  theme-only choices, drawn under the picker's list and saved in settings.themeOptions[id];
 //            the server schema must list each one.
 //   mount    optional live art for #jobs (or the picker's small copy of it, theme-preview.js);
 //            returns its unmount. A theme without one runs no loops.
@@ -28,14 +27,12 @@ export const THEMES = [
   {
     id: 'wrangler', name: 'Wrangler', scheme: 'host',
     blurb: 'Agent Wrangler’s own look: the board’s surfaces, system type and small radii, light or dark with the board. Nothing animates.',
-    facts: [['Scheme', 'Follows the board'], ['Motion', 'None'], ['Options', 'None']],
     options: [],
     plateArt: () => 'plain',
   },
   {
     id: 'space', name: 'Space', scheme: 'dark',
     blurb: 'The night sky Jobs has always had: a Gargantua masthead, black-hole plates and serif titles. Always dark, whatever the board is set to.',
-    facts: [['Scheme', 'Always dark'], ['Motion', 'Glare, hover sweep, halos'], ['Options', 'Plate art']],
     options: [{ key: 'plateArt', label: 'Plate art', default: 'quiet', values: [['quiet', 'Skylines'], ['full', 'Launch scenes']] }],
     mount: mountSpace,
     plateArt: (o) => o.plateArt,

@@ -1699,7 +1699,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const settingsForm = dialog.querySelector('form'); bindReviewPoints(settingsForm);
     themePicker?.dispose();
     themePicker = mountThemePicker(dialog.querySelector('#job-theme-pick'), {
-      themes: THEMES, value: themeOf(data.settings).id, cover: dialog,
+      themes: THEMES, value: themeOf(data.settings).id,
       optionsOf: (t) => optionsOf(data.settings, t),
       onChange: (id) => saveSettings({ theme: id }),
       // Sent whole: settings(patch) merges shallowly, and each theme keeps its own.
