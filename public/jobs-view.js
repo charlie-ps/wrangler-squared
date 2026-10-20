@@ -341,11 +341,35 @@ export const isPrimaryActionKey = (e) => (e.metaKey || e.ctrlKey) && e.key === '
 // behave exactly as the click does — or, on a detail, the lone primary
 // [data-action]. A confirmation whose only buttons are destructive (Drop, Cancel
 // job) has neither and stays keyboard-inert: those are for the mouse to say.
-export function primaryAction(dialog) {
+const primaryButton = (dialog) => {
   const form = dialog.querySelector('form');
-  const button = form ? form.querySelector('button.primary:not([type="button"])') : dialog.querySelector('button.primary[data-action]');
-  if (!button || button.disabled) return null;
+  return form ? form.querySelector('button.primary:not([type="button"])') : dialog.querySelector('button.primary[data-action]');
+};
+export function primaryAction(dialog) {
+  const button = primaryButton(dialog);
+  if (!button || button.disabled || hasDraft(dialog)) return null;
+  const form = dialog.querySelector('form');
   return form ? () => form.requestSubmit(button) : () => button.click();
+}
+// Unsent words in a planner box would be skipped by the primary, so it waits,
+// greyed with the reason, until they are sent or cleared. What it was before the
+// hold is kept on it, so a release restores its own disabled state and title.
+const DRAFT_HOLD = 'Send or clear your message to the planner first';
+const hasDraft = (dialog) => [...dialog.querySelectorAll('.job-change textarea')].some((t) => t.value.trim());
+function releaseDraftHold(button) {
+  if (!button?.dataset.draftHold) return;
+  const [disabled, title] = JSON.parse(button.dataset.draftHold);
+  delete button.dataset.draftHold;
+  button.disabled = disabled;
+  if (title == null) button.removeAttribute('title'); else button.title = title;
+}
+function holdPrimary(dialog) {
+  const button = primaryButton(dialog);
+  if (!button || isBusy(button)) return;
+  releaseDraftHold(button);
+  if (!hasDraft(dialog)) return;
+  button.dataset.draftHold = JSON.stringify([button.disabled, button.getAttribute('title')]);
+  button.disabled = true; button.title = DRAFT_HOLD;
 }
 
 const MAX_ASK_IMAGES = 4;
@@ -533,7 +557,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (reviewed?.plan && JSON.stringify(reviewed.plan) === basePlan) {
       revision = reviewed.revision;
       const approve = dialog.querySelector('[data-action="approve-plan"]');
-      if (approve && !isBusy(approve)) approve.disabled = reviewed.runs.some((r) => !r.stopped);
+      if (approve && !isBusy(approve)) { releaseDraftHold(approve); approve.disabled = reviewed.runs.some((r) => !r.stopped); holdPrimary(dialog); }
       // The chip was drawn while the planner was still stopping; it follows the job.
       const chip = dialog.querySelector('.job-appbar .job-chip-state');
       if (chip) chip.outerHTML = stateChip(jobState(reviewed), jobLabel(reviewed));
@@ -807,6 +831,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     send.disabled = !text.value.trim() || askImages.some((i) => !i.name);
     box.classList.toggle('has-text', !!text.value.trim()); box.classList.toggle('has-img', askImages.length > 0);
     text.style.height = 'auto'; if (text.scrollHeight) text.style.height = `${Math.min(text.scrollHeight, 160)}px`;
+    holdPrimary(dialog);
   }
   function paintAsk(box) {
     const tray = box.querySelector('.job-change-tray'), error = box.querySelector('.job-change-error');

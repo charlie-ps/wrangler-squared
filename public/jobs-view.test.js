@@ -1452,6 +1452,45 @@ test('the chord fires a detail\u2019s primary action, and stops at a disabled or
   assert.equal(f.sent.length, before); assert.equal(f.q('#job-dialog').open, true, 'the chord neither submits nor closes it');
 });
 
+test('unsent words in the planner box grey the primary and hold the chord back from it, wherever focus is', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'head1', checkStatus: 'passing', checks: [] } }];
+  f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const text = f.q('.job-change textarea'), merge = () => f.q('[data-action="approve-merge"]');
+  const title = merge().title;
+  text.value = '   \n '; text.dispatchEvent(f.event('input'));
+  assert.equal(merge().disabled, false, 'a blank box does not count as a draft');
+  chord(f, f.q('#job-dialog'));
+  assert.equal(f.sent.at(-1).action, 'approve-merge');
+  const before = f.sent.length;
+  text.value = 'Rename the flag first'; text.dispatchEvent(f.event('input'));
+  assert.equal(merge().disabled, true);
+  assert.equal(merge().title, 'Send or clear your message to the planner first');
+  assert.equal(primaryAction(f.q('#job-dialog')), null);
+  chord(f, f.q('#job-dialog'));
+  chord(f, f.q('[data-action="approve-merge"]'));
+  merge().click();
+  assert.equal(f.sent.length, before, 'neither the chord outside the box nor a click fires Merge over the draft');
+  text.value = ''; text.dispatchEvent(f.event('input'));
+  assert.deepEqual([merge().disabled, merge().title], [false, title], 'cleared, Merge is itself again');
+  text.value = 'Rename the flag first'; text.dispatchEvent(f.event('input'));
+  chord(f, text);
+  assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).text], ['request-change', 'Rename the flag first'], 'inside the box the chord still sends it');
+});
+
+test('a draft holds Approve on plan review, and a planner still running keeps it held once the draft is cleared', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0];
+  f.q('.job-plate-open[data-job="job1"]').click();
+  const approve = () => f.q('[data-action="approve-plan"]'), text = f.q('.job-change textarea');
+  text.value = 'Split api in two'; text.dispatchEvent(f.event('input'));
+  assert.equal(approve().disabled, true);
+  job.runs = [{ id: 'r1', phase: 'planning', stopped: false }]; f.view.update(f.data);
+  assert.deepEqual([approve().disabled, approve().title], [true, 'Send or clear your message to the planner first'], 'a tick keeps the hold');
+  text.value = ''; text.dispatchEvent(f.event('input'));
+  assert.equal(approve().disabled, true, 'the running planner still holds it');
+  assert.notEqual(approve().title, 'Send or clear your message to the planner first');
+});
+
 test('a disabled primary stays disabled to the keyboard', (t) => {
   const f = fixture(t); const job = f.data.jobs[0];
   job.runs = [{ id: 'r1', phase: 'planning', stopped: false }]; f.view.update(f.data);
