@@ -751,17 +751,20 @@ test('new-job picker follows a changed catalog and Escape closes only the cabine
 });
 
 test('the new-job primary action starts planning and the plain button parks it in the backlog', (t) => {
-  const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
-  const [primary, backlog] = form.querySelectorAll('.job-actions button');
+  const f = fixture(t);
+  const submit = (as) => {
+    f.q('#job-new').click(); const form = f.q('#job-create-form'); form.elements.intent.value = 'Deliver it';
+    const [primary, backlog] = form.querySelectorAll('.job-actions button');
+    form.dispatchEvent(new f.window.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: { primary, backlog }[as] }));
+    return f.sent.filter((m) => m.type === 'job-create').at(-1).start;
+  };
+  f.q('#job-new').click();
+  const [primary, backlog] = f.q('#job-create-form').querySelectorAll('.job-actions button');
   assert.equal(primary.className, 'primary'); assert.equal(primary.textContent, 'Start planning');
   assert.equal(backlog.className, ''); assert.equal(backlog.textContent, 'Add to backlog');
-  form.elements.intent.value = 'Deliver it';
-  form.dispatchEvent(f.event('submit'));
-  assert.equal(f.sent[0].start, true, 'Enter is the main action');
-  form.dispatchEvent(new f.window.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: primary }));
-  assert.equal(f.sent[1].start, true);
-  form.dispatchEvent(new f.window.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: backlog }));
-  assert.equal(f.sent[2].start, false);
+  assert.equal(submit(), true, 'Enter is the main action');
+  assert.equal(submit('primary'), true);
+  assert.equal(submit('backlog'), false);
 });
 
 test('new idea is a brief beside a property sidebar, and the brief is the description, images and checkpoint tiles', (t) => {
@@ -1524,6 +1527,16 @@ test('Enter in the job\u2019s Add idea box sends it to the planner', (t) => {
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', at: 'job', ref: 'job', text: 'Split web in two' });
 });
 
+test('a second New idea submit before job-created sends one job-create, and both buttons stay held', (t) => {
+  const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
+  form.elements.intent.value = 'Customers can access their accounts';
+  const [start, backlog] = form.querySelectorAll('.job-create-foot button');
+  start.click();
+  assert.equal(start.getAttribute('aria-busy'), 'true'); assert.deepEqual([start.disabled, backlog.disabled], [true, true]);
+  form.dispatchEvent(f.event('submit')); chord(f, form.elements.intent); backlog.click();
+  assert.deepEqual(f.sent.filter((m) => m.type === 'job-create').length, 1);
+});
+
 test('in New idea, Enter is a new line in the Idea and only the chord submits', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   form.elements.intent.value = 'Customers can access their accounts';
@@ -1748,6 +1761,9 @@ test('New job holds planning back while an image uploads, then creates the job w
   form.elements.shareImages.checked = false;
   form.dispatchEvent(f.event('submit'));
   assert.deepEqual([f.sent[0].job.images, f.sent[0].job.shareImages], [['paste-1700000000000-aaaa1111.png'], false]);
+  form.querySelector('.job-outcome').dispatchEvent(drop);
+  await new Promise((r) => setTimeout(r, 0)); release(); await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual([...form.querySelectorAll('.job-create-foot button')].map((b) => b.disabled), [true, true], 'an upload after the press does not free the held buttons');
 });
 
 test('a job’s Outcome shows its pictures as a numbered strip, asks for the bytes once, and fills in when they arrive', (t) => {
