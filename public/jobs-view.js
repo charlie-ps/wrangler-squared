@@ -376,6 +376,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // suggestion pressed here while its hole flares, how many messages were last drawn
   // (a new one scrolls the thread to it), and the idea a fresh New idea opens on.
   let ideaSent = null, ideaFiring = null, ideaSeen = null, openOnCreate = null;
+  // The Ask an agent pressed in this tab, with the helpers its step already had: the
+  // first new one opens once it has a session; one that fails keeps its error here.
+  let helperAsked = null;
   const ideaDrawn = new Set();
   const freshMessage = (id) => !ideaDrawn.has(id) && !!ideaDrawn.add(id);
   // Ideas drawn with the title loader, then when their title landed: a tick redraws the
@@ -446,8 +449,31 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // A plan approved from the footer (Plan switched to Auto) leaves review: the
     // draft goes, so the detail follows the job instead of the frozen editor.
     if (planDraft && job && job.id === selected?.jobId && !selected.subId && job.stage !== 'planning') planDraft = null;
+    if (helperAsked && !helperAsked.error) openAskedHelper();
     render(); picker?.agentsChanged(getAgents()); themePicker?.sync(themeOf(data.settings).id);
     if (openOnCreate && data.jobs.some((j) => j.id === openOnCreate)) { const id = openOnCreate; openOnCreate = null; openDetail(id); }
+  }
+  function openAskedHelper() {
+    const { jobId, subId, had } = helperAsked;
+    const helper = data.jobs.find((j) => j.id === jobId)?.subJobs.find((s) => s.id === subId)?.helpers?.find((h) => !had.has(h.id));
+    if (helper?.error) { helperAsked.error = helper.error; showHelperError(); return; }
+    if (!helper?.sessionId) return;
+    helperAsked = null;
+    // Only from the step it was asked on: a dialog since opened elsewhere is left alone.
+    if (dialog.open && !(selected?.jobId === jobId && selected?.subId === subId)) return;
+    dialog.close(); onSession(helper.sessionId);
+  }
+  function helperFailed(msg) {
+    if (helperAsked?.jobId !== msg.jobId || helperAsked.subId !== msg.subJobId || helperAsked.error) return;
+    helperAsked.error = msg.error;
+    showHelperError();
+  }
+  // A human step's dialog skips tick redraws, so the error redraws it here, keeping its typed result.
+  function showHelperError() {
+    if (!dialog.open || selected?.jobId !== helperAsked.jobId || selected?.subId !== helperAsked.subId) return;
+    const output = dialog.querySelector('#job-human-form')?.elements.output.value;
+    renderDetail();
+    if (output != null && dialog.querySelector('#job-human-form')) dialog.querySelector('#job-human-form').elements.output.value = output;
   }
   function render() {
     const cards = jobCards(data.jobs);
@@ -741,10 +767,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     return `<span class="job-split job-approve-split">${button}<details class="job-split-more job-approve-more" data-keep="approve-note" ${openMore.has('approve-note') ? 'open' : ''}><summary aria-label="${aria}" title="${aria}">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>${heading}<textarea data-approve-note maxlength="2000" rows="3" placeholder="${placeholder}"></textarea></label><button type="button" data-action="${action}" data-with-note>${ICONS.check}${label} with note</button></div></details></span>`;
   };
   // Ask an agent: the human's own sessions about this step (server/job-helper.js),
-  // newest last. A queued one is the only state that holds the button.
-  const helperQueued = (sub) => (sub.helpers || []).some((h) => !h.sessionId && !h.error);
+  // newest last. One live per step: a queued one holds the button, one on the board is reopened.
+  const askedHere = (sub) => helperAsked?.jobId === selected?.jobId && helperAsked.subId === sub.id;
+  const helperQueued = (sub) => (sub.helpers || []).some((h) => !h.sessionId && !h.error) || (askedHere(sub) && !helperAsked.error);
+  const liveHelper = (sub) => (sub.helpers || []).findLast((h) => h.sessionId && onBoard(h.sessionId));
+  const helperError = (sub) => askedHere(sub) && helperAsked.error ? `<p class="job-error" role="alert">Could not start an agent: ${esc(helperAsked.error)}</p>` : '';
   const askHelperHtml = (sub) => helperQueued(sub)
     ? `<button type="button" data-ask-helper disabled title="An agent session is starting for this step">${ICONS.spin}Starting an agent</button>`
+    : liveHelper(sub) ? `<button type="button" data-open-helper="${esc(liveHelper(sub).sessionId)}" title="Open this step's agent session">${ICONS.robot}Open agent</button>`
     : `<button type="button" data-ask-helper title="Start your own agent session, briefed with this step and the job, to investigate or help. It never changes the step or the plan: when you ask, it sends what it finds to the planner, as Add idea does.">${ICONS.robot}Ask an agent</button>`;
   const helpersHtml = (sub) => sub.helpers?.length ? `<h3>Helper sessions</h3><ul class="job-helpers">${sub.helpers.map((h, i) => `<li>${h.sessionId ? ICONS.robot : h.error ? ICONS.x : ICONS.spin}<span>Helper ${i + 1} · ${h.sessionId ? `started ${esc(when(h.at))}` : h.error ? `could not start: ${esc(h.error)}` : 'starting'}</span>${h.sessionId ? `<button type="button" data-helper-session="${esc(h.sessionId)}">${ICONS.terminal}${onBoard(h.sessionId) ? 'Open' : 'Restore'}</button>` : ''}${helperIdeasHtml(h)}</li>`).join('')}</ul>` : '';
   // What a helper sent the planner (send_step_idea), as the step's Add idea box would.
@@ -1278,11 +1308,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       ${workflows.length ? `<h4>What runs on merge <small>${workflows.filter((w) => w.triggers).length} of ${workflows.length}</small></h4><ul class="job-checks">${workflows.map((w) => `<li class="${w.triggers ? 'passed' : ''}">${w.triggers ? '✓' : '○'} ${esc(w.name)} <small>${esc(w.reason)}</small></li>`).join('')}</ul>` : ''}
       ${sub.repairs.length ? `<h4>Changes after failed checks</h4>${sub.repairs.map((r, i) => `<div class="job-repair"><b>Repair ${i + 1}</b>${receiptHtml(r.changes)}<details><summary>Re-verified</summary>${receiptHtml(r.checks)}</details></div>`).join('')}` : ''}`;
     const detailsOpen = openMore.has('details');
-    actions += askHelperHtml(sub);
+    if (isHumanSub(sub)) actions += askHelperHtml(sub);
     if (!isWriteSub(sub)) actions += `<button type="button" class="job-details-toggle" data-details-toggle aria-expanded="${detailsOpen}">${ICONS.doc}Details</button>`;
     return `${appbar(sub.title, chips, kicker, line)}${depsHtml(job, sub)}
       ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub)}
-      ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}${helpersHtml(sub)}
+      ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}${helperError(sub)}${helpersHtml(sub)}
       ${reviewing ? changeBoxHtml(job, sub) : ''}${actions.trim() ? `<div class="job-actions tone-${STATES[state].tone}">${actions}</div>` : ''}${reviewing ? '' : changeBoxHtml(job, sub)}
       ${isWriteSub(sub) ? '' : `<div class="job-details-body" ${detailsOpen ? '' : 'hidden'}>${details}</div>`}`;
   }
@@ -1524,7 +1554,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       };
     });
     bind('#job-session', () => { dialog.close(); onSession(sub.sessions.at(-1)); });
-    bind('[data-ask-helper]', (e) => { e.currentTarget.disabled = true; action('ask-helper', {}, sub.id); });
+    bind('[data-ask-helper]', () => { helperAsked = { jobId: job.id, subId: sub.id, had: new Set((sub.helpers || []).map((h) => h.id)) }; action('ask-helper', {}, sub.id); dialog.querySelector('[data-ask-helper]').outerHTML = askHelperHtml(sub); dialog.querySelector('.job-error[role=alert]')?.remove(); });
+    bind('[data-open-helper]', (e) => { const id = e.currentTarget.dataset.openHelper; dialog.close(); onSession(id); });
     dialog.querySelectorAll('[data-helper-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.helperSession); });
     // Reviewing the code is a round trip out to the board's diff panel, so hand over
     // where the reader came FROM as well as what to show — index.js re-opens this
@@ -1719,7 +1750,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     e.preventDefault();
     run();
   });
-  dialog.addEventListener('close', () => { shotZoom?.close(); releaseSkies(dialog); ideaSent = null; ideaFiring = null; ideaSeen = null; selected = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
+  dialog.addEventListener('close', () => { if (helperAsked?.error) helperAsked = null; shotZoom?.close(); releaseSkies(dialog); ideaSent = null; ideaFiring = null; ideaSeen = null; selected = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
   // the same dialog a board card's click does, from a job/sub id pair index.js kept.
@@ -1754,7 +1785,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     askDraft = null;
     return true;
   }
-  return { update, newJob: createJob, reviewFailed, changeFailed, ideaFailed, idea: idea.message, runningLog: (msg) => { if (msg.subJobId && msg.name) { runLogs.set(msg.subJobId, { name: msg.name, text: msg.text, truncated: msg.truncated, error: msg.error }); if (dialog.open && selected?.subId === msg.subJobId) renderDetail(); } }, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); if (shotZoom && !shotZoom.querySelector('.job-proof-full:not(.soft)')) paintShotBox(); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
+  return { update, newJob: createJob, reviewFailed, changeFailed, helperFailed, ideaFailed, idea: idea.message, runningLog: (msg) => { if (msg.subJobId && msg.name) { runLogs.set(msg.subJobId, { name: msg.name, text: msg.text, truncated: msg.truncated, error: msg.error }); if (dialog.open && selected?.subId === msg.subJobId) renderDetail(); } }, evidence: (msg) => { evidence.note(msg); hydrateEvidence(root, evidence, send); if (proofView && dialog.open) renderDetail(); else hydrateEvidence(dialog, evidence, send); if (shotZoom && !shotZoom.querySelector('.job-proof-full:not(.soft)')) paintShotBox(); }, images: (msg) => { for (const i of msg.images || []) imageCache.set(i.name, i); hydrateStrips(); }, created: (msg) => {
     // A checkpoint switch keeps the dialog: the footer is where it was made.
     if (msg?.action === 'set-review') {
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }

@@ -121,6 +121,7 @@ export default {
         else if (!['set-review', 'request-change', 'idea-reply'].includes(msg.action)) toast('Job updated');
       } else if (msg.event === 'job-action-failed') {
         if (msg.action === 'set-review') view?.reviewFailed(msg);
+        else if (msg.action === 'ask-helper') { view?.helperFailed(msg); toastError(msg.error); }
         else if (!(msg.action === 'request-change' && view?.changeFailed(msg))) { view?.ideaFailed(msg); toastError(msg.error); }
       } else if (msg.event === 'job-images') {
         view?.images(msg);

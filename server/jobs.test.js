@@ -3090,7 +3090,7 @@ test('Ask an agent queues one helper per press, the tick spawns it as a plain se
   const f = fixture(t);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-helper-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  await f.approve(plan([spec('api', [], { repo: dir })]));
+  await f.approve(plan([spec('api', [], { repo: dir }), humanSpec('sign', ['api'])]));
   await f.tick();
   f.store.update(f.job.id, (j) => { j.subJobs[0].pr = { url: PR_URL, head: 'h', base: 'main', checkStatus: 'pending' }; });
   const before = f.store.get(f.job.id);
@@ -3098,36 +3098,48 @@ test('Ask an agent queues one helper per press, the tick spawns it as a plain se
   const real = new JobRuntime({ host: { sessions: { spawn: async (o) => { spawned.push(o); return { sessionId: `s_help${spawned.length}` }; } } } });
   f.runtime.spawnHelper = (...a) => real.spawnHelper(...a);
 
-  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
-  assert.throws(() => f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' }), /already starting/, 'a second press before the tick is refused');
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'sign' });
+  assert.throws(() => f.store.action(f.job.id, 'ask-helper', { subJobId: 'sign' }), /already starting/, 'a second press before the tick is refused');
   await f.tick();
   assert.equal(spawned.length, 1);
   const [s] = spawned;
-  assert.equal(s.cwd, dir, 'the step\'s own checkout');
+  assert.equal(s.cwd, dir, 'the prerequisite PR\'s checkout');
   assert.equal(s.worktree, undefined); assert.equal(s.addDirs, undefined);
   assert.match(s.intent, /This is the human's own session and they drive it/);
-  assert.match(s.intent, /"title": "Deliver api"/);
-  assert.match(s.intent, new RegExp(`Pull request: ${PR_URL}`));
+  assert.match(s.intent, /"title": "Do sign yourself"/);
+  assert.match(s.intent, new RegExp(`Prerequisite pull requests:\\n- "Deliver api": ${PR_URL}`));
   assert.doesNotMatch(s.intent, /runId/);
   let job = f.store.get(f.job.id);
-  const sub = job.subJobs[0];
+  const sub = job.subJobs[1];
   assert.deepEqual(sub.helpers.map((h) => h.sessionId), ['s_help1']);
-  assert.deepEqual(sub.sessions, before.subJobs[0].sessions, 'not one of the step\'s sessions: cleanup would archive it');
+  assert.deepEqual(sub.sessions, before.subJobs[1].sessions, 'not one of the step\'s sessions: cleanup would archive it');
   assert.equal(job.runs.length, before.runs.length, 'no run, so no job_report, worker skill or sandbox');
-  assert.match(job.moves.at(-1).detail, /Asked an agent to help with “Deliver api”/);
+  assert.match(job.moves.at(-1).detail, /Asked an agent to help with “Do sign yourself”/);
 
   await f.tick();
   assert.equal(spawned.length, 1, 'one session per press');
-  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'sign' });
   await f.tick();
-  assert.deepEqual(f.store.get(f.job.id).subJobs[0].helpers.map((h) => h.sessionId), ['s_help1', 's_help2'], 'a step may have several over time');
-  assert.deepEqual(new JobStore(f.store.file).get(f.job.id).subJobs[0].helpers, f.store.get(f.job.id).subJobs[0].helpers, 'kept across a restart');
+  assert.deepEqual(f.store.get(f.job.id).subJobs[1].helpers.map((h) => h.sessionId), ['s_help1', 's_help2'], 'a step may have several over time');
+  assert.deepEqual(new JobStore(f.store.file).get(f.job.id).subJobs[1].helpers, f.store.get(f.job.id).subJobs[1].helpers, 'kept across a restart');
 
   f.store.action(f.job.id, 'cancel-job');
-  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'sign' });
   await f.tick();
   assert.equal(spawned.length, 3, 'a cancelled job can still be looked into');
   assert.throws(() => f.store.action(f.job.id, 'ask-helper', { subJobId: 'nope' }), /Sub-job not found/);
+});
+
+test('ask-helper on a PR, session or write step is refused with an error and queues nothing', async (t) => {
+  const f = fixture(t);
+  await f.approve(plan([spec('api'), sessionSpec('notes')]));
+  f.store.update(f.job.id, (j) => { j.subJobs.push({ ...j.subJobs[1], id: 'post', kind: 'write', title: 'Post it' }); });
+  for (const id of ['api', 'notes', 'post']) {
+    assert.throws(() => f.store.action(f.job.id, 'ask-helper', { subJobId: id }), /^Error: Ask an agent is only for a human step: this step has its own agent, or goes through the planner$/);
+  }
+  const job = f.store.get(f.job.id);
+  assert.deepEqual(job.subJobs.map((s) => s.helpers ?? []), [[], [], []]);
+  assert.equal(job.moves.filter((m) => m.move === 'ask-helper').length, 0);
 });
 
 test('a human task\'s helper marks it in progress; a helper that cannot start says why and frees the button', async (t) => {
@@ -3153,10 +3165,10 @@ test('a human task\'s helper marks it in progress; a helper that cannot start sa
 });
 
 test('a helper sends its idea through the step\'s own Add idea route, marked as the helper\'s; any other session is refused', async (t) => {
-  const f = fixture(t); await f.approve(plan([spec('api')]));
+  const f = fixture(t); await f.approve(plan([spec('api'), humanSpec('sign')]));
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api')); await f.tick();
   f.runtime.spawnHelper = async () => 's_help';
-  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
+  f.store.action(f.job.id, 'ask-helper', { subJobId: 'sign' });
   await f.tick();
   const host = fakeHost(f);
   const send = (caller, text) => sendStepIdeaTool.handler({ host, caller }, { text });
@@ -3171,20 +3183,20 @@ test('a helper sends its idea through the step\'s own Add idea route, marked as 
   const res = await send('s_help', 'The retry loop never backs off: add a delay');
   assert.equal(res.structuredContent.accepted, true);
   let job = f.store.get(f.job.id);
-  assert.equal(job.replan.feedback, 'About “Deliver api” (api, review/verified): (Sent by the human\'s helper session on this step, at the human\'s request) The retry loop never backs off: add a delay');
-  assert.deepEqual(job.replan.source, { sub: 'api', at: 'code', ref: job.subJobs[0].ready.receiptId }, 'pinned to the step as it stands, like the box');
-  assert.deepEqual(job.subJobs[0].helpers[0].ideas.map((m) => m.text), ['The retry loop never backs off: add a delay']);
-  assert.deepEqual([job.moves.at(-1).move, job.moves.at(-1).subJobId, job.moves.at(-1).note], ['helper-idea', 'api', 'The retry loop never backs off: add a delay']);
-  assert.match(job.moves.at(-1).detail, /^A helper session sent the planner an idea about “Deliver api”$/);
+  assert.equal(job.replan.feedback, 'About “Do sign yourself” (sign, human/doing): (Sent by the human\'s helper session on this step, at the human\'s request) The retry loop never backs off: add a delay');
+  assert.deepEqual(job.replan.source, { sub: 'sign', at: 'step', ref: 'human/doing' }, 'pinned to the step as it stands, like the box');
+  assert.deepEqual(job.subJobs[1].helpers[0].ideas.map((m) => m.text), ['The retry loop never backs off: add a delay']);
+  assert.deepEqual([job.moves.at(-1).move, job.moves.at(-1).subJobId, job.moves.at(-1).note], ['helper-idea', 'sign', 'The retry loop never backs off: add a delay']);
+  assert.match(job.moves.at(-1).detail, /^A helper session sent the planner an idea about “Do sign yourself”$/);
   assert.equal(host.rebuilds, 1);
 
   await f.tick();
   const planner = f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub);
   assert.match(jobPrompt(f.store.get(f.job.id), null, planner.run), /helper session on this step/);
-  f.report({ kind: 'plan', plan: plan([spec('api'), spec('backoff', ['api'])]) }, planner);
+  f.report({ kind: 'plan', plan: plan([spec('api'), humanSpec('sign'), spec('backoff', ['api'])]) }, planner);
   job = f.store.get(f.job.id);
   assert.ok(job.replan.proposal, 'the planner\'s proposal waits for the human as a typed idea\'s does');
-  assert.equal(job.subJobs[0].stage, 'review', 'the helper changed nothing itself');
+  assert.deepEqual([job.subJobs[1].stage, job.subJobs[1].state], ['human', 'doing'], 'the helper changed nothing itself');
 
   const g = fixture(t); await g.approve(plan([spec('api')]));
   g.report({ kind: 'ready', checks: ['Tests pass'] }, g.workerFor('api')); await g.tick();

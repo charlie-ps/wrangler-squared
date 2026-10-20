@@ -34,9 +34,9 @@ export function helperFor(store, sessionId) {
 }
 
 const isDir = (dir) => { try { return fs.statSync(dir).isDirectory(); } catch { return false; } };
-// The step's own checkout, else a prerequisite PR's, else '' (the wrangler's
-// fresh scratch workspace). Never a worktree: a live worker may be writing there.
+// A prerequisite PR's checkout, else '' (the wrangler's fresh scratch workspace).
+// Never a worktree: a live worker may be writing there.
 export function helperCwd(job, sub) {
-  const repos = [sub, ...upstreamOf(job, sub).filter(isPrSub)].filter((s) => isPrSub(s) && s.repo).map((s) => expandRepo(s.repo));
+  const repos = upstreamOf(job, sub).filter((s) => isPrSub(s) && s.repo).map((s) => expandRepo(s.repo));
   return repos.find(isDir) || '';
 }
