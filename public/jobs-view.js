@@ -1,11 +1,12 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT } from './jobs.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, askActs } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, releaseSkies, spinTo } from './job-skylines.js';
+import { wireDeps, relight } from './job-deps.js';
 import { THEMES, themeOf, optionsOf, applyTheme, setCurrentTheme } from './themes.js';
 import { mountThemePicker } from './theme-picker.js';
 import { mountForming, dropForming, formingClock, formingMs } from './job-forming.js';
@@ -294,6 +295,7 @@ const andMore = (shown, total) => total > shown ? `<li><small>and ${total - show
 export function lossHtml(r) {
   return `${r.cause === 'detached' ? `<p>The worktree is on a detached HEAD at <code>${esc(String(r.head).slice(0, 8))}</code>${r.state ? `, with a ${esc(r.state)} in progress` : ''}, not on <code>${esc(r.branch)}</code>${r.branchHead ? ` (at <code>${esc(r.branchHead.slice(0, 8))}</code>)` : ''}.</p>` : ''}
     ${r.cause === 'unreadable' ? `<p>Git could not read the worktree: <code>${esc(r.error || '')}</code></p>` : ''}
+    ${r.cause === 'unremovable' ? `<p>Could not remove the worktree: <code>${esc(r.error || '')}</code></p>` : ''}
     ${r.commitCount ? `<h4>${r.commitCount} commit${plural(r.commitCount)} not on origin/${esc(r.base)}</h4><ul class="job-checks job-loss">${r.commits.map((c) => `<li><code>${esc(c.sha.slice(0, 8))}</code> ${esc(c.subject)} <small>${c.pushed ? 'on a branch on origin' : 'not pushed'}</small></li>`).join('')}${andMore(r.commits.length, r.commitCount)}</ul>` : ''}
     ${r.fileCount ? `<h4>${r.fileCount} uncommitted file${plural(r.fileCount)}</h4><ul class="job-checks job-loss">${r.files.map((f) => `<li><code>${esc(f.path)}</code> <small>${esc(f.change)}</small></li>`).join('')}${andMore(r.files.length, r.fileCount)}</ul>` : ''}
     ${r.stale ? `<p>Origin could not be reached, so whether origin/${esc(r.base)} still has this branch’s commits is unconfirmed.</p>` : ''}
@@ -317,7 +319,17 @@ export function mainNoticeHtml(job) {
     ${n.resolveError ? `<p class="job-main-error">Could not start the agent: ${esc(n.resolveError)}</p>` : ''}
     <div class="job-actions">${n.resolving?.sessionId ? `<button class="primary" data-main-session="${esc(n.resolving.sessionId)}">${ICONS.terminal}Open session</button>` : ''}${n.resolving ? '' : (n.resolutions || []).map((r, i) => `<button ${i ? '' : 'class="primary"'} data-main-resolve="${esc(r.id)}" title="${esc(r.title)}. Starts an agent in this checkout that does only this.">${ICONS.robot}${esc(r.label)}</button>`).join('')}<button ${n.resolving || n.resolutions?.length ? '' : 'class="primary"'} data-main-retry ${n.retrying ? 'disabled' : ''} title="Try the update again, after you have fixed it yourself">${n.retrying ? ICONS.spin : ICONS.wrench}${n.retrying ? 'Retrying' : 'Retry'}</button><button data-main-dismiss title="Leave this checkout as it is and forget this notice">${ICONS.x}Dismiss</button></div></section>`).join('');
 }
-const refusalHtml = (sub) => sub.cleanupRefusal && !sub.discard ? `<h3>Kept for you <small>Cleanup would lose this</small></h3>${lossHtml(sub.cleanupRefusal)}<p class="job-authority">Save anything you want from <code>${esc(tildify(sub.cleanupRefusal.path || sub.worktree?.path || ''))}</code>, then Retry${sub.cleanupRefusal.cause === 'unreadable' ? '. Git cannot read it, so there is nothing to pin a Discard to; repair or clear it by hand' : sub.cleanupRefusal.pinned === false ? '. It holds a submodule or too much to pin a Discard to what you see here, so clear it by hand' : '; or Discard anyway to delete the worktree and its local branch as listed here'}.</p>` : '';
+// Paused at its spend limit (server/job-budget.js): what it spent, and the one way on.
+export const budgetHtml = (job) => budgetHeld(job) ? `<section class="job-main-notice job-budget"><h3>${ICONS.pause}Paused for budget <small>${esc(budgetLine(job))}</small></h3>
+    <p>This job reached its spend limit, so nothing new starts and its working sessions were interrupted. Resume does not lift it: add ${esc(dollars(job.spendStep ?? 0))} to its limit and it carries on${job.topUps ? ` (added ${job.topUps} time${plural(job.topUps)} so far)` : ''}, or change the limit for every job in Automation settings.</p>
+    <div class="job-actions"><button class="primary" data-top-up title="Raise this job's limit to ${esc(dollars((job.spendLimit ?? 0) + (job.spendStep ?? 0)))} and resume it">${ICONS.plus}${esc(topUpLabel(job))}</button></div></section>` : '';
+const refusalHtml = (sub) => {
+  const r = sub.cleanupRefusal;
+  if (!r || sub.discard) return '';
+  const where = `<code>${esc(tildify(r.path || sub.worktree?.path || ''))}</code>`;
+  if (r.cause === 'unremovable') return `<h3>Kept for you <small>Cleanup could not remove this</small></h3>${lossHtml(r)}<p class="job-authority">Something may still be running in ${where}, such as a dev server, a build or an editor. Stop it and Retry, or Discard to delete that folder with everything in it and the local branch <code>${esc(r.branch)}</code>.</p>`;
+  return `<h3>Kept for you <small>Cleanup would lose this</small></h3>${lossHtml(r)}<p class="job-authority">Save anything you want from ${where}, then Retry${r.cause === 'unreadable' ? '. Git cannot read it, so there is nothing to pin a Discard to; repair or clear it by hand' : r.pinned === false ? '. It holds a submodule or too much to pin a Discard to what you see here, so clear it by hand' : '; or Discard anyway to delete the worktree and its local branch as listed here'}.</p>`;
+};
 
 // The board's own Cmd/Ctrl+Enter handlers only reach the elements they own, and
 // this dialog hangs off <body> outside every one of them, so the chord is matched
@@ -340,6 +352,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   setFileOpener(files ? (path) => files.canOpen(path) : null);
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
+  wireDeps(root); wireDeps(dialog);
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, maxReplans: 2, deploymentStaleMinutes: 30 } };
   // Ideas on the board at the last render, and those forming into a job since (id → { start, ms, stage }):
   // `stage` is the idea's sky as last drawn, so the painted cloud is kept rather than drawn again.
@@ -525,6 +538,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       holdSkies(boards);
       boards.innerHTML = html;
       mountSkies(boards);
+      relight(boards);
       scrolls();
       // Keyed to when each started, so a redraw mid-transition picks it up at the same instant; a
       // render after it drops the cloud, which is clear by then.
@@ -657,6 +671,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
     observer?.observe(graph.querySelector('.job-graph-canvas'));
     layoutGraphEdges(graph);
+    relight(graph);
   }
   // A human's own write, made by the session they added it from: a Jira write
   // where the plan has stories (the first status past its start, or a PR-link
@@ -1106,7 +1121,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // suggestion is accepted the job starts, the thread folded under its detail.
   function ideaDetail(job) {
     const cost = costChip(job.usd, job.usdEstimated, JOB_COST_TITLE);
-    const error = job.error ? `<p class="job-error">${esc(job.error)}</p>` : job.idea?.error ? `<p class="job-error">${esc(job.idea.error)} · Retrying automatically</p>` : '';
+    const error = budgetHtml(job) + (job.error ? `<p class="job-error">${esc(job.error)}</p>` : job.idea?.error ? `<p class="job-error">${esc(job.idea.error)} · Retrying automatically</p>` : '');
     const actions = `${job.error ? `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>` : ''}<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel idea</button>`;
     // What was on screen when the dialog opened is not new; only what arrives after fades in.
     if (ideaSeen?.jobId !== job.id) for (const m of ideaThread(job)) ideaDrawn.add(m.id);
@@ -1147,7 +1162,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       : replanPending(job) ? `<button data-action="discard-replan" title="Stop re-planning and keep the plan as it is">${ICONS.x}Discard change</button>` : '';
     const tail = job.cancelledAt || job.stage === 'done' ? '' : `<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel job</button>`;
     const ask = changeBoxHtml(job, null);
-    return `${appbar(job.title, chips)}${eventHtml(job, null)}${mainNoticeHtml(job)}${body}${conversationHtml(job)}${ask}
+    return `${appbar(job.title, chips)}${eventHtml(job, null)}${budgetHtml(job)}${mainNoticeHtml(job)}${body}${conversationHtml(job)}${ask}
       <div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${tail}</div>${footerHtml(job)}`;
   }
   // What a write's state means, in sentences: the chip's tooltip carries them all,
@@ -1301,7 +1316,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
         ${sub.deployed ? `<h3>Landed</h3>${receiptHtml(sub.deployed.checks)}` : ''}${noteFor(sub)}${approvalNoteFor(sub)}${refusalHtml(sub)}`;
       actions = `${codeAwaitingReview(sub) && !sub.error && !held ? approveSplitHtml('approve-code', [hints.find((h) => h.startsWith('Uncommitted')) || '', sub.ready?.round ? `Approval is tied to round ${sub.ready.round}${sub.ready.treeHash ? ` and working tree ${sub.ready.treeHash.slice(0, 7)}` : ''}.` : ''].filter(Boolean).join(' · '), `Approve &amp; ${sub.pr ? 'push' : 'open PR'}`, 'pr') : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="Merge head ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
-        ${sub.worktree && sub.stage !== 'done' ? reviewCodeHtml(sub) : ''}${session}${retry}${sub.cleanupRefusal && sub.cleanupRefusal.pinned !== false && sub.stage === 'cleanup' && !sub.discard ? `<button class="danger" id="job-discard">${ICONS.x}Discard anyway</button>` : ''}
+        ${sub.worktree && sub.stage !== 'done' ? reviewCodeHtml(sub) : ''}${session}${retry}${sub.cleanupRefusal && sub.cleanupRefusal.pinned !== false && sub.stage === 'cleanup' && !sub.discard ? `<button class="danger" id="job-discard">${ICONS.x}${sub.cleanupRefusal.cause === 'unremovable' ? 'Discard' : 'Discard anyway'}</button>` : ''}
         ${sub.recoveredBy ? `<button data-open-sub="${esc(sub.recoveredBy)}" title="${esc(hints.at(-1))}">${ICONS.wrench}Open fix sub-job</button>` : ''}`;
     }
     const details = `${metDepsHtml(job, sub)}${pr ? `<code>${esc(sub.worktree?.path || 'Worktree created on dispatch')}</code>` : ''}${isHumanSub(sub) || isWriteSub(sub) ? '' : `<p>${esc(sub.brief)}</p>`}${sub.why ? `<p>Why: ${esc(sub.why)}</p>` : ''}${sub.check ? `<p>Check after it lands: ${esc(sub.check)}</p>` : ''}${showMeHtml(sub)}
@@ -1458,6 +1473,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if ('mainResolve' in b.dataset) action('resolve-main', { path, resolution: b.dataset.mainResolve }, null);
       else action('mainDismiss' in b.dataset ? 'dismiss-main' : 'retry-main', { path }, null);
     });
+    dialog.querySelectorAll('[data-top-up]').forEach((b) => b.onclick = () => { b.disabled = true; action('top-up', { topUps: job.topUps || 0 }, null); });
     dialog.querySelectorAll('[data-main-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.mainSession); });
     dialog.querySelectorAll('[data-action]').forEach((b) => b.onclick = () => {
       const name = b.dataset.action;
@@ -1532,7 +1548,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // runner has replaced since is refused by the server instead of discarded unseen.
     bind('#job-discard', () => {
       const r = sub.cleanupRefusal;
-      show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Discard ${esc(sub.title)}’s worktree?</h2><form id="job-discard-form"><p>This force-removes <code>${esc(tildify(r.path || sub.worktree?.path || ''))}</code> and deletes the local branch <code>${esc(r.branch)}</code>. This is lost for good, along with any gitignored files in it (build output, a local <code>.env</code>):</p>${lossHtml(r)}<p class="job-authority">Cleanup checks the worktree again just before deleting it: if anything has changed, nothing is deleted and you are shown the new list.</p><div class="job-actions"><button type="button" class="danger" data-discard="1">Discard anyway</button><button type="button" id="job-move-back">Keep it</button></div></form>`);
+      show(`<span class="jobs-kicker">${esc(job.title)}</span><h2>Discard ${esc(sub.title)}’s worktree?</h2><form id="job-discard-form">${r.cause === 'unremovable' ? `<p>This deletes the folder <code>${esc(tildify(r.path || sub.worktree?.path || ''))}</code> with everything in it, deletes the local branch <code>${esc(r.branch)}</code> and tells git the worktree is gone. Nothing in the folder can be listed first, and it is lost for good.</p>${r.commitCount ? lossHtml({ ...r, cause: null }) : ''}<p class="job-authority">Cleanup checks the branch again just before deleting: if it has moved, nothing is deleted and you are shown it again.</p>`
+        : `<p>This force-removes <code>${esc(tildify(r.path || sub.worktree?.path || ''))}</code> and deletes the local branch <code>${esc(r.branch)}</code>. This is lost for good, along with any gitignored files in it (build output, a local <code>.env</code>):</p>${lossHtml(r)}<p class="job-authority">Cleanup checks the worktree again just before deleting it: if anything has changed, nothing is deleted and you are shown the new list.</p>`}<div class="job-actions"><button type="button" class="danger" data-discard="1">${r.cause === 'unremovable' ? 'Delete it' : 'Discard anyway'}</button><button type="button" id="job-move-back">Keep it</button></div></form>`);
       dialog.querySelector('[data-discard]').onclick = () => action('discard-worktree', { discardHead: r.head, fingerprint: r.fingerprint });
       dialog.querySelector('#job-move-back').onclick = () => renderDetail();
     });
@@ -1719,6 +1736,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       general: section('Editor', `<label title="A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…">IDE<input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label>`, 'Review code’s “In IDE” opens a step’s worktree in this app.')
         + section('Local checkout', '<label class="job-toggle job-settings-main" title="Once a PR lands on the default branch, fast-forward your own checkout of it. A checkout with work of its own is left alone and the job tells you, with fixes an agent can make.">Keep local main updated<input type="checkbox" class="job-switch" name="updateMain" ' + (data.settings.updateMain === false ? '' : 'checked') + '></label>'),
       automation: section('Repairs and replans', `<label>CI repairs per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to the planner this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label>`, 'These limits apply across all jobs.')
+        + section('Spend', `<label title="Dollars, cents allowed, $100 unless you change it. Empty for no limit. A job that reaches it is paused and its working sessions interrupted, until you add this much again on the job.">Job spend limit ($)<input type="number" name="spendLimit" min="0.01" max="100000" step="0.01" placeholder="No limit" value="${data.settings.spendLimit === undefined ? DEFAULT_SPEND_LIMIT : data.settings.spendLimit ?? ''}"></label>`, 'Each job may spend this much, plus this much again for every time you top it up. A new figure applies to jobs already running.')
         + section('Deployments', `<label>Deploy wait (min)<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label>`, 'How long a merge may go without any deployment run before the job asks you.'),
       review: `<fieldset class="job-prop job-settings-review"><legend>Defaults for new jobs</legend>${reviewPointsHtml(reviewDefaultsOf(data.settings), { warn: true })}</fieldset>`,
       appearance: '<fieldset class="job-prop job-settings-theme" id="job-theme-pick"><legend>Theme</legend></fieldset>',
@@ -1736,7 +1754,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       onOption: (t, key, v) => saveSettings({ themeOptions: { ...data.settings.themeOptions, [t.id]: { ...optionsOf(data.settings, t), [key]: v } } }),
     });
     dialog.addEventListener('close', () => { themePicker?.dispose(); themePicker = null; }, { once: true });
-    settingsForm.onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); send({ type: 'job-settings', patch: { maxRepairs: +f.get('maxRepairs'), maxReplans: +f.get('maxReplans'), deploymentStaleMinutes: +f.get('deploymentStaleMinutes'), ideApp: String(f.get('ideApp')).trim(), updateMain: f.has('updateMain'), reviewDefaults: reviewFlagsOf(f) } }); dialog.close(); };
+    settingsForm.onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); send({ type: 'job-settings', patch: { maxRepairs: +f.get('maxRepairs'), maxReplans: +f.get('maxReplans'), deploymentStaleMinutes: +f.get('deploymentStaleMinutes'), spendLimit: f.get('spendLimit') === '' ? null : +f.get('spendLimit'), ideApp: String(f.get('ideApp')).trim(), updateMain: f.has('updateMain'), reviewDefaults: reviewFlagsOf(f) } }); dialog.close(); };
     dialog.querySelector('#job-settings-intro').onclick = () => { dialog.close(); onIntro(); };
     dialog.querySelector('.update-section').onclick = (e) => { const b = e.target.closest('[data-update-id]'); if (b) { dialog.close(); updates.open(b.dataset.updateId); } };
   };

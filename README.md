@@ -42,6 +42,21 @@ It returns the `jobId`; without `start` the job waits in the backlog, and with i
 planning still stops for a human to approve the plan. Job-step sessions do not
 see the tool, so a job cannot start further jobs.
 
+A **job spend limit** in Automation settings (its Automation tab, dollars, cents allowed;
+$100 unless you change it, empty for none) caps what any one job may spend. A job's limit is that figure
+times one plus the number of times it has been topped up, worked out live, so a
+new figure reaches every job in flight: raise it and a job paused for budget
+carries on, lower it and one already over pauses. A job that reaches its limit is
+**paused for budget**: no new step, repair, replan, comment triage or mail to a
+parked session starts, and every session of it that is working is interrupted
+(one Escape per card per 15 seconds while it is still over). A plain Resume does
+not lift it; **Add $X** in the job's dialog (the board's plate says only
+"Paused for budget", never the limit) raises its limit by one more X and the
+interrupted sessions are mailed to carry on. Spend is the usage scan's per-card
+price with each live card's own price off the ~4s board graph folded in. An
+interrupt lands between model turns: a single long reply is not cut mid-stream,
+so a job can finish over its limit by up to one turn.
+
 ## Status
 
 Functionally complete against host API **1.38.0**: 1.4 added the worktree,
@@ -59,7 +74,7 @@ Requires an agent-wrangler on `main` (host API `^1.38.0`). In the wrangler's
 Extensions tab, install from this repository's git URL, consent to the
 capabilities disclosed in `package.json`'s `wranglerExtension` block, then
 restart the wrangler. The extension asks for `sessions:read`, `sessions:spawn`,
-`sessions:archive`, `sessions:bill`, `tasks:read`, `tasks:write`, `usage:read`,
+`sessions:archive`, `sessions:bill`, `sessions:wake`, `sessions:interrupt`, `tasks:read`, `tasks:write`, `usage:read`,
 `board:rebuild` and `board:broadcast`.
 
 Adding Task support widens the extension's requested capabilities. Updating an

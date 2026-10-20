@@ -364,10 +364,10 @@ test('the plan review names no worktree branch, and a cut PR tile shows it; a su
   const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', worktree: { path: '/wt/api', branch: 'fix/AUTH-1-api', repoRoot: '/repo' } }, { ...sub('web', ['api']), stage: 'implementation' }]; f.view.update(f.data);
   f.q('.job-plate-open[data-job=\"job1\"]').click();
-  assert.equal(f.q('[data-node="api"] .job-node-wt').textContent, 'fix/AUTH-1-api', 'a cut PR shows its worktree branch on its tile');
-  assert.equal(f.q('[data-node="api"] .job-node-landing').textContent, 'fix/AUTH-1-api', 'default branch: no arrow, nothing to say');
-  assert.equal(f.q('[data-node="web"] .job-node-wt'), null, 'not cut yet: only where it lands');
-  assert.equal(f.q('[data-node="web"] .job-node-landing'), null, 'a PR on the default branch with no worktree shows nothing');
+  assert.equal(f.q('#job-dialog [data-node="api"] .job-node-wt').textContent, 'fix/AUTH-1-api', 'a cut PR shows its worktree branch on its tile');
+  assert.equal(f.q('#job-dialog [data-node="api"] .job-node-landing').textContent, 'fix/AUTH-1-api', 'default branch: no arrow, nothing to say');
+  assert.equal(f.q('#job-dialog [data-node="web"] .job-node-wt'), null, 'not cut yet: only where it lands');
+  assert.equal(f.q('#job-dialog [data-node="web"] .job-node-landing'), null, 'a PR on the default branch with no worktree shows nothing');
   assert.match(f.q('[data-open-sub="api"]').title, /Lands on the default branch\nBranch fix\/AUTH-1-api/, 'both are a hover away');
   f.q('[data-open-sub="api"]').click();
   assert.equal(f.q('.job-detail-line .job-plan-branch').textContent, 'fix/AUTH-1-api');
@@ -757,8 +757,9 @@ test('global concurrency, pause and repair limits are explicit controls, and no 
   assert.equal(form.elements.maxRunMinutes, undefined, 'a step ends with a receipt or an idle session, not a timeout');
   assert.equal(form.elements.updateMain.checked, true, 'Keep local main updated is on until switched off');
   assert.match(form.elements.updateMain.closest('label').textContent, /^Keep local main updated/);
+  assert.equal(form.elements.spendLimit.value, '100', 'the spend limit starts at $100');
   form.elements.maxRepairs.value = '1'; form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, maxReplans: 2, deploymentStaleMinutes: 30, ideApp: 'IntelliJ IDEA', updateMain: true, reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
+  assert.deepEqual(f.sent.at(-1).patch, { maxRepairs: 1, maxReplans: 2, deploymentStaleMinutes: 30, spendLimit: 100, ideApp: 'IntelliJ IDEA', updateMain: true, reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
 });
 
 test('the Jobs view wears the saved theme: Space forces dark and paints its masthead, Wrangler follows the board and paints nothing', (t) => {
@@ -947,8 +948,8 @@ test('a waiting human task needs you, and the work behind it waits', (t) => {
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   assert.equal(f.q('.job-dependency-list .job-chip').title, 'Start after Sign licence');
   f.q('[data-open-job]').click();
-  assert.equal(f.q('[data-node="licence"] .job-kind').getAttribute('aria-label'), 'Human');
-  assert.match(f.q('[data-node="licence"]').title, /Only you can do this one/);
+  assert.equal(f.q('#job-dialog [data-node="licence"] .job-kind').getAttribute('aria-label'), 'Human');
+  assert.match(f.q('#job-dialog [data-node="licence"]').title, /Only you can do this one/);
   // One a prerequisite still gates is just waiting, not the human's yet.
   const behind = { ...humanSub('audit', ['api']), stage: 'human', state: 'queued' };
   assert.deepEqual(jobStatus({ ...job, subJobs: [...job.subJobs, behind] }, behind), { tone: 'muted', text: 'Waiting for 1 deployment' });
@@ -1017,7 +1018,7 @@ test('plans show session rows without a repository and new jobs default to revie
   job.plan = { ...plan, subJobs: [sessionSub('spike'), sub('api', ['spike'])] }; f.view.update(f.data);
   f.q('.job-plate-open[data-job=\"job1\"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-node')].map((n) => [n.dataset.node, n.querySelector('.job-kind').getAttribute('aria-label')]), [['spike', 'Session'], ['api', 'PR']]);
-  assert.match(f.q('[data-node="spike"]').title, /An agent session on this machine/);
+  assert.match(f.q('#job-dialog [data-node="spike"]').title, /An agent session on this machine/);
   assert.equal(f.q('[data-action="approve-plan"]').title, 'Starts 2 steps');
   f.q('#job-dialog').close();
   f.q('#job-new').click(); const form = f.q('#job-create-form');
@@ -1061,7 +1062,7 @@ test('a plan lists its story titles, and approval of keyless stories says whethe
   assert.equal(f.q('[data-action="approve-plan"]'), null);
   const create = f.q('.job-write[data-open-sub="create-story"]');
   assert.match(create.textContent, /^Create.*Create Jira stories is working$/);
-  assert.equal(create.closest('.job-stack'), f.q('[data-node="stories"]').closest('.job-stack'), 'a create hangs under the session that makes it');
+  assert.equal(create.closest('.job-stack'), f.q('#job-dialog [data-node="stories"]').closest('.job-stack'), 'a create hangs under the session that makes it');
   assert.match(create.closest('.job-place').querySelector('summary').textContent, /NEW-1/);
 });
 
@@ -1200,14 +1201,14 @@ test('the plan is a dependency graph: a box per sub-job in its wave, an arrow pe
   assert.deepEqual([...document.querySelectorAll('.job-node-tile .job-kind')].map((k) => k.getAttribute('aria-label')), ['PR', 'PR']);
   assert.deepEqual([...document.querySelectorAll('.job-graph-edges path[data-from]')].map((p) => p.getAttribute('class')), ['deploy'], 'a PR prerequisite is a deploy gate: dashed, with a rocket');
   assert.equal(document.querySelectorAll('.job-edge-glyph').length, 1);
-  assert.match(f.q('[data-node="web"] .job-node-deps summary').title, /Start after Deliver api deploys/);
-  const details = f.q('[data-node="web"] .job-node-deps'); details.open = true; details.dispatchEvent(f.event('toggle'));
-  const box = f.q('[data-node="web"] [data-dep]'); box.checked = false; box.dispatchEvent(f.event('change'));
+  assert.match(f.q('#job-dialog [data-node="web"] .job-node-deps summary').title, /Start after Deliver api deploys/);
+  const details = f.q('#job-dialog [data-node="web"] .job-node-deps'); details.open = true; details.dispatchEvent(f.event('toggle'));
+  const box = f.q('#job-dialog [data-node="web"] [data-dep]'); box.checked = false; box.dispatchEvent(f.event('change'));
   assert.deepEqual(waves(), [['api', 'web']]); assert.deepEqual(arrows(), [], 'independent work shares wave one with nothing pointing at it');
-  assert.equal(f.q('[data-node="web"] .job-node-deps').open, true, 'the open editor survives the redraw');
-  f.q('[data-node="api"] [data-dep]').checked = true; f.q('[data-node="api"] [data-dep]').dispatchEvent(f.event('change'));
+  assert.equal(f.q('#job-dialog [data-node="web"] .job-node-deps').open, true, 'the open editor survives the redraw');
+  f.q('#job-dialog [data-node="api"] [data-dep]').checked = true; f.q('#job-dialog [data-node="api"] [data-dep]').dispatchEvent(f.event('change'));
   assert.deepEqual(waves(), [['web'], ['api']]); assert.deepEqual(arrows(), ['web→api']);
-  const title = f.q('[data-node="api"] [data-title]'); title.value = 'Deliver the API last'; title.dispatchEvent(f.event('input'));
+  const title = f.q('#job-dialog [data-node="api"] [data-title]'); title.value = 'Deliver the API last'; title.dispatchEvent(f.event('input'));
   f.q('[data-action="approve-plan"]').click();
   assert.deepEqual(f.sent[0].plan.subJobs.map((s) => [s.title, s.after]), [['Deliver the API last', ['web']], ['Deliver web', []]]);
 });
@@ -1221,10 +1222,10 @@ test('a live job shows the same graph with each box carrying its kind and status
   const nodes = [...document.querySelectorAll('button.job-node')];
   assert.deepEqual(nodes.map((n) => [n.dataset.openSub, n.classList.contains('session'), [...n.classList].find((c) => c.startsWith('tone-')), n.querySelector('.job-status').textContent]),
     [['spike', true, 'tone-warn', 'Review result'], ['api', false, 'tone-idle', 'Waiting for 1 session']]);
-  assert.ok(f.q('[data-node="spike"] .job-node-tile').classList.contains('on'), 'a step that needs you is filled; one still waiting is hollow');
-  assert.equal(f.q('[data-node="api"] .job-node-tile').classList.contains('on'), false);
+  assert.ok(f.q('#job-dialog [data-node="spike"] .job-node-tile').classList.contains('on'), 'a step that needs you is filled; one still waiting is hollow');
+  assert.equal(f.q('#job-dialog [data-node="api"] .job-node-tile').classList.contains('on'), false);
   assert.deepEqual([...document.querySelectorAll('.job-graph-edges path[data-from]')].map((p) => `${p.dataset.from}→${p.dataset.to}:${p.getAttribute('class')}`), ['spike→api:start'], 'a session prerequisite gates the start: a solid line');
-  assert.match(f.q('[data-node="api"]').title, /Start after Run spike/);
+  assert.match(f.q('#job-dialog [data-node="api"]').title, /Start after Run spike/);
   f.q('[data-open-sub="api"]').click();
   assert.equal(f.q('#job-dialog h2').textContent, 'Deliver api'); assert.equal(f.q('.job-detail-line .job-kind-label').textContent, 'PR'); assert.equal(f.q('.job-detail-line .job-kind-label').title, 'A pull request in a repository');
   assert.equal(f.q('.job-graph'), null, 'a sub-job detail is about one sub-job, not the graph');
@@ -1538,7 +1539,7 @@ test('a plan-change proposal locks landed work, marks removed work as cancelled 
   const removed = f.q('.job-replan-changes .job-mark-removed');
   assert.match(removed.textContent, /Will be cancelled: Deliver web · PR #7 ↗ stays open on GitHub/);
   assert.equal(removed.querySelector('a').href, 'https://github.com/org/repo/pull/7');
-  assert.equal(f.q('[data-node="cli"]').tagName, 'DIV', 'a proposed node opens nothing: it has no sub-job yet');
+  assert.equal(f.q('#job-dialog [data-node="cli"]').tagName, 'DIV', 'a proposed node opens nothing: it has no sub-job yet');
   f.q('[data-action="approve-replan"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_p' });
   f.q('[data-action="discard-replan"]').click();
@@ -1688,24 +1689,24 @@ test('plan review hangs each proposed write under the session that makes it, dra
     jiraWrite('w-pr', 'n-pr', { type: 'transition', to: 'In Review', comment: 'PR {pr.url}' }, { why: 'AUTH moves <b>open</b> PRs to In Review' }),
     jiraWrite('w-wont', 'n-wont', { type: 'transition', to: 'Done' }, { review: true })]);
   f.q('[data-job="job1"]').click();
-  const stack = (id) => f.q(`[data-node="${id}"]`).closest('.job-stack');
+  const stack = (id) => f.q(`#job-dialog [data-node="${id}"]`).closest('.job-stack');
   assert.equal(stack('w-pr'), stack('n-pr'), 'a write hangs under the session that makes it');
   assert.equal(stack('w-wont'), stack('n-wont'));
-  assert.equal(f.q('[data-node="n-pr"] .job-node-on').textContent, 'When Deliver api opens its PR', 'the milestone is the session\'s');
-  assert.equal(f.q('[data-node="n-wont"] .job-node-on').textContent, 'Only if Deliver web is dropped');
+  assert.equal(f.q('#job-dialog [data-node="n-pr"] .job-node-on').textContent, 'When Deliver api opens its PR', 'the milestone is the session\'s');
+  assert.equal(f.q('#job-dialog [data-node="n-wont"] .job-node-on').textContent, 'Only if Deliver web is dropped');
   assert.ok(f.q('path.on[data-from="api"][data-to="n-pr"]'), 'a milestone is a connector from its trigger');
-  assert.match(f.q('[data-node="w-pr"]').textContent, /^→ In Review \+ comment\s*by the session$/);
-  assert.ok(f.q('[data-node="w-pr"] .job-proposed'));
-  const pill = f.q('[data-node="w-pr"]').closest('details.job-place');
+  assert.match(f.q('#job-dialog [data-node="w-pr"]').textContent, /^→ In Review \+ comment\s*by the session$/);
+  assert.ok(f.q('#job-dialog [data-node="w-pr"] .job-proposed'));
+  const pill = f.q('#job-dialog [data-node="w-pr"]').closest('details.job-place');
   assert.equal(pill.open, false, 'a place starts folded');
   assert.equal(pill.querySelector('summary').textContent, 'AUTH-1↗', 'an existing ticket is a place that exists');
   assert.equal(pill.querySelectorAll('.job-place-dot').length, 1);
-  assert.match(f.q('[data-node="w-wont"]').textContent, /drafted for your review/);
-  assert.ok(f.q('[data-node="w-wont"]').classList.contains('dormant'), 'an if-dropped session\'s writes are dormant with it');
-  const eye = (id) => f.q(`[data-node="${id}"]`).parentElement.querySelector('[data-review-write]');
+  assert.match(f.q('#job-dialog [data-node="w-wont"]').textContent, /drafted for your review/);
+  assert.ok(f.q('#job-dialog [data-node="w-wont"]').classList.contains('dormant'), 'an if-dropped session\'s writes are dormant with it');
+  const eye = (id) => f.q(`#job-dialog [data-node="${id}"]`).parentElement.querySelector('[data-review-write]');
   assert.deepEqual([eye('w-wont').getAttribute('aria-pressed'), eye('w-wont').classList.contains('on'), eye('w-wont').title], ['true', true, 'Review before writing']);
   assert.equal(eye('w-pr').getAttribute('aria-pressed'), 'false');
-  assert.equal(f.q('[data-node="w-wont"]').contains(eye('w-wont')), false, 'the eye is beside the row, not inside its button');
+  assert.equal(f.q('#job-dialog [data-node="w-wont"]').contains(eye('w-wont')), false, 'the eye is beside the row, not inside its button');
   assert.equal(f.q('.job-write-count').textContent, '2 writes · 1 reviewed');
   eye('w-wont').click();
   assert.equal(f.q('[data-write-editor]'), null, 'flipping review does not open the editor');
@@ -1717,15 +1718,15 @@ test('plan review hangs each proposed write under the session that makes it, dra
   assert.equal(f.q('[data-action="approve-plan"]').title, 'Starts 4 steps · 1 write held for you');
   assert.ok(![...document.querySelectorAll('[data-dep]')].some((c) => c.value.startsWith('w-')), 'nothing can wait on a write');
   assert.equal(f.q('[data-add-write="api"]'), null, 'only a session makes writes');
-  f.q('[data-node="w-pr"]').click();
+  f.q('#job-dialog [data-node="w-pr"]').click();
   const editor = f.q('[data-write-editor]');
   assert.match(editor.querySelector('.job-write-why').innerHTML, /&lt;b&gt;open&lt;\/b&gt;/, 'the planner\'s reason is text, never markup');
   assert.deepEqual([...editor.querySelectorAll('[name="to"] option')].map((o) => o.value), ['', 'To Do', 'In Progress', 'In Review', 'Done']);
   assert.equal(editor.querySelector('[name="on"]'), null, 'a write has no milestone of its own');
   editor.querySelector('[name="to"]').value = 'Done'; editor.querySelector('[name="to"]').dispatchEvent(f.event('change'));
   f.q('[data-write-editor] [name="review"]').checked = true; f.q('[data-write-editor] [name="review"]').dispatchEvent(f.event('change'));
-  assert.match(f.q('[data-node="w-pr"]').textContent, /^→ Done/);
-  assert.ok(f.q('[data-node="w-pr"]').closest('details.job-place').open, 'the place holding the open editor stays open');
+  assert.match(f.q('#job-dialog [data-node="w-pr"]').textContent, /^→ Done/);
+  assert.ok(f.q('#job-dialog [data-node="w-pr"]').closest('details.job-place').open, 'the place holding the open editor stays open');
   f.q('[data-write-editor] [name="to"]').value = ''; f.q('[data-write-editor] [name="to"]').dispatchEvent(f.event('change'));
   f.q('[data-write-editor] [name="comment"]').value = ''; f.q('[data-write-editor] [name="comment"]').dispatchEvent(f.event('change'));
   assert.ok(f.q('[data-action="approve-plan"]').disabled, 'a write that neither moves nor comments cannot be approved');
@@ -1733,7 +1734,7 @@ test('plan review hangs each proposed write under the session that makes it, dra
   f.q('[data-add-write="n-pr"]').click();
   assert.match(f.q('[data-write-editor] h4').textContent, /AUTH-1 → In Review/); assert.doesNotMatch(f.q('[data-write-editor] h4').textContent, /Proposed/, 'the human\'s own write is not proposed');
   f.q('[data-write-remove]').click();
-  f.q('[data-node="w-wont"]').click(); f.q('[data-write-done]').click();
+  f.q('#job-dialog [data-node="w-wont"]').click(); f.q('[data-write-done]').click();
   assert.equal(f.q('[data-write-editor]'), null);
   f.q('[data-action="approve-plan"]').click();
   assert.equal(f.sent.at(-1).plan.subJobs.find((s) => s.id === 'w-wont').review, true, 'a flipped eye is sent as an explicit boolean');
@@ -1757,12 +1758,12 @@ test('a write waits on its session; a draft needs you, its panel the editor that
   assert.equal(f.q('#jobs-review-count').textContent, '1', 'a draft in review counts toward needs-you');
   assert.match(f.q('[data-board="job1"]').textContent, /Review write/);
   f.q('[data-board="job1"] .job-plate-open').click();
-  const pill = f.q('[data-node="w-rev"]').closest('details.job-place');
-  assert.equal(pill.closest('.job-stack'), f.q('[data-node="n-rev"]').closest('.job-stack'));
+  const pill = f.q('#job-dialog [data-node="w-rev"]').closest('details.job-place');
+  assert.equal(pill.closest('.job-stack'), f.q('#job-dialog [data-node="n-rev"]').closest('.job-stack'));
   assert.ok(pill.classList.contains('urgent') && pill.classList.contains('tone-warn'), 'a draft in review rings its folded pill');
-  assert.match(f.q('[data-node="w-pr"]').textContent, /by the session$/);
-  assert.match(f.q('[data-node="n"]').textContent, /When Deliver api opens its PR/);
-  assert.match(f.q('[data-node="w-rev"]').textContent, /Review write$/);
+  assert.match(f.q('#job-dialog [data-node="w-pr"]').textContent, /by the session$/);
+  assert.match(f.q('#job-dialog [data-node="n"]').textContent, /When Deliver api opens its PR/);
+  assert.match(f.q('#job-dialog [data-node="w-rev"]').textContent, /Review write$/);
   assert.ok(f.q('[data-board="job1"] .job-plate-graph g.moon[data-sub="w-rev"]'), 'a write is a moon on the plate, no step of the plan');
   f.q('[data-open-sub="w-rev"]').click();
   assert.match(f.q('.job-appbar .job-chip-state').title, /Review is on for this write: Run n-rev drafted it below and nothing has been written to Jira yet\. .*once every draft it sent is decided, Run n-rev is told what to make/);
@@ -1845,9 +1846,9 @@ test('the stepper folds a session\'s writes into one pill per place: dots per wr
   const f = fixture(t);
   placesJob(f, { k6: { state: 'failed', error: 'k6 was not installed' } });
   f.q('[data-board="job1"] .job-plate-open').click();
-  const pill = (id) => f.q(`[data-node="${id}"]`).closest('details.job-place');
+  const pill = (id) => f.q(`#job-dialog [data-node="${id}"]`).closest('details.job-place');
   assert.equal(pill('w-pr'), pill('w-done'), 'two writes to one ticket by one session are one pill');
-  assert.equal(pill('w-pr').closest('.job-stack'), f.q('[data-node="tix"]').closest('.job-stack'));
+  assert.equal(pill('w-pr').closest('.job-stack'), f.q('#job-dialog [data-node="tix"]').closest('.job-stack'));
   assert.equal(pill('w-pr').querySelectorAll('.job-place-dot').length, 2);
   assert.deepEqual([...pill('w-pr').querySelectorAll('.job-place-dot')].map((d) => d.className.includes('tone-ok')), [true, false]);
   assert.equal(pill('w-pr').querySelector('summary b').textContent, 'AUTH-1');
@@ -1861,10 +1862,10 @@ test('the stepper folds a session\'s writes into one pill per place: dots per wr
   pill('chart').open = true; pill('chart').ontoggle();
   assert.deepEqual([pill('w-pr').open, pill('chart').open], [false, true], 'one place open at a time');
   assert.notEqual(pill('chart'), pill('k6'), 'each made output is its own place');
-  assert.equal(f.q('[data-node="chart"]').closest('.job-stack'), f.q('[data-node="report"]').closest('.job-stack'), 'a made output hangs under its session');
+  assert.equal(f.q('#job-dialog [data-node="chart"]').closest('.job-stack'), f.q('#job-dialog [data-node="report"]').closest('.job-stack'), 'a made output hangs under its session');
   assert.ok(pill('chart').classList.contains('ghost')); assert.match(pill('chart').querySelector('.job-place-head em').textContent, /not made yet/);
   assert.equal(pill('chart').querySelector('summary b').textContent, 'p95 <i>chart</i>', 'what the planner wrote is text');
-  assert.match(f.q('[data-node="chart"]').textContent, /^Make\s*made by the session$/);
+  assert.match(f.q('#job-dialog [data-node="chart"]').textContent, /^Make\s*made by the session$/);
   assert.ok(pill('k6').classList.contains('urgent') && pill('k6').classList.contains('tone-bad'), 'a failed output rings its pill');
   assert.match(pill('post').querySelector('summary').textContent, /^#web-platform$/); assert.ok(pill('post').querySelector('.job-write-review'), 'the eye says it is reviewed first');
   f.q('[data-open-sub="k6"]').click();
@@ -1877,7 +1878,7 @@ test('a place that exists opens from its pill; a local file shows its path to co
   placesJob(f, { chart: { stage: 'done', state: 'done', result: { outcome: 'written', url: 'https://claude.ai/artifact/7f3c', title: 'Checkout p95', receiptId: 'r2', at: 2 } },
     k6: { stage: 'done', state: 'done', result: { outcome: 'written', url: '/Users/me/k6 report.html', receiptId: 'r2', at: 2 } } });
   f.q('[data-board="job1"] .job-plate-open').click();
-  const pill = (id) => f.q(`[data-node="${id}"]`).closest('details.job-place');
+  const pill = (id) => f.q(`#job-dialog [data-node="${id}"]`).closest('details.job-place');
   assert.equal(pill('chart').querySelector('summary b').textContent, 'Checkout p95', 'a made place takes the title it was made with');
   assert.equal(pill('chart').querySelector('.job-place-head a').getAttribute('href'), 'https://claude.ai/artifact/7f3c');
   assert.equal(pill('k6').querySelector('.job-place-head a'), null, 'the board cannot follow file://');
@@ -1897,7 +1898,7 @@ test('a file place shows Open beside Copy only where the host can open it, and O
   const f = fixture(t, undefined, { files, onOpenFile: async (p) => { opened.push(p); return { ok: true }; } });
   placesJob(f, { k6: { stage: 'done', state: 'done', result: { outcome: 'written', url: '/Users/me/report.md', receiptId: 'r2', at: 2 } } });
   f.q('[data-board="job1"] .job-plate-open').click();
-  const pill = f.q('[data-node="k6"]').closest('details.job-place');
+  const pill = f.q('#job-dialog [data-node="k6"]').closest('details.job-place');
   assert.equal(pill.querySelector('[data-open-path]').textContent.trim(), 'Open');
   assert.ok(pill.querySelector('[data-copy-path]'), 'Copy stays beside it');
   pill.querySelector('[data-open-path]').click(); await new Promise((r) => setTimeout(r, 0));
@@ -1909,7 +1910,7 @@ test('a file the host cannot show, or a host without api.files, keeps path and C
     const f = fixture(t, undefined, extra);
     placesJob(f, { k6: { stage: 'done', state: 'done', result: { outcome: 'written', url: '/Users/me/k6 report.html', receiptId: 'r2', at: 2 } } });
     f.q('[data-board="job1"] .job-plate-open').click();
-    const pill = f.q('[data-node="k6"]').closest('details.job-place');
+    const pill = f.q('#job-dialog [data-node="k6"]').closest('details.job-place');
     assert.equal(pill.querySelector('[data-open-path]'), null);
     assert.equal(pill.querySelector('.job-place-path code').textContent, '/Users/me/k6 report.html');
     assert.ok(pill.querySelector('[data-copy-path]'));
@@ -2054,8 +2055,8 @@ test('plan review adds a write to somewhere else: named, optionally located, wit
   set('text', 'Post a resolved notice');
   assert.equal(f.q('[data-write-editor] .job-error'), null);
   assert.match(f.q('[data-write-editor] h4').textContent, /Write to Status page/);
-  assert.equal(f.q('[data-node="report-write"]').closest('details.job-place').querySelector('summary b').textContent, 'Status page');
-  assert.ok(f.q('[data-node="report-write"]').closest('details.job-place').classList.contains('other'), 'a place elsewhere is drawn dashed');
+  assert.equal(f.q('#job-dialog [data-node="report-write"]').closest('details.job-place').querySelector('summary b').textContent, 'Status page');
+  assert.ok(f.q('#job-dialog [data-node="report-write"]').closest('details.job-place').classList.contains('other'), 'a place elsewhere is drawn dashed');
   const review = f.q('[data-write-editor] [name="review"]'); review.checked = true; review.dispatchEvent(f.event('change'));
   f.q('[data-write-done]').click();
   f.q('[data-add-write="report"]').click();
@@ -2886,6 +2887,25 @@ test('a detached worktree says so and offers Discard; one git cannot read shows 
   assert.equal(f.q('#job-discard'), null);
 });
 
+test('a worktree git could not remove shows git\'s reason in plain words and offers Retry or a Discard of the whole folder', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active'; job.cancelledAt = 1;
+  const why = "error: failed to delete '/wt/api': Directory not empty";
+  const refusal = { path: '/wt/api', branch: 'job-api', base: 'main', head: 'cc47137aaaa', fingerprint: 'fp1', cause: 'unremovable', error: why, pinned: true, stale: false, commits: [], commitCount: 0, files: [], fileCount: 0 };
+  job.subJobs = [{ ...sub('api'), stage: 'cleanup', state: 'cancelled', cancelledAt: 1, worktree: { path: '/wt/api', branch: 'job-api' }, error: `Worktree at /wt/api could not be removed (${why}); preserve it for review`, cleanupRefusal: refusal }];
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  const text = f.q('#job-dialog').textContent;
+  assert.match(text, /Kept for you Cleanup could not remove this/);
+  assert.ok(text.includes(`Could not remove the worktree: ${why}`));
+  assert.match(text, /Something may still be running in \/wt\/api, such as a dev server, a build or an editor\. Stop it and Retry, or Discard to delete that folder with everything in it and the local branch job-api\./);
+  assert.doesNotMatch(text, /pin/i);
+  assert.doesNotMatch(text, /Branch job-api at/, 'no plain branch line under a cause');
+  assert.equal(f.q('#job-discard').textContent, 'Discard');
+  f.q('#job-discard').click();
+  assert.match(f.q('#job-dialog').textContent, /This deletes the folder \/wt\/api with everything in it, deletes the local branch job-api and tells git the worktree is gone/);
+  f.q('[data-discard]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'discard-worktree', discardHead: 'cc47137aaaa', fingerprint: 'fp1' });
+});
+
 test('every PR tile shows its worktree branch → where it lands, the override marked and long names truncated', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active'; job.base = 'next';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', base: 'release/2.x', worktree: { path: '/wt/api', branch: 'fix/api-2x', repoRoot: '/repo' } },
@@ -2894,8 +2914,8 @@ test('every PR tile shows its worktree branch → where it lands, the override m
   assert.deepEqual([...document.querySelectorAll('.job-node-landing')].map((e) => [e.closest('[data-node]').dataset.node, e.textContent]), [['api', 'fix/api-2x→release/2.x'], ['web', '→next'], ['same', '→next']], 'every PR names where it lands');
   assert.deepEqual([...document.querySelectorAll('.job-node-base.own')].map((e) => e.closest('[data-node]').dataset.node), ['api'], 'only the override is marked');
   const long = 'feature/' + 'a'.repeat(80); job.subJobs[2].worktree = { path: '/wt/s', branch: long }; f.view.update(f.data);
-  assert.equal(f.q('[data-node="same"] .job-node-wt').textContent, long, 'the whole name is in the markup, CSS truncates it');
-  assert.match(f.q('[data-node="same"] .job-node-landing').title, new RegExp(`Branch ${long}\\nLands on next`), 'and whole in the tooltip');
+  assert.equal(f.q('#job-dialog [data-node="same"] .job-node-wt').textContent, long, 'the whole name is in the markup, CSS truncates it');
+  assert.match(f.q('#job-dialog [data-node="same"] .job-node-landing').title, new RegExp(`Branch ${long}\\nLands on next`), 'and whole in the tooltip');
   assert.match(f.q('[data-open-sub="api"]').title, /Lands on release\/2\.x, not the job's next/);
   assert.match(f.q('[data-open-sub="web"]').title, /Lands on next/);
   assert.match(f.q('#job-dialog .job-chips').textContent, /→ next/, 'the job\'s own base heads the job');
@@ -3184,4 +3204,29 @@ test('what a helper sent the planner shows under it on the step, marked from the
   assert.equal(document.querySelectorAll('.job-helpers > li')[1].querySelector('.job-helper-ideas'), null, 'a helper that sent nothing shows nothing');
   assert.equal(f.q('[data-helper-session="s_help1"]').textContent, 'Restore', 'kept as history on a PR step, which has no Ask an agent');
   assert.equal(f.q('#job-dialog [data-ask-helper], #job-dialog [data-open-helper]'), null);
+});
+
+test('a job paused for budget keeps its limit off the board, and offers Add $X in its dialog, pinned to the count seen', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation' }];
+  Object.assign(job, { usd: 12.3, spendLimit: 10, spendStep: 10, topUps: 0, budgetPaused: { at: 1, usd: 12.3, limit: 10 } });
+  f.view.update(f.data);
+  const plate = f.q('[data-board="job1"]');
+  assert.equal(plate.querySelector('.job-plate-go').textContent, 'Open');
+  assert.doesNotMatch(plate.textContent, /\$10\b|Add \$/, 'no limit on the board');
+  plate.querySelector('.job-plate-go').click();
+  assert.match(f.q('#job-dialog .job-budget h3').textContent, /Paused for budget\s*\$12\.30 of \$10/);
+  f.q('#job-dialog [data-top-up]').click();
+  assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).id, f.sent.at(-1).topUps], ['top-up', 'job1', 0]);
+});
+
+test('an emptied spend limit saves as no limit, and a saved one is shown as it is', (t) => {
+  const f = fixture(t); f.data.settings.spendLimit = 12.5; f.view.update(f.data);
+  f.q('#jobs-settings').click(); let form = f.q('#job-settings-form');
+  assert.equal(form.elements.spendLimit.value, '12.5');
+  form.elements.spendLimit.value = ''; form.dispatchEvent(f.event('submit'));
+  assert.equal(f.sent.at(-1).patch.spendLimit, null);
+  f.data.settings.spendLimit = null; f.view.update(f.data);
+  f.q('#jobs-settings').click(); form = f.q('#job-settings-form');
+  assert.equal(form.elements.spendLimit.value, '', 'null is no limit, never the default');
 });

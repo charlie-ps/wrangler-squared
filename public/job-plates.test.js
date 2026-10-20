@@ -140,5 +140,14 @@ test('a plate stacks each column in the order and rows the expanded dialog untan
   assert.deepEqual(plateCols, dialogCols);
   const ys = new Map([...plate.values()].flat().map(([y, id]) => [id, y]));
   assert.equal(ys.get('e'), ys.get('a'), 'e takes the median row of its prerequisites, as in the dialog');
-  assert.match(svg, /<path class="edge [^"]*" d="M64,56 C[^"]*,70 160,70 C[^"]*"\/>/, 'the wave-skipping link follows its lane through the column it skips');
+  assert.match(svg, /<path class="edge [^"]*"[^>]* d="M64,56 C[^"]*,70 160,70 C[^"]*"\/>/, 'the wave-skipping link follows its lane through the column it skips');
+});
+
+test('a job paused for budget says so on its stub, but never shows its limit on the board', () => {
+  const held = job({ subJobs: [sub('a', { stage: 'implementation' })], usd: 10.4, spendLimit: 10, spendStep: 10, budgetPaused: { at: 1, usd: 10.2, limit: 10 } });
+  assert.deepEqual(['label', 'detail', 'button', 'act'].map((k) => plateAsk(held)[k]), ['Paused for budget', '', 'Open', 'open']);
+  const html = plateHtml(held, 'haiku');
+  assert.doesNotMatch(html, /of \$10|Add \$|top-up/);
+  assert.equal(plateAsk({ ...held, budgetPaused: null }), null);
+  assert.notEqual(plateAsk({ ...held, cancelledAt: 1, budgetPaused: { at: 1 } })?.label, 'Paused for budget', 'a cancelled job asks nothing of the budget');
 });

@@ -69,9 +69,9 @@ test('Automation settings groups its fields into General, Automation, Review def
   assert.deepEqual(shown(), ['general'], 'General opens first');
   const inPanel = (id) => p.q(`#job-settings-panel-${id}`);
   const form = p.q('#job-settings-form');
-  assert.deepEqual(['ideApp', 'updateMain', 'maxRepairs', 'maxReplans', 'deploymentStaleMinutes', 'reviewPlan'].map((n) => form.elements[n].closest('[role="tabpanel"]').dataset.panel), ['general', 'general', 'automation', 'automation', 'automation', 'review']);
+  assert.deepEqual(['ideApp', 'updateMain', 'maxRepairs', 'maxReplans', 'spendLimit', 'deploymentStaleMinutes', 'reviewPlan'].map((n) => form.elements[n].closest('[role="tabpanel"]').dataset.panel), ['general', 'general', 'automation', 'automation', 'automation', 'automation', 'review']);
   assert.deepEqual([...inPanel('general').querySelectorAll('.job-settings-section h3')].map((h) => h.textContent), ['Editor', 'Local checkout']);
-  assert.deepEqual([...inPanel('automation').querySelectorAll('.job-settings-section h3')].map((h) => h.textContent), ['Repairs and replans', 'Deployments']);
+  assert.deepEqual([...inPanel('automation').querySelectorAll('.job-settings-section h3')].map((h) => h.textContent), ['Repairs and replans', 'Spend', 'Deployments']);
   assert.ok(inPanel('appearance').querySelector('#job-theme-pick .theme-choice'), 'the theme picker mounts in its hidden panel');
   assert.ok(inPanel('updates').querySelector('.update-item'));
   assert.ok(p.q('#job-settings-form .job-actions'), 'Save sits under every tab');
@@ -81,11 +81,11 @@ test('Save from another tab sends every field, including those on tabs not showi
   const p = page(t); const sent = settings(p, null);
   const form = p.q('#job-settings-form');
   form.elements.ideApp.value = 'Rider'; form.elements.updateMain.checked = false;
-  p.q('#job-settings-tab-automation').click(); form.elements.maxRepairs.value = '4';
+  p.q('#job-settings-tab-automation').click(); form.elements.maxRepairs.value = '4'; form.elements.spendLimit.value = '12.5';
   p.q('#job-settings-tab-updates').click();
   assert.deepEqual(shown(), ['updates']);
   form.dispatchEvent(new p.window.Event('submit', { bubbles: true, cancelable: true }));
-  assert.deepEqual(sent.at(-1).patch, { maxRepairs: 4, maxReplans: 2, deploymentStaleMinutes: 30, ideApp: 'Rider', updateMain: false, reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
+  assert.deepEqual(sent.at(-1).patch, { maxRepairs: 4, maxReplans: 2, deploymentStaleMinutes: 30, spendLimit: 12.5, ideApp: 'Rider', updateMain: false, reviewDefaults: { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true } });
 });
 
 test('the last tab is remembered per viewer and reopens next time', (t) => {

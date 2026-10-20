@@ -41,8 +41,8 @@ text as public as the rest of this repo.
   uninstall path disagree. `package.json`'s `wranglerExtension` block is what the
   human consents to BEFORE any code runs, so it and `server/manifest.js` are
   duplicated by design and must agree (`id`, and `requires` in the manifest may
-  not be WIDER than the block's). `requires` is the five `sessions:*` (read, spawn,
-  archive, bill, wake) plus `mail:send`, `tasks:read`/`tasks:write`, `usage:read`,
+  not be WIDER than the block's). `requires` is the six `sessions:*` (read, spawn,
+  archive, bill, wake, interrupt) plus `mail:send`, `tasks:read`/`tasks:write`, `usage:read`,
   `board:rebuild`/`board:broadcast`, `images:keep` and `files:view`. Task read/write lets New job validate a
   selected Task or create one; spawn's `taskId` still binds task memory and
   assigns the card itself. `mail:send` and `sessions:wake` (both host API 1.0)
@@ -116,6 +116,15 @@ text as public as the rest of this repo.
   `adopt` and stamps the record, which is what lets `name_branch` work on the
   publish run (the one that pushes). `noteDispatch` discards the adopted record
   (`pendingLaunch.adopt`) so the store's copy keeps its `cleanupHead` and rename.
+- **A job's spend limit is `settings.spendLimit` × (1 + `job.topUps`), never stored**
+  (`server/job-budget.js`). The runner's `enforceBudget` runs first each tick: over, it sets
+  `job.budgetPaused` (claim and `allowed()` refuse it, as do `tendHelpers` and a main
+  resolution) and interrupts each `working` run card through `sessions:interrupt`, one per card
+  per `INTERRUPT_COOLDOWN_MS`, stamping `run.budgetHaltedAt`; under again it releases the job and
+  mails each halted run to carry on. `settle()` never idle-reaps a budget-paused job's runs. The
+  spend is `JobSpendRefresh.current` (the 60s scan with each card's highest live graph `usd`
+  folded in), the same figure the board shows. Resume clears only `job.paused`; `top-up` (pinned
+  to `topUps`) is the human's way past the limit.
 - **Every write is made by the session it names (`by`)**, and that session's
   `completed` receipt must answer for each one it owns (`job-writes.js
   applyWrites`; a missing one refuses the receipt). There is no batched writer:

@@ -516,6 +516,7 @@ export function jobStatus(job, sub) {
   if (sub?.cancelledAt) { const word = sub.superseded ? 'Superseded' : sub.notNeeded ? 'Not needed' : 'Dropped'; return { tone: sub.stage === 'done' ? 'done' : 'muted', text: sub.stage === 'done' ? word : `${word} · cleaning up` }; }
   if (!sub && job.cancelledAt) return { tone: job.stage === 'done' ? 'done' : 'muted', text: job.stage === 'done' ? 'Cancelled' : 'Cancelled · cleaning up' };
   if (job.paused) return { tone: 'muted', text: 'Paused' };
+  if (budgetHeld(job)) return { tone: 'muted', text: 'Paused for budget' };
   if (sub && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return { tone: 'needs', text: triggerDropped(job, sub) ? 'Trigger dropped' : 'Depends on a dropped sub-job' };
   if (isWriteSub(sub)) return writeStatusLine(job, sub);
   const idea = !sub && ideaStage(job);
@@ -601,6 +602,13 @@ export function dependencyLine(job, sub) {
 // transcript its cards have owned. `~` for a Codex estimate, exactly as a session
 // card reads it (cards.js). Empty for null/0 — a backlog job that has spent nothing
 // shows no price rather than an authoritative-looking $0.00.
+// Paused at its spend limit (server/job-budget.js), until Add $X or a new limit in Settings.
+// Mirrors server/jobs-schema.js DEFAULT_SPEND_LIMIT: what Settings shows while none is saved.
+export const DEFAULT_SPEND_LIMIT = 100;
+export const budgetHeld = (job) => !!job.budgetPaused && !job.cancelledAt && job.stage !== 'done';
+export const dollars = (usd) => `$${Number.isInteger(usd) ? usd : usd.toFixed(2)}`;
+export const topUpLabel = (job) => `Add ${dollars(job.spendStep ?? 0)}`;
+export const budgetLine = (job) => `${dollars(Math.max(job.usd ?? 0, job.budgetPaused?.usd ?? 0))} of ${job.spendLimit == null ? 'no limit' : dollars(job.spendLimit)}`;
 export const jobCostLabel = (usd, estimated) => typeof usd === 'number' && usd > 0 ? `${estimated ? '~' : ''}$${usd.toFixed(2)}` : '';
 export const JOB_COST_TITLE = 'Total price of this job: planning, every implementation step, CI repairs and PR comment triage';
 export const SUB_COST_TITLE = 'Price of this sub-job: every step it ran, its CI repairs and its comment triage';
@@ -620,6 +628,17 @@ export function storyLabel(story, stories = []) {
 export const receiptHtml = (checks = []) => `<ul class="job-receipt">${checks.map((c) => `<li><span aria-hidden="true">✓</span> ${esc(c)}</li>`).join('')}</ul>`;
 // A session's milestone (`on`) orders it like `after`, so it is a wave past its trigger.
 export const edgesOf = (sub) => [...sub.after, ...(isSessionSub(sub) && sub.on && !sub.after.includes(sub.on.sub) ? [sub.on.sub] : [])];
+// Every step `id` waits on, directly or through another, as id → hops (1 is a
+// direct prerequisite; breadth-first, so a step reached both ways counts as 1).
+// Writes are not steps. `edges` lets a drawn graph walk its own connectors.
+export function prerequisitesOf(subs, id, edges = edgesOf) {
+  const byId = new Map(subs.filter((s) => !isWriteSub(s)).map((s) => [s.id, s])), hops = new Map(), queue = [[id, 0]];
+  while (queue.length) {
+    const [at, n] = queue.shift(), sub = byId.get(at);
+    for (const p of sub ? edges(sub) : []) if (p !== id && byId.has(p) && !hops.has(p)) { hops.set(p, n + 1); queue.push([p, n + 1]); }
+  }
+  return hops;
+}
 export function dependencyLevels(plan) {
   const levels = new Map();
   function level(sub, visiting = new Set()) {

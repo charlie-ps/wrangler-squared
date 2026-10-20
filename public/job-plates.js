@@ -2,7 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml, inflowHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, ideaStage, liveSuggestion, ideaOpen } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, budgetHeld, ideaStage, liveSuggestion, ideaOpen } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, mainWaiting } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 import { runningDotHtml } from './job-running.js';
@@ -117,7 +117,7 @@ function skyGraphHtml(job, scene, lvl, art) {
     const kind = !s.after.includes(id) ? 'on' : isPrSub(dep) ? 'deploy' : '';
     const lit = kind !== 'on' && live(job) && dependencySatisfied(dep) && stateSolid(stateOf(job, s));
     const pts = [[ax + 8, ay], ...(lane ? lane.cols.map((w) => [colX(w), rowY(lane.r) + lane.k * 3]) : []), [bx - 8, by]];
-    out.push(`<path class="edge ${kind} ${lit ? 'lit' : ''} ${ink((ax + bx) / 2, (ay + by) / 2)}" d="M${pts[0]} ${pts.slice(1).map((p, i) => curve(pts[i], p)).join(' ')}"/>`);
+    out.push(`<path class="edge ${kind} ${lit ? 'lit' : ''} ${ink((ax + bx) / 2, (ay + by) / 2)}" data-from="${esc(id)}" data-to="${esc(s.id)}" d="M${pts[0]} ${pts.slice(1).map((p, i) => curve(pts[i], p)).join(' ')}"/>`);
   }
   let floor = 0;
   const open = (s) => live(job) ? `data-job="${esc(job.id)}" data-sub="${esc(s.id)}" tabindex="0" role="button"` : '';
@@ -129,7 +129,7 @@ function skyGraphHtml(job, scene, lvl, art) {
     const halo = ['running', 'needs'].includes(state) ? `<circle class="halo" cx="${x}" cy="${y}" r="6"/>` : '';
     const tag = labels && k <= 2 ? `<text class="lbl ${ink(x, y + 15)}" x="${x}" y="${y + 17}" text-anchor="middle">${KIND_TAG[kind]}${n ? ` #${esc(n)}` : ''}</text>` : '';
     floor = Math.max(floor, y + 6, tag ? y + 20 : 0);
-    out.push(`<g class="node ${kind} ${stateSolid(state) ? state : 'hollow'} ${state} tone-${STATES[state].tone} ${ink(x, y)}" data-state="${state}" ${open(s)} aria-label="${esc(`${s.title}: ${line}`)}"><title>${esc(tip)}</title>${halo}${SHAPES[kind](x, y)}${tag}<circle cx="${x}" cy="${y}" r="13" fill="transparent"/></g>`);
+    out.push(`<g class="node ${kind} ${stateSolid(state) ? state : 'hollow'} ${state} tone-${STATES[state].tone} ${ink(x, y)}" data-state="${state}" data-node="${esc(s.id)}" ${open(s)} aria-label="${esc(`${s.title}: ${line}`)}"><title>${esc(tip)}</title>${halo}${SHAPES[kind](x, y)}${tag}<circle cx="${x}" cy="${y}" r="13" fill="transparent"/></g>`);
     const moons = writes.filter((w) => w.by === s.id);
     if (!moons.length) continue;
     const beside = !subs.some((o) => edgesOf(o).includes(s.id)), up = y - 14 >= 32;
@@ -185,6 +185,9 @@ export function plateAsk(job) {
   const tone = state === 'failing' ? 'bad' : 'warn';
   const whole = (label, button, detail = '') => ({ tone, label, detail, button, icon: state === 'failing' ? ICONS.x : ICONS.doc, act: 'open', sub: '' });
   if (job.error) return whole('Needs attention', 'Open');
+  // At its spend limit nothing of the job moves until the human adds to it. The
+  // figures and Add $X stay in the job's own dialog: the board never shows the limit.
+  if (budgetHeld(job)) return { ...whole('Paused for budget', 'Open'), tone: 'warn', icon: ICONS.pause };
   // An agent stuck on a prompt outranks anything else waiting on you, and is
   // answered on its own card whether or not the job rolls up to "needs you".
   const prompts = promptsWaiting(job);

@@ -1122,6 +1122,17 @@ test('a Discard the disk no longer matches is spent: the fresh refusal replaces 
   assert.throws(() => f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'h3', fingerprint: 'fp1' }), /cannot be pinned/);
 });
 
+test('a Discard of a folder git could not remove is marked so the runtime deletes it whole, and says so in history', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api')]));
+  dropIt(f, 'api');
+  const refusal = { path: '/worktree/api', branch: 'branch-api', head: 'h1', fingerprint: 'fp1', pinned: true, cause: 'unremovable', error: 'error: failed to delete', commits: [], commitCount: 0, files: [], fileCount: 0 };
+  f.runtime.cleanup = async () => { throw new CleanupRefused('refused', refusal); };
+  await f.tick();
+  f.store.action(f.job.id, 'discard-worktree', { subJobId: 'api', discardHead: 'h1', fingerprint: 'fp1' });
+  assert.deepEqual([f.sub().discard.cause, f.sub().discard.fingerprint], ['unremovable', 'fp1']);
+  assert.equal(f.store.get(f.job.id).moves.at(-1).detail, 'Chose to delete the leftover folder /worktree/api and branch branch-api, from “Deliver api”');
+});
+
 test('a failed git command in cleanup shows git\'s own reason on the board, not just the command line', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api')]));
   dropIt(f, 'api');

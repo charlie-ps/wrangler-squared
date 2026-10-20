@@ -217,8 +217,8 @@ test('cleanup preserves a worktree that moved on since verification, and a branc
   const dir = fs.mkdtempSync(path.join(DATA_DIR, 'worktree-'));
   const wt = { path: dir, repoRoot: '/repo', branch: 'job-api' };
   for (const [ref, head] of [['refs/heads/somewhere-else', 'verified'], ['refs/heads/job-api', 'newer']]) {
-    const f = fakeRun({ log: `${head}\tLocal work`, overrides: { 'symbolic-ref': () => ref, 'rev-parse': (args) => args[1] === '--abbrev-ref' ? 'origin/main' : args[1] === '--verify' ? 'tracked' : head } });
-    await assert.rejects(runtimeWith(host, { run: f.run }).cleanupWorktree(wt, 'verified'), /preserve it for review/);
+    const f = fakeRun({ log: `${head}\tLocal work`, overrides: { 'symbolic-ref': () => ref, 'rev-parse': (args, cwd) => args[1] === '--abbrev-ref' ? 'origin/main' : args[1] === '--verify' ? 'tracked' : args[1] === '--show-toplevel' ? cwd : head } });
+    await assert.rejects(runtimeWith(host, { run: f.run }).cleanupWorktree(wt, 'verified'), ref.endsWith('/job-api') ? /would be lost/ : /changed since verification/);
     assert.ok(!f.calls.some((c) => c[0] === 'worktree'), 'nothing is removed once the tree has changed');
   }
   const held = fakeRun({ overrides: { worktree: () => 'worktree /elsewhere\nbranch refs/heads/job-api' } });
@@ -661,6 +661,65 @@ test('a worktree git cannot read is refused with git\'s reason and no Discard, a
   assert.deepEqual([e.refusal.cause, e.refusal.pinned], ['unreadable', false]);
   await assert.rejects(r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: { head: null, fingerprint: undefined } }), CleanupRefused);
   assert.ok(fs.existsSync(path.join(r.wt.path, 'README.md')));
+});
+
+test('a worktree git cannot delete is kept with git\'s reason, and its Discard deletes the whole folder and branch', async () => {
+  const r = await gitRepo();
+  // An ignored directory git may delete but cannot: what a process still
+  // writing there looks like to `git worktree remove`.
+  fs.appendFileSync(path.join(r.repo, '.git', 'info', 'exclude'), 'locked/\n');
+  const locked = path.join(r.wt.path, 'locked');
+  fs.mkdirSync(locked); fs.writeFileSync(path.join(locked, 'out.log'), 'busy\n'); fs.chmodSync(locked, 0o555);
+  try {
+    const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+    assert.ok(e instanceof CleanupRefused, e.message);
+    assert.match(e.message, new RegExp(`^Worktree at ${r.wt.path} could not be removed \\(error: failed to delete .+\\); preserve it for review$`));
+    assert.deepEqual([e.refusal.cause, e.refusal.pinned, e.refusal.path, e.refusal.branch, e.refusal.head], ['unremovable', true, r.wt.path, 'job-api', r.wt.cleanupHead]);
+    assert.match(e.refusal.error, /^error: failed to delete/);
+    assert.ok(await r.branchExists(), 'the branch is kept with the tree');
+    // Git had already dropped its own record of the tree, so a Retry finds the
+    // same leftover, with the same pin.
+    const again = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+    assert.deepEqual([again.refusal?.cause, again.refusal?.fingerprint], ['unremovable', e.refusal.fingerprint], again.message);
+    assert.ok(fs.existsSync(path.join(locked, 'out.log')), 'nothing is deleted unasked');
+  } finally { fs.chmodSync(locked, 0o755); }
+  const e = await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead).catch((e) => e);
+  await r.runtime.cleanupWorktree(r.wt, r.wt.cleanupHead, { discard: { head: e.refusal.head, fingerprint: e.refusal.fingerprint, cause: 'unremovable' } });
+  assert.equal(fs.existsSync(r.wt.path), false);
+  assert.equal(await r.branchExists(), false);
+});
+
+test('a half-deleted worktree inside its parent checkout is the same refusal on Retry, and its Discard spares the parent', async () => {
+  const r = await gitRepo();
+  await r.git(r.repo, 'worktree', 'remove', r.wt.path);
+  const inside = path.join(r.repo, 'worktrees.noindex', 'job-api');
+  await r.git(r.repo, 'worktree', 'add', '-q', inside, 'job-api');
+  await r.git(r.repo, 'checkout', '-q', '-b', 'elsewhere');
+  await r.commit(inside, 'wip.js', 'Unpushed work');
+  // What a failed delete leaves: its .git file gone, some of its files not.
+  fs.rmSync(path.join(inside, '.git'));
+  const wt = { ...r.wt, path: inside };
+  const e = await r.runtime.cleanupWorktree(wt, wt.cleanupHead).catch((e) => e);
+  assert.ok(e instanceof CleanupRefused, e.message);
+  assert.match(e.message, /could not be removed \(no longer its own worktree: git reads it as .+\/repo\); preserve it for review$/);
+  assert.deepEqual([e.refusal.cause, e.refusal.pinned, e.refusal.path, e.refusal.commitCount, e.refusal.commits[0].subject], ['unremovable', true, inside, 1, 'Unpushed work']);
+  await assert.rejects(r.runtime.cleanupWorktree(wt, wt.cleanupHead, { discard: { head: e.refusal.head, fingerprint: 'stale', cause: 'unremovable' } }), /changed after you chose to discard/);
+  assert.ok(fs.existsSync(path.join(inside, 'README.md')), 'a stale Discard deletes nothing');
+  assert.ok(await r.branchExists());
+  await r.runtime.cleanupWorktree(wt, wt.cleanupHead, { discard: { head: e.refusal.head, fingerprint: e.refusal.fingerprint, cause: 'unremovable' } });
+  assert.equal(fs.existsSync(inside), false);
+  assert.equal(await r.branchExists(), false);
+  assert.equal(await r.git(r.repo, 'worktree', 'list', '--porcelain').then((t) => t.includes(inside)), false, 'git\'s record is pruned');
+  assert.equal(await r.git(r.repo, 'symbolic-ref', '--short', 'HEAD'), 'elsewhere');
+  assert.ok(fs.existsSync(path.join(r.repo, 'README.md')), 'the parent checkout is untouched');
+});
+
+test('a leftover Discard never deletes the folder holding the repository', async () => {
+  const r = await gitRepo();
+  const e = await r.runtime.cleanupWorktree({ ...r.wt, path: path.dirname(r.repo) }, r.wt.cleanupHead).catch((e) => e);
+  assert.equal(e.refusal?.cause, 'unremovable', e.message);
+  await assert.rejects(r.runtime.cleanupWorktree({ ...r.wt, path: path.dirname(r.repo) }, r.wt.cleanupHead, { discard: { head: e.refusal.head, fingerprint: e.refusal.fingerprint, cause: 'unremovable' } }), /holds the repository itself/);
+  assert.ok(fs.existsSync(path.join(r.repo, 'README.md')));
 });
 
 test('a Discard does not cover a change only to what is staged', async () => {
