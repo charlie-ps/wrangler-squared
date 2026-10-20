@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isPrimaryActionKey, primaryAction } from './jobs-view.js';
-import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, pinLine } from './jobs.js';
+import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml, plateAsk } from './job-plates.js';
@@ -11,6 +11,8 @@ import { subState, subLabel, subLine, jobState, jobLabel } from './job-state.js'
 const sub = (id, after = []) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Implement it and open the PR', sessions: [], repairs: [] });
 const plan = { context: 'Keys live in the vault; every service reads them at boot.', stories: [{ id: 'story', key: 'AUTH-1', title: 'Customers can sign in' }], subJobs: [sub('api'), sub('web', ['api'])] };
 const hint = (f) => f.q('#job-dialog .job-chip-state').title;
+// A press stays busy until a redraw or its timeout; a test pressing again with neither hands it back as the timeout would.
+const release = (b) => { b.removeAttribute('aria-busy'); b.disabled = false; };
 const deploys = (summary = 'Deploys on merge · Deploy') => ({ head: 'head1', base: 'main', expected: true, workflows: [{ name: 'Deploy', file: 'deploy.yml', triggers: true, reason: 'runs on push' }], summary });
 function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], extra = {}) {
   const window = new Window({ url: 'http://localhost:7878' });
@@ -112,7 +114,7 @@ test('each job is its own card, and a delivered job only returns with Finished',
   f.q('[data-filter="done"]').click();
   assert.deepEqual(boards(), ['job3'], 'Finished shows only the finished');
   assert.ok(f.q('[data-board="job3"]').classList.contains('tone-ok'));
-  assert.deepEqual([...document.querySelectorAll('.jobs-rail-n')].map((n) => n.textContent), ['2', '', '', '', '', '1'], 'each filter counts its jobs, and none is blank, not a grey 0');
+  assert.deepEqual([...document.querySelectorAll('.jobs-rail-n')].map((n) => n.textContent), ['2', '', '', '2', '', '1'], 'each filter counts its jobs, and none is blank, not a grey 0');
   assert.equal(f.q('.jobs-rail-sort'), null, 'no fixed sort label posing as a control');
   const sky = f.q('.jobs-top > canvas.jobs-mast-sky');
   assert.equal(sky?.getAttribute('aria-hidden'), 'true', 'the masthead sits on its own painted sky, hidden from assistive tech');
@@ -226,6 +228,19 @@ test('a red run the human accepted reads as landing or merging', (t) => {
   const landing = { ...sub('api'), stage: 'deployment', pr: { ...redPr, checkStatus: 'passing', mergeCommit: 'abc' }, deploymentResult: { status: 'failing', runs: [{ workflow: 'Deploy', status: 'failing', url: 'https://github.com/org/repo/actions/runs/1' }], commit: 'abc' } };
   assert.deepEqual(jobStatus(job, { ...landing, acceptedRed: { ref: 'abc' }, error: null }), { tone: 'working', text: 'Red run accepted · landing' });
   assert.deepEqual(jobStatus(job, { ...sub('api'), stage: 'pr', pr: redPr, acceptedRed: { ref: 'h1' } }), { tone: 'working', text: 'Merging with red checks' });
+});
+
+test('watching checks reads as work in progress, apart from a queued sub-job; a GitHub review stays a wait', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  const pr = { url: 'https://github.com/org/repo/pull/1', head: 'h1', checkStatus: 'pending', checks: [] };
+  job.subJobs = [{ ...sub('api'), stage: 'pr', pr }, { ...sub('web'), stage: 'implementation' }];
+  f.view.update(f.data);
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Watching checks' });
+  assert.deepEqual(jobStatus(job, job.subJobs[1]), { tone: 'muted', text: 'Queued' });
+  const tone = (id) => [...f.q(`.job-plate-graph .node[data-sub="${id}"]`).classList].find((c) => c.startsWith('tone-'));
+  assert.deepEqual([tone('api'), tone('web')], ['tone-run', 'tone-idle']);
+  assert.deepEqual(jobStatus(job, { ...job.subJobs[0], pr: { ...pr, checkStatus: 'awaiting-review' } }), { tone: 'muted', text: 'GitHub review required' });
+  assert.deepEqual(jobStatus(job, { ...sub('api'), stage: 'deployment', recoveredBy: 'fix' }), { tone: 'muted', text: 'Awaiting fix' });
 });
 
 test('Request changes sends the text pinned to the PR head that was on screen, and nothing else', (t) => {
@@ -392,6 +407,36 @@ test('Review code in Wrangler opens the latest run already on the board, else th
   f.q('#job-diff').click(); assert.deepEqual(f.diffs, ['s3'], 'every run shares the worktree; nothing on the board, so the latest');
   f.onBoard.add('s1'); f.onBoard.add('s2'); f.view.openDetail('job1', 'api');
   f.q('#job-diff').click(); assert.equal(f.diffs.at(-1), 's2', 'an archived card would resume its agent just to show a diff');
+});
+
+test('a round-trip press is busy at once, a double-click sends once, and the next broadcast redraws it fresh', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; Object.assign(job, { stage: 'backlog', plan: null }); f.view.update(f.data);
+  f.view.openDetail('job1');
+  const start = f.q('[data-action="start"]');
+  start.click();
+  assert.deepEqual([start.getAttribute('aria-busy'), start.disabled], ['true', true], 'busy before any broadcast');
+  start.click(); start.dispatchEvent(f.event('click'));
+  assert.equal(f.sent.filter((m) => m.action === 'start').length, 1, 'one start however often it is pressed');
+  job.revision++; f.view.update(f.data);
+  assert.equal(f.q('[data-action="start"]').hasAttribute('aria-busy'), false, 'the redraw is the confirmation');
+  job.stage = 'active'; job.plan = plan;
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1'], pr: { url: 'https://github.com/org/repo/pull/1', head: 'head1', checkStatus: 'passing', checks: [] } }];
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  const merge = f.q('[data-action="approve-merge"]');
+  merge.click(); merge.click();
+  assert.equal(f.sent.filter((m) => m.action === 'approve-merge').length, 1, 'a double-click on Merge sends one action');
+  assert.equal(merge.getAttribute('aria-busy'), 'true');
+});
+
+test('a plate\'s Merge holds its stub busy, so a double-click sends one merge', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1'], pr: { url: 'https://github.com/org/repo/pull/1', head: 'head1', checkStatus: 'passing', checks: [] } }];
+  f.view.update(f.data);
+  const go = f.q('[data-board="job1"] [data-ask="merge"]');
+  assert.ok(go, 'the plate offers Merge');
+  go.click(); go.dispatchEvent(f.event('click'));
+  assert.equal(f.sent.filter((m) => m.action === 'approve-merge').length, 1);
+  assert.deepEqual([go.getAttribute('aria-busy'), go.disabled], ['true', true]);
 });
 
 test('PR review shows green checks, what runs on merge, CI changes, and approves only the displayed head', (t) => {
@@ -690,7 +735,8 @@ test('new idea is a brief beside a property sidebar, and the brief is the descri
   assert.equal(brief.querySelector('details'), null, 'no folded planning guidance or repository hints');
   assert.deepEqual([...brief.querySelectorAll('textarea')].map((e) => e.name), ['intent']);
   assert.equal(form.elements.repos, undefined); assert.equal(form.elements.planningPrompt, undefined);
-  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Sandbox', 'Images']);
+  assert.deepEqual([...props.querySelectorAll('legend')].map((l) => l.textContent), ['Task', 'Agent', 'Images']);
+  assert.ok(props.querySelector('#job-sandbox').hidden, 'Claude has no Sandbox section');
   assert.deepEqual([...brief.querySelectorAll('legend')].map((l) => l.textContent), ['Review checkpoints']);
   for (const name of ['taskId', 'newTaskName', 'agent', 'model', 'effort', 'shareImages']) assert.ok(props.contains(form.querySelector(`[name="${name}"]`)), `${name} lives in the sidebar`);
   for (const name of ['reviewPlan', 'reviewCode', 'reviewMerge', 'reviewSessions', 'reviewWrites', 'reviewRed']) assert.ok(brief.contains(form.querySelector(`[name="${name}"]`)), `${name} is a tile under the brief`);
@@ -1320,7 +1366,7 @@ test('a merged sub-job with no post-merge run turns amber, joins Needs me and sa
   const watching = { ...sub('api'), stage: 'deployment', mergedAt: Date.now() - 40 * 60000, deploys: deploys(), pr: { url: 'https://github.com/org/repo/pull/1', mergeCommit: 'abcdef1234567890', base: 'main', checkStatus: 'passing', checks: [] },
     deploymentResult: { status: 'pending', runs: [{ workflow: 'Deploy', runId: 3, status: 'pending' }], commit: 'abcdef1234567890' } };
   job.subJobs = [watching]; f.view.update(f.data);
-  assert.deepEqual(jobStatus(job, watching), { tone: 'muted', text: 'Watching post-merge runs' }); assert.equal(jobNeedsReview(job, watching), false);
+  assert.deepEqual(jobStatus(job, watching), { tone: 'working', text: 'Watching post-merge runs' }); assert.equal(jobNeedsReview(job, watching), false);
   watching.deploymentStale = { since: watching.mergedAt }; f.view.update(f.data);
   assert.deepEqual(jobStatus(job, watching), { tone: 'needs', text: 'No deployment run' }); assert.equal(jobNeedsReview(job, watching), true);
   assert.ok(f.q('.job-plate-graph .node[data-sub="api"]').classList.contains('tone-warn')); assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Nothing deployed');
@@ -1537,7 +1583,9 @@ test('a plan-change proposal locks landed work, marks removed work as cancelled 
   assert.equal(mark('web'), 'Will be cancelled'); assert.equal(mark('docs'), 'Edited'); assert.equal(mark('cli'), 'New');
   assert.equal(f.q('.job-node[data-node="docs"] .job-node-title').textContent, 'Docs <b>v2</b>', 'agent text is escaped');
   const removed = f.q('.job-replan-changes .job-mark-removed');
-  assert.match(removed.textContent, /Will be cancelled: Deliver web · PR #7 ↗ stays open on GitHub/);
+  assert.match(removed.textContent, /Cancels “Deliver web” · PR #7 ↗ stays open on GitHub/);
+  assert.equal(f.q('.job-replan-changes .job-mark-added').textContent, 'Adds “Deliver cli”');
+  assert.equal(f.q('.job-replan-changes .job-mark-edited').textContent, 'Renames it to “Docs <b>v2</b>”', 'a title edit names the new title, escaped');
   assert.equal(removed.querySelector('a').href, 'https://github.com/org/repo/pull/7');
   assert.equal(f.q('#job-dialog [data-node="cli"]').tagName, 'DIV', 'a proposed node opens nothing: it has no sub-job yet');
   f.q('[data-action="approve-replan"]').click();
@@ -1776,6 +1824,7 @@ test('a write waits on its session; a draft needs you, its panel the editor that
   assert.equal(f.q('.job-change').dataset.changeAt, 'write', 'a draft takes ideas too, pinned to where it stands'); assert.equal(f.q('.job-moves'), null);
   panel.requestSubmit();
   assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).subJobId, f.sent.at(-1).write], ['approve-write', 'w-rev', undefined], 'nothing changed: a plain approval');
+  release(panel.querySelector('button.primary'));
   panel.querySelector('[name="to"]').value = ''; panel.querySelector('[name="comment"]').value = '';
   panel.requestSubmit();
   assert.match(f.q('#job-move-error').textContent, /moves the ticket, comments on it, or both/); assert.equal(f.sent.at(-1).write, undefined);
@@ -2085,6 +2134,7 @@ test('a write elsewhere in review is approved as Write to its name, sending only
   panel.querySelector('[name="text"]').value = 'Post a resolved notice';
   panel.requestSubmit();
   assert.deepEqual(f.sent.at(-1).write, { action: { text: 'Post a resolved notice' } });
+  release(panel.querySelector('button.primary'));
   panel.querySelector('[name="name"]').value = 'Statuspage'; panel.requestSubmit();
   assert.deepEqual(f.sent.at(-1).write, { action: { text: 'Post a resolved notice' }, name: 'Statuspage' });
 });
@@ -2184,9 +2234,11 @@ test('New job\'s Sandbox section follows the agent and round-trips its mode and 
   const sbx = () => f.q('#job-sandbox');
   assert.ok(f.q('.job-create-brief .job-review-grid .job-review-tiles .job-review[data-checkpoint="reviewWrites"]'), 'the checkpoints are tiles under the brief');
   assert.equal(f.q('.job-create-props .job-review'), null, 'and no longer in the side panel');
-  assert.match(sbx().textContent, /Not used by Claude/, 'Claude collapses the section to one row');
-  assert.equal(sbx().querySelector('.job-sbx'), null);
+  assert.ok(sbx().hidden, 'Claude hides the whole section');
+  assert.equal(sbx().querySelector('legend, .job-sbx'), null);
   click(f, '.pick-ticket'); click(f, '.pick-tab[data-agent=codex]'); click(f, '.pick-cell[data-value="gpt-5.6-sol"]');
+  assert.equal(sbx().hidden, false, 'Codex shows it again');
+  assert.equal(sbx().querySelector('legend').textContent, 'Sandbox');
   const pressed = () => sbx().querySelector('.job-sbx[aria-pressed=true]').dataset.mode;
   const launches = () => sbx().querySelector('.job-sbx-launch code').textContent;
   assert.equal(pressed(), 'auto', 'a new job auto-approves');
@@ -2261,11 +2313,16 @@ test('a proposal with a diagnosis, ranked options and actions: options switch th
     alternatives: [{ label: 'Fix the flaky test first', why: 'A new PR first', plan: fixed, merged: fixed, changes: changes({ added: ['flake'], edited: [{ id: 'api', fields: ['after'] }], kept: ['web'] }), actions: [] }] } };
   f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
   const html = () => f.q('#job-dialog').innerHTML;
-  assert.match(f.q('.job-triage').textContent, /Wrangler looked into it.*times out.*run 88213e2e/);
+  assert.match(f.q('.job-triage header').textContent, /What Wrangler found/);
+  assert.match(f.q('.job-triage p').textContent, /times out/);
+  assert.equal(f.q('.job-triage details').open, false, 'evidence waits behind Details');
+  assert.match(f.q('.job-triage details').textContent, /Details \(1\)run 88213e2e/);
+  assert.equal(f.q('.job-options legend').textContent, 'Choose one');
   assert.ok(!html().includes('<b>times out</b>') && !html().includes('<i>flake</i>'), 'agent text is escaped');
   assert.deepEqual([...document.querySelectorAll('.job-option b')].map((b) => b.textContent), ['Accept the red checksRecommended', 'Fix the flaky test first']);
   assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Accept red', 'the action is drawn on the node it acts on');
-  assert.match(f.q('.job-replan-changes .job-mark-act').textContent, /Accept red: Deliver api\s*merge as it stands\s*pinned to head h1abcdef1/);
+  assert.equal(f.q('.job-replan-changes .job-mark-act').textContent, 'Merges “Deliver api” despite its failing checks');
+  assert.equal(f.q('.job-replan-changes .job-mark-act').title, 'Not applied if its PR has new commits by the time you approve');
   f.q('[data-action="approve-replan"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_p', option: 0 });
   const second = f.q('input[name="opt"][value="1"]'); second.checked = true; second.dispatchEvent(f.event('change'));
@@ -2285,7 +2342,11 @@ test('a recover is a mark on the merged node that waits for its fix, and a propo
   job.replan = { feedback: 'Deploy failed', at: 1, previous: null, proposal: { id: 'run_q', plan: merged, merged, changes: { frozen: ['api'], kept: [], edited: [], added: ['fix'], removed: [] }, actions: [{ type: 'recover', sub: 'api', fix: 'fix', pin: { at: 'merge', ref: 'm1' } }] } };
   f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
   assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Waits for its fix');
-  assert.match(f.q('.job-replan-changes .job-mark-act').textContent, /Recover: Deliver api\s*lands when “Deliver fix” deploys\s*pinned to merge m1/);
+  assert.equal(f.q('.job-replan-changes .job-mark-act').textContent, 'Fixes “Deliver api” with a new PR, “Deliver fix”');
+  assert.equal(f.q('.job-option-only'), null, 'no label or why, nothing to read');
+  job.replan.proposal = { ...job.replan.proposal, label: 'Fix it with a <b>new</b> PR', why: 'The deploy stays red until it lands.' }; f.view.update(f.data);
+  assert.equal(f.q('.job-option-only').textContent, 'Fix it with a <b>new</b> PRThe deploy stays red until it lands.', 'a lone option still says what it does, escaped');
+  assert.equal(f.q('.job-replan-changes .job-mark-act').title, 'Not applied if its merge has changed by the time you approve', 'the pin is a tooltip, not text to read');
   assert.equal(f.q('.job-options'), null, 'one option needs no chooser');
   f.q('[data-action="approve-replan"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_q' });
@@ -2940,7 +3001,7 @@ test('plan review sets a PR\'s own base from its branch pill, and blank lands wh
   assert.equal(f.sent.at(-1).plan.subJobs[0].base, 'release/2.x');
   const again = f.q('[data-base="0"]'); again.value = ''; again.dispatchEvent(f.event('change'));
   assert.equal(f.q('.job-node-base.own'), null);
-  f.q('[data-action="approve-plan"]').click();
+  release(f.q('[data-action="approve-plan"]')); f.q('[data-action="approve-plan"]').click();
   assert.equal('base' in f.sent.at(-1).plan.subJobs[0], false, 'cleared, it is gone rather than empty');
 });
 
@@ -2966,11 +3027,19 @@ test('what the agent left running is a chip among the step\'s own, its popover s
   assert.equal(f.q('#job-dialog .job-run-chip').textContent.trim(), '1 of 2 running');
 });
 
+test('an edited step reads as what changes for it, never the plan\'s field names', () => {
+  const plan = { subJobs: [{ id: 'fix', title: 'Show worktree remove failures as a cleanup refusal' }] };
+  assert.equal(editLine({ id: 'fix', fields: ['brief', 'show'] }, plan), 'Changes “Show worktree remove failures as a cleanup refusal”: what it is asked to do and what it shows you');
+  assert.equal(editLine({ id: 'fix', fields: ['title', 'after', 'base', 'check'] }, plan), 'Changes “Show worktree remove failures as a cleanup refusal”: when it starts, which branch it lands on and how it is checked');
+  assert.equal(editLine({ id: 'fix', fields: ['title'] }, plan), 'Renames it to “Show worktree remove failures as a cleanup refusal”');
+  assert.doesNotMatch(editLine({ id: 'fix', fields: ['brief', 'show', 'check', 'after', 'by', 'on'] }, plan), /\b(brief|show|check|after|by|on)\b,|: (brief|show)/);
+});
+
 test('a forward reads as the quote the session will be told, pinned to its round, and lands in the thread tagged as come through the planner', () => {
   const plan = { subJobs: [{ id: 'api', title: 'Design export button' }] };
   const a = { type: 'forward', sub: 'api', note: 'Not enough spacing before the button.', pin: { at: 'round', ref: 'run_1#2', round: 2 } };
-  assert.deepEqual(actionLine(a, plan), { text: 'Forward: Design export button', detail: '“Not enough spacing before the button.”' });
-  assert.equal(pinLine(a.pin), 'to its open session · pinned to round 2');
+  assert.deepEqual(actionLine(a, plan), { text: 'Sends your message to the agent that built “Design export button”', detail: '“Not enough spacing before the button.”' });
+  assert.equal(pinLine(a.pin), 'Not applied if that review has moved on by the time you approve');
   const job = { id: 'job1', runs: [{ id: 'run_1', subJobId: 'api', stopped: false, parkedFor: 'ready', sessionId: 's1' }] };
   const sub = { id: 'api', ready: { round: 2 }, answering: { kind: 'change', round: 2 }, thread: [{ id: 'm1', at: 1, from: 'human', via: 'planner', to: 'agent', text: 'Not enough <b>spacing</b>', round: 2, sentAt: null }] };
   const html = threadHtml(job, sub);

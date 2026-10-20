@@ -29,11 +29,11 @@ export function mountSandbox(el, { mode = 'auto', dirs = [] } = {}) {
     const add = state.dirs.length >= MAX_DIRS ? '' : state.adding
       ? '<input class="job-sbx-input" aria-label="Folder path" placeholder="~/.docker" maxlength="1000" spellcheck="false" autocomplete="off">'
       : `<button type="button" class="job-sbx-add">${ICONS.plus}Folder</button>`;
-    el.innerHTML = `<legend>Sandbox</legend>${codex
-      ? `<div class="job-sbx-modes" role="group" aria-label="Codex sandbox">${modes}</div>
-        <div class="job-sbx-dirs"${full ? ' hidden' : ''}><span class="job-sbx-label">Also writable</span><div class="job-sbx-chips">${chips}${add}</div></div>
-        <div class="job-sbx-launch tone-${state.mode}"><span>Launches</span><code>${esc(launchesLine(state.mode, state.dirs))}</code></div>`
-      : `<div class="job-review-row job-sbx-claude"><span class="job-review-stage">${ICONS.info}</span><span class="job-review-name" title="Claude has no OS sandbox. Its own permission mode decides what runs.">Not used by Claude</span><span></span></div>`}`;
+    // Claude has no OS sandbox, so the whole section goes rather than saying so.
+    el.hidden = !codex;
+    el.innerHTML = codex ? `<legend>Sandbox</legend><div class="job-sbx-modes" role="group" aria-label="Codex sandbox">${modes}</div>
+      <div class="job-sbx-dirs"${full ? ' hidden' : ''}><span class="job-sbx-label">Also writable</span><div class="job-sbx-chips">${chips}${add}</div></div>
+      <div class="job-sbx-launch tone-${state.mode}"><span>Launches</span><code>${esc(launchesLine(state.mode, state.dirs))}</code></div>` : '';
     const input = el.querySelector('.job-sbx-input');
     if (input) input.focus();
   };

@@ -27,6 +27,15 @@ const uid = (prefix) => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 // ~/.claude/settings.json says at launch — not knowable here, so not guessed.
 const launchModel = (job) => job.model || null;
 const launchEffort = (job) => job.effort || null;
+// What runs a job's steps when its create left agent/model/effort out: New job's
+// last pick. That pick's model and effort mean nothing to another agent, and its
+// effort is for its own model, so an explicit model keeps the agent's default.
+const pickFor = ({ agent, model, effort }, usual) => {
+  const resolved = agent ?? usual?.agent ?? 'claude';
+  const same = usual?.agent === resolved;
+  const m = model ?? (same ? usual.model : '');
+  return { agent: resolved, model: m, effort: effort ?? (same && m === usual.model ? usual.effort : '') };
+};
 const quoted = (title) => `“${title}”`;
 const listed = (items, total, label) => `${items.slice(0, 5).map(label).join(', ')}${total > 5 ? ` and ${total - 5} more` : ''}`;
 const lossLine = (r) => [r.commitCount && `${r.commitCount} commit${r.commitCount === 1 ? '' : 's'} (${listed(r.commits, r.commitCount, (c) => `${c.sha.slice(0, 8)} ${c.subject}`)})`,
@@ -262,9 +271,9 @@ export class JobStore {
   create(input, extra = {}) {
     const parsed = jobInputSchema.parse(input);
     // Parsed here, not trusted: the store parses settings only for a fresh file.
-    const { reviewDefaults } = settingsSchema.parse(this.data.settings ?? {});
+    const { reviewDefaults, usualPick } = settingsSchema.parse(this.data.settings ?? {});
     const reviews = Object.fromEntries(Object.keys(REVIEW_DEFAULTS).map((f) => [f, parsed[f] ?? reviewDefaults[f]]));
-    const job = { ...parsed, ...reviews, title: parsed.title || fallbackTitle(parsed.intent), id: uid('job'), stage: 'backlog', revision: 0,
+    const job = { ...parsed, ...reviews, ...pickFor(parsed, usualPick), title: parsed.title || fallbackTitle(parsed.intent), id: uid('job'), stage: 'backlog', revision: 0,
       createdAt: Date.now(), updatedAt: Date.now(), paused: false, plan: null, subJobs: [], runs: [], moves: [], ...extra };
     return this.change((d) => { d.jobs.push(job); return job; });
   }

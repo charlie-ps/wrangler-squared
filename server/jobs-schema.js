@@ -388,8 +388,10 @@ export const SANDBOX_MODES = ['locked', 'auto', 'full'];
 export const jobInputSchema = z.object({
   title: line.optional(), intent: z.string().trim().min(1).max(16000),
   repos: z.array(repoPath).max(30).default([]),
-  agent: z.enum(['claude', 'codex']).default('claude'), model: z.string().max(150).default(''),
-  effort: z.string().max(40).default(''),
+  // Left out, these take the human's `settings.usualPick` (JobStore.create); no
+  // zod default for the same reason as the review flags below.
+  agent: z.enum(['claude', 'codex']).optional(), model: z.string().max(150).optional(),
+  effort: z.string().max(40).optional(),
   planningPrompt: z.string().max(8000).default(''),
   // Left out, a flag takes the human's `settings.reviewDefaults` (JobStore.create).
   // No zod default here: create_job spreads this shape, and the MCP SDK would fill

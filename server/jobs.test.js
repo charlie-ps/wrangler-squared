@@ -2526,6 +2526,10 @@ test('a running job takes a plan change as a proposal: frozen work is locked, re
   assert.match(prompt, /ALREADY RUNNING/); assert.match(prompt, /- api \(pr\) "Deliver api": done\/done · FROZEN/);
   assert.match(prompt, /Frozen \(.*\): api\./); assert.match(prompt, /- web .*a step is running/); assert.match(prompt, /Requested change: Drop docs/);
   assert.match(prompt, /Feedback on, or a question about, what a live sub-job already produced.*`forward` when its session is open on review, else `rework`.*never write it into a later sub-job/i);
+  assert.match(prompt, /The summary is at most four sentences: first what is wrong or what the human asked, then what approving your recommended option does/);
+  assert.match(prompt, /A label says what happens if they pick it.*its why says what they get and what they give up/);
+  assert.match(prompt, /for the human, who has not read the code, the plan or this prompt.*never file or function names, sub-job ids, or the plan's own words: brief, show, check, context, round, forward, rework, frozen, pinned/);
+  assert.match(prompt, /call it that \(the agent that built it\), never a reviewer\. Paths, ids, commands, plan lines and runs go in evidence/);
   assert.throws(() => change(f, null, 'again'), /Wait for the planning/);
 
   const proposal = (subs) => plan(subs);

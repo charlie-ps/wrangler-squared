@@ -366,16 +366,28 @@ export const proposalOptions = (proposal) => [proposal, ...(proposal?.alternativ
 // What an action says it does and what it is pinned to, in words; the node it
 // acts on carries `actionMark` in the graph (job-graph.js MARKS).
 export const actionMark = (a) => (a.type === 'mark' ? `mark-${a.position}` : a.type);
-const PIN_NOUN = { head: 'head', merge: 'merge', stage: 'stage' };
-export const pinLine = (pin) => !pin ? '' : pin.at === 'round' ? `to its open session · pinned to round ${pin.round || 1}` : `pinned to ${PIN_NOUN[pin.at] || pin.at} ${String(pin.ref ?? 'none').slice(0, 9)}`;
+// The pin is why an approval can be refused, not something to read: it is the
+// change line's tooltip.
+const PIN_MOVED = { round: 'that review has moved on', head: 'its PR has new commits', merge: 'its merge has changed', stage: 'it has moved on' };
+export const pinLine = (pin) => !pin ? '' : `Not applied if ${PIN_MOVED[pin.at] || 'it has moved on'} by the time you approve`;
 export function actionLine(a, plan) {
-  const title = (id) => plan.subJobs.find((s) => s.id === id)?.title || id;
+  const title = (id) => `“${plan.subJobs.find((s) => s.id === id)?.title || id}”`;
   const name = title(a.sub);
-  if (a.type === 'accept-red') return { text: `Accept red: ${name}`, detail: a.pin?.at === 'merge' ? 'count the merge as landed' : 'merge as it stands' };
-  if (a.type === 'recover') return { text: `Recover: ${name}`, detail: `lands when “${title(a.fix)}” deploys` };
-  if (a.type === 'mark') return { text: `Mark ${a.position === 'merged' ? 'merged' : 'done'}: ${name}`, detail: a.evidence || '' };
-  if (a.type === 'forward') return { text: `Forward: ${name}`, detail: `“${a.note || ''}”` };
-  return { text: `Rework: ${name}`, detail: a.note || '' };
+  if (a.type === 'accept-red') return { text: a.pin?.at === 'merge' ? `Counts ${name} as landed despite its failing run after merge` : `Merges ${name} despite its failing checks`, detail: a.note || '' };
+  if (a.type === 'recover') return { text: `Fixes ${name} with a new PR, ${title(a.fix)}`, detail: '' };
+  if (a.type === 'mark') return { text: a.position === 'merged' ? `Marks ${name} as merged elsewhere` : `Marks ${name} as done`, detail: a.evidence || '' };
+  if (a.type === 'forward') return { text: `Sends your message to the agent that built ${name}`, detail: `“${a.note || ''}”` };
+  return { text: `Sends ${name} back to be redone`, detail: a.note || '' };
+}
+// What editing a sub-job's plan fields (server/job-replan.js EDITABLE, plus
+// base) changes about it, in the human's words rather than the field names.
+const EDIT_EFFECT = { brief: 'what it is asked to do', show: 'what it shows you', check: 'how it is checked', after: 'when it starts', base: 'which branch it lands on',
+  action: 'what it writes', place: 'where it writes', on: 'when it runs', by: 'which step makes it', review: 'whether you review it first', why: 'why it is there' };
+export function editLine(edit, plan) {
+  const name = `“${plan.subJobs.find((s) => s.id === edit.id)?.title || edit.id}”`;
+  const effects = [...new Set(edit.fields.map((f) => EDIT_EFFECT[f]).filter(Boolean))];
+  if (!effects.length) return `Renames it to ${name}`;
+  return `Changes ${name}: ${effects.length === 1 ? effects[0] : `${effects.slice(0, -1).join(', ')} and ${effects.at(-1)}`}`;
 }
 // Every idea goes to one recipient, the planner (server/job-change.js): it sorts
 // the idea into feedback for a live step and changes to the plan, and the human
@@ -558,8 +570,12 @@ export function jobStatus(job, sub) {
   if (sub.observationError) return { tone: 'needs', text: 'Pipeline polling will retry' };
   // Accepted red: the runner merges, or finishes the landing, on its next tick.
   if (redAccepted(sub)) return { tone: 'working', text: sub.stage === 'pr' ? (sub.mergeRequestedHead ? 'Merge requested' : 'Merging with red checks') : 'Red run accepted · landing' };
-  if (sub.stage === 'pr') return { tone: sub.pr?.checkStatus === 'passing' || sub.pr?.behind ? 'working' : 'muted', text: sub.mergeRequestedHead ? 'Merge requested' : sub.pr?.behind ? 'Behind base · updating branch' : sub.pr?.checkStatus === 'awaiting-review' ? 'GitHub review required' : 'Watching checks' };
-  if (sub.stage === 'deployment') return sub.recoveredBy ? { tone: 'muted', text: 'Awaiting fix' } : { tone: 'muted', text: 'Watching post-merge runs' };
+  // Watching runs is Wrangler at work; a red run or a GitHub review is not.
+  if (sub.stage === 'pr') {
+    const text = sub.mergeRequestedHead ? 'Merge requested' : sub.pr?.behind ? 'Behind base · updating branch' : sub.pr?.checkStatus === 'awaiting-review' ? 'GitHub review required' : 'Watching checks';
+    return { tone: sub.pr?.behind || (!redPipeline(sub) && text !== 'GitHub review required') ? 'working' : 'muted', text };
+  }
+  if (sub.stage === 'deployment') return sub.recoveredBy ? { tone: 'muted', text: 'Awaiting fix' } : { tone: redPipeline(sub) ? 'muted' : 'working', text: 'Watching post-merge runs' };
   // Fix here on an open PR under code review: the work restarts on the next tick.
   if (sub.stage === 'implementation' && sub.pr) return { tone: 'working', text: 'Fix queued' };
   if (sub.stage === 'done') return { tone: 'done', text: isPrSub(sub) ? 'Delivered' : isSessionSub(sub) ? 'Completed' : 'Done' };
