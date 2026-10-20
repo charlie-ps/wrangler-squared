@@ -8,7 +8,7 @@ import { parkedReadyRun, askAgent } from './job-parked.js';
 import { setRunning, owe, runningOf } from './job-running.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
-import { dropSub } from './job-sub-ops.js';
+import { dropSub, retrySub } from './job-sub-ops.js';
 import { requestChange } from './job-change.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan, requestReplan } from './job-replan.js';
@@ -337,27 +337,13 @@ export class JobStore {
         return;
       }
       if (action === 'retry') {
-        const target = s || j;
-        if (!target.error) throw new Error('Nothing is blocked');
+        if (!(s || j).error) throw new Error('Nothing is blocked');
         if (j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null))) throw new Error('The previous session is still stopping');
         // A write is only ever made by its session: retrying one runs that
         // session again for it (job-writes.js).
         if (isWriteSub(s)) { reopenWrite(j, s); record(j, s, 'retry', note, `Retried ${quoted(s.title)}`); return; }
-        target.error = null; target.blocked = null;
-        if (s) { s.cleanupRefusal = null; s.discard = null; }
-        // Under review the only run that can have failed is publish, and the tree
-        // the human approved is unchanged: keep the approval so publish runs
-        // again. `queued` here would strand the card — the runner launches only
-        // on `approved`, and approve-code refuses anything but `verified`.
-        if (s) {
-          s.state = s.cancelledAt ? 'cancelled' : s.stage === 'review' ? (s.ready?.approvedAt ? 'approved' : 'verified') : 'queued';
-          s.repairAllowance = (s.repairAllowance || 0) + 1;
-          // A retry is one more automatic try for a red step, and wipes the human's
-          // "leave it" on that failure.
-          s.replanAllowance = (s.replanAllowance || 0) + 1;
-          if (s.red) s.red = { ...s.red, held: null, declared: null };
-          if (note) s.note = note;
-        }
+        if (s) retrySub(s, note);
+        else { j.error = null; j.blocked = null; }
         record(j, s, 'retry', note, s ? `Retried ${quoted(s.title)}` : 'Retried the job');
         return;
       }

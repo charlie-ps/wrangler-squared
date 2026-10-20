@@ -177,7 +177,7 @@ export function graphGrid(cols, work, levels, styleOf) {
 // node in its live state and labelled with what approval would do to it.
 export const rocketHtml = (id) => `<g class="job-edge-glyph" data-glyph="${esc(id)}"><circle r="12"/><g transform="translate(-9.6 -9.6) scale(.8)">${ROCKET_PATH}</g></g>`;
 const MARKS = { frozen: 'Locked · already landed', removed: 'Will be cancelled', added: 'New', edited: 'Edited', kept: 'Unchanged',
-  'accept-red': 'Accept red', recover: 'Waits for its fix', rework: 'Rework', forward: 'To its open session', 'mark-done': 'Marked done', 'mark-merged': 'Marked merged' };
+  'accept-red': 'Accept red', recover: 'Waits for its fix', rework: 'Rework', forward: 'To its open session', 'mark-done': 'Marked done', 'mark-merged': 'Marked merged', retry: 'Retry this step' };
 export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf = null, markOf = null, openDeps = new Set(), openTickets = new Set(), openShow = new Set(), editing = null, reviewWrites = false, base = null } = {}) {
   const subs = plan.subJobs;
   if (!subs.length) return '';

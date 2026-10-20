@@ -193,6 +193,29 @@ test('a forward or rework on the step the idea came from is refused once that vi
   assert.equal(subOf(j, 'api').thread, undefined);
 });
 
+test('a retry pins to the failure it was written about, refuses a step that is not red, and starts it again as the human\'s Retry would', () => {
+  const lock = "Command failed: git fetch origin: error: cannot lock ref 'refs/remotes/origin/main'";
+  const j = job([spec('api'), spec('web')], { api: { stage: 'implementation', state: 'queued', error: lock, red: { held: 'x' } } });
+  assert.throws(() => gateAction(j, { type: 'retry', sub: 'web' }), /“Deliver web” is not red: nothing to retry/);
+  const actions = stampActions(j, [{ type: 'retry', sub: 'api' }], j.plan, { removed: [] });
+  assert.deepEqual(actions[0].pin, { at: 'red', ref: `${lock}|||0` });
+  subOf(j, 'api').error = 'Command failed: npm ci';
+  assert.throws(() => checkActions(j, actions, j.plan), /“Deliver api” has moved since this was proposed \(failure Command f/);
+  subOf(j, 'api').error = lock;
+  checkActions(j, actions, j.plan);
+  assert.deepEqual(applyActions(j, actions, { now: 9 }).map((l) => l.detail), ['Retried “Deliver api”']);
+  const api = subOf(j, 'api');
+  assert.deepEqual([api.error, api.blocked, api.state, api.replanAllowance, api.red.held], [null, null, 'queued', 1, null]);
+});
+
+test('a red step\'s fix never applies a retry by itself, whatever else it carries', () => {
+  const j = job([spec('api')], { api: { stage: 'implementation', state: 'queued', error: 'cannot lock ref' } });
+  j.replan = { feedback: 'x', at: 1, proposal: null, previous: null };
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'retry', sub: 'api' }] }, 2);
+  assert.equal(autoApplicable({ ...j, reviewPlan: false, reviewRed: false }, j.replan.proposal), false);
+  assert.equal(autoApplicable(j, { ...j.replan.proposal, actions: [{ type: 'rework', sub: 'api', note: 'x' }] }), true, 'a rework alone still would');
+});
+
 test('a red step\'s fix never applies a forward by itself', () => {
   const j = parkedJob();
   j.replan = { feedback: 'x', at: 1, proposal: null, previous: null };

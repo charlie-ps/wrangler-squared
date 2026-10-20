@@ -2774,6 +2774,12 @@ test('what the agent left running is a chip among the step\'s own, its popover s
   assert.equal(f.q('#job-dialog .job-run-chip').textContent.trim(), '1 of 2 running');
 });
 
+test('a retry reads as Retry this step, pinned to the failure', () => {
+  const plan = { subJobs: [{ id: 'api', title: 'Deliver api' }] };
+  assert.deepEqual(actionLine({ type: 'retry', sub: 'api', pin: { at: 'red', ref: 'x|||1' } }, plan), { text: 'Retry this step: Deliver api', detail: 'start it again as it is' });
+  assert.equal(pinLine({ at: 'red', ref: 'x|||1' }), 'pinned to this failure');
+});
+
 test('a forward reads as the quote the session will be told, pinned to its round, and lands in the thread tagged as come through the planner', () => {
   const plan = { subJobs: [{ id: 'api', title: 'Design export button' }] };
   const a = { type: 'forward', sub: 'api', note: 'Not enough spacing before the button.', pin: { at: 'round', ref: 'run_1#2', round: 2 } };

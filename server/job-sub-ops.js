@@ -31,6 +31,22 @@ export function dropSub(sub, now, job = null) {
   sub.error = null; sub.blocked = null; sub.observationError = null;
   if (job && isStoryCreate(sub)) unlinkStory(job, sub.storyId, now);
 }
+// A red step started again as it is: the human's Retry, and the planner's retry
+// action once the human approves it (job-actions.js). Under review the only run
+// that can have failed is publish, and the tree the human approved is unchanged:
+// keep the approval so publish runs again. `queued` here would strand the card —
+// the runner launches only on `approved`, and approve-code refuses anything but
+// `verified`.
+export function retrySub(sub, note) {
+  sub.error = null; sub.blocked = null; sub.cleanupRefusal = null; sub.discard = null;
+  sub.state = sub.cancelledAt ? 'cancelled' : sub.stage === 'review' ? (sub.ready?.approvedAt ? 'approved' : 'verified') : 'queued';
+  sub.repairAllowance = (sub.repairAllowance || 0) + 1;
+  // One more automatic try for a red step, and it wipes the human's "leave it"
+  // on that failure.
+  sub.replanAllowance = (sub.replanAllowance || 0) + 1;
+  if (sub.red) sub.red = { ...sub.red, held: null, declared: null };
+  if (note) sub.note = note;
+}
 // A created story's key, from its create's receipt or a receipt: on
 // the plan and on every sub-job naming it, which is what releases them. An
 // approved key is part of what the human agreed to and never swaps.

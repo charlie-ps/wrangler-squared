@@ -115,9 +115,15 @@ after it are held while you work.
 - Find the cause, then fix the step (`rework` action), change the plan around
   it, or both. With **Red steps = "Wrangler replans"** a `rework` (and plan edits
   only when the job's Plan checkpoint is Auto, none cancelling a PR) is applied
-  by itself; `accept-red`, `mark` and `recover` **never are**, so propose them
-  only when they are the honest answer, with evidence. Under "You decide"
-  everything waits for the human.
+  by itself; `accept-red`, `mark`, `recover` and `retry` **never are**, so
+  propose them only when they are the honest answer, with evidence. Under "You
+  decide" everything waits for the human.
+- A failure the step's own work did not cause and that will not happen again (a
+  race with another step, a lock, a network blip) is a `retry` action: the
+  human's Retry, suggested, always waiting for their approval.
+- An unchanged plan with no actions changes nothing: it declares the step red
+  to the human, and your `diagnosis.summary` is what they read on it. Say what
+  you found and the decision they need, never what approving would do.
 - If neither a fix nor a plan change can get past it without a decision only the
   human can make, report `escalate` instead of a plan:
   `{kind:"escalate", summary:"what you found", tried?:["what you tried"],
@@ -135,8 +141,8 @@ after it are held while you work.
   or ticket that shows it), `forward {note}` (the human's words to a session
   still open on its code review), `rework {note}` (back to its own agent: use it for the human's feedback on what the step produced, not only for a red step), and
   `recover {fix}` for a merged sub-job whose post-merge run failed: add a PR
-  sub-job that fixes it and name its id as `fix`. Never use accept-red or mark
-  to hide a real failure.
+  sub-job that fixes it and name its id as `fix`, and `retry {note?}` starts a
+  red step again as it is. Never use accept-red or mark to hide a real failure.
 - Up to three ranked options: your own `plan` and `actions` are option 1, the
   recommended one, with `label` and `why`; `alternatives:[{label, why?, plan,
   actions?}]` hold at most two more, each a whole plan.
