@@ -253,8 +253,8 @@ test('an idea is a plate under a forming sky, tagged IDEA, idle while the planne
   assert.doesNotMatch(ideaPlate.querySelector('.job-plate-where').textContent, /message/);
   assert.equal(f.q('[data-board="think"] .job-status').textContent, 'Planner is reading the idea');
   f.q('[data-filter="ideas"]').click();
-  assert.deepEqual([...document.querySelectorAll('.job-plate')].map((p) => p.dataset.board).sort(), ['later', 'reply', 'sugg', 'think'], 'the Ideas filter shows only ideas');
-  assert.equal(f.q('[data-filter="ideas"] .jobs-rail-n').textContent, '4');
+  assert.deepEqual([...document.querySelectorAll('.job-plate')].map((p) => p.dataset.board).sort(), ['reply', 'sugg', 'think'], 'the Ideas filter shows only ideas being talked through: a draft is in the backlog alone');
+  assert.equal(f.q('[data-filter="ideas"] .jobs-rail-n').textContent, '3');
   f.q('[data-board="reply"] .job-plate-open').click();
   assert.ok(f.q('#job-dialog .job-idea-band .gx.nb'), 'clicking an idea opens its conversation');
   assert.ok(f.q('#job-dialog [data-idea-composer]'));

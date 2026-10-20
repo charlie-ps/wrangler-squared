@@ -15,7 +15,7 @@ import { resolutionsFor, resolutionLabel } from './job-main.js';
 import { queueHelper, helperFor } from './job-helper.js';
 import { limitStep, limitOf } from './job-budget.js';
 import { changeView } from './job-actions.js';
-import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
+import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation, UNSENT_IDEA, isDraft, editDraft } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
 import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
@@ -381,8 +381,15 @@ export class JobStore {
         record(j, null, 'top-up', null, `Added ${usd(x)}: the spend limit is now ${usd(limitOf(this.data.settings, j))}`);
         return;
       }
+      // A draft idea (job-idea.js): its words change until Start, which may carry
+      // the last unsaved edit so the conversation opens on what was on screen.
+      if (action === 'edit-draft') {
+        if (editDraft(j, payload)) record(j, null, 'edit-draft', null, 'Edited the draft idea');
+        return;
+      }
       if (action === 'start') {
         if (j.stage !== 'backlog') throw new Error('Job has already started');
+        if (isDraft(j) && (payload.intent != null || payload.title != null) && editDraft(j, payload)) record(j, null, 'edit-draft', null, 'Edited the draft idea');
         j.stage = 'planning'; return;
       }
       if (action === 'discard-replan') {

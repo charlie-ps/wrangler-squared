@@ -672,7 +672,7 @@ test('the new-job primary action starts planning and the plain button parks it i
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   const [primary, backlog] = form.querySelectorAll('.job-actions button');
   assert.equal(primary.className, 'primary'); assert.equal(primary.textContent, 'Start planning');
-  assert.equal(backlog.className, ''); assert.equal(backlog.textContent, 'Add to backlog');
+  assert.equal(backlog.className, ''); assert.equal(backlog.textContent, 'Save as draft');
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
   assert.equal(f.sent[0].start, true, 'Enter is the main action');
@@ -700,7 +700,7 @@ test('new idea is a brief beside a property sidebar, and the brief is the descri
   assert.deepEqual([...props.querySelectorAll('.job-toggle')].map((l) => [l.querySelector('input').name, l.querySelector('input').checked, l.querySelector('span').title]),
     [['shareImages', true, 'every session on the job sees them, not just planning']]);
   assert.equal(form.elements.updateMain, undefined, 'keeping local main updated is a global setting, not a job\'s');
-  assert.equal(form.querySelector('.job-create-foot').textContent, 'Start planningAdd to backlog');
+  assert.equal(form.querySelector('.job-create-foot').textContent, 'Start planningSave as draft');
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
   assert.deepEqual(f.sent[0], { type: 'job-create', idea: true, start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true, sandbox: 'auto', writableDirs: [], images: [], shareImages: true, taskId: null } });
@@ -1399,7 +1399,7 @@ test('the chord carries the primary submitter, so a new job starts planning rath
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   form.elements.intent.value = 'Customers can access their accounts';
   chord(f, form.elements.intent);
-  assert.equal(f.sent.at(-1).type, 'job-create'); assert.equal(f.sent.at(-1).start, true, 'the primary button is the submitter, not Add to backlog');
+  assert.equal(f.sent.at(-1).type, 'job-create'); assert.equal(f.sent.at(-1).start, true, 'the primary button is the submitter, not Save as draft');
 });
 
 test('the chord fires a detail\u2019s primary action, and stops at a disabled or destructive one', (t) => {
@@ -3143,4 +3143,44 @@ test('an emptied spend limit saves as no limit, and a saved one is shown as it i
   f.data.settings.spendLimit = null; f.view.update(f.data);
   f.q('#jobs-settings').click(); form = f.q('#job-settings-form');
   assert.equal(form.elements.spendLimit.value, '', 'null is no limit, never the default');
+});
+
+test('a draft idea reads Draft on its plate and opens on its own words to edit: Save stores them, a tick keeps unsaved edits, Start sends them', (t) => {
+  const f = fixture(t);
+  f.data.jobs = [{ id: 'd1', title: 'Nag <me>', intent: 'PRs sit green', repos: [], stage: 'backlog', idea: { thread: [] }, plan: null, subJobs: [], runs: [], moves: [], revision: 0 }];
+  f.view.update(f.data);
+  const shownIn = (filter) => { f.q(`[data-filter="${filter}"]`).click(); return !!f.q('[data-board="d1"]'); };
+  assert.deepEqual(['all', 'ideas', 'needs', 'backlog'].map(shownIn), [false, false, false, true], 'a draft is in the backlog alone');
+  assert.equal(f.q('[data-board="d1"] .job-status').textContent, 'Draft');
+  f.q('[data-board="d1"] .job-plate-open').click();
+  const dialog = f.q('#job-dialog');
+  const [title, intent] = dialog.querySelectorAll('[data-draft-field]');
+  assert.deepEqual([title.value, intent.value], ['Nag <me>', 'PRs sit green'], 'escaped into the boxes, read back as typed');
+  assert.equal(dialog.querySelector('.job-change'), null, 'no Add idea box: an idea for the planner would start it');
+  const save = dialog.querySelector('[data-draft-save]');
+  assert.equal(save.disabled, true, 'nothing to save yet');
+  intent.value = 'Plates nag when a PR sits green for a day'; intent.dispatchEvent(f.event('input'));
+  assert.equal(save.disabled, false);
+  f.data.jobs[0].revision++; f.view.update(f.data);
+  assert.equal(dialog.querySelector('[name="intent"]').value, 'Plates nag when a PR sits green for a day', 'a tick does not wipe an unsaved edit');
+  save.click();
+  assert.deepEqual({ ...f.sent.at(-1), subJobId: null }, { type: 'job-action', id: 'd1', subJobId: null, action: 'edit-draft', intent: 'Plates nag when a PR sits green for a day' });
+  intent.value = 'Plates nag after a day, louder after two'; intent.dispatchEvent(f.event('input'));
+  dialog.querySelector('[data-draft-start]').click();
+  assert.deepEqual({ ...f.sent.at(-1), subJobId: null }, { type: 'job-action', id: 'd1', subJobId: null, action: 'start', intent: 'Plates nag after a day, louder after two' }, 'only what was edited: a title named meanwhile is not sent back');
+  f.view.created({ event: 'job-action-complete', action: 'start', jobId: 'd1' });
+  assert.equal(dialog.open, true, 'a started idea stays open to turn into its conversation');
+  f.view.created({ event: 'job-action-complete', action: 'edit-draft', jobId: 'd1' });
+  assert.equal(dialog.open, true, 'a saved draft stays open on its boxes');
+});
+
+test('Start on a backlog job that is not an idea still closes its dialog', (t) => {
+  const f = fixture(t);
+  f.data.jobs = [{ id: 'b1', title: 'Ship', intent: 'Ship it', repos: [], stage: 'backlog', plan: null, subJobs: [], runs: [], moves: [], revision: 0 }];
+  f.view.update(f.data);
+  f.q('[data-board="b1"] .job-plate-open').click();
+  assert.equal(f.q('#job-dialog [data-draft]'), null, 'only an idea is a draft');
+  f.q('#job-dialog [data-action="start"]').click();
+  f.view.created({ event: 'job-action-complete', action: 'start', jobId: 'b1' });
+  assert.equal(f.q('#job-dialog').open, false);
 });

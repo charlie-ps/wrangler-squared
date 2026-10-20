@@ -29,6 +29,8 @@ export const hasSessionSubs = (job) => job.subJobs.some(reviewedSession);
 export const ideaThread = (job) => job?.idea?.thread || [];
 export const inConversation = (job) => !!job?.idea && job.stage === 'planning' && !job.plan && !job.replan && !job.cancelledAt;
 // An idea's plate on the board: talked through, or parked in the backlog, until it has a plan.
+// Saved from New idea and not started (server/job-idea.js isDraft): its words stay editable.
+export const isDraft = (job) => !!job?.idea && job.stage === 'backlog' && !job.cancelledAt;
 export const ideaOpen = (job) => !!job?.idea && ['planning', 'backlog'].includes(job.stage) && !job.plan && !job.replan && !job.cancelledAt;
 export function liveSuggestion(job) {
   const last = ideaThread(job).at(-1);

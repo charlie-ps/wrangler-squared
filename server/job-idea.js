@@ -8,8 +8,13 @@
 // quietly. Pure over the job
 // draft job-store.js is about to persist, like job-change.js.
 
+import { jobInputSchema } from './jobs-schema.js';
+
 export const IDEA_TEXT_MAX = 8000;
 export const isIdea = (job) => !!job?.idea;
+// A draft: saved from New idea and not started. It runs nothing (the runner claims
+// only a planning job), so its words stay the human's to edit until Start.
+export const isDraft = (job) => isIdea(job) && job.stage === 'backlog' && !job.cancelledAt;
 // Still talking: nothing is planned yet and no plan change has taken over.
 export const inConversation = (job) => isIdea(job) && job.stage === 'planning' && !job.plan && !job.replan && !job.cancelledAt;
 export const ideaThread = (job) => job?.idea?.thread || [];
@@ -24,6 +29,19 @@ export function liveSuggestion(job) {
 // of what the human said; the runner mails them on its next tick (deliverIdea).
 export const UNSENT_IDEA = 'The human wrote again while you were working and it is on its way to you by mail: read your mail, then reply or report the plan';
 const nextId = (job, now) => `msg_${now.toString(36)}${ideaThread(job).length.toString(36)}`;
+
+// Edit a draft's words, checked as New idea checks them. A title the human types
+// ends the wait for Haiku's, which then never replaces it (job-store.js retitle).
+// Returns whether anything changed.
+export function editDraft(job, { title, intent } = {}) {
+  if (!isDraft(job)) throw new Error('Only a draft idea can be edited; this one has started');
+  const next = jobInputSchema.pick({ title: true, intent: true }).safeParse({ title: title ?? job.title, intent: intent ?? job.intent });
+  if (!next.success) throw new Error(next.error.issues[0].path[0] === 'title' ? 'Give the idea a title of up to 180 characters on one line' : 'Write the idea first (up to 16,000 characters)');
+  const changed = next.data.title !== job.title || next.data.intent !== job.intent;
+  if (next.data.title !== job.title) delete job.titlePending;
+  Object.assign(job, next.data);
+  return changed;
+}
 
 // The planner's turn. It parks the run until the human answers; an identical retry
 // of the last reply is safe, a different one while parked is refused, and so is

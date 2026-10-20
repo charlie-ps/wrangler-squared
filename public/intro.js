@@ -187,7 +187,7 @@ export const INTRO_STEPS = [
     figure: (reviews, phase) => board(phase) },
   { tab: 'New idea',
     title: 'New idea, then a plan you approve before anything runs.',
-    body: `<p>Press <b>New idea</b> and describe the outcome, in words or with screenshots. If it is unclear, the planner asks you, then suggests a job; if it is clear, ${W2} drafts the <b>plan</b> straight away. It picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>A drafted plan is ordered sub-jobs. To change it, write in <b>Add idea</b> under it. Nothing runs until you <b>Approve</b>: no session, ticket or PR. A suggested job needs no second look: pressing <b>Create job</b> approves its plan and starts it. You can also save an idea to the backlog and come back to it.</p>`,
+    body: `<p>Press <b>New idea</b> and describe the outcome, in words or with screenshots. If it is unclear, the planner asks you, then suggests a job; if it is clear, ${W2} drafts the <b>plan</b> straight away. It picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>A drafted plan is ordered sub-jobs. To change it, write in <b>Add idea</b> under it. Nothing runs until you <b>Approve</b>: no session, ticket or PR. A suggested job needs no second look: pressing <b>Create job</b> approves its plan and starts it. You can also save an idea as a draft, edit it, and start it when you are ready.</p>`,
     cls: 'intro-idea', anim: { frames: IDEA_FRAMES.length, ms: 1700, still: 5 },
     figure: (reviews, phase) => newIdeaFigure(phase) },
   { tab: 'Sub-jobs',

@@ -1,7 +1,7 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT } from './jobs.js';
-import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml } from './job-idea.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, isDraft, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT } from './jobs.js';
+import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml, draftEditorHtml, draftValues } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, askActs } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
@@ -14,9 +14,10 @@ import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel,
 
 // The board's filter rail: what each shows, and the one an empty view explains.
 const FILTERS = [
-  ['all', 'In flight', (job) => job.stage !== 'done'],
+  // A draft idea has not started, so it is in the backlog alone.
+  ['all', 'In flight', (job) => job.stage !== 'done' && !isDraft(job)],
   ['needs', 'Needs you', jobNeedsYou],
-  ['ideas', 'Ideas', (job) => ideaOpen(job)],
+  ['ideas', 'Ideas', (job) => ideaOpen(job) && !isDraft(job)],
   ['running', 'Running', (job) => jobState(job) === 'running'],
   ['backlog', 'Backlog', (job) => job.stage === 'backlog'],
   ['done', 'Finished', (job) => job.stage === 'done'],
@@ -538,7 +539,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if (chip) chip.outerHTML = stateChip(jobState(reviewed), jobLabel(reviewed));
     }
     // A picture waiting in a box is as much a draft as words are.
-    const typing = askImages.length > 0 || [...dialog.querySelectorAll('.job-change textarea, [data-approve-note]')].some((t) => t.value);
+    const shown = data.jobs.find((j) => j.id === selected?.jobId);
+    const typing = askImages.length > 0 || [...dialog.querySelectorAll('.job-change textarea, [data-approve-note]')].some((t) => t.value)
+      || !!dialog.querySelector('[data-draft]') && draftValues(dialog, shown).changed;
     // An empty reply box with the cursor in it is someone reading the thread: it redraws, keeping the cursor.
     const composing = document.activeElement?.closest?.('[data-idea-composer]');
     const humanForm = dialog.querySelector('#job-human-form');
@@ -562,6 +565,17 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // Which of a proposal's options is picked; it resets with a new proposal.
   let optionPick = { id: null, i: 0 };
   const pickedOption = (job) => (optionPick.id === job.replan?.proposal?.id && proposalOptions(job.replan.proposal)[optionPick.i] ? optionPick.i : 0);
+  // A draft idea's boxes: Save stores them, Start sends them with the start so
+  // the conversation opens on what was on screen (server/job-idea.js editDraft).
+  function wireDraft(job) {
+    const box = dialog.querySelector('[data-draft]');
+    const save = box.querySelector('[data-draft-save]'), start = dialog.querySelector('[data-draft-start]');
+    const sync = () => { const v = draftValues(box, job); save.disabled = !v.changed || !v.title || !v.intent; if (start) start.disabled = !v.title || !v.intent; };
+    box.querySelectorAll('[data-draft-field]').forEach((f) => f.oninput = sync);
+    save.onclick = () => { save.disabled = true; action('edit-draft', draftValues(box, job).edits, null); };
+    if (start) start.onclick = () => { start.disabled = true; action('start', draftValues(box, job).edits, null); };
+    sync();
+  }
   function action(name, extra = {}, subId = selected.subId) {
     send({ type: 'job-action', id: selected.jobId, subJobId: subId || undefined, action: name, ...extra });
   }
@@ -1105,7 +1119,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const plan = planDraft || job.plan;
     const running = job.runs.some((r) => !r.stopped);
     const hints = [job.cancelledAt ? cancelledText(job) : '',
-      job.stage === 'backlog' && !job.cancelledAt ? 'Planning proposes Jira story titles without touching Jira. You review the plan before tickets are created or work begins.' : '',
+      isDraft(job) ? 'Start planning sends the idea as it reads in the boxes to the planner, which may ask you about it before it suggests a job.' : '',
+      job.stage === 'backlog' && !job.cancelledAt && !job.idea ? 'Planning proposes Jira story titles without touching Jira. You review the plan before tickets are created or work begins.' : '',
       job.stage === 'planning' && !job.plan && !job.cancelledAt ? 'Wrangler will bring the plan here for review.' : '',
       replanPending(job) ? replanProposed(job) ? 'Approving applies the change: new sub-jobs are added, edited ones take their new brief, removed ones are cancelled with any PR left open on GitHub. Locked sub-jobs have already landed and stay as they are. No new step starts until you approve or discard.' : 'Wrangler is re-planning and will bring the proposal here. No new step starts meanwhile; running steps carry on.' : ''].filter(Boolean);
     const chips = stateChip(state, jobLabel(job), hints) + (plan ? storyChips(plan.stories || []) : repoChips(job.repos))
@@ -1122,16 +1137,19 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       fab = `<button class="primary" data-action="approve-plan" title="${esc(bad.length ? `Finish ${bad.length === 1 ? 'the write' : `${bad.length} writes`} first: ${writeProblem(bad[0])}` : authority)}" ${running || bad.length ? 'disabled' : ''}>${ICONS.check}Approve ${planDraft.subJobs.filter((s) => !isWriteSub(s)).length}</button>`;
     } else if (replanProposed(job)) body = proposalHtml(job);
     else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b> ${esc(job.replan.feedback)}</p>` : ''}${supersededHtml(job)}${planGraphHtml({ ...job.plan, subJobs: job.subJobs }, { stateOf: (s) => subState(job, s), lineOf: (s) => subLine(job, s), openTickets, reviewWrites: job.reviewWrites, base: job.base })}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
+    else if (isDraft(job)) body = draftEditorHtml(job, stripHtml(job));
     else body = `<p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}`;
     if (job.error) fab = `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>`;
+    else if (isDraft(job)) fab = `<button class="primary" data-draft-start title="${esc(hints[0])}">${ICONS.play}Start planning</button>`;
     else if (job.stage === 'backlog' && !job.cancelledAt) fab = `<button class="primary" data-action="start" title="${esc(hints[0])}">${ICONS.play}Start planning</button>`;
     else if (replanProposed(job)) fab = `<button class="primary" data-action="approve-replan" title="${esc(hints.at(-1))}" ${job.runs.some((r) => !r.stopped && !r.subJobId) ? 'disabled' : ''}>${ICONS.check}Approve change</button>`;
     else if (job.stage === 'active') fab = leadFab(job);
     else if (!fab) fab = promptFab(job);
     if (job.stage === 'active' && !job.cancelledAt) extra = replanProposed(job) ? `<button data-action="discard-replan">${ICONS.x}Discard</button>`
       : replanPending(job) ? `<button data-action="discard-replan" title="Stop re-planning and keep the plan as it is">${ICONS.x}Discard change</button>` : '';
-    const tail = job.cancelledAt || job.stage === 'done' ? '' : `<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel job</button>`;
-    const ask = changeBoxHtml(job, null);
+    const tail = job.cancelledAt || job.stage === 'done' ? '' : `<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel ${isDraft(job) ? 'idea' : 'job'}</button>`;
+    // A draft's words are edited in place: an idea sent to the planner would start it.
+    const ask = isDraft(job) ? '' : changeBoxHtml(job, null);
     return `${appbar(job.title, chips)}${eventHtml(job, null)}${budgetHtml(job)}${mainNoticeHtml(job)}${body}${conversationHtml(job)}${ask}
       <div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${tail}</div>${footerHtml(job)}`;
   }
@@ -1430,6 +1448,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     flags.painting = false;
     if (viewing) { wireProofViewer(job, sub); return; }
     if (!sub && inConversation(job)) wireIdea(job);
+    if (!sub && isDraft(job)) wireDraft(job);
     wireFooter();
     if (focus) dialog.querySelector(`.job-detail-footer [data-review="${focus}"]`)?.focus();
     if (shotFocus >= 0) dialog.querySelectorAll('.job-shot-open')[shotFocus]?.focus();
@@ -1574,7 +1593,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     show(`<form id="job-create-form" class="job-create">
       <div class="job-create-brief"><h2>New idea</h2><div class="job-outcome"><label>Idea<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should exist that doesn’t yet?"></textarea></label>${imagesPanelHtml()}</div><fieldset class="job-prop job-review-grid"><legend>Review checkpoints</legend><div class="job-review-tiles">${reviewPointsHtml(reviewDefaultsOf(data.settings))}</div></fieldset></div>
       <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop job-pick" id="job-pick"><legend>Agent</legend></fieldset><input type="hidden" name="agent"><input type="hidden" name="model"><input type="hidden" name="effort"><fieldset class="job-prop job-sandbox" id="job-sandbox"></fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset></aside>
-      <footer class="job-create-foot"><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
+      <footer class="job-create-foot"><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog" title="Keep it in the backlog to edit; nothing runs until you start it">Save as draft</button></div></footer></form>`);
     const form = dialog.querySelector('form');
     let images;
     images = createJobImages({
@@ -1784,6 +1803,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (msg?.event === 'job-created' && msg.idea && msg.started) { openOnCreate = msg.jobId; if (data.jobs.some((j) => j.id === msg.jobId)) { openOnCreate = null; openDetail(msg.jobId); } return; }
     // A reply stays in its conversation for the next tick. A created job closes the dialog it was pressed in,
     // so the board's forming animation plays in view; one the human has since navigated away from is left alone.
+    // A draft stays open on its boxes; a started one turns into its conversation on the next tick.
+    if (msg?.action === 'edit-draft' || msg?.action === 'start' && selected?.jobId === msg.jobId && data.jobs.find((j) => j.id === msg.jobId)?.idea) return;
     if (msg?.action === 'idea-reply') { if (ideaSent?.jobId === msg.jobId) ideaSent.state = 'sent'; return; }
     if (msg?.action === 'accept-idea') { if (ideaFiring?.jobId === msg.jobId && ideaFiring.state === 'sent' && dialog.open && selected?.jobId === msg.jobId) dialog.close(); return; }
     // An idea stays on screen as its bubble: the tick is the confirmation, not a closed dialog.

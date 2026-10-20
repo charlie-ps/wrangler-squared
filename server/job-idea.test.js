@@ -265,3 +265,48 @@ test('New idea\'s form creates an idea job; create_job and a plain form do not',
   assert.deepEqual(f.store.get(idea.jobId).idea, { thread: [] });
   assert.equal(f.store.get(plain.jobId).idea, undefined);
 });
+
+test('a draft idea runs nothing until Start; its title and words are edited in place, checked as New idea checks them', async (t) => {
+  const f = fixture(t);
+  for (let i = 0; i < 3; i++) await f.tick();
+  assert.deepEqual([f.launched.length, f.get().runs.length, f.get().stage], [0, 0, 'backlog'], 'no planner run while a draft');
+  const before = f.get().revision;
+  f.store.action(f.job.id, 'edit-draft', { title: 'Nag me about green PRs', intent: '  Plates nag when a PR sits green for a day.  ' });
+  assert.deepEqual([f.get().title, f.get().intent], ['Nag me about green PRs', 'Plates nag when a PR sits green for a day.']);
+  assert.equal(f.get().revision, before + 1);
+  assert.equal(f.get().moves.at(-1).move, 'edit-draft');
+  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { intent: '   ' }), /Write the idea first/);
+  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { title: 'Two\nlines' }), /title of up to 180/);
+  assert.equal(f.get().intent, 'Plates nag when a PR sits green for a day.', 'a refused edit changes nothing');
+  await f.tick();
+  assert.equal(f.launched.length, 0, 'an edit starts nothing');
+});
+
+test('Start on a draft carries its unsaved words, and the planner reads the edited idea', async (t) => {
+  const f = fixture(t);
+  f.store.action(f.job.id, 'start', { intent: 'Plates nag when a PR sits green for a day.' });
+  await f.tick();
+  assert.equal(f.get().stage, 'planning');
+  assert.equal(f.get().intent, 'Plates nag when a PR sits green for a day.');
+  assert.match(jobPrompt(f.get(), null, f.last().run), /Plates nag when a PR sits green for a day\./);
+  assert.ok(inConversation(f.get()));
+  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { intent: 'Too late' }), /has started/);
+});
+
+test('only an idea in the backlog is a draft: a job from create_job or a cancelled idea is not edited', (t) => {
+  const f = fixture(t);
+  const plain = f.store.create({ intent: 'Ship it' });
+  assert.throws(() => f.store.action(plain.id, 'edit-draft', { intent: 'Other' }), /Only a draft idea/);
+  f.store.action(f.job.id, 'cancel-job');
+  assert.throws(() => f.store.action(f.job.id, 'edit-draft', { intent: 'Other' }), /cancelled/);
+});
+
+test('a title typed on a draft ends the wait for the generated one, which never replaces it', (t) => {
+  const f = fixture(t);
+  const job = f.store.create({ intent: 'PRs sit green for ages' }, { idea: { thread: [] }, titlePending: true });
+  const fallback = job.title;
+  f.store.action(job.id, 'edit-draft', { title: 'My own title' });
+  assert.equal(f.store.get(job.id).titlePending, undefined);
+  assert.equal(f.store.retitle(job.id, fallback, 'Haiku title'), false);
+  assert.equal(f.store.get(job.id).title, 'My own title');
+});

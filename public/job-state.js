@@ -105,7 +105,7 @@ export function jobLabel(job) {
   if (job.error) return 'Needs attention';
   if (!['needs', 'failing'].includes(state) && mainWaiting(job).length) return `Local ${mainWaiting(job)[0].base} behind`;
   if (budgetHeld(job)) return 'Paused for budget';
-  if (job.stage === 'backlog') return job.paused ? 'Paused' : 'Backlog';
+  if (job.stage === 'backlog') return job.paused ? 'Paused' : job.idea ? 'Draft' : 'Backlog';
   if (job.stage === 'planning' && state === 'needs' && job.plan && !runStatus(job, null)) return 'Plan ready';
   if (job.stage !== 'active') return jobStatus(job, null).text;
   if (state === 'done') return 'Delivered';

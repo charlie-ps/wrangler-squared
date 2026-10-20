@@ -212,7 +212,11 @@ text as public as the rest of this repo.
   which parks the run (`parkedFor: 'idea'`, no slot, like a ready park) until the human's `idea-reply`
   is mailed by the runner (`deliverIdea`, `ideaMail`). `accept-idea {messageId}` is pinned to the newest
   message: it applies the suggestion exactly as a plan receipt (Plan review still applies), and settle()
-  then ends the parked run quietly because the job is no longer `inConversation`. A fresh planning run
+  then ends the parked run quietly because the job is no longer `inConversation`. Save as draft
+  creates the same idea job unstarted (`isDraft`: `backlog`, so the runner claims nothing): its title and
+  words change by `edit-draft` (`editDraft`, checked as `jobInputSchema` checks them; a typed title ends
+  `titlePending`), and `start` may carry the boxes' unsaved edits so the conversation opens on them. The
+  draft dialog has no Add idea box, which would reach the planner, and the board lists a draft under Backlog alone. A fresh planning run
   (a retry) reads the whole thread from its prompt, so `claim` marks unsent messages sent. The chat
   dialog redraws on ticks even with the cursor in its empty reply box; only new messages fade in.
 - **What the agent leaves running is the agent's; tearing it down is ours** (`server/job-running.js`).

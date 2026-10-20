@@ -133,3 +133,21 @@ export function ideaViewHtml(job, { cost = '', actions = '', error = '', pending
     ${ideaThreadHtml(job, { pending, firing, fresh })}
     <div class="job-idea-dock">${ideaComposerHtml(draft, tray)}${actions ? `<div class="job-actions">${actions}</div>` : ''}</div></div>`;
 }
+
+// A draft idea (jobs.js isDraft): its title and words, editable until Start, which
+// sends what is in the boxes. `pics` is the job's own picture strip.
+export function draftEditorHtml(job, pics = '') {
+  return `<div class="job-draft" data-draft>
+    <label class="job-draft-field">Title<input data-draft-field name="title" maxlength="180" value="${esc(job.title)}" aria-label="Draft title"></label>
+    <label class="job-draft-field">Idea<textarea data-draft-field name="intent" rows="8" maxlength="16000" aria-label="Draft idea">${esc(job.intent)}</textarea></label>${pics}
+    <p class="job-change-error" role="alert" hidden></p>
+    <div class="job-draft-foot"><span>A draft: nothing runs, and the planner has not read it, until you press Start planning.</span><button type="button" data-draft-save disabled>${ICONS.check}Save draft</button></div></div>`;
+}
+// The boxes as the server would store them; `edits` only what differs from `job`, so
+// a title Haiku landed meanwhile is not sent back over itself.
+export function draftValues(root, job) {
+  const value = (name) => root.querySelector(`[data-draft-field][name="${name}"]`)?.value.trim() ?? '';
+  const out = { title: value('title'), intent: value('intent') };
+  const edits = Object.fromEntries(Object.entries(out).filter(([k, v]) => job && v !== job[k]));
+  return { ...out, edits, changed: Object.keys(edits).length > 0 };
+}

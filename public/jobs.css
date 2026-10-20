@@ -380,7 +380,7 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-create-foot .job-actions { margin:0 0 0 auto; }
 .job-create-foot .job-actions button:not(.primary) { color:var(--fg-muted); }
 .job-create-foot .job-actions button:not(.primary):hover { background:var(--surface-2); color:var(--fg); }
-/* The primary stays first in the DOM so Enter in a field submits with it, not with Add to backlog. */
+/* The primary stays first in the DOM so Enter in a field submits with it, not with Save as draft. */
 .job-create-foot .job-actions button.primary { order:1; margin:0; }
 /* New job's checkpoints sit under the brief as a two-column tile grid. */
 .job-dialog .job-review-grid { margin-top:22px; padding:0; border-bottom:0; }
@@ -701,6 +701,12 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-checks .failed { color:var(--red-fg); }
 .job-note { display:flex; align-items:center; gap:8px; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
 .job-context,.job-intent { white-space:pre-wrap; color:var(--fg) !important; }
+.job-draft { display:flex; flex-direction:column; gap:10px; margin:12px 0; }
+.job-draft-field { display:flex; flex-direction:column; gap:4px; color:var(--fg-muted); font-size:12px; }
+.job-draft-field input { width:100%; font-size:15px !important; font-weight:600; }
+.job-draft-field textarea { font-size:14px; line-height:1.45; }
+.job-draft-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; color:var(--fg-muted); font-size:12px; }
+.job-draft-foot button { display:inline-flex; align-items:center; gap:6px; }
 .job-brief { color:var(--fg) !important; }
 .job-approve-split { order:-1; margin-right:6px; }
 .job-approve-split>button.primary { margin-right:2px; }
