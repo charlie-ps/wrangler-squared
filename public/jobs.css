@@ -641,6 +641,12 @@ button.job-flag.auto { background:var(--surface); border:1px dashed var(--border
 button.job-flag.auto:hover { background:var(--surface-2); color:var(--fg); border-color:var(--fg-subtle); }
 button.job-flag:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
 button.job-flag[aria-busy="true"] { cursor:progress; opacity:.6; }
+/* A press waiting on the server (busy-button.js): dimmed, with a ring that turns in the button's own ink. */
+:is(.job-dialog,#jobs) button[aria-busy="true"]:not(.job-flag) { cursor:progress; opacity:.7; user-select:none; }
+:is(.job-dialog,#jobs) button[aria-busy="true"]:not(.job-flag)::after { content:""; width:12px; height:12px; flex:none; margin-left:2px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent; animation:job-spin .8s linear infinite; }
+.job-actions button.primary[aria-busy="true"]:disabled { opacity:.7; box-shadow:none; }
+.job-actions button.primary:active:not(:disabled) { transform:scale(.97); box-shadow:0 1px 3px var(--shadow); }
+@media(prefers-reduced-motion:reduce) { :is(.job-dialog,#jobs) button[aria-busy="true"]:not(.job-flag)::after { animation:none; border-right-color:currentColor; opacity:.5; } .job-actions button.primary:active { transform:none; } }
 button.job-flag[aria-disabled="true"] { cursor:default; opacity:.45; }
 button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 /* A review checkpoint on one row: stage glyph, name over the hint for the current
