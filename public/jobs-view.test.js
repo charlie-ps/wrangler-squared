@@ -114,7 +114,7 @@ test('each job is its own card, and a delivered job only returns with Finished',
   f.q('[data-filter="done"]').click();
   assert.deepEqual(boards(), ['job3'], 'Finished shows only the finished');
   assert.ok(f.q('[data-board="job3"]').classList.contains('tone-ok'));
-  assert.deepEqual([...document.querySelectorAll('.jobs-rail-n')].map((n) => n.textContent), ['2', '', '', '', '', '1'], 'each filter counts its jobs, and none is blank, not a grey 0');
+  assert.deepEqual([...document.querySelectorAll('.jobs-rail-n')].map((n) => n.textContent), ['2', '', '', '2', '', '1'], 'each filter counts its jobs, and none is blank, not a grey 0');
   assert.equal(f.q('.jobs-rail-sort'), null, 'no fixed sort label posing as a control');
   const sky = f.q('.jobs-top > canvas.jobs-mast-sky');
   assert.equal(sky?.getAttribute('aria-hidden'), 'true', 'the masthead sits on its own painted sky, hidden from assistive tech');
@@ -228,6 +228,19 @@ test('a red run the human accepted reads as landing or merging', (t) => {
   const landing = { ...sub('api'), stage: 'deployment', pr: { ...redPr, checkStatus: 'passing', mergeCommit: 'abc' }, deploymentResult: { status: 'failing', runs: [{ workflow: 'Deploy', status: 'failing', url: 'https://github.com/org/repo/actions/runs/1' }], commit: 'abc' } };
   assert.deepEqual(jobStatus(job, { ...landing, acceptedRed: { ref: 'abc' }, error: null }), { tone: 'working', text: 'Red run accepted · landing' });
   assert.deepEqual(jobStatus(job, { ...sub('api'), stage: 'pr', pr: redPr, acceptedRed: { ref: 'h1' } }), { tone: 'working', text: 'Merging with red checks' });
+});
+
+test('watching checks reads as work in progress, apart from a queued sub-job; a GitHub review stays a wait', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  const pr = { url: 'https://github.com/org/repo/pull/1', head: 'h1', checkStatus: 'pending', checks: [] };
+  job.subJobs = [{ ...sub('api'), stage: 'pr', pr }, { ...sub('web'), stage: 'implementation' }];
+  f.view.update(f.data);
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Watching checks' });
+  assert.deepEqual(jobStatus(job, job.subJobs[1]), { tone: 'muted', text: 'Queued' });
+  const tone = (id) => [...f.q(`.job-plate-graph .node[data-sub="${id}"]`).classList].find((c) => c.startsWith('tone-'));
+  assert.deepEqual([tone('api'), tone('web')], ['tone-run', 'tone-idle']);
+  assert.deepEqual(jobStatus(job, { ...job.subJobs[0], pr: { ...pr, checkStatus: 'awaiting-review' } }), { tone: 'muted', text: 'GitHub review required' });
+  assert.deepEqual(jobStatus(job, { ...sub('api'), stage: 'deployment', recoveredBy: 'fix' }), { tone: 'muted', text: 'Awaiting fix' });
 });
 
 test('Request changes sends the text pinned to the PR head that was on screen, and nothing else', (t) => {
@@ -1353,7 +1366,7 @@ test('a merged sub-job with no post-merge run turns amber, joins Needs me and sa
   const watching = { ...sub('api'), stage: 'deployment', mergedAt: Date.now() - 40 * 60000, deploys: deploys(), pr: { url: 'https://github.com/org/repo/pull/1', mergeCommit: 'abcdef1234567890', base: 'main', checkStatus: 'passing', checks: [] },
     deploymentResult: { status: 'pending', runs: [{ workflow: 'Deploy', runId: 3, status: 'pending' }], commit: 'abcdef1234567890' } };
   job.subJobs = [watching]; f.view.update(f.data);
-  assert.deepEqual(jobStatus(job, watching), { tone: 'muted', text: 'Watching post-merge runs' }); assert.equal(jobNeedsReview(job, watching), false);
+  assert.deepEqual(jobStatus(job, watching), { tone: 'working', text: 'Watching post-merge runs' }); assert.equal(jobNeedsReview(job, watching), false);
   watching.deploymentStale = { since: watching.mergedAt }; f.view.update(f.data);
   assert.deepEqual(jobStatus(job, watching), { tone: 'needs', text: 'No deployment run' }); assert.equal(jobNeedsReview(job, watching), true);
   assert.ok(f.q('.job-plate-graph .node[data-sub="api"]').classList.contains('tone-warn')); assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Nothing deployed');
