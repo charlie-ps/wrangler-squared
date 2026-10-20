@@ -754,7 +754,12 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 /* This extension's own toast: the board's is app.js-private and the client api
    exposes none. Fixed to the viewport but parented to the view's host, so it is
    hidden along with it whenever another view is on screen. */
-.jobs-toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:40; max-width:min(520px,90vw); padding:10px 16px; background:var(--surface); color:var(--fg); border:1px solid var(--border); border-radius:12px; box-shadow:0 4px 16px var(--shadow); font-family:var(--font); font-size:13px; }
+.jobs-toast { position:fixed; inset:auto auto 18px 50%; margin:0; bottom:18px; left:50%; transform:translateX(-50%); z-index:40; overflow:visible; max-width:min(520px,90vw); padding:10px 16px; background:var(--surface); color:var(--fg); border:1px solid var(--border); border-radius:12px; box-shadow:0 4px 16px var(--shadow); font-family:var(--font); font-size:13px; }
+.jobs-toast-error { display:flex; align-items:center; gap:10px; padding:10px 8px 10px 16px; background:color-mix(in srgb, var(--red) 18%, var(--surface)); border:1px solid var(--red); border-left-width:4px; color:var(--fg); box-shadow:0 6px 24px var(--shadow), 0 0 0 1px color-mix(in srgb, var(--red) 30%, transparent); font-weight:500; }
+.jobs-toast-error > span { min-width:0; overflow-wrap:anywhere; }
+.jobs-toast-close { flex:none; width:24px; height:24px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:transparent; color:var(--red-fg); cursor:pointer; }
+.jobs-toast-close:hover { background:color-mix(in srgb, var(--red) 20%, transparent); }
+.jobs-toast-close svg { width:14px; height:14px; }
 @media(max-width:700px) { #jobs { padding:18px 12px 84px; } .job-dialog { padding:20px; width:95vw; border-radius:20px; } .job-form-row { flex-direction:column; gap:0; } }
 @media(prefers-reduced-motion:reduce) { .job-spin { animation:none; } .job-card,.job-node-tile,.job-seg::after { transition:none; } .job-card:hover { transform:none; } }
 /* A proposed plan change: what approving does to each sub-job, as a tag under its node and a line below. */

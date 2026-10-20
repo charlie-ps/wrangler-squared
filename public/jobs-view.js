@@ -336,7 +336,7 @@ export function primaryAction(dialog) {
 }
 
 const MAX_ASK_IMAGES = 4;
-export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, files = null, onOpenFile = null, updates = null, storage = null, toast = () => {} }) {
+export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
   setFileOpener(files ? (path) => files.canOpen(path) : null);
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
@@ -725,7 +725,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   async function openPath(button) {
     let res;
     try { res = await onOpenFile?.(button.dataset.openPath); } catch { res = null; }
-    if (!res?.ok) toast(res?.reason ? `Could not open the file: ${res.reason}` : 'Could not open the file');
+    if (!res?.ok) toastError(res?.reason ? `Could not open the file: ${res.reason}` : 'Could not open the file');
   }
   const noteFor = (sub) => sub.note ? `<p class="job-note" title="Note for the next session">${ICONS.note}<span>${esc(sub.note)}</span></p>` : '';
   const NOTED_APPROVALS = new Set(['approve-session', 'approve-code']);
@@ -1649,8 +1649,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   let closeMenu = null;
   function copyText(text, done) {
     const p = globalThis.navigator?.clipboard?.writeText?.(text);
-    if (!p) return toast('Clipboard unavailable');
-    p.then(() => toast(done), () => toast('Could not copy to clipboard'));
+    if (!p) return toastError('Clipboard unavailable');
+    p.then(() => toast(done), () => toastError('Could not copy to clipboard'));
   }
   function pickMenu(jobId, item) {
     const job = data.jobs.find((j) => j.id === jobId);
