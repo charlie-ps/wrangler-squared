@@ -1,6 +1,8 @@
 import { execFile as defaultExecFile } from 'node:child_process';
 import { access as defaultAccess } from 'node:fs/promises';
 import { kick, makeCreateJob } from './job-create.js';
+import { generateConvoTitle } from './job-title.js';
+import { runHeadlessClaude } from './headless-claude.js';
 import { settingsSchema } from './jobs-schema.js';
 import { runFile } from './job-github.js';
 import { thumbnailOf, readEvidence, keepAskImages, readIdeaImage, readTalkImage } from './job-evidence.js';
@@ -67,10 +69,23 @@ async function prepare(msg, host) {
   return clean;
 }
 
-export const jobActionHandler = {
+// A conversation an idea just opened is named by Haiku from its first message, as a
+// job is from its description (job-create.js): after the fact, so naming never
+// delays or fails a send, and billed to the card that answers it once one is up.
+async function nameConvo(host, jobId, convoId, run) {
+  const first = host.stores.jobs.get(jobId)?.talk?.find((m) => m.convo === convoId && m.from === 'human');
+  const { title, liveSessionId } = await generateConvoTitle(first?.text || '', { run });
+  host.stores.jobs.titleConvo(jobId, convoId, title);
+  await host.rebuild();
+  const sid = host.stores.jobs.get(jobId)?.runs.findLast((r) => r.sessionId)?.sessionId;
+  if (sid && liveSessionId) host.sessions.bill(sid, liveSessionId);
+}
+
+export const makeJobActionHandler = ({ run = runHeadlessClaude } = {}) => ({
   type: 'job-action',
   async handler(raw, host) {
     const { refused, ...msg } = await prepare(raw, host);
+    const had = new Set((host.stores.jobs.get(msg.id)?.convos || []).map((c) => c.id));
     const ids = { jobId: msg.id, action: msg.action, ...(msg.subJobId ? { subJobId: msg.subJobId } : {}) };
     if (refused) { host.broadcast({ event: 'job-action-failed', ...ids, error: refused }); return; }
     // A refusal goes out as a frame rather than a throw, which never reaches the
@@ -85,8 +100,12 @@ export const jobActionHandler = {
     await host.rebuild();
     host.broadcast({ event: 'job-action-complete', ...ids });
     kick(host).catch((e) => host.log('job-action tick failed', e));
+    for (const c of host.stores.jobs.get(msg.id)?.convos || []) {
+      if (c.titlePending && !had.has(c.id)) nameConvo(host, msg.id, c.id, run).catch((e) => host.log('conversation title generation failed', e));
+    }
   },
-};
+});
+export const jobActionHandler = makeJobActionHandler();
 
 // The wrangler's answers the human now has in front of them: the job leaves the
 // to-read state. Silent, so neither a toast nor a closed dialog follows it.

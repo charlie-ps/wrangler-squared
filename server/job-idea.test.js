@@ -8,9 +8,12 @@ import { JobRunner } from './job-runner.js';
 import { reportSchema } from './jobs-schema.js';
 import { jobPrompt, ideaMail, SPLIT_PRINCIPLE } from './job-prompts.js';
 import { liveSuggestion, inConversation, suggestionsOf, ideaEditable, IDEA_TEXT_MAX } from './job-idea.js';
-import { makeJobCreateHandler, jobActionHandler, jobImagesHandler } from './handlers.js';
+import { makeJobCreateHandler, makeJobActionHandler, jobImagesHandler } from './handlers.js';
 import { ideasDir } from './job-evidence.js';
 import { _resetForTests, runnerFor } from './jobs.js';
+
+// Never a real Haiku run: a conversation an idea opens is named after the action.
+const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
 
 const plan = (title = 'Nudge') => ({ context: 'ctx', stories: [], subJobs: [{ id: 'nudge', title, repo: '/repo', after: [], brief: 'Build it', show: ['Plate shows the wait'] }] });
 const suggest = (title = 'Nudge when a green PR waits') => ({ title, plan: plan() });
