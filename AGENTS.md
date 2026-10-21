@@ -204,8 +204,8 @@ text as public as the rest of this repo.
   shows it. `job-prompts.js approvalNotesBlock` hands every note upstream of a sub-job (transitive
   `after`, `upstreamOf`) to each of its prompts as quoted JSON, capped at 8,000 characters like
   `humanOutputBlock`. A bulk release (a checkpoint switched to Auto) carries none and clears it.
-  On the board Approve stays one click that sends no note; its caret (`approveSplitHtml`) opens a
-  popup whose `[data-with-note]` button sends `[data-approve-note]`, and typed text holds back a tick's redraw.
+  On the board Approve works like Retry: its caret (`approveSplitHtml`) opens a popup holding only
+  `[data-approve-note]`, which Approve itself sends when non-empty, and typed text holds back a tick's redraw.
 - **New idea is a job that may start as a conversation** (`server/job-idea.js`, `public/job-idea.js`).
   Only the board's form sets `idea` (`job-create` `idea:true` → `job.idea.thread`); `create_job` never does.
   Its planning run either reports `plan` as any job's does, or `reply {text, suggest?}`, one `{title, plan}`

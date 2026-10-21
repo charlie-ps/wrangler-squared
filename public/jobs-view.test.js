@@ -1002,7 +1002,7 @@ test('a reported session needs you, a running one spins, and approval is pinned 
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'request-change', at: 'session', ref: 'receipt9', text: 'Check staging too' });
 });
 
-test('Approve keeps one click, and its caret opens a popup whose words go to later steps, on a session result and on code', (t) => {
+test('Approve sends whatever its caret\'s popup holds, as Retry does, on a session result and on code', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sessionSub('spike'), stage: 'review', result: { checks: ['Schema documented'], receiptId: 'receipt9' } },
     { ...sub('api', ['spike']), stage: 'review', state: 'verified', worktree: { path: '/wt', branch: 'fix/AUTH-1' }, sessions: ['s1'], ready: { checks: ['Tests pass'], receiptId: 'run_1' } }];
@@ -1015,6 +1015,7 @@ test('Approve keeps one click, and its caret opens a popup whose words go to lat
   assert.equal(more.querySelector('summary').getAttribute('aria-label'), 'Approve with context for later steps');
   more.open = true; more.dispatchEvent(f.event('toggle'));
   assert.match(more.querySelector('label').textContent, /Add context for later steps/);
+  assert.equal(more.querySelector('button'), null, 'the popup holds only the note: Approve itself sends it');
   more.querySelector('textarea').value = '  Use the <v2> table  ';
   f.view.update(f.data);
   assert.equal(f.q('.job-approve-more').open, true, 'the popup survives a tick');
@@ -1028,10 +1029,8 @@ test('Approve keeps one click, and its caret opens a popup whose words go to lat
   assert.equal(f.q('.job-approve-more').open, false, 'and the next tick does not reopen it');
   f.q('.job-approve-more').open = true; f.q('.job-approve-more').dispatchEvent(f.event('toggle'));
   f.q('[data-approve-note]').value = '  Use the <v2> table  ';
-  f.q('[data-action="approve-session"][data-with-note]').click();
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'approve-session', head: undefined, sessionReceiptId: 'receipt9', note: 'Use the <v2> table' });
   f.q('.job-approve-split > button.primary').click();
-  assert.equal('note' in f.sent.at(-1), false, 'plain Approve never sends the popup\'s words');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'approve-session', head: undefined, sessionReceiptId: 'receipt9', note: 'Use the <v2> table' });
   Object.assign(job.subJobs[0], { stage: 'cleanup', approvalNote: 'Use the <v2> table' });
   job.moves = [{ id: 'mv_1', at: 1757400000000, subJobId: 'spike', move: 'approve-session', note: 'Use the <v2> table', detail: 'Approved the result of “Run spike”' }];
   f.q('[data-approve-note]').value = ''; f.view.update(f.data);
@@ -1039,12 +1038,22 @@ test('Approve keeps one click, and its caret opens a popup whose words go to lat
   assert.equal(f.q('.job-approval-note').textContent, 'Use the <v2> table', 'escaped, and kept on the step');
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   assert.equal(f.q('.job-approve-split > button.primary').textContent, 'Approve & open PR');
-  assert.equal(f.q('[data-with-note]').textContent, 'Approve & open PR with note');
+  assert.equal(f.q('.job-approve-pop button'), null);
   f.q('[data-approve-note]').value = 'Keep the flag off';
-  f.q('[data-action="approve-code"][data-with-note]').click();
+  f.q('.job-approve-split > button.primary').click();
   assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).readyReceiptId, f.sent.at(-1).note], ['approve-code', 'run_1', 'Keep the flag off']);
   f.q('[data-open-job]').click();
   assert.equal(f.q('.job-move-log q').textContent, 'Use the <v2> table', 'the job history shows the words with the approval');
+});
+
+test('Approve with a blank note behind its caret sends no note', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sessionSub('spike'), stage: 'review', result: { checks: ['Schema documented'], receiptId: 'receipt9' } }, { ...sub('api', ['spike']), stage: 'pending' }];
+  f.view.update(f.data); f.view.openDetail('job1', 'spike');
+  f.q('[data-approve-note]').value = '  \n ';
+  f.q('.job-approve-split > button.primary').click();
+  assert.equal(f.sent.at(-1).action, 'approve-session');
+  assert.equal('note' in f.sent.at(-1), false, 'a blank note sends no words');
 });
 
 test('Approve has no note caret on a session nothing later reads, and says a PR\'s note reaches its own publish too', (t) => {
