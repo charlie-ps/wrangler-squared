@@ -762,7 +762,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   const noteFor = (sub) => sub.note ? `<p class="job-note" title="Note for the next session">${ICONS.note}<span>${esc(sub.note)}</span></p>` : '';
   const NOTED_APPROVALS = new Set(['approve-session', 'approve-code']);
-  // Approve stays one click; the caret beside it opens a popup whose note goes to
+  // Approve goes at once, as Retry does; its caret holds a note Approve itself sends to
   // the prompts that read it (server/job-prompts.js approvalNotesBlock), so a
   // step nothing reads it from gets no caret (`reach` null).
   const NOTE_REACH = { later: ['Approve with context for later steps', 'Add context for later steps', 'Passed to every step after this one'],
@@ -771,7 +771,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const button = `<button class="primary" data-action="${action}" title="${esc(title)}">${ICONS.check}${label}</button>`;
     if (!reach) return button;
     const [aria, heading, placeholder] = NOTE_REACH[reach];
-    return `<span class="job-split job-approve-split">${button}<details class="job-split-more job-approve-more" data-keep="approve-note" ${openMore.has('approve-note') ? 'open' : ''}><summary aria-label="${aria}" title="${aria}">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>${heading}<textarea data-approve-note maxlength="2000" rows="3" placeholder="${placeholder}"></textarea></label><button type="button" data-action="${action}" data-with-note>${ICONS.check}${label} with note</button></div></details></span>`;
+    return `<span class="job-split job-approve-split">${button}<details class="job-split-more job-approve-more" data-keep="approve-note" ${openMore.has('approve-note') ? 'open' : ''}><summary aria-label="${aria}" title="${aria}">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>${heading}<textarea data-approve-note maxlength="2000" rows="3" placeholder="${placeholder}"></textarea></label></div></details></span>`;
   };
   // A failing step's Retry goes at once; its caret holds the one line the retried
   // session reads last (server/job-prompts.js). A coordinator error has no session
@@ -1509,9 +1509,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     wireFooter();
     if (focus) dialog.querySelector(`.job-detail-footer [data-review="${focus}"]`)?.focus();
     if (shotFocus >= 0) dialog.querySelectorAll('.job-shot-open')[shotFocus]?.focus();
-    // Only the popup's own button sends its words: plain Approve is exactly what it was.
     const approvalNoteOf = (b) => {
-      const note = NOTED_APPROVALS.has(b.dataset.action) && 'withNote' in b.dataset && dialog.querySelector('[data-approve-note]')?.value.trim();
+      const note = NOTED_APPROVALS.has(b.dataset.action) && dialog.querySelector('[data-approve-note]')?.value.trim();
       return note ? { note } : {};
     };
     dialog.querySelectorAll('[data-main-retry], [data-main-dismiss], [data-main-resolve]').forEach((b) => b.onclick = () => {
