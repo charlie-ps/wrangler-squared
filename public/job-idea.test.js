@@ -316,3 +316,40 @@ test('a title Haiku is still naming is a loader, on the plate and in the dialog,
   assert.equal(h2().classList.contains('titled'), false, 'and once it has ended a tick does not replay it');
   assert.equal(h2().querySelector('.job-title-loader'), null);
 });
+
+test('a backlog idea opens to its words with Edit idea; Save sends only what changed and the dialog stays on the saved idea', (t) => {
+  const backlog = { ...ideaJob([], []), stage: 'backlog' };
+  const f = fixture(t, [backlog]);
+  f.view.openDetail('idea1');
+  assert.equal(f.q('.job-intent').textContent, backlog.intent);
+  f.q('[data-idea-edit]').click();
+  const form = f.q('#job-idea-edit');
+  assert.equal(form.elements.title.value, backlog.title);
+  assert.equal(form.elements.text.value, backlog.intent);
+  assert.equal(form.elements.text.getAttribute('maxlength'), '8000');
+  assert.equal(f.q('[data-action="start"]'), null, 'Start planning waits until the edit is saved or cancelled');
+  form.elements.text.value = 'Nag me when a green PR waits over a day.';
+  form.querySelector('button.primary').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'edit-idea', text: 'Nag me when a green PR waits over a day.' });
+  f.data.jobs[0] = { ...backlog, intent: 'Nag me when a green PR waits over a day.', revision: 4 };
+  f.view.update(f.data);
+  f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'edit-idea' });
+  assert.ok(f.q('#job-dialog').open);
+  assert.equal(f.q('#job-idea-edit'), null);
+  assert.equal(f.q('.job-intent').textContent, 'Nag me when a green PR waits over a day.');
+  f.q('[data-idea-edit]').click();
+  f.q('#job-idea-edit').elements.title.value = 'Nag me';
+  f.q('#job-idea-edit button.primary').click();
+  assert.equal(f.sent.at(-1).title, 'Nag me');
+  f.q('[data-idea-edit-cancel]').click();
+  assert.ok(f.q('[data-action="start"]'));
+});
+
+test('an idea is no longer editable once planning starts, nor a plain backlog job', (t) => {
+  const f = fixture(t, [ideaJob([asked]), { ...ideaJob([], []), id: 'plain', stage: 'backlog', idea: undefined }]);
+  f.view.openDetail('idea1');
+  assert.equal(f.q('[data-idea-edit]'), null);
+  f.view.openDetail('plain');
+  assert.ok(f.q('[data-action="start"]'));
+  assert.equal(f.q('[data-idea-edit]'), null);
+});
