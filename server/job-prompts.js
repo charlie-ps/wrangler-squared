@@ -388,7 +388,7 @@ const replanBlock = (job, run) => lines(
 // planned. The board calls the planner "the wrangler", so that is who the human is
 // talking to.
 const askBlock = (job, run, convo) => lines(
-  'This job is ALREADY RUNNING and the human has ASKED YOU A QUESTION about it in one of the job\'s conversations (the board calls you "Wrangler"). Where each sub-job stands now:',
+  'This job is ALREADY RUNNING and the human has WRITTEN TO YOU about it in one of the job\'s conversations (the board calls you "Wrangler"): a question, or a change they want. Nothing is held while you read it. Where each sub-job stands now:',
   ...standing(job),
   job.replan?.proposal ? `A plan change you proposed is waiting for the human: ${JSON.stringify({ plan: job.replan.proposal.plan, actions: job.replan.proposal.actions, diagnosis: job.replan.proposal.diagnosis })}` : '',
   `Current plan: ${JSON.stringify(job.plan)}`,
@@ -396,10 +396,10 @@ const askBlock = (job, run, convo) => lines(
   otherWranglers(job, convo.id),
   sourceLine(job, convo.pending),
   stepConvoLine(job, convo),
-  ...convo.pending.asks.map((a, i) => `${i ? 'Then the human added' : 'The question'}: ${a.feedback}`),
-  'Find out before you answer, READ-ONLY: get_job_context gives every run with its sessionId, read_session_transcript reads a step\'s session (open the raw transcriptPath it returns when the detail matters), `gh pr view`/`gh pr diff` read a PR, and a step\'s worktree is on disk. Change nothing anywhere.',
-  `Then answer: ${reportCall(run, `kind:"reply", text:"your answer"${convo.sub ? ', escalate?:true' : ''}`)} ${REPLY_RULES} No plan change is made and nothing is held. Anything more the human says before you reply reaches you here by mail: answer all of it in that one reply.`,
-  'If the human is really asking for a change ("can you make it…?", "should we drop step 3?" meant as "do"), do not ask permission: propose it as a plan change, with the rules below, and report the plan receipt instead of a reply.',
+  ...convo.pending.asks.map((a, i) => `${i ? 'Then the human added' : 'The human wrote'}: ${a.feedback}`),
+  'Find out before you answer or propose, READ-ONLY: get_job_context gives every run with its sessionId, read_session_transcript reads a step\'s session (open the raw transcriptPath it returns when the detail matters), `gh pr view`/`gh pr diff` read a PR, and a step\'s worktree is on disk. Change nothing anywhere.',
+  `To answer, reply: ${reportCall(run, `kind:"reply", text:"your answer"${convo.sub ? ', escalate?:true' : ''}`)} ${REPLY_RULES} No plan change is made and nothing is held. Anything more the human says before you reply reaches you here by mail: answer all of it in that one reply.`,
+  'You may answer or propose. If the human wants a change (an instruction, or "can you make it…?", "should we drop step 3?" meant as "do"), do not ask permission: propose it as a plan change, with the rules below, and report the plan receipt instead of a reply. Only then does anything wait for the human.',
   ...proposalRules(job),
 );
 // The human wrote again in this conversation before its wrangler replied.
@@ -424,7 +424,7 @@ export function jobPrompt(job, sub, run) {
   const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, `${attribution}\nCommit, push to the open PR, then `) : report('kind:"published", url:"<PR url>"', `${attribution}\nCommit, push, open the PR${baseFlag}, then `);
   const prompts = {
     planning: lines(
-      `${run.ask ? 'Answer a question about this running job' : 'Plan this job'}: ${job.title}`,
+      `${run.ask ? 'Answer or act on an idea about this running job' : 'Plan this job'}: ${job.title}`,
       '',
       `Goal: ${job.intent}`,
       `Repository hints (optional; discover others as needed): ${JSON.stringify(job.repos || [])}`,

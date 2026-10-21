@@ -15,7 +15,8 @@ import { jobCreateHandler, makeJobCreateHandler, makeJobActionHandler, jobSettin
 import { _resetForTests, runnerFor } from './jobs.js';
 import { jobReportTool, getJobContextTool } from './tools.js';
 import { changeView } from './job-change.js';
-import { say } from './job-talk.js';
+import { say, openConvo } from './job-talk.js';
+import { requestReplan } from './job-replan.js';
 import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 
@@ -38,6 +39,15 @@ const change = (f, subId, text = 'Take another pass', convo) => {
   const view = changeView(job, subId ? job.subJobs.find((s) => s.id === subId) : null);
   return f.store.action(f.job.id, 'request-change', { subJobId: subId, at: view?.at, ref: view?.ref, text, ...(convo ? { convo } : {}) });
 };
+// What the wrangler is reading in the conversation an idea opened, before it answers or proposes.
+const reading = (f) => f.store.get(f.job.id).convos.at(-1).pending;
+// A change Wrangler is drawing with no ask run before it, as one dequeued or sent
+// back is: the human's own ideas reach a replan only through an ask run's proposal.
+const drawing = (f, text) => f.store.update(f.job.id, (j) => {
+  const convo = openConvo(j, null, Date.now());
+  say(j, { from: 'human', text, convo: convo.id }, Date.now());
+  requestReplan(j, text, Date.now(), null, { convo: convo.id });
+});
 // The planner's half of an idea: it proposes `actions` on the plan as it stands,
 // and the human approves that proposal.
 const plannerOf = (f) => f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub);
@@ -394,8 +404,10 @@ test('an idea on code under review with its session gone: the planner reworks it
   f.report({ kind: 'ready', checks: ['Helper reused'] }); f.alive.delete(f.last().sid); await f.tick();
   assert.equal(f.sub().stage, 'review'); assert.equal(f.sub().note, null);
   // Approved but not yet launched: Request changes still withdraws it.
+  change(f, 'api'); await f.tick();
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId });
-  await reworkVia(f, 'api');
+  f.report({ kind: 'plan', plan: f.store.get(f.job.id).plan, actions: [{ type: 'rework', sub: 'api', note: 'Take another pass' }] }, plannerOf(f));
+  f.store.action(f.job.id, 'approve-replan', { proposalId: plannerOf(f).run.id });
   assert.equal(f.sub().stage, 'implementation');
   await f.tick(); f.report({ kind: 'ready', checks: ['Again'] }); await f.tick();
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await f.tick();
@@ -1008,8 +1020,7 @@ test('a blocked step is retried with a note; a request on a step with no agent o
   assert.equal(f.sub().note, null, 'the note is spent once that session reports');
   f.store.update(f.job.id, (j) => { j.subJobs[0].stage = 'deployment'; });
   change(f, 'api', 'Also guard empty payloads');
-  const asked = f.store.get(f.job.id);
-  assert.match(asked.replan.feedback, /^About “Deliver api” \(api, deployment\/\w+\): Also guard empty payloads$/, 'merged work has no resumable agent: the planner takes it, told where it came from');
+  assert.match(reading(f).asks[0].feedback, /^About “Deliver api” \(api, deployment\/\w+\): Also guard empty payloads$/, 'merged work has no resumable agent: the planner takes it, told where it came from');
   assert.equal(f.sub().stage, 'deployment', 'nothing moves until the proposal is approved');
   assert.deepEqual(movesOf(f).at(-1) && [movesOf(f).at(-1).subJobId, movesOf(f).at(-1).move, movesOf(f).at(-1).note], ['api', 'request-change', 'Also guard empty payloads']);
 });
@@ -1034,7 +1045,7 @@ test('an idea on a session result reaches its own session through the planner; t
   assert.deepEqual(changeView(g.store.get(g.job.id), g.sub()), { at: 'session', ref: g.sub().result.receiptId });
   assert.throws(() => g.store.action(g.job.id, 'request-change', { subJobId: 'spike', at: 'session', ref: 'run_stale', text: 'Also check staging' }), /changed since you looked/);
   change(g, 'spike', 'Also check staging');
-  assert.deepEqual([g.sub().stage, !!g.sub().result, g.store.get(g.job.id).replan.source], ['review', true, { sub: 'spike', at: 'session', ref: g.sub().result.receiptId }], 'nothing moves before the human approves');
+  assert.deepEqual([g.sub().stage, !!g.sub().result, reading(g).source], ['review', true, { sub: 'spike', at: 'session', ref: g.sub().result.receiptId }], 'nothing moves before the human approves');
   await g.tick();
   g.report({ kind: 'plan', plan: g.store.get(g.job.id).plan, actions: [{ type: 'rework', sub: 'spike', note: 'Also check staging' }] }, plannerOf(g));
   g.store.action(g.job.id, 'approve-replan', { proposalId: plannerOf(g).run.id });
@@ -1051,15 +1062,16 @@ test('every idea has one way in: the planner, which takes a step\'s idea into th
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api')); await f.tick();
   change(f, null, 'Also cover SSO'); await f.tick();
-  assert.equal(f.store.get(f.job.id).replan.feedback, 'Also cover SSO');
-  change(f, 'api', 'Rename it');
-  assert.equal(f.store.get(f.job.id).replan.feedback, 'Also cover SSO', 'one planner at a time: the second idea queues');
-  assert.equal(f.store.get(f.job.id).replanQueue.length, 1);
-  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub)); await f.tick();
+  const sso = plannerOf(f);
+  assert.equal(f.store.get(f.job.id).replan, undefined, 'the wrangler reads it first');
+  change(f, 'api', 'Rename it'); await f.tick();
+  const rename = plannerOf(f);
+  assert.notEqual(rename.run.id, sso.run.id, 'each idea has its own wrangler: nothing queues');
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, sso); await f.tick();
   const proposal = f.store.get(f.job.id).replan.proposal;
   assert.deepEqual(changeView(f.store.get(f.job.id), null), { at: 'proposal', ref: proposal.id });
   assert.throws(() => f.store.action(f.job.id, 'request-change', { at: 'proposal', ref: 'run_other', text: 'x' }), /changed since you looked/);
-  change(f, 'api', 'Rename it');
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, rename);
   const replan = f.store.get(f.job.id).replan;
   assert.equal(replan.previous.subJobs.length, 3, 'the planner reads the proposal it is asked to change');
   assert.deepEqual([replan.earlier, replan.feedback], [['Also cover SSO'], 'About “Deliver api” (api, review/verified): Rename it']);
@@ -2260,7 +2272,7 @@ test('a request-change arrives as a job-action with its own fields and reaches t
   stubRunner(t, host);
   await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: 'code', ref: f.sub().ready.receiptId, text: 'Use the retry helper' }, host);
   assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id, action: 'request-change', subJobId: 'api' }]);
-  assert.match(f.store.get(f.job.id).replan.feedback, /Use the retry helper$/);
+  assert.match(reading(f).asks[0].feedback, /Use the retry helper$/);
   assert.equal(f.sub().stage, 'review', 'the planner has it; the step waits for the proposal');
 });
 
@@ -2637,7 +2649,7 @@ test('a running job takes a plan change as a proposal: frozen work is locked, re
   assert.equal(f.sub(0).stage, 'done');
   const prompt = jobPrompt(f.store.get(f.job.id), null, planner.run);
   assert.match(prompt, /ALREADY RUNNING/); assert.match(prompt, /- api \(pr\) "Deliver api": done\/done · FROZEN/);
-  assert.match(prompt, /Frozen \(.*\): api\./); assert.match(prompt, /- web .*a step is running/); assert.match(prompt, /Requested change: Drop docs/);
+  assert.match(prompt, /Frozen \(.*\): api\./); assert.match(prompt, /- web .*a step is running/); assert.match(prompt, /The human wrote: Drop docs/);
   assert.match(prompt, /Feedback on, or a question about, what a live sub-job already produced.*`forward` when its session is open on review, else `rework`.*never write it into a later sub-job/i);
   assert.match(prompt, /ONE card: the option's `label` as its heading, its `why` under it, its `leaves` line, then Approve and Discard/);
   assert.match(prompt, /Every clause you write must tell the human one of three things: what is wrong, what approving does, or what it leaves them to do\. Cut anything else/);
@@ -2684,9 +2696,8 @@ test('a running job takes a plan change as a proposal: frozen work is locked, re
 test('a plan change that moves a green PR behind new work reworks it, and neither the rework nor a merge runs before that work deploys', async (t) => {
   const f = fixture(t, { ...input, reviewCode: false }); await f.approve(plan([spec('api'), spec('web')]));
   f.report({ kind: 'published', url: PR_URL }, f.workerFor('web')); f.setPr({ checkStatus: 'passing' }); await f.tick();
-  f.store.action(f.job.id, 'approve-merge', { subJobId: 'web', head: 'head1' });
   change(f, 'web', 'Web needs the new api'); await f.tick();
-  assert.deepEqual(f.merged, [], 'the step the idea was typed on waits for Wrangler');
+  f.store.action(f.job.id, 'approve-merge', { subJobId: 'web', head: 'head1' });
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web', ['api'], { brief: 'Implement web on the new api' })]) }, f.last());
   f.store.action(f.job.id, 'approve-replan', { proposalId: f.last().run.id });
   const web = () => f.store.get(f.job.id).subJobs.find((s) => s.id === 'web');
@@ -2703,9 +2714,10 @@ test('a plan change that moves a green PR behind new work reworks it, and neithe
   assert.match(jobPrompt(f.store.get(f.job.id), web(), f.workerFor('web', 'repair').run), /the human asks: About “Deliver web” .*: Web needs the new api/);
 });
 
-test('an idea typed on a PR holds it from merging until the change is discarded', async (t) => {
+test('an idea typed on a PR holds it from merging once Wrangler proposes a change to it, until that change is discarded', async (t) => {
   const f = fixture(t); await atPr(f);
   change(f, 'api', 'Rethink it'); await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api', [], { brief: 'Rethink api' })]) }, plannerOf(f));
   f.setPr({ checkStatus: 'passing' }); await f.tick(); await f.tick();
   assert.equal(f.merged.length, 0, 'merging would land work the proposal may cancel');
   assert.equal(f.sub().pr.checkStatus, 'passing', 'the PR is still watched');
@@ -2713,10 +2725,20 @@ test('an idea typed on a PR holds it from merging until the change is discarded'
   assert.equal(f.merged.length, 1);
 });
 
-test('an idea typed on the job holds nothing while the wrangler draws it: a green PR merges and the next step starts', async (t) => {
+test('an idea worded as a change on a PR holds nothing while the wrangler reads it: the green PR merges', async (t) => {
+  const f = fixture(t); await atPr(f);
+  change(f, 'api', 'Rename the flag to sign_in_v2'); await f.tick();
+  assert.ok(plannerOf(f).run.ask, 'read by an ask run, as a question would be');
+  assert.equal(f.store.get(f.job.id).replan ?? null, null);
+  f.setPr({ checkStatus: 'passing' }); await f.tick();
+  assert.equal(f.merged.length, 1);
+});
+
+test('an idea holds nothing while the wrangler reads it: a green PR merges and the next step starts', async (t) => {
   const f = fixture(t); f.setDeploys({ expected: false }); await atPr(f, plan([spec('api'), sessionSpec('notes', ['api'])]));
   change(f, null, 'Also cover SSO'); await f.tick();
-  assert.ok(f.store.get(f.job.id).replan, 'the change is being drawn');
+  assert.ok(reading(f), 'the wrangler is reading it');
+  assert.equal(f.store.get(f.job.id).replan ?? null, null, 'no plan change until it proposes one');
   f.setPr({ checkStatus: 'passing' }); await f.tick();
   assert.equal(f.merged.length, 1, 'the PR merges under Wrangler');
   f.setPr({ state: 'MERGED', mergeCommit: 'm1' }); f.store.update(f.job.id, (j) => { j.subJobs[0].nextPollAt = 0; }); await f.tick(); await f.tick();
@@ -2775,7 +2797,7 @@ test('an open PR moved behind a new fix keeps its code: no repair or merge until
 test('a discarded plan change stops its planner quietly and ignores a late proposal', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api')]));
   assert.throws(() => f.store.action(f.job.id, 'discard-replan'), /No plan change/);
-  change(f, null, 'Smaller'); await f.tick();
+  drawing(f, 'Smaller'); await f.tick();
   const planner = f.last();
   f.store.action(f.job.id, 'discard-replan');
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web')]) }, planner);
@@ -2787,14 +2809,18 @@ test('a discarded plan change stops its planner quietly and ignores a late propo
   assert.equal(job.moves.at(-1).move, 'discard-replan');
 });
 
-test('asking again replaces a waiting proposal and shows it to the next planner; a blocked planner says so in the conversation and stops nothing', async (t) => {
+test('asking again replaces a waiting proposal and shows it to the next wrangler; a blocked planner says so in the conversation and stops nothing', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api')]));
   change(f, null, 'Add web'); await f.tick();
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web')]) }); await f.tick();
   change(f, null, 'Web first'); await f.tick();
   const second = f.last();
-  assert.match(jobPrompt(f.store.get(f.job.id), null, second.run), /Your previous proposal, which the human asked to change: .*"web"/);
-  f.report({ kind: 'blocked', summary: 'Cannot tell which repo' }, second); await f.tick();
+  assert.match(jobPrompt(f.store.get(f.job.id), null, second.run), /A plan change you proposed is waiting for the human: .*"web"/);
+  f.report({ kind: 'plan', plan: plan([spec('web'), spec('api', ['web'])]) }, second);
+  assert.deepEqual([f.store.get(f.job.id).replan.earlier, f.store.get(f.job.id).replan.proposal.id], [['Add web'], second.run.id]);
+  f.store.action(f.job.id, 'discard-replan'); await f.tick();
+  drawing(f, 'Split api'); await f.tick();
+  f.report({ kind: 'blocked', summary: 'Cannot tell which repo' }, plannerOf(f)); await f.tick();
   const job = f.store.get(f.job.id);
   assert.deepEqual([job.error ?? null, job.replan], [null, null], 'the job runs on; the change can be sent again');
   const said = job.talk.at(-1);
@@ -3353,8 +3379,9 @@ test('a question is answered in the job\'s conversation: an ask run that holds n
   assert.equal(asker.run.ask, job.talk[0].id, 'an ask run, tied to the question');
   assert.equal(asker.run.convo, job.convos[0].id, 'and to its conversation');
   const prompt = jobPrompt(f.store.get(f.job.id), null, asker.run);
-  assert.match(prompt, /^Answer a question about this running job/);
-  assert.match(prompt, /ASKED YOU A QUESTION/); assert.match(prompt, /The question: About “Deliver api” \(api, implementation\/\w+\): Why did the api step/);
+  assert.match(prompt, /^Answer or act on an idea about this running job/);
+  assert.match(prompt, /WRITTEN TO YOU about it .*: a question, or a change they want/); assert.match(prompt, /You may answer or propose/);
+  assert.match(prompt, /The human wrote: About “Deliver api” \(api, implementation\/\w+\): Why did the api step/);
   assert.match(prompt, /read_session_transcript/); assert.match(prompt, /kind:"reply"/);
   assert.match(prompt, /reads the FIRST LINE of your text at a glance, so the first line is the answer itself/, 'the reply leads with the answer');
   assert.match(prompt, /what they can do, and what happens if they leave it\. Cut background, history and explanation they did not ask for/);
@@ -3370,12 +3397,13 @@ test('a question is answered in the job\'s conversation: an ask run that holds n
   assert.equal(f.store.get(f.job.id).error, null);
 });
 
-test('a change idea goes straight to a proposal, drawn in the conversation as a card that records what became of it', async (t) => {
+test('a change idea is read like a question, then proposed, drawn in the conversation as a card that records what became of it', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   change(f, null, 'Add a CLI after web'); await f.tick();
   assert.deepEqual(talk(f), [['human', null, 'Add a CLI after web', null]]);
   const planner = plannerOf(f);
-  assert.equal(planner.run.ask, undefined, 'a plan change, as before');
+  assert.ok(planner.run.ask, 'an ask run, whatever its wording');
+  assert.equal(f.store.get(f.job.id).replan ?? null, null, 'nothing held while it reads');
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli', ['web'])]), diagnosis: { summary: 'Adds the CLI once web lands.' } }, planner);
   let card = f.store.get(f.job.id).talk.at(-1);
   assert.deepEqual([card.from, card.kind, card.proposalId, card.text, card.outcome], ['wrangler', 'proposal', planner.run.id, 'Adds the CLI once web lands.', undefined]);
@@ -3411,7 +3439,7 @@ test('a question that asks for a change is proposed by its ask run, folding into
 
 test('a question handed over as a change while another is drafted queues behind it, and runs once that one is approved', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
-  change(f, null, 'Add a CLI after web'); await f.tick();
+  drawing(f, 'Add a CLI after web'); await f.tick();
   const first = plannerOf(f);
   change(f, null, 'Can you also add docs?'); await f.tick();
   const asker = plannerOf(f);
@@ -3423,6 +3451,7 @@ test('a question handed over as a change while another is drafted queues behind 
   assert.deepEqual(job.replanQueue.map((q) => [q.feedback, q.convo]), [['Can you also add docs?', job.convos[1].id]]);
   assert.equal(job.talk.at(-1).kind, 'queued'); assert.doesNotMatch(job.talk.at(-1).text, /Could not/);
   change(f, null, 'And a changelog'); await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('changelog')]) }, plannerOf(f));
   assert.equal(f.store.get(f.job.id).replanQueue.length, 2, 'a change idea queues too');
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli', ['web'])]) }, first); await f.tick();
   f.store.action(f.job.id, 'approve-replan', { proposalId: first.run.id });
@@ -3442,7 +3471,7 @@ test('a question handed over as a change while another is drafted queues behind 
 
 test('a plan change whose idea was only a question answers it and drops the change', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
-  change(f, null, 'Tell me how web is going'); await f.tick();
+  drawing(f, 'Tell me how web is going'); await f.tick();
   const planner = plannerOf(f);
   assert.match(jobPrompt(f.store.get(f.job.id), null, planner.run), /If those words are only a question.*kind:"reply"/);
   f.report({ kind: 'reply', text: 'Web is still being written.' }, planner);
@@ -3463,7 +3492,7 @@ test('several conversations at once: each has its own wrangler run, and each run
   assert.deepEqual(askers.map((w) => w.run.convo), job.convos.map((c) => c.id), 'two wranglers, one per conversation, answering at once');
   job = f.store.get(f.job.id);
   const [left, slow] = askers.map((w) => jobPrompt(job, null, w.run));
-  assert.match(left, /The question: What is left\?/); assert.doesNotMatch(left, /The question: About/);
+  assert.match(left, /The human wrote: What is left\?/); assert.doesNotMatch(left, /The human wrote: About/);
   assert.match(left, /Other wranglers are at work[\s\S]*\(on web\): the human asked "Why is web slow\?"; another wrangler is answering it now/);
   assert.match(slow, /Other wranglers are at work[\s\S]*the human asked "What is left\?"/);
   assert.doesNotMatch(slow, /This conversation so far[^\n]*\n- The human: "What is left\?"/, 'each reads only its own conversation');
@@ -3510,7 +3539,7 @@ test('a message sent before the wrangler replies reaches the same running sessio
   change(f, null, 'And what about docs', convo);
   await f.tick();
   const asker = plannerOf(f);
-  assert.match(jobPrompt(f.store.get(f.job.id), null, asker.run), /The question: What is left\?\nThen the human added: And what about docs/, 'queued before launch, it rides in the prompt');
+  assert.match(jobPrompt(f.store.get(f.job.id), null, asker.run), /The human wrote: What is left\?\nThen the human added: And what about docs/, 'queued before launch, it rides in the prompt');
   const runs = () => f.store.get(f.job.id).runs.filter((r) => r.ask).length;
   assert.equal(f.mailed.length, 0);
   change(f, null, 'Also, is api deployed?', convo);
@@ -3528,18 +3557,18 @@ test('a message sent before the wrangler replies reaches the same running sessio
   const next = plannerOf(f);
   assert.equal(next.run.convo, convo);
   const prompt = jobPrompt(f.store.get(f.job.id), null, next.run);
-  assert.match(prompt, /You answered: "Only web; api is deployed\."/); assert.match(prompt, /The question: Never mind docs/);
+  assert.match(prompt, /You answered: "Only web; api is deployed\."/); assert.match(prompt, /The human wrote: Never mind docs/);
   f.report({ kind: 'reply', text: 'Noted.' }, next);
   convo = f.store.get(f.job.id).convos[0];
   assert.equal(convo.pending, null);
   change(f, null, 'Add a CLI after web', convo.id);
-  assert.ok(f.store.get(f.job.id).replan, 'once answered, a change idea in it is a plan change');
-  assert.equal(f.store.get(f.job.id).replan.convo, convo.id);
+  assert.equal(f.store.get(f.job.id).replan ?? null, null, 'once answered, a change idea in it is read the same way');
+  assert.equal(f.store.get(f.job.id).convos[0].pending.asks.length, 1);
 });
 
 test('a question never holds a step, and answers alongside a plan change being drawn', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web', ['api'])]));
-  change(f, null, 'Add a CLI after web'); await f.tick();
+  drawing(f, 'Add a CLI after web'); await f.tick();
   change(f, null, 'How is api going?'); await f.tick();
   const job = f.store.get(f.job.id);
   const live = job.runs.filter((r) => !r.stopped);
@@ -3592,9 +3621,9 @@ test('dismiss-convo hides a conversation for good, never one whose wrangler is a
   f.report({ kind: 'reply', text: 'Only web.' }, asker);
   await f.tick();
   change(f, null, 'Add a CLI after web', id);
-  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /plan change in progress/, 'a change being drawn');
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'a change idea is read first');
   await f.tick();
-  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli')]) }, plannerOf(f));
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli')]) }, plannerOf(f)); await f.tick();
   assert.ok(f.store.get(f.job.id).replan.proposal);
   assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /plan change in progress/, 'a proposal waiting');
   f.store.action(f.job.id, 'discard-replan');

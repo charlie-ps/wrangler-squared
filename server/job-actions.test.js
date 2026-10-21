@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gateAction, stampActions, checkActions, applyActions, forwardsOnly, changeView } from './job-actions.js';
-import { proposeReplan, approveReplan, optionsOf } from './job-replan.js';
+import { proposeReplan, approveReplan, optionsOf, requestReplan } from './job-replan.js';
 import { reportSchema } from './jobs-schema.js';
 import { buildSubJob } from './job-store.js';
 import { autoApplicable } from './job-red.js';
 import { requestChange } from './job-change.js';
+import { askToReplan } from './job-talk.js';
 
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, kind: 'pr', repo: '/repo', storyId: 'story', after, brief: `Implement ${id}`, ...extra });
 const PR = 'https://github.com/o/r/pull/1';
@@ -288,7 +289,8 @@ test('only a proposal of forwards and nothing else skips the human: any plan cha
 // The job moved under a proposal the human is about to approve: what it edits or
 // acts on has since landed. No press could ever approve it, so it goes back.
 const openPrOf = () => ({ stage: 'pr', state: 'watching', pr: { url: PR, head: 'h1', checkStatus: 'passing' } });
-const ideaOn = (j, id, text) => { const sub = subOf(j, id); requestChange(j, sub, { ...changeView(j, sub), text }, { now: 1 }); };
+// Typed on the step, read by an ask run that proposes a change (job-talk.js askToReplan).
+const ideaOn = (j, id, text) => { const sub = subOf(j, id); requestChange(j, sub, { ...changeView(j, sub), text }, { now: 1 }); askToReplan(j, { id: 'run_a', convo: j.talk.at(-1).convo }, requestReplan, 1); };
 const land = (j, id, patch) => Object.assign(subOf(j, id), patch);
 
 test('Unit test: brief edit on a PR that merges before approval goes back to the planner', () => {
