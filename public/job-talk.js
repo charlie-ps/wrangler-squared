@@ -66,11 +66,12 @@ function proposalHtml(job, m, onJob, kept) {
 // noteProposal), or an older card that did no more than that.
 export const isForward = (m) => m.kind === 'proposal' && (m.forward || (!m.red && (m.options || 1) === 1 && m.changes?.length > 0 && m.changes.every((c) => c.mark === 'forward')));
 const stepTitle = (job, id) => job.subJobs.find((s) => s.id === id)?.title || id;
-const sessionsOf = (titles) => titles.length === 1 ? `${titles[0]}'s session` : `${titles.slice(0, -1).join(', ')} and ${titles.at(-1)}'s sessions`;
-function forwardLine(job, m) {
-  const titles = [...new Set((m.forwarded?.length ? m.forwarded.map((f) => stepTitle(job, f.sub)) : m.changes.map((c) => c.title)))];
-  return `${WRANGLER_NAME} forwarded this to ${sessionsOf(titles)}`;
+const listOf = (titles) => titles.length === 1 ? titles[0] : `${titles.slice(0, -1).join(', ')} and ${titles.at(-1)}`;
+function forwardedTo(job, m) {
+  return listOf([...new Set((m.forwarded?.length ? m.forwarded.map((f) => stepTitle(job, f.sub)) : m.changes.map((c) => c.title)))]);
 }
+// A speaker's label, then the step it is about: muted, one line, cut short.
+const whoHtml = (label, step, at) => `<div class="job-idea-who">${label}${step ? `<span class="job-talk-step" title="${esc(step)}">${esc(step)}</span>` : ''}<time>${esc(time(at))}</time></div>`;
 
 // What the session said back to a forwarded message, read from the step's thread
 // (the source of truth): everything after it up to the next message sent to it.
@@ -86,7 +87,7 @@ function sessionHtml(job, sub, t) {
   const attach = files.length ? `<div class="job-msg-att">${files.map((f, k) => shotButtonHtml(job, sub, t.round, f, k)).join('')}</div>` : '';
   const run = t.run ? `<pre class="job-msg-run"><i>$</i> ${esc(t.run.cmd)}\n${esc(t.run.out)}\n<b class="${t.run.exit === 0 ? 'ok' : 'bad'}">exit ${esc(t.run.exit)}</b></pre>` : '';
   const text = t.from === 'system' ? `Reported ready again: round ${t.round}` : t.text;
-  return `<div class="job-talk-session" data-talk-thread="${esc(t.id)}"><span class="job-talk-session-mark" aria-hidden="true">${ICONS.terminal}</span><div><div class="job-idea-who">Session · ${esc(sub.title)}<time>${esc(time(t.at))}</time></div><div class="job-idea-body">${proseHtml(text)}</div>${run}${attach}</div></div>`;
+  return `<div class="job-talk-session" data-talk-thread="${esc(t.id)}"><span class="job-talk-session-mark" aria-hidden="true">${ICONS.terminal}</span><div>${whoHtml('Session', sub.title, t.at)}<div class="job-idea-body">${proseHtml(text)}</div>${run}${attach}</div></div>`;
 }
 // Each approved forward's answers, or that its session is still at it.
 const answersHtml = (job, m) => (m.forwarded || []).map(({ sub: id, message }) => {
@@ -96,7 +97,7 @@ const answersHtml = (job, m) => (m.forwarded || []).map(({ sub: id, message }) =
   const working = !got.length && sub.answering?.id === message ? `<div class="job-idea-thinking job-talk-working"><span class="job-talk-session-mark" aria-hidden="true">${ICONS.terminal}</span><span class="job-idea-shine">${esc(sub.title)}'s session is working on it…</span></div>` : '';
   return got.map((t) => sessionHtml(job, sub, t)).join('') + working;
 }).join('');
-const forwardHtml = (job, m) => `<div class="job-talk-forward" data-talk="${esc(m.id)}">${wranglerMark('small')}<span>${esc(forwardLine(job, m))}</span><time>${esc(time(m.outcomeAt || m.at))}</time></div>`;
+const forwardHtml = (job, m) => `<div class="job-talk-forward" data-talk="${esc(m.id)}">${wranglerMark('small')}${whoHtml('Forwarded to', forwardedTo(job, m), m.outcomeAt || m.at)}</div>`;
 
 function messageHtml(job, m, onJob, kept) {
   if (m.from === 'human') return humanHtml(job, m, onJob);

@@ -1783,8 +1783,8 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .job-idea-thread .job-sent-bubble { max-width:min(86%,560px); }
 .job-idea-msg { display:grid; grid-template-columns:30px minmax(0,1fr); gap:12px; max-width:720px; }
 .job-idea-msg.fresh { animation:job-idea-fade .4s both; }
-.job-idea-who { display:flex; align-items:baseline; gap:8px; margin-bottom:6px; font:600 10px/1.9 var(--jobs-mono); letter-spacing:.16em; text-transform:uppercase; color:var(--fg-muted); }
-.job-idea-who time { font-weight:400; letter-spacing:.04em; text-transform:none; color:var(--fg-subtle); }
+.job-idea-who { display:flex; align-items:baseline; gap:8px; margin-bottom:6px; font:600 12.5px/1.5 var(--font); color:var(--fg-muted); }
+.job-idea-who time { font-weight:400; font-size:11.5px; color:var(--fg-subtle); }
 .job-idea-body { padding:12px 15px; border-radius:4px 18px 18px 18px; background:color-mix(in srgb, var(--surface-2) 70%, transparent); box-shadow:inset 0 0 0 1px var(--border-muted); color:var(--fg); font-size:13.5px; line-height:1.6; overflow-wrap:anywhere; }
 .job-dialog .job-idea-body p { margin:0; font-size:inherit; color:inherit; }
 .job-idea-body :is(p,ol,ul)+:is(p,ol,ul), .job-dialog .job-idea-body :is(p,ol,ul)+:is(p,ol,ul) { margin-top:8px; }
@@ -1917,8 +1917,11 @@ details.job-talk-card[open] > summary svg { transform:none; }
 .job-talk-working { padding-left:0; }
 /* A forwarded idea is no plan change: one quiet line, then the step's session answering it, marked
    as the session (a terminal chip, not Wrangler's mark). Its words live in the step's thread. */
-.job-talk-forward { display:flex; align-items:center; gap:10px; font-size:12.5px; color:var(--fg-muted); }
-.job-talk-forward time { color:var(--fg-subtle); font-size:11.5px; }
+.job-talk-forward { display:grid; grid-template-columns:18px minmax(0,1fr); gap:10px; align-items:center; }
+.job-talk-forward .job-idea-who { margin:0; }
+.job-talk :is(.job-talk-forward,.job-talk-session) .job-idea-who { min-width:0; max-width:640px; white-space:nowrap; }
+.job-talk-step { min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:400; color:var(--fg-subtle); }
+.job-talk-step + time { flex:none; }
 .job-talk-session { display:grid; grid-template-columns:18px minmax(0,1fr); gap:10px; max-width:720px; }
 .job-talk-session-mark { display:inline-grid; place-items:center; width:18px; height:18px; margin-top:2px; border-radius:5px; color:var(--fg-muted); background:var(--surface-2); box-shadow:inset 0 0 0 1px var(--border); }
 .job-talk-session-mark .icon { width:11px; height:11px; }
