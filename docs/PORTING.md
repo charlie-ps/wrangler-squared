@@ -2,7 +2,7 @@
 
 This repo is the job system from agent-wrangler's `job-system` branch
 (18 commits ahead of `main`, never merged), re-homed as an **installable
-extension**. The port is functionally complete against host API **1.38.0**: every
+extension**. The port is functionally complete against host API **1.39.0**: every
 feature the in-core system had is either wired through the `host` façade or is
 one of the open gaps below. This document stays the map — what came from
 where, what stands in for what, and what has to change in agent-wrangler before

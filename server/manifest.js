@@ -57,7 +57,10 @@ export default {
     'mail:send', 'tasks:read', 'tasks:write',
     'usage:read', 'board:rebuild', 'board:broadcast', 'images:keep', 'files:view',
   ],
-  engines: { wranglerApi: '^1.38.0' },
+  engines: { wranglerApi: '^1.39.0' },
+  // Early builds an install may opt into (host API 1.39) from the hidden
+  // switch in public/early-adopter.js; mirrored in package.json so it is consented to.
+  earlyAdopter: { branch: 'next' },
 
   // Instantiated once by the wrangler with `{ id, log }`; the file path is the
   // extension's own choice (server/data-dir.js).

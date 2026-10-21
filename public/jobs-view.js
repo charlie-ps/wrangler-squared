@@ -355,7 +355,7 @@ export function primaryAction(dialog) {
 }
 
 const MAX_ASK_IMAGES = 4;
-export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
+export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, onThemeChoice = () => {}, files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
   setFileOpener(files ? (path) => files.canOpen(path) : null);
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
@@ -778,7 +778,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // session reads last (server/job-prompts.js). A coordinator error has no session
   // to read it, so the job's own Retry stays plain.
   const retrySplitHtml = (primary) => `<span class="job-split job-retry-split"><button id="job-retry" ${primary ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button><details class="job-split-more" data-keep="retry-note" ${openMore.has('retry-note') ? 'open' : ''}><summary aria-label="Add a note for Retry to send" title="Add a note for Retry to send">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>Note sent with Retry<textarea data-retry-note maxlength="180" rows="2" placeholder="Optional. Shown on the card until the retried session reports"></textarea></label></div></details></span>`;
-  // newest last. A queued one is the only state that holds the button.
   // Every run's session, newest first: a repair or publish run hides the implementation one behind it.
   const sessionSplitHtml = (job, sub, primary) => {
     const button = `<button id="job-session" ${primary ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>`;
@@ -1804,7 +1803,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     themePicker = mountThemePicker(dialog.querySelector('#job-theme-pick'), {
       themes: THEMES, value: themeOf(data.settings).id,
       optionsOf: (t) => optionsOf(data.settings, t),
-      onChange: (id) => saveSettings({ theme: id }),
+      onChange: (id) => { const from = themeOf(data.settings).id; saveSettings({ theme: id }); onThemeChoice({ id, from }); },
       // Sent whole: settings(patch) merges shallowly, and each theme keeps its own.
       onOption: (t, key, v) => saveSettings({ themeOptions: { ...data.settings.themeOptions, [t.id]: { ...optionsOf(data.settings, t), [key]: v } } }),
     });

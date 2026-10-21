@@ -21,7 +21,9 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   assert.deepEqual([...manifest.requires].sort(), [...declared.requires].sort(), 'the manifest may not be wider than what the human consented to');
   assert.ok(manifest.requires.includes('tasks:read'));
   assert.ok(manifest.requires.includes('tasks:write'));
-  assert.equal(manifest.engines.wranglerApi, '^1.38.0', 'files:view and the client api.files arrived in 1.38');
+  assert.equal(manifest.engines.wranglerApi, '^1.39.0', 'earlyAdopter and the client api.earlyAdopter arrived in 1.39');
+  assert.deepEqual(manifest.earlyAdopter, { branch: 'next' });
+  assert.deepEqual(declared.earlyAdopter, manifest.earlyAdopter, 'the early-adopter branch is part of what the human consented to');
   assert.ok(manifest.requires.includes('images:keep'));
   assert.ok(manifest.requires.includes('files:view'));
   assert.ok(declared.requires.includes('files:view'));

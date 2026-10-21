@@ -892,6 +892,16 @@ test('Automation settings picks the theme from a radio list beside its preview, 
   assert.equal('theme' in f.sent.at(-1).patch || 'themeOptions' in f.sent.at(-1).patch, false, 'Save settings leaves the theme alone');
 });
 
+test('each theme choice reports the theme it left, for the early-adopter gesture', (t) => {
+  const choices = [];
+  const f = fixture(t, undefined, { onThemeChoice: (c) => choices.push(c) });
+  f.data.settings.theme = 'space'; f.view.update(f.data);
+  f.q('#jobs-settings').click();
+  const choice = (id) => f.q(`#job-theme-pick .theme-choice[data-value="${id}"]`);
+  choice('wrangler').click(); choice('space').click(); choice('space').click(); choice('wrangler').click();
+  assert.deepEqual(choices, [{ id: 'wrangler', from: 'space' }, { id: 'space', from: 'wrangler' }, { id: 'wrangler', from: 'space' }], 'the checked theme again is no choice');
+});
+
 test('dependency waves, session waits and escaped titles remain compact', () => {
   assert.deepEqual([...dependencyLevels(plan)], [['api', 0], ['web', 1]]);
   const spike = { ...sub('spike'), kind: 'session', stage: 'session' };
