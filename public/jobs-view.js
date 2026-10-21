@@ -33,6 +33,7 @@ import { historyHtml } from './job-thread.js';
 import { replanAsks, latestAsk } from './replan-asks.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
 import { pressBusy, isBusy, submitterOf } from './busy-button.js';
+import { guardOpen } from './dialog-backdrop.js';
 import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, shotBoxHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
 // Mirrors server/jobs-schema.js MAX_SHOW.
 const MAX_SHOW = 8;
@@ -355,11 +356,12 @@ export function primaryAction(dialog) {
 }
 
 const MAX_ASK_IMAGES = 4;
-export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, onThemeChoice = () => {}, files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
+export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, onThemeChoice = () => {}, now = () => Date.now(), files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
   setFileOpener(files ? (path) => files.canOpen(path) : null);
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
   wireDeps(root); wireDeps(dialog);
+  const markOpened = guardOpen(dialog, { now });
   let data = { jobs: [], settings: { concurrency: 8, maxRepairs: 2, maxReplans: 2, deploymentStaleMinutes: 30 } };
   // Ideas on the board at the last render, and those forming into a job since (id → { start, ms, stage }):
   // `stage` is the idea's sky as last drawn, so the painted cloud is kept rather than drawn again.
@@ -565,7 +567,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     dialog.innerHTML = `<button class="job-dialog-close" aria-label="Close" title="Close">${ICONS.x}</button>${html}`;
     dialog.querySelector('.job-dialog-close').onclick = () => dialog.close();
     dialog.querySelectorAll('details[data-keep]').forEach((d) => d.ontoggle = () => { if (d.open) openMore.add(d.dataset.keep); else openMore.delete(d.dataset.keep); });
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) { dialog.showModal(); markOpened(); }
   }
   const more = (key, summary, body, cls = '') => `<details class="job-more ${cls}" data-keep="${key}" ${openMore.has(key) ? 'open' : ''}><summary>${summary}</summary>${body}</details>`;
   // Which of a proposal's options is picked; it resets with a new proposal.
