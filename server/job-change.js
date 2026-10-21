@@ -2,7 +2,6 @@ import { requestReplan } from './job-replan.js';
 import { changeView } from './job-actions.js';
 import { isDeclared } from './job-red.js';
 import { say, ask, convoById, openConvo } from './job-talk.js';
-import { looksLikeQuestion } from './job-parked.js';
 
 export { changeView };
 
@@ -13,10 +12,10 @@ export { changeView };
 // board), which sorts it into actions on live steps (forward to an open session,
 // rework) and plan edits: one proposal the human approves (job-replan.js,
 // job-actions.js). On a running job every idea is also said in one of the job's
-// conversations (job-talk.js: `convo` names it, none starts a new one), and a
-// question is answered there instead, with no plan change and nothing held.
-// Anything said while that conversation's wrangler is still at it goes to that
-// wrangler. Pure over the job draft job-store.js is about to persist, like
+// conversations (job-talk.js: `convo` names it, none starts a new one) and read
+// there first by an ask run, which answers or proposes; nothing is held until it
+// proposes. Anything said while that conversation's wrangler is still at it goes
+// to that wrangler. Pure over the job draft job-store.js is about to persist, like
 // job-replan.js.
 
 const quoted = (title) => `“${title}”`;
@@ -59,12 +58,12 @@ export function requestChange(job, sub, { at, ref, text, attachments, convo: con
     requestReplan(job, `About ${quoted(sub.title)} (${sub.id}), which was declared red: ${d.summary}${d.tried?.length ? `\nTried: ${d.tried.join(' | ')}` : ''}${d.ask ? `\nThe decision asked of the human: ${d.ask}` : ''}\nThe human says: ${idea}`, now, { sub: sub.id, auto: false, human: true }, { source, images, convo: convo.id });
     return { detail: `Sent the declared red on ${quoted(sub.title)} back to Wrangler`, route: 'planner' };
   }
-  // Anything else is a question, answered in the thread, or a change of plan on a
-  // running job, even a word for one step's open session: the planner proposes,
-  // the human approves. A step's idea says where it came from.
+  // On a running job anything else is read by the conversation's wrangler first,
+  // question or change alike: it answers, or proposes and the human approves. A
+  // step's idea says where it came from.
   const feedback = sub ? `About ${quoted(sub.title)} (${sub.id}, ${sub.stage}${sub.state ? `/${sub.state}` : ''}): ${idea}` : idea;
   const convo = target || openConvo(job, sub, now);
-  if (job.stage === 'active' && (convo.pending || looksLikeQuestion(typed))) {
+  if (job.stage === 'active') {
     const sent = ask(convo, say(job, { ...said, convo: convo.id }, now), { feedback, source, images }, now);
     if (sent === 'follow-up') return { detail: 'Sent to Wrangler that is answering', route: 'planner' };
     return { detail: sub ? `Asked Wrangler about ${quoted(sub.title)}` : 'Asked Wrangler', route: 'planner' };

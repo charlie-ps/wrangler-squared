@@ -4,14 +4,14 @@ import { forwardsOnly } from './job-actions.js';
 // planner): every idea the human types in an Add idea box, every answer, and
 // every plan change proposed, kept on `job.talk` so they outlive a plan change and
 // a reload. Each message names its conversation (`convo`, one of `job.convos`),
-// and several can be open at once, each with its own wrangler run. A question
-// starts an ASK run for its conversation (`convo.pending`): a planning run that
-// never sets `job.replan`, so nothing is held while it reads, and that replies in
-// the thread. Whatever the human says before that run replies is one more ask for
-// the SAME run, mailed to it by the runner (job-runner.js deliverAsks), never a
-// new run. A change idea goes to `requestReplan` exactly as before; its proposal
-// is drawn in its conversation as a card that records what became of it. Pure
-// over the job draft job-store.js is about to persist, like job-change.js.
+// and several can be open at once, each with its own wrangler run. Every idea,
+// question or change, starts an ASK run for its conversation (`convo.pending`): a
+// planning run that never sets `job.replan`, so nothing is held while it reads,
+// and that replies in the thread or proposes (askToReplan). Whatever the human
+// says before that run replies is one more ask for the SAME run, mailed to it by
+// the runner (job-runner.js deliverAsks), never a new run. A proposal is drawn in
+// its conversation as a card that records what became of it. Pure over the job
+// draft job-store.js is about to persist, like job-change.js.
 
 export const TALK_MAX = 200;
 export const CONVOS_MAX = 50;
@@ -46,7 +46,7 @@ export function openConvo(job, sub, now) {
   return convo;
 }
 
-// A question, or anything said while that conversation's wrangler is still at it:
+// An idea, or anything said while that conversation's wrangler is still at it:
 // the first starts a run, the rest go to it.
 export function ask(convo, message, { feedback, source, images }, now) {
   const entry = { messageId: message.id, feedback, sentAt: null };
