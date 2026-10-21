@@ -32,6 +32,8 @@ const fixedOf = (s, k) => (k === 'place.type' ? s.place?.type : s[k]);
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const norm = (s) => ({ ...s, kind: s.kind || 'pr', after: s.after || [], check: s.check || undefined, show: s.show?.length ? s.show : undefined });
 const quoted = (title) => `“${title}”`;
+// What a frozen sub-job may not change: anything that would make it a different step.
+const respecs = (p, next) => [...EDITABLE, 'base'].some((k) => !same(norm(p)[k], next[k])) || FIXED.some((k) => !same(fixedOf(norm(p), k), fixedOf(next, k)));
 // A session parked on its ready receipt is only waiting for the human (job-parked.js);
 // a plan change that reworks its sub-job simply ends it.
 const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.parkedFor !== 'ready' && r.subJobId === subId);
@@ -87,7 +89,7 @@ export function mergeReplan(job, proposal) {
     const next = proposed.get(p.id);
     const sub = live.get(p.id);
     if (!sub || frozen.includes(p.id)) {
-      if (next && ([...EDITABLE, 'base'].some((k) => !same(norm(p)[k], next[k])) || FIXED.some((k) => !same(fixedOf(norm(p), k), fixedOf(next, k))))) throw new Error(`${p.id} has already ${sub?.cancelledAt ? 'been dropped' : 'landed'}; keep it exactly as it is`);
+      if (next && respecs(p, next)) throw new Error(`${quoted(p.title)}: ${p.id} has already ${sub?.cancelledAt ? 'been dropped' : 'landed'}; keep it exactly as it is`);
       subJobs.push(p); continue;
     }
     // Stories outlive every proposal, so the write that creates one does too,
@@ -331,8 +333,10 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
 }
 
 // What the chosen option touches that has landed, finished or moved since it was
-// written: an edit, removal or write's session now frozen, or an action's pin gone.
-// No refusal it causes can ever clear, so the proposal would be dead.
+// written: an edit, removal or write's session now frozen, an action's pin gone, or
+// a frozen step whose stored entry no longer matches the proposal's copy (a write
+// the human edited after the proposal kept it, then made). No refusal it causes
+// can ever clear, so the proposal would be dead.
 function movedSince(job, chosen) {
   const moved = movedActions(job, chosen.actions, chosen.merged);
   const was = new Set(chosen.changes?.frozen || []);
@@ -342,6 +346,12 @@ function movedSince(job, chosen) {
     const sub = job.subJobs.find((s) => s.id === id);
     if (!sub || was.has(id) || moved.some((m) => m.sub === sub) || !isFrozen(sub)) continue;
     moved.push({ sub, how: landedAs(sub) || 'has finished' });
+  }
+  for (const next of chosen.plan?.subJobs || []) {
+    const sub = job.subJobs.find((s) => s.id === next.id);
+    const p = job.plan.subJobs.find((s) => s.id === next.id);
+    if (!sub || !p || !isFrozen(sub) || moved.some((m) => m.sub === sub) || !respecs(p, norm(next))) continue;
+    moved.push({ sub, how: `${landedAs(sub) || 'has finished'} and changed` });
   }
   return moved;
 }
