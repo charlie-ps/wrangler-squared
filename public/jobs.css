@@ -1051,12 +1051,12 @@ li.job-mark-rework { color:var(--wf); }
 /* An idea on the mini board: a card drawn on its forming sky (job-skylines.js), like its
    plate, edged in amber while it waits on you. Its text sits on the art, so its ink is fixed. */
 .intro-mini-idea { position:relative; isolation:isolate; overflow:hidden; min-height:54px; box-sizing:border-box; background:var(--jt-night); transition:box-shadow .3s; }
-.intro-mini-idea.tone-read { box-shadow:inset 0 0 0 1.5px var(--c); }
+.intro-mini-idea.tone-warn { box-shadow:inset 0 0 0 1.5px var(--c); }
 .intro-mini-sky { position:absolute; inset:0; z-index:-1; }
 .intro-mini-sky::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg, color-mix(in srgb, var(--jt-night) 55%, transparent), transparent 65%); }
 .intro-mini-idea b { color:var(--jt-ivory); }
 .intro-mini-idea small { color:color-mix(in srgb, var(--jt-ivory) 78%, transparent); }
-.intro-mini-idea.tone-read small { color:var(--jt-ink-read); }
+.intro-mini-idea.tone-warn small { color:var(--jt-ink-needs); }
 .intro-mini-idea .job-idea-mark { color:var(--jt-ivory); }
 /* New idea's chat: a fixed window, newest at the foot, the planner's own thread markup inside. */
 .intro-chat { height:330px; display:flex; flex-direction:column; justify-content:flex-end; gap:12px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 36px); mask-image:linear-gradient(180deg, transparent, #000 36px); }

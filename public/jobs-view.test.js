@@ -37,7 +37,7 @@ test('every job is one tonal card in its state, and only jobs with attention ite
   const boards = () => [...document.querySelectorAll('.job-plate')].map((b) => b.dataset.board);
   assert.deepEqual(boards(), ['idea', 'job1'], 'newest first, and a backlog idea is not in flight until planning starts');
   assert.equal(f.q('[data-filter="all"] .jobs-rail-n').textContent, '2', 'nor counted in flight');
-  assert.ok(f.q('[data-board="job1"]').classList.contains('tone-read'), 'a plan to review is the to-read teal');
+  assert.ok(f.q('[data-board="job1"]').classList.contains('tone-warn'), 'a plan to review is amber');
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Plan ready');
   f.q('[data-filter="backlog"]').click();
   assert.deepEqual(boards(), ['backlog'], 'Backlog lists it');
@@ -48,6 +48,19 @@ test('every job is one tonal card in its state, and only jobs with attention ite
   assert.equal(document.querySelectorAll('[data-board="job1"] .job-plate-graph .node').length, 2, 'one segment per planned sub-job');
   f.q('[data-filter="needs"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-plate')].map((b) => b.dataset.board), ['job1']);
+});
+
+test('the Needs you count is teal only while every job waiting is a wrangler reply to read', (t) => {
+  const f = fixture(t);
+  const count = () => f.q('[data-filter="needs"] .jobs-rail-n');
+  f.view.update(f.data);
+  assert.deepEqual([count().textContent, count().classList.contains('ask'), count().classList.contains('read')], ['1', true, false], 'a plan ready is amber');
+  const replied = { ...f.data.jobs[0], id: 'replied', stage: 'active', plan: null, subJobs: [{ ...sub('a'), stage: 'done' }, { ...sub('b'), stage: 'implementation' }], convos: [{ id: 'c1', at: 1, pending: null, seenAt: 1 }], talk: [{ id: 't1', at: 2, from: 'wrangler', kind: 'answer', text: 'Yes.', convo: 'c1' }] };
+  f.data.jobs.push(replied); f.view.update(f.data);
+  assert.ok(f.q('[data-board="replied"]').classList.contains('tone-read'), 'a wrangler reply stays teal');
+  assert.deepEqual([count().textContent, count().classList.contains('read')], ['2', false], 'amber while a plan waits beside it');
+  f.data.jobs.shift(); f.view.update(f.data);
+  assert.deepEqual([count().textContent, count().classList.contains('read')], ['1', true]);
 });
 
 test('the board orders segments by dependency wave, so a sub-job moved after another reads after it', (t) => {
