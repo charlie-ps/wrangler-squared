@@ -2537,10 +2537,13 @@ test('a running job takes a plan change as a proposal: frozen work is locked, re
   assert.match(prompt, /ALREADY RUNNING/); assert.match(prompt, /- api \(pr\) "Deliver api": done\/done · FROZEN/);
   assert.match(prompt, /Frozen \(.*\): api\./); assert.match(prompt, /- web .*a step is running/); assert.match(prompt, /Requested change: Drop docs/);
   assert.match(prompt, /Feedback on, or a question about, what a live sub-job already produced.*`forward` when its session is open on review, else `rework`.*never write it into a later sub-job/i);
-  assert.match(prompt, /The summary is at most four sentences: first what is wrong or what the human asked, then what approving your recommended option does/);
-  assert.match(prompt, /A label says what happens if they pick it.*its why says what they get and what they give up/);
-  assert.match(prompt, /for the human, who has not read the code, the plan or this prompt.*never file or function names, sub-job ids, or the plan's own words: brief, show, check, context, round, forward, rework, frozen, pinned/);
-  assert.match(prompt, /call it that \(the agent that built it\), never a reviewer\. Paths, ids, commands, plan lines and runs go in evidence/);
+  assert.match(prompt, /ONE card: the option's `label` as its heading, its `why` under it, its `leaves` line, then Approve and Discard/);
+  assert.match(prompt, /Every clause you write must tell the human one of three things: what is wrong, what approving does, or what it leaves them to do\. Cut anything else/);
+  assert.match(prompt, /- diagnosis\.summary: .*Never say what approving does/);
+  assert.match(prompt, /never file or function names, sub-job ids, or the plan's own words: brief, show, check, context, round, forward, rework, frozen, pinned/);
+  assert.match(prompt, /call it that \(the agent that built it\), never a reviewer/);
+  assert.match(prompt, /alternatives:\[\{label,why\?,leaves\?,plan,actions\?\}\]/);
+  assert.doesNotMatch(prompt, /at most four sentences|in one or two sentences|in a few words/, 'phrasing rules, never a length');
 
   const proposal = (subs) => plan(subs);
   assert.throws(() => f.report({ kind: 'plan', plan: proposal([{ ...spec('api'), brief: 'Redo api' }, spec('web')]) }, planner), /api has already landed/);
@@ -2908,6 +2911,7 @@ test('a red step is sent to the planner, which holds only that step; "Replans pe
   const prompt = jobPrompt(redJob(f), null, planner.run);
   assert.match(prompt, /one of its steps has gone red/); assert.match(prompt, /RED STEP: “Deliver api” \(api, pr\/watching\).*try 1 of 2/);
   assert.match(prompt, /failing checks: e2e/); assert.match(prompt, /"You decide": whatever you propose waits/); assert.match(prompt, /kind:"escalate"/);
+  assert.match(prompt, /options\?:\[\{label, why\?, leaves\?, plan, actions\?\}\].*`ask` is its heading and the summary's FIRST sentence is the only line under it/, 'an escalation is written for its card');
   // Only the red step and what follows it are held: web carries on, the rest of the job is not frozen.
   f.store.update(f.job.id, (j) => { const w = j.subJobs.find((s) => s.id === 'web'); w.stage = 'review'; w.state = 'verified'; w.ready = { checks: ['ok'], receiptId: 'rcpt', at: 1 }; });
   f.store.action(f.job.id, 'approve-code', { subJobId: 'web', readyReceiptId: 'rcpt' });
@@ -3250,6 +3254,9 @@ test('a question is answered in the job\'s conversation: an ask run that holds n
   assert.match(prompt, /^Answer a question about this running job/);
   assert.match(prompt, /ASKED YOU A QUESTION/); assert.match(prompt, /The question: About “Deliver api” \(api, implementation\/\w+\): Why did the api step/);
   assert.match(prompt, /read_session_transcript/); assert.match(prompt, /kind:"reply"/);
+  assert.match(prompt, /only the FIRST LINE of your text until the human opens the conversation, so the first line is the answer itself/, 'the reply leads with the answer');
+  assert.match(prompt, /what they can do, and what happens if they leave it\. Cut background, history and explanation they did not ask for/);
+  assert.doesNotMatch(prompt, /short paragraphs|at most 4000 characters/, 'phrasing rules, never a length');
   assert.match(prompt, /The human \(on api\): "Why did the api step take so long\?"/, 'the conversation so far rides along');
   f.report({ kind: 'reply', text: 'It waited on a slow test suite.' }, asker);
   job = f.store.get(f.job.id);

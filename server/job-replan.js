@@ -237,7 +237,7 @@ export function proposeReplan(job, run, report, now) {
 export function proposeOptions(job, run, options, extra, now) {
   const option = (o) => {
     const { plan: merged, changes } = mergeReplan(job, o.plan);
-    return { label: o.label || null, why: o.why || null, plan: o.plan, merged, changes, then: thenOf(job, merged, changes), actions: stampActions(job, o.actions, merged, changes) };
+    return { label: o.label || null, why: o.why || null, leaves: o.leaves || null, plan: o.plan, merged, changes, then: thenOf(job, merged, changes), actions: stampActions(job, o.actions, merged, changes) };
   };
   const [first, ...rest] = options.map(option);
   job.replan = { ...job.replan, proposal: { id: run.id, ...first, ...extra, alternatives: rest, at: now } };

@@ -489,6 +489,19 @@ function eventTitle(sub) {
   return 'Needs attention';
 }
 const flat = (text) => String(text || '').replace(/\s+/g, ' ').trim();
+// Model-written text is folded to its lead (the decision card, a red's
+// declaration, a folded conversation); the rest waits behind a disclosure.
+export function leadSentence(text) {
+  const t = flat(text);
+  const m = t.match(/^.*?[.!?](?=\s+["“(\[]?[A-Z0-9])/);
+  return m ? { head: m[0], rest: t.slice(m[0].length).trim() } : { head: t, rest: '' };
+}
+// The first line that says something (a heading only when nothing else does), its markdown marks dropped.
+export function firstLine(text) {
+  const all = String(text || '').split('\n').filter((l) => l.trim());
+  const line = all.find((l) => !/^\s*#/.test(l)) || all[0] || '';
+  return line.replace(/^\s*(?:#+|[-*>]|\d+[.)])\s+/, '').replace(/[*_`]/g, '').trim();
+}
 // What happened, in one line.
 export function eventFor(job, sub) {
   if (!sub) return job.error ? { title: 'Job needs attention', detail: job.error } : null;

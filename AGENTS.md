@@ -186,7 +186,7 @@ text as public as the rest of this repo.
   `reply` when the idea was only a question (`answerReplan`, refused once a red or
   earlier proposal rides on it). An ask run that dies or blocks says so in its
   conversation (`askFailed`), never `job.error`. `planningRun` (client) ignores ask
-  runs, so Approve change stays live while one answers. Every conversation ends in
+  runs, so Approve stays live while one answers. Every conversation ends in
   its own box (`boxHtml`, `data-change-convo`), and the box below them all starts a
   new one; pasted pictures and the sent bubble belong to the box they were used in
   (`askImages[].box`, `askSent.convo`). A conversation opened from a step
@@ -194,8 +194,9 @@ text as public as the rest of this repo.
   (`stepConvoLine`), and it shows ONLY on that step's dialog until the wrangler
   escalates it (`reply {escalate:true}`, or any proposal it draws, `escalate` →
   `convo.escalatedAt`); then the job's list shows it too (`talkFor`, client-side
-  only). A step's dialog shows only what was said on it. A conversation not at work and not the one
-  the human spoke in last folds to a strip (`convoOpen`; clicks are client-side, per id), and its ×
+  only). A step's dialog shows only what was said on it. A conversation not at work folds to its
+  header and ONE line, the first line of what was said back last (`convoOpen`, `foldLine`; clicks
+  and the human writing in it open it, client-side, per id; it names its step once, in the header), and its ×
   (`dismiss-convo`, refused while it answers or holds a plan change) stamps `convo.dismissedAt`,
   which hides it everywhere until anything new is said in it (`say` clears it, so a reply
   from a stale box or a wrangler's message brings it back). A job
@@ -216,6 +217,14 @@ text as public as the rest of this repo.
   `sub.catchUp` stops repairs and merges until its new prerequisites land, then the
   runner updates its branch once. Each proposal carries `then` (`thenOf`), the
   card's "Re-queued · starts after …" line, drawn in the thread and proposal view.
+- **A plan change is ONE decision card, and its words are written for it** (`public/jobs-view.js
+  proposalHtml`, `server/job-prompts.js PROPOSAL_VOICE`). The card is the picked option's `label`
+  (heading), `why`, `leaves` (what the human still has to do; on the receipt and each alternative)
+  and Approve/Discard; what Wrangler found, its evidence and the asks wait behind Why, other options fold to their
+  labels, and the graph, every change and the plan details are drawn under the card as before. A
+  declaration leads with its `ask` and the summary's first sentence (`ESCALATE_VOICE`), and an answer
+  is folded to its first line (`REPLY_RULES`). The prompts are PHRASING rules, never sentence counts
+  or length caps: text may grow when a case needs it, because the UI folds it.
 - **`change` and `read` head `STATE_ORDER`, above `failing`** (`public/job-state.js`). `change` (amber) is a
   plan waiting on you: a plan change and the steps it acts on (so a red job with a proposal waiting shows "Plan
   change ready" / "Fix proposed" while its red step stays red), a first plan, an idea's question or suggestion.

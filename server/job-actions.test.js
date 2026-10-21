@@ -93,9 +93,9 @@ test('recover waits for the fix; rework sends code or a session result back to i
   assert.equal(subOf(k, 'fix').note, 'rename it');
 });
 
-test('a plan receipt may carry a diagnosis, actions and up to two alternatives, and nothing else', () => {
+test('a plan receipt may carry a diagnosis, actions, what each option leaves you and up to two alternatives, and nothing else', () => {
   const plan = { context: 'c', stories: [{ id: 'story', key: 'A-1', title: 'Story' }], subJobs: [spec('api')] };
-  const ok = { kind: 'plan', plan, label: 'Accept', why: 'unrelated', actions: [{ type: 'accept-red', sub: 'api' }], diagnosis: { summary: 'flaky', evidence: [{ label: 'run 1', detail: 'timeout' }] }, alternatives: [{ label: 'Fix it', plan }, { label: 'Wait', plan, actions: [{ type: 'mark', sub: 'api', position: 'done', evidence: '#1' }] }] };
+  const ok = { kind: 'plan', plan, label: 'Accept', why: 'unrelated', leaves: 'Merge main into next by hand', actions: [{ type: 'accept-red', sub: 'api' }], diagnosis: { summary: 'flaky', evidence: [{ label: 'run 1', detail: 'timeout' }] }, alternatives: [{ label: 'Fix it', plan, leaves: 'Nothing' }, { label: 'Wait', plan, actions: [{ type: 'mark', sub: 'api', position: 'done', evidence: '#1' }] }] };
   assert.equal(reportSchema.safeParse(ok).success, true);
   assert.equal(reportSchema.safeParse({ ...ok, alternatives: [...ok.alternatives, { label: 'Third', plan }] }).success, false);
   assert.equal(reportSchema.safeParse({ ...ok, actions: [{ type: 'delete', sub: 'api' }] }).success, false);
@@ -107,9 +107,10 @@ test('a proposal carries ranked options, each merged and stamped; approving the 
   const j = job(subs, { api: redOf() });
   j.replan = { feedback: 'Checks red', at: 1, proposal: null };
   const alt = { ...empty(j), subJobs: [...subs, spec('flake', [], { brief: 'Stabilise it' })].map((s) => (s.id === 'api' ? { ...s, after: ['flake'] } : s)) };
-  proposeReplan(j, { id: 'run_1' }, { plan: empty(j), label: 'Accept', why: 'Noise', actions: [{ type: 'accept-red', sub: 'api' }], diagnosis: { summary: 'flaky' }, alternatives: [{ label: 'Fix it first', plan: alt }] }, 5);
+  proposeReplan(j, { id: 'run_1' }, { plan: empty(j), label: 'Accept', why: 'Noise', leaves: 'Fix the flake later', actions: [{ type: 'accept-red', sub: 'api' }], diagnosis: { summary: 'flaky' }, alternatives: [{ label: 'Fix it first', plan: alt }] }, 5);
   const p = j.replan.proposal;
   assert.deepEqual(optionsOf(p).map((o) => o.label), ['Accept', 'Fix it first']);
+  assert.deepEqual(optionsOf(p).map((o) => o.leaves), ['Fix the flake later', null], 'what each option leaves the human, kept for the decision card');
   assert.deepEqual(p.actions[0].pin, { at: 'head', ref: 'h1' });
   assert.deepEqual(p.alternatives[0].changes.added, ['flake']);
   assert.throws(() => approveReplan(structuredClone(j), 'run_1', { now: 6, buildSubJob, option: 2 }), /Choose one of/);
