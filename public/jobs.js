@@ -30,11 +30,23 @@ export const ideaThread = (job) => job?.idea?.thread || [];
 export const inConversation = (job) => !!job?.idea && job.stage === 'planning' && !job.plan && !job.replan && !job.cancelledAt;
 // An idea's plate on the board: talked through, or parked in the backlog, until it has a plan.
 export const ideaOpen = (job) => !!job?.idea && ['planning', 'backlog'].includes(job.stage) && !job.plan && !job.replan && !job.cancelledAt;
+// One suggestion stored before several existed is an object, created once accepted.
+export function suggestionsOf(msg) {
+  if (Array.isArray(msg?.suggest)) return msg.suggest;
+  return msg?.suggest ? [{ ...msg.suggest, ...(msg.acceptedAt ? { createdAt: msg.acceptedAt } : {}) }] : [];
+}
+export const uncreatedSuggestions = (msg) => suggestionsOf(msg).filter((x) => !x.createdAt);
 // A backlog idea no planner has read yet: its title and words are still the human's to change.
 export const ideaEditable = (job) => !!job?.idea && job.stage === 'backlog' && !job.plan && !job.replan && !job.cancelledAt && !ideaThread(job).length && !job.runs?.length;
 export function liveSuggestion(job) {
   const last = ideaThread(job).at(-1);
-  return last?.from === 'planner' && last.suggest && !last.acceptedAt ? last : null;
+  return last?.from === 'planner' && uncreatedSuggestions(last).length ? last : null;
+}
+// "Job suggested", or with several "Jobs suggested · 3", counting down once one is created.
+export function suggestedLabel(msg) {
+  const all = suggestionsOf(msg), left = uncreatedSuggestions(msg).length;
+  if (all.length === 1) return 'Job suggested';
+  return `Jobs suggested · ${left}${left < all.length ? ' left' : ''}`;
 }
 export function ideaStage(job) {
   if (!inConversation(job) || job.error) return null;
@@ -534,7 +546,7 @@ export function jobStatus(job, sub) {
   if (sub && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return { tone: 'needs', text: triggerDropped(job, sub) ? 'Trigger dropped' : 'Depends on a dropped sub-job' };
   if (isWriteSub(sub)) return writeStatusLine(job, sub);
   const idea = !sub && ideaStage(job);
-  if (idea) return idea === 'thinking' ? { tone: 'working', text: ideaThread(job).length ? 'Planner is thinking' : 'Planner is reading the idea' } : { tone: 'needs', text: idea === 'suggested' ? 'Job suggested' : 'Your reply' };
+  if (idea) return idea === 'thinking' ? { tone: 'working', text: ideaThread(job).length ? 'Planner is thinking' : 'Planner is reading the idea' } : { tone: 'needs', text: idea === 'suggested' ? suggestedLabel(liveSuggestion(job)) : 'Your reply' };
   const run = liveRun(job, sub);
   if (run) {
     if (run.status === 'needs-you') return { tone: 'needs', text: 'Waiting on a prompt' };
