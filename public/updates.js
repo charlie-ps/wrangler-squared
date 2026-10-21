@@ -2,6 +2,7 @@ import { ICONS } from './icons.js';
 import { SHOTS, proofFigure, runningBar } from './figs.js';
 import { plateHtml } from './job-plates.js';
 import { ideaThreadHtml } from './job-idea.js';
+import { talkHtml } from './job-talk.js';
 import { mountSkies, releaseSkies } from './job-skylines.js';
 import { applyTheme } from './themes.js';
 
@@ -228,7 +229,7 @@ const IDEAS = scenes([
   {},
 ]);
 // Figure buttons stay out of the tab order, and its thread is not announced every frame.
-const inert = (html) => html.replaceAll('<button ', '<button tabindex="-1" ').replaceAll(' aria-live="polite"', '');
+const inert = (html) => html.replaceAll('<button ', '<button tabindex="-1" ').replaceAll('<summary>', '<summary tabindex="-1">').replaceAll(' aria-live="polite"', '');
 function ideasFigure(phase) {
   const f = IDEAS[phase], { clock, suggest, threads } = ideaTalk(Date.now());
   // Creating it approved the plan, so the job it became is already building.
@@ -243,6 +244,58 @@ function ideasFigure(phase) {
       <div class="wn-ideas-plate">${inert(plateHtml(job, 'opus'))}</div>
       <div class="wn-ideas-chat">${inert(thread)}</div>
     </div>`;
+}
+
+// The wrangler conversation, as the job dialog draws it: an example running job fed
+// to the real talkHtml (job-talk.js). A question is answered in its own
+// conversation while the PR carries on; new work in a second one becomes a
+// proposal that folds to one line once approved. Times are the reader's clock.
+const TALK_Q = 'Does the export keep the column order when a filter is on?';
+const TALK_A = 'Yes. It follows the table’s visible columns, filtered or not, and the PR already tests it.';
+const TALK_NEW = 'Add an Excel export too, once this PR is in.';
+const TALK = scenes([
+  { pr: ['running', 'Writing tests'], xl: null, text: '', go: false, c1: 0, c2: 0 },
+  { text: TALK_Q },
+  { go: true },
+  { text: '', go: false, c1: 1, pr: ['running', 'Checks running'] },
+  { c1: 2 },
+  { text: TALK_NEW, go: true },
+  { text: '', go: false, c2: 1, pr: ['review', 'Ready to verify'] },
+  { c2: 2, xl: 'proposed' },
+  { c2: 3, xl: 'queued' },
+  {},
+]);
+function talkJob(f, now) {
+  const clock = (m) => now - (6 - m) * 60000;
+  const talk = [], convos = [], runs = [];
+  if (f.c1) {
+    convos.push({ id: 'c1', at: clock(1), pending: f.c1 === 1 ? { asks: [] } : null });
+    talk.push({ id: 't1', convo: 'c1', from: 'human', text: TALK_Q, at: clock(1) });
+    if (f.c1 === 1) runs.push({ id: 'wn-ask', subJobId: null, phase: 'planning', ask: true, convo: 'c1', stopped: false });
+    else talk.push({ id: 't2', convo: 'c1', from: 'planner', text: TALK_A, at: clock(2) });
+  }
+  if (f.c2) {
+    convos.push({ id: 'c2', at: clock(4) });
+    talk.push({ id: 't3', convo: 'c2', from: 'human', text: TALK_NEW, at: clock(4) });
+    if (f.c2 > 1) talk.push({ id: 't4', convo: 'c2', from: 'planner', kind: 'proposal', proposalId: 'p1', at: clock(5),
+      text: 'One new PR after Add CSV export, so the two exports share its column logic.',
+      changes: [{ mark: 'added', title: 'Add Excel export', then: 'Starts after Add CSV export' }],
+      ...(f.c2 === 3 ? { outcome: 'approved', outcomeAt: clock(6) } : {}) });
+  }
+  const replan = f.c2 === 1 ? { convo: 'c2' } : f.c2 === 2 ? { convo: 'c2', proposal: { id: 'p1' } } : null;
+  return { id: 'wn-talk', title: 'CSV export', subJobs: [{ id: 'csv', title: 'Add CSV export' }], runs, convos, talk, replan };
+}
+function talkFigure(phase) {
+  const f = TALK[phase];
+  const xl = f.xl === 'proposed' ? `<div class="job-node tone-idle job-mark-added wn-fade">${tile('queued', 'pr')}<strong class="job-node-title">Add Excel export</strong><span class="job-status">Proposed</span></div>`
+    : f.xl ? node('queued', 'pr', 'Add Excel export', 'After Add CSV export') : '';
+  const box = `<div class="job-change${f.text ? ' has-text' : ''}"><div class="job-change-row"><span class="job-change-to"><i>W</i>The wrangler${f.c1 ? '<small>New conversation</small>' : ''}</span><div class="job-change-text${f.text ? '' : ' ph'}">${f.text || 'Add idea: a question, a change, new work…'}</div><label class="job-change-attach">${ICONS.image}</label><button type="button" class="job-change-go${f.go ? ' on' : ''}" tabindex="-1">${ICONS.send}</button></div></div>`;
+  return `<div class="wn-row2s" role="img" aria-label="A running job: you ask the wrangler a question and it answers while the PR carries on, then you ask for new work and approve the PR it proposes">
+      <div class="wn-stack">${node(f.pr[0], 'pr', 'Add CSV export', f.pr[1])}</div>
+      <span class="wn-edge${!f.xl ? ' ghost' : f.xl === 'proposed' ? ' added' : ''}"></span>
+      <div class="wn-stack">${xl}</div>
+    </div>
+    <div class="wn-talk">${inert(talkHtml(talkJob(f, Date.now())))}${box}</div>`;
 }
 
 // Redraws a figure in place, so surviving nodes keep their identity: tones
@@ -338,6 +391,14 @@ export const UPDATES = [
       '<b>Creating a suggested job approves its plan</b>, so it starts at once. A plan the planner drafts itself still waits for you with Plan on You review.',
     ])}`,
     anim: { frames: 9, ms: 1700, still: 3 }, figure: (phase) => ideasFigure(phase) },
+  { id: 'wrangler-talk', date: '2026-10-21', icon: 'note', tone: 'run',
+    title: 'Talk it through with the wrangler',
+    body: `<p><b>Add idea</b> is now a conversation with <b>the wrangler</b>, the planner behind every job. Ask it something and it answers right there. Ask for a change and its proposal turns up in the same thread, ready to approve.</p>${done([
+      '<b>Several conversations at once</b>, each with its own box. The box at the bottom starts a new one.',
+      '<b>The job keeps running</b> while the wrangler thinks. Only the steps a change touches wait for it.',
+      '<b>It tidies up after itself</b>: quiet conversations fold to a strip, approved proposals to one line, and × dismisses one.',
+    ])}`,
+    anim: { frames: 10, ms: 1700, still: 7 }, figure: (phase) => talkFigure(phase) },
 ];
 
 const dateLabel = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });

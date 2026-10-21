@@ -25,9 +25,9 @@ const SAMPLE = [
   { id: 'c', date: '2026-11-01', title: 'Third release', body: '<p>Third body</p>' },
 ];
 
-test('the shipped registry is the two Writes pages, review defaults, See it working, the three planner pages and New idea, and every frame of their figures draws', (t) => {
+test('the shipped registry is the two Writes pages, review defaults, See it working, the three planner pages, New idea and the wrangler conversation, and every frame of their figures draws', (t) => {
   const p = page(t);
-  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places', 'review-defaults', 'see-it-working', 'planner-red-steps', 'planner-options', 'planner-add-idea', 'new-idea']);
+  assert.deepEqual(UPDATES.map((u) => u.id), ['writes-designs', 'writes-places', 'review-defaults', 'see-it-working', 'planner-red-steps', 'planner-options', 'planner-add-idea', 'new-idea', 'wrangler-talk']);
   for (const u of UPDATES.filter((u) => u.anim)) {
     for (let i = 0; i < u.anim.frames; i++) assert.match(u.figure(i), /job-node|job-option|job-plate/, `${u.id} frame ${i}`);
     assert.ok(u.anim.still < u.anim.frames, u.id);
@@ -51,10 +51,27 @@ test('the shipped registry is the two Writes pages, review defaults, See it work
   assert.ok(at(7).plate.classList.contains('running'), 'creating it approved the plan: the job is already working');
   assert.doesNotMatch(at(7).plate.textContent, /Plan ready/);
   assert.ok([...Array(idea.anim.frames).keys()].every((i) => !drawn(i).querySelector('button:not([tabindex="-1"])')), 'its buttons stay out of the tab order');
+  const talk = UPDATES.find((u) => u.id === 'wrangler-talk');
+  const said = (i) => { const d = document.createElement('div'); d.innerHTML = talk.figure(i); return d; };
+  assert.equal(said(0).querySelector('.job-talk'), null, 'a running job with nothing said yet');
+  assert.match(said(1).querySelector('.job-change-text').textContent, /column order/);
+  assert.match(said(3).querySelector('.job-talk-convo').textContent, /Answering.*The wrangler is looking into it/s, 'the question opens Conversation 1');
+  assert.match(said(3).querySelector('.job-node .job-status').textContent, /Checks running/, 'and the PR carries on meanwhile');
+  assert.match(said(4).querySelector('.job-talk-msg').textContent, /follows the table’s visible columns/);
+  const second = said(6);
+  assert.equal(second.querySelectorAll('.job-talk-convo').length, 2);
+  assert.ok(second.querySelector('.job-talk-convo[data-convo="c1"]').classList.contains('is-folded'), 'the first folds once you speak in the second');
+  assert.match(second.querySelector('[data-convo="c2"]').textContent, /drawing a proposal/);
+  assert.match(said(7).querySelector('.job-talk-card.tone-needs').textContent, /Waiting for you.*Add Excel export/s);
+  assert.ok(said(7).querySelector('.job-node.job-mark-added'), 'the proposed step shows on the graph, dashed');
+  const approved = said(8).querySelector('details.job-talk-card');
+  assert.ok(approved && !approved.open, 'approved, the card folds to one line');
+  assert.match(approved.querySelector('summary').textContent, /Approved.*1 new/s);
+  assert.ok([...Array(talk.anim.frames).keys()].every((i) => !said(i).querySelector('button:not([tabindex="-1"]), summary:not([tabindex="-1"]), [aria-live]')), 'nothing in it takes focus or is announced');
   const storage = memoryStorage();
   assert.equal(createUpdates({ storage }).maybeShow(), true);
   assert.equal(p.title(), 'See the design before anything is built');
-  assert.equal(p.q('.intro-count').textContent, '1 of 8');
+  assert.equal(p.q('.intro-count').textContent, '1 of 9');
   assert.ok(p.q('.update-panel .wn-row3'));
   p.click('[data-update="next"]');
   assert.match(p.title(), /^Jira, Slack and Confluence/);
@@ -76,9 +93,12 @@ test('the shipped registry is the two Writes pages, review defaults, See it work
   p.click('[data-update="next"]');
   assert.equal(p.title(), 'Start with an idea, not a plan');
   assert.ok(p.q('.update-panel .wn-ideas .job-plate.idea .gx.nb[data-inflow]'), 'the idea’s plate with its forming sky');
+  p.click('[data-update="next"]');
+  assert.equal(p.title(), 'Talk it through with the wrangler');
+  assert.ok(p.q('.update-panel .wn-talk .job-change'));
   assert.equal(p.q('[data-update="next"]').textContent, 'Got it');
   p.click('[data-update="next"]');
-  assert.deepEqual(seenIds(storage), ['new-idea', 'planner-add-idea', 'planner-options', 'planner-red-steps', 'review-defaults', 'see-it-working', 'writes-designs', 'writes-places']);
+  assert.deepEqual(seenIds(storage), ['new-idea', 'planner-add-idea', 'planner-options', 'planner-red-steps', 'review-defaults', 'see-it-working', 'wrangler-talk', 'writes-designs', 'writes-places']);
 });
 
 test('a reader behind on several releases steps through each unseen one, oldest first, with Next and Back', (t) => {
@@ -196,7 +216,7 @@ test('the client never opens an update on top of the first-run intro', (t) => {
   assert.equal(p.q('#jobs-update'), null);
   p.click('.jobs-intro .job-dialog-close');
   assert.equal(storage.get(SEEN_KEY), '1');
-  assert.deepEqual(seenIds(storage), ['new-idea', 'planner-add-idea', 'planner-options', 'planner-red-steps', 'review-defaults', 'see-it-working', 'writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
+  assert.deepEqual(seenIds(storage), ['new-idea', 'planner-add-idea', 'planner-options', 'planner-red-steps', 'review-defaults', 'see-it-working', 'wrangler-talk', 'writes-designs', 'writes-places'], 'closing the intro counts every current update as seen');
 });
 
 test('the client holds unseen updates until the reader opens the Jobs view', (t) => {
@@ -211,4 +231,16 @@ test('the client holds unseen updates until the reader opens the Jobs view', (t)
   p.window.dispatchEvent(new p.window.Event('hashchange'));
   assert.ok(p.q('#jobs-update').open);
   assert.equal(p.title(), 'See the design before anything is built');
+});
+
+test('a browser that has seen every older update opens just the wrangler conversation, once', (t) => {
+  const p = page(t);
+  const storage = memoryStorage({ [SEEN_UPDATES_KEY]: JSON.stringify(UPDATES.filter((u) => u.id !== 'wrangler-talk').map((u) => u.id)) });
+  assert.equal(createUpdates({ storage }).maybeShow(), true);
+  assert.equal(p.title(), 'Talk it through with the wrangler');
+  assert.equal(p.q('.intro-count').textContent, '');
+  p.click('[data-update="next"]');
+  assert.ok(seenIds(storage).includes('wrangler-talk'));
+  assert.equal(createUpdates({ storage }).maybeShow(), false);
+  assert.equal(createUpdates({ storage }).list()[0].id, 'wrangler-talk', 'and What’s new lists it first');
 });
