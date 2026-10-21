@@ -411,6 +411,32 @@ test('a job session archived when its step stopped is offered as a restore, not 
   f.q('#job-session').click(); assert.deepEqual(f.sessions, ['s2'], 'the latest run, live or archived');
 });
 
+test('a step with several sessions lists each one in Open session\'s caret, newest first', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1', 's2', 's3'] }];
+  job.runs = [{ id: 'r1', subJobId: 'api', phase: 'implementation', sessionId: 's1', startedAt: 1, stopped: true }, { id: 'r2', subJobId: 'api', phase: 'publish', sessionId: 's2', startedAt: 2, stopped: true }];
+  f.onBoard.add('s3'); f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('#job-session').textContent, 'Open session');
+  const items = [...f.q('#job-dialog').querySelectorAll('[data-step-session]')];
+  assert.deepEqual(items.map((b) => b.dataset.stepSession), ['s3', 's2', 's1']);
+  assert.match(items[0].textContent, /^Session 3Open$/, 'no run for it: numbered');
+  assert.match(items[1].textContent, /^Publish · .+Restore$/);
+  assert.match(items[2].textContent, /^Implementation · .+Restore$/);
+  f.q('#job-dialog [data-keep="session-menu"]').open = true; f.q('#job-dialog [data-keep="session-menu"]').dispatchEvent(new f.window.Event('toggle'));
+  f.view.update(f.data); assert.equal(f.q('#job-dialog [data-keep="session-menu"]').open, true, 'a tick leaves it open');
+  f.q('[data-step-session="s1"]').click(); assert.deepEqual(f.sessions, ['s1']);
+  assert.equal(f.q('#job-dialog').open, false);
+});
+
+test('a step with one session keeps the plain Open session button', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1'] }];
+  f.onBoard.add('s1'); f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  assert.equal(f.q('#job-session').textContent, 'Open session');
+  assert.equal(f.q('#job-dialog .job-session-split'), null);
+  assert.equal(f.q('#job-dialog [data-step-session]'), null);
+});
+
 test('Review code in Wrangler opens the latest run already on the board, else the latest', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'review', worktree: { path: '/wt/api' }, sessions: ['s1', 's2', 's3'] }];
@@ -725,17 +751,20 @@ test('new-job picker follows a changed catalog and Escape closes only the cabine
 });
 
 test('the new-job primary action starts planning and the plain button parks it in the backlog', (t) => {
-  const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
-  const [primary, backlog] = form.querySelectorAll('.job-actions button');
+  const f = fixture(t);
+  const submit = (as) => {
+    f.q('#job-new').click(); const form = f.q('#job-create-form'); form.elements.intent.value = 'Deliver it';
+    const [primary, backlog] = form.querySelectorAll('.job-actions button');
+    form.dispatchEvent(new f.window.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: { primary, backlog }[as] }));
+    return f.sent.filter((m) => m.type === 'job-create').at(-1).start;
+  };
+  f.q('#job-new').click();
+  const [primary, backlog] = f.q('#job-create-form').querySelectorAll('.job-actions button');
   assert.equal(primary.className, 'primary'); assert.equal(primary.textContent, 'Start planning');
   assert.equal(backlog.className, ''); assert.equal(backlog.textContent, 'Add to backlog');
-  form.elements.intent.value = 'Deliver it';
-  form.dispatchEvent(f.event('submit'));
-  assert.equal(f.sent[0].start, true, 'Enter is the main action');
-  form.dispatchEvent(new f.window.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: primary }));
-  assert.equal(f.sent[1].start, true);
-  form.dispatchEvent(new f.window.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: backlog }));
-  assert.equal(f.sent[2].start, false);
+  assert.equal(submit(), true, 'Enter is the main action');
+  assert.equal(submit('primary'), true);
+  assert.equal(submit('backlog'), false);
 });
 
 test('new idea is a brief beside a property sidebar, and the brief is the description, images and checkpoint tiles', (t) => {
@@ -1498,6 +1527,16 @@ test('Enter in the job\u2019s Add idea box sends it to the planner', (t) => {
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', at: 'job', ref: 'job', text: 'Split web in two' });
 });
 
+test('a second New idea submit before job-created sends one job-create, and both buttons stay held', (t) => {
+  const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
+  form.elements.intent.value = 'Customers can access their accounts';
+  const [start, backlog] = form.querySelectorAll('.job-create-foot button');
+  start.click();
+  assert.equal(start.getAttribute('aria-busy'), 'true'); assert.deepEqual([start.disabled, backlog.disabled], [true, true]);
+  form.dispatchEvent(f.event('submit')); chord(f, form.elements.intent); backlog.click();
+  assert.deepEqual(f.sent.filter((m) => m.type === 'job-create').length, 1);
+});
+
 test('in New idea, Enter is a new line in the Idea and only the chord submits', (t) => {
   const f = fixture(t); f.q('#job-new').click(); const form = f.q('#job-create-form');
   form.elements.intent.value = 'Customers can access their accounts';
@@ -1813,8 +1852,42 @@ test('a change idea goes straight to a proposal card in the same thread, with it
   f.view.openDetail('job1');
   job.replan = null; job.talk[1].outcome = 'approved';
   f.view.update(f.data);
-  assert.match(f.q('#job-dialog .job-talk-card header').textContent, /Approved/);
+  assert.match(f.q('#job-dialog .job-talk-card summary').textContent, /Approved/);
   assert.equal(f.q('#job-dialog .job-talk-card [data-talk-review]'), null);
+});
+
+test('a decided proposal card folds to one line of counts by kind, opens on a click and stays as the human left it', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'Bring <b>it</b> back', convo: 'c1' },
+    { id: 't2', at: 2, from: 'wrangler', kind: 'proposal', proposalId: 'p1', convo: 'c1', outcome: 'approved', text: 'Sends your words to the agent.',
+      changes: [{ mark: 'rework', title: 'Deliver api' }, { mark: 'edited', title: 'Deliver api', detail: 'brief' }] }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }];
+  job.runs = [];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const card = () => f.q('#job-dialog details.job-talk-card');
+  assert.equal(card().open, false, 'decided: folded');
+  assert.equal(card().querySelector('summary').textContent, 'Proposed a changeApproved1 edited, 1 rework', 'counts in the order of the marks');
+  assert.equal(card().querySelectorAll('.job-talk-change').length, 2, 'the rows are kept inside, for opening');
+  card().open = true; card().dispatchEvent(f.event('toggle'));
+  f.view.update(f.data);
+  assert.equal(card().open, true, 'a redraw keeps it open');
+  card().open = false; card().dispatchEvent(f.event('toggle'));
+  f.view.update(f.data);
+  assert.equal(card().open, false, 'and closed again');
+
+  job.talk[1].changes = [];
+  job.talk[1].outcome = null; job.talk[1].red = true;
+  f.view.update(f.data);
+  assert.equal(card().querySelector('summary').textContent, 'Proposed a fixNo longer waitingno sub-job changes');
+
+  job.replan = { feedback: 'x', at: 2, convo: 'c1', proposal: { id: 'p1', plan: job.plan, merged: job.plan, changes: { frozen: [], kept: [], edited: [], added: [], removed: [] }, actions: [], alternatives: [] }, previous: null };
+  f.view.update(f.data);
+  assert.equal(card(), null, 'waiting: not a fold');
+  const live = f.q('#job-dialog .job-talk-card');
+  assert.match(live.querySelector('header').textContent, /Waiting for you/);
+  assert.ok(live.querySelector('[data-talk-review]'));
 });
 
 test('a plan change about a sub-job awaiting review freezes it: held, not needs-you, and nothing to approve or move; one about the job holds nothing', (t) => {
@@ -1914,6 +1987,9 @@ test('New job holds planning back while an image uploads, then creates the job w
   form.elements.shareImages.checked = false;
   form.dispatchEvent(f.event('submit'));
   assert.deepEqual([f.sent[0].job.images, f.sent[0].job.shareImages], [['paste-1700000000000-aaaa1111.png'], false]);
+  form.querySelector('.job-outcome').dispatchEvent(drop);
+  await new Promise((r) => setTimeout(r, 0)); release(); await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual([...form.querySelectorAll('.job-create-foot button')].map((b) => b.disabled), [true, true], 'an upload after the press does not free the held buttons');
 });
 
 test('a job’s Outcome shows its pictures as a numbered strip, asks for the bytes once, and fills in when they arrive', (t) => {
