@@ -33,11 +33,18 @@ function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value:
 
 test('every job is one tonal card in its state, and only jobs with attention items survive Needs me', (t) => {
   const f = fixture(t);
-  f.data.jobs.push({ ...f.data.jobs[0], id: 'backlog', stage: 'backlog', plan: null }); f.view.update(f.data);
-  assert.deepEqual([...document.querySelectorAll('.job-plate')].map((b) => b.dataset.board), ['backlog', 'job1'], 'newest first');
+  f.data.jobs.push({ ...f.data.jobs[0], id: 'idea', stage: 'planning', plan: null }, { ...f.data.jobs[0], id: 'backlog', stage: 'backlog', plan: null }); f.view.update(f.data);
+  const boards = () => [...document.querySelectorAll('.job-plate')].map((b) => b.dataset.board);
+  assert.deepEqual(boards(), ['idea', 'job1'], 'newest first, and a backlog idea is not in flight until planning starts');
+  assert.equal(f.q('[data-filter="all"] .jobs-rail-n').textContent, '2', 'nor counted in flight');
   assert.ok(f.q('[data-board="job1"]').classList.contains('tone-warn'), 'a plan to review is amber');
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Plan ready');
+  f.q('[data-filter="backlog"]').click();
+  assert.deepEqual(boards(), ['backlog'], 'Backlog lists it');
   assert.equal(f.q('[data-board="backlog"] .job-status').textContent, 'Backlog');
+  f.data.jobs[2].stage = 'planning'; f.q('[data-filter="all"]').click();
+  assert.deepEqual(boards(), ['backlog', 'idea', 'job1'], 'Start planning puts it in flight');
+  f.data.jobs.splice(1, 2); f.view.update(f.data);
   assert.equal(document.querySelectorAll('[data-board="job1"] .job-plate-graph .node').length, 2, 'one segment per planned sub-job');
   f.q('[data-filter="needs"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-plate')].map((b) => b.dataset.board), ['job1']);
@@ -311,6 +318,7 @@ test('Cancel job is confirmed first, sends only the job action, and a cancelled 
 
 test('a job cancelled before it had sub-jobs keeps a card in Done and never offers Start planning', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'backlog'; job.plan = null; job.cancelledAt = 5; f.view.update(f.data);
+  f.q('[data-filter="backlog"]').click();
   f.q('.job-plate-open[data-job=\"job1\"]').click();
   assert.equal(f.q('[data-action="start"]'), null); assert.match(f.q('#job-dialog').textContent, /Cancelled/);
   assert.equal(jobNeedsReview({ ...job, stage: 'planning', plan }, null), false, 'a cancelled plan is not waiting for review');
@@ -800,7 +808,7 @@ test('new jobs need only an outcome and leave repositories to planning', (t) => 
   assert.equal(f.sent[0].type, 'job-create'); assert.equal('repos' in f.sent[0].job, false); assert.equal('planningPrompt' in f.sent[0].job, false);
   f.view.created();
   const job = f.data.jobs[0]; job.repos = []; job.plan = null; job.stage = 'backlog'; f.view.update(f.data);
-  f.q('.job-plate-open').click();
+  f.q('[data-filter="backlog"]').click(); f.q('.job-plate-open').click();
   assert.match([...document.querySelectorAll('#job-dialog .job-chip')].map((c) => c.title).join(' '), /discover the repositories/);
   assert.equal(f.q('#job-dialog .job-intent').textContent, 'Reliable sign-in', 'a backlog job shows the outcome it was given');
 });

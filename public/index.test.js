@@ -56,7 +56,7 @@ test('a graph tick draws the job boards', () => {
   const { el, c } = mountClient();
   c.update(el, null, graphWith([]));
   assert.match(el.querySelector('#jobs-boards').textContent, /Start with an outcome/);
-  c.update(el, null, graphWith([job()]));
+  c.update(el, null, graphWith([job({ stage: 'planning' })]));
   assert.match(el.querySelector('#jobs-boards').textContent, /Ship it/);
 });
 

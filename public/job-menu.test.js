@@ -102,12 +102,14 @@ test('right-clicking a plate opens its menu; Start, Copy and Cancel do what they
     return [...document.querySelectorAll('.job-menu .job-menu-item')];
   };
   const row = (rows, label) => rows.find((b) => b.textContent === label);
+  document.querySelector('[data-filter="backlog"]').click();
   let rows = menuOf('job_b');
   assert.equal(document.querySelector('.job-menu').style.left, '50px');
   assert.deepEqual(rows.map((b) => b.textContent), ['Open job', 'Copy reference', 'Copy job ID', 'Start planning', 'Cancel job']);
   row(rows, 'Start planning').click();
   assert.deepEqual(sent.at(-1), { type: 'job-action', id: 'job_b', action: 'start' });
 
+  document.querySelector('[data-filter="all"]').click();
   rows = menuOf('job_r');
   assert.equal(document.querySelectorAll('.job-menu').length, 1, 'one menu at a time');
   row(rows, 'Copy reference').click();
