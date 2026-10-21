@@ -285,6 +285,8 @@ function talkJob(f, now) {
   const replan = f.c2 === 1 ? { convo: 'c2' } : f.c2 === 2 ? { convo: 'c2', proposal: { id: 'p1' } } : null;
   return { id: 'wn-talk', title: 'CSV export', subJobs: [{ id: 'csv', title: 'Add CSV export' }], runs, convos, talk, replan };
 }
+// The story reads each answer as it lands: the conversation in play stays open, the earlier one folds once the second starts.
+const TALK_OPEN = (f) => new Map([['c1', !f.c2], ['c2', true]]);
 function talkFigure(phase) {
   const f = TALK[phase];
   const xl = f.xl === 'proposed' ? `<div class="job-node tone-idle job-mark-added wn-fade">${tile('queued', 'pr')}<strong class="job-node-title">Add Excel export</strong><span class="job-status">Proposed</span></div>`
@@ -295,7 +297,7 @@ function talkFigure(phase) {
       <span class="wn-edge${!f.xl ? ' ghost' : f.xl === 'proposed' ? ' added' : ''}"></span>
       <div class="wn-stack">${xl}</div>
     </div>
-    <div class="wn-talk">${inert(talkHtml(talkJob(f, Date.now())))}${box}</div>`;
+    <div class="wn-talk">${inert(talkHtml(talkJob(f, Date.now()), null, null, TALK_OPEN(f)))}${box}</div>`;
 }
 
 // Redraws a figure in place, so surviving nodes keep their identity: tones

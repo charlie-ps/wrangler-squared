@@ -304,6 +304,7 @@ test('pasted images go to the evidence folder and the session is mailed their pa
   assert.deepEqual(Object.keys(host.kept), [], 'the kept copy is released once it is beside the round');
   const text = threadMail(f.store.get(f.job.id), f.run(), f.sub(), [m]);
   assert.ok(text.includes(path.join(roundDir(f.job.id, 'api', 1), m.images[0].file)));
+  assert.match(text, /A QUESTION: .*the first line is the answer itself.*End with one line starting "How I know:"/, 'a session\'s reply follows the same phrasing rules as the wrangler\'s');
 });
 
 test('an image that cannot be kept refuses the idea out loud, so nothing the human saw is quietly dropped', async (t) => {

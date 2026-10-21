@@ -186,7 +186,7 @@ text as public as the rest of this repo.
   `reply` when the idea was only a question (`answerReplan`, refused once a red or
   earlier proposal rides on it). An ask run that dies or blocks says so in its
   conversation (`askFailed`), never `job.error`. `planningRun` (client) ignores ask
-  runs, so Approve change stays live while one answers. ONE box, and ONE
+  runs, so Approve stays live while one answers. ONE box, and ONE
   conversation open at a time, with the box at its foot (`boxHtml`, `data-change-convo`):
   `replyTarget` is the human's pick (a title row opens that one and folds the other, the
   open one's header or the chip's × folds it), else `defaultTarget`, the one at work or
@@ -223,6 +223,14 @@ text as public as the rest of this repo.
   `sub.catchUp` stops repairs and merges until its new prerequisites land, then the
   runner updates its branch once. Each proposal carries `then` (`thenOf`), the
   card's "Re-queued · starts after …" line, drawn in the thread and proposal view.
+- **A plan change is ONE decision card, and its words are written for it** (`public/jobs-view.js
+  proposalHtml`, `server/job-prompts.js PROPOSAL_VOICE`). The card is the picked option's `label`
+  (heading), `why`, `leaves` (what the human still has to do; on the receipt and each alternative)
+  and Approve/Discard; what Wrangler found, its evidence and the asks wait behind Why, other options fold to their
+  labels, and the graph, every change and the plan details are drawn under the card as before. A
+  declaration leads with its `ask` and the summary's first sentence (`ESCALATE_VOICE`), and an answer
+  leads with the answer in its first line (`REPLY_RULES`). The prompts are PHRASING rules, never sentence counts
+  or length caps: text may grow when a case needs it, because the UI folds it.
 - **`change` and `read` head `STATE_ORDER`, above `failing`** (`public/job-state.js`). `change` (amber) is a
   plan waiting on you: a plan change and the steps it acts on (so a red job with a proposal waiting shows "Plan
   change ready" / "Fix proposed" while its red step stays red), a first plan, an idea's question or suggestion.

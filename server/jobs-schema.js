@@ -499,7 +499,8 @@ export const diagnosisSchema = z.object({ summary: z.string().trim().min(1).max(
   evidence: z.array(z.object({ label: line, detail: line }).strict()).max(6).optional() }).strict();
 // Up to three ranked options: the receipt's own plan is the first (recommended),
 // `alternatives` are the rest. Each is a whole plan plus the actions it carries.
-const optionShape = { label: line, why: z.string().trim().max(400).optional(), actions: z.array(actionSchema).max(6).optional() };
+// `leaves` is what the human still has to do once it is approved (the decision card's last line).
+const optionShape = { label: line, why: z.string().trim().max(400).optional(), leaves: z.string().trim().max(400).optional(), actions: z.array(actionSchema).max(6).optional() };
 export const alternativeSchema = z.object({ ...optionShape, plan: planSchema }).strict();
 // A job the idea's planner offers: what the human creates with one press, and
 // exactly the plan receipt it would otherwise have sent (job-idea.js acceptIdea).

@@ -18,3 +18,12 @@ test('a message saved when only a count was kept still says how many pictures it
   assert.doesNotMatch(html, /job-image-strip/);
   assert.doesNotMatch(talkHtml(job(undefined)), /image/);
 });
+
+test('a conversation on a step names it once, in its header, never again on each message', () => {
+  const j = { id: 'job_1', subJobs: [{ id: 'api', title: 'Deliver api' }], runs: [], convos: [{ id: 'c1', at: 1, sub: 'api', escalatedAt: 2 }], talk: [
+    { id: 't1', at: 1, from: 'human', text: 'why did sync next fail', convo: 'c1', sub: 'api' },
+    { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'It failed on a merge conflict.', convo: 'c1', sub: 'api' }] };
+  const html = talkHtml(j, null, null, new Map([['c1', true]]));
+  assert.match(html, /You · \d/);
+  assert.equal(html.match(/Deliver api/g).length, 1);
+});

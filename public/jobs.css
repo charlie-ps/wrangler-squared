@@ -630,6 +630,13 @@ button.job-write:focus-visible { outline:2px solid var(--c); outline-offset:1px;
 .job-details-body { margin:4px 0 8px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, var(--surface-2) 50%, transparent); font-size:12px; color:var(--fg-muted); }
 .job-details-body code { display:block; overflow-wrap:anywhere; font-size:11px; }
 .job-detail-footer { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:18px; padding-top:12px; border-top:1px solid var(--border-muted); }
+/* The job's buttons and its checkpoints, one row under a rule (jobs-view.js jobDetail). */
+.job-detail-tail { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-top:18px; padding-top:12px; border-top:1px solid var(--border-muted); }
+.job-detail-tail > .job-actions { order:2; margin:0 0 0 auto; }
+.job-detail-tail > .job-detail-footer { flex:1 1 auto; margin:0; padding:0; border:0; }
+.job-delivered { display:flex; align-items:baseline; gap:8px; margin:14px 0 4px; font-size:13px !important; color:var(--fg) !important; }
+.job-delivered .icon { flex:none; align-self:center; color:var(--st-ok-fg); }
+.job-node .job-status:empty { display:none; }
 .job-flags { display:flex; gap:8px; }
 .job-flags-hint { flex:1; min-width:180px; margin:0; font-size:12px; color:var(--fg-muted); }
 .job-flags-hint b { color:var(--fg); font-weight:600; }
@@ -775,7 +782,12 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-event-fix.fixing small { display:inline; }
 .job-event-fix.declared>.icon, .job-event-fix.declared b { color:var(--st-bad-fg); }
 .job-event-fix ul { margin:6px 0 0; padding-left:16px; color:var(--fg-muted); font-size:11.5px; }
-.job-event-fix .ask { display:block; margin-top:6px; color:var(--fg); font-weight:500; }
+.job-event-fix b.ask { display:block; margin:0 0 4px; color:var(--fg); font-weight:600; }
+.job-event-more { margin:6px 0 0; font-size:12px; }
+.job-event-more > summary { padding:2px 0; color:var(--fg-muted); }
+.job-event-more[open] { padding:0; background:none; }
+.job-dialog .job-event-why p { margin:4px 0 0; white-space:pre-wrap; color:var(--fg-muted); }
+.job-event-why b { display:block; margin-top:6px; font-size:11.5px; color:var(--fg-muted) !important; }
 .job-event-fix.alone { grid-column:1 / -1; margin-top:0; padding-top:0; border-top:0; }
 .job-event-fix.alone>.icon { font-size:16px; margin-top:0; }
 .job-move-log { list-style:none; padding:0; margin:8px 0 0; font-size:12px; }
@@ -817,20 +829,6 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-mark-accept-red .job-mark,.job-mark-recover .job-mark,.job-mark-mark-done .job-mark,.job-mark-mark-merged .job-mark { color:var(--wf); background:color-mix(in srgb, var(--wf) 16%, var(--surface)); font-weight:600; }
 .job-mark-rework .job-mark,.job-mark-forward .job-mark,.job-mark-retry .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
 li.job-mark-act { color:var(--wf); }
-.job-triage { background:var(--surface-2); border-radius:12px; padding:12px 14px; display:grid; gap:8px; margin:0 0 14px; font-size:13px; }
-.job-triage header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.job-triage header .icon { color:var(--wf); }
-.job-triage header b { font-weight:600; }
-.job-triage p { margin:0; color:var(--fg); line-height:1.5; max-width:110ch; white-space:pre-wrap; }
-.job-triage ul { margin:0; padding:0; list-style:none; display:flex; flex-wrap:wrap; gap:6px; }
-.job-triage li { display:inline-flex; gap:6px; align-items:center; padding:3px 9px; border:1px solid var(--border-muted); border-radius:999px; font-size:11.5px; color:var(--fg-muted); }
-.job-triage li span { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--blue-fg); }
-.job-triage-more { margin:0 -10px; }
-.job-triage-more>summary { padding:4px 10px; }
-.job-triage-more[open] { background:none; }
-.job-triage-more ul { flex-direction:column; gap:4px; margin-top:4px; }
-.job-triage-more li { display:block; padding:0; border:0; border-radius:0; font-size:12px; overflow-wrap:anywhere; }
-.job-triage-more li span { margin-right:6px; }
 fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin:0 0 14px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:8px; }
 .job-options legend { font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-subtle); margin-bottom:8px; padding:0; }
 .job-option { display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px; align-items:start; padding:10px 12px; border:1px solid var(--border-muted); border-radius:12px; cursor:pointer; font-size:13px; background:var(--surface); }
@@ -839,7 +837,6 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-option b { font-weight:600; }
 .job-option small { color:var(--fg-muted); font-size:12px; line-height:1.4; }
 .job-option.sel { border-color:var(--blue); background:color-mix(in srgb, var(--blue) 10%, var(--surface)); }
-.job-option-only { grid-template-columns:minmax(0,1fr); cursor:default; margin:0 0 14px; }
 .job-option-rec { font-size:10.5px; font-weight:600; color:var(--blue-fg); margin-left:6px; }
 /* Every change is one row: what kind in a fixed column, then the step, so the
    titles line up whether or not the row opens to its field diff. */
@@ -853,29 +850,38 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-change-what { min-width:0; overflow-wrap:anywhere; }
 .job-change-what small { margin-left:6px; }
 .job-change-what small + small::before { content:"· "; }
-/* A proposal reads as a decision (jobs-view.js proposalHtml): one amber bar that
-   asks, with the buttons that answer, then a graph drawn as a diff. */
-.job-proposal-bar { position:sticky; top:-12px; z-index:2; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px 16px; align-items:center; margin:16px 0 4px; padding:12px 12px 12px 16px; border-radius:12px; background:color-mix(in srgb, var(--st-warn) 10%, var(--surface)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 40%, transparent), inset 4px 0 0 var(--st-warn), 0 -12px 0 var(--surface), 0 10px 14px -12px var(--shadow); }
-.job-proposal-head { display:grid; gap:2px; min-width:0; }
-.job-proposal-title { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--st-warn-fg); }
-.job-proposal-title b { font-weight:600; }
-.job-dialog .job-proposal-hint { font-size:12px; color:var(--fg-muted); }
-.job-actions.job-proposal-cta { margin:0; justify-content:flex-end; }
-.job-actions.job-proposal-cta button.primary { padding:10px 16px; border-radius:12px; margin-right:0; }
-/* Pinned 12px below the dialog's top (half its padding), the gap above filled by the surface shadow so nothing scrolls
-   through it; the ask is clamped to one line with its toggle beside it. */
-.job-proposal-bar .job-replan-ask { grid-column:1/-1; display:flex; align-items:baseline; gap:12px; margin:0; background:var(--surface); }
-.job-ask-text { flex:1; min-width:0; }
-.job-proposal-bar .job-ask-earlier { grid-column:1/-1; margin:0; }
-.job-ask-earlier ol { margin:0; padding-left:20px; max-height:30vh; overflow:auto; white-space:pre-wrap; color:var(--fg); }
+/* A proposal is one decision card (jobs-view.js proposalHtml): where it comes from,
+   what approving does, why, what it leaves you, the buttons; the rest folds below. */
+.job-decision { display:grid; gap:8px; margin:16px 0 4px; padding:14px 16px; border-radius:12px; background:color-mix(in srgb, var(--st-warn) 9%, var(--surface)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 40%, transparent), inset 4px 0 0 var(--st-warn); }
+.job-dialog .job-decision-kicker { display:flex; align-items:center; gap:6px; min-width:0; margin:0; font-size:12px; color:var(--st-warn-fg); }
+.job-decision-kicker > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.job-decision-kicker .icon { flex:none; width:14px; height:14px; }
+.job-dialog .job-decision-ask { margin:0; font-size:13px; font-weight:600; color:var(--fg); overflow-wrap:anywhere; }
+.job-dialog .job-decision-title { margin:0; font-size:15px; font-weight:600; line-height:1.35; color:var(--fg); overflow-wrap:anywhere; }
+.job-dialog .job-decision-why { margin:0; font-size:13.5px; line-height:1.5; color:var(--fg); max-width:90ch; overflow-wrap:anywhere; }
+.job-dialog .job-decision-leaves { margin:0; font-size:12.5px; color:var(--fg-muted); overflow-wrap:anywhere; }
+.job-decision-leaves b { margin-right:6px; font-weight:600; color:var(--fg); }
+.job-actions.job-proposal-cta { margin:4px 0 0; justify-content:flex-start; }
+.job-actions.job-proposal-cta button.primary { padding:8px 16px; border-radius:10px; }
+.job-decision-foot { display:flex; flex-wrap:wrap; align-items:flex-start; gap:2px 14px; }
+.job-decision-foot > details[open] { flex-basis:100%; }
+.job-decision-more { margin:0; font-size:12.5px; }
+.job-decision-more > summary { padding:2px 0; color:var(--fg-muted); }
+.job-decision-more[open] { padding:0; background:none; }
+.job-decision-more[open]>summary, .job-event-more[open]>summary { margin:0; }
+.job-decision-more>summary:hover, .job-event-more>summary:hover { background:none; }
+.job-decision-why-body { display:grid; gap:8px; padding:6px 0 4px; font-size:13px; }
+.job-dialog .job-decision-why-body p { margin:0; line-height:1.5; max-width:110ch; white-space:pre-wrap; }
+.job-decision-evidence { margin:0; padding:0; list-style:none; display:grid; gap:4px; }
+.job-decision-evidence li { font-size:12px; color:var(--fg-muted); overflow-wrap:anywhere; }
+.job-decision-evidence li span { margin-right:6px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--blue-fg); }
+.job-decision-why-body .job-replan-ask { margin:0; }
+.job-decision-why-body .job-replan-changes { margin:0; }
+.job-ask-earlier { margin:0; padding-left:20px; white-space:pre-wrap; color:var(--fg-muted); }
 .job-ask-earlier li+li { margin-top:6px; }
-.job-ask-text.job-ask-clamp { display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
-.job-ask-more { all:unset; cursor:pointer; flex:none; font-size:12px; font-weight:500; color:var(--blue-fg); white-space:nowrap; }
-.job-ask-more[hidden] { display:none; }
-.job-ask-more:hover { text-decoration:underline; }
-.job-ask-more:focus-visible { outline:2px solid var(--blue); outline-offset:2px; border-radius:4px; }
-@media (max-width:700px) { .job-proposal-bar { top:-8px; } }
-@media (max-width:640px) { .job-proposal-bar { grid-template-columns:1fr; } .job-actions.job-proposal-cta { justify-content:flex-start; } }
+.job-decision-other { all:unset; cursor:pointer; padding:2px 0; font-size:12.5px; color:var(--blue-fg); }
+.job-decision-other:hover { text-decoration:underline; }
+.job-decision-other:focus-visible { outline:2px solid var(--blue); outline-offset:2px; border-radius:4px; }
 /* Every changed node wears its colour as a ring; everything the change leaves alone fades back. */
 .job-mark-added { --dc:var(--st-ok); } .job-mark-edited { --dc:var(--st-run); } .job-mark-removed { --dc:var(--st-bad); }
 :is(.job-mark-rework,.job-mark-forward,.job-mark-retry,.job-mark-accept-red,.job-mark-recover,.job-mark-mark-done,.job-mark-mark-merged) { --dc:var(--wf); }
@@ -1929,7 +1935,7 @@ details.job-talk-card[open] > summary svg { transform:none; }
 .job-talk-session .job-msg-run { max-width:640px; }
 .job-talk-working .job-talk-session-mark { margin-top:0; }
 /* Several conversations at once (job-talk.js): one section each, one open at a time with the box at its foot. */
-.job-talk-convo { display:grid; gap:12px; padding:10px 12px; border-radius:10px; box-shadow:inset 0 0 0 1px var(--border-muted); transition:box-shadow .2s; }
+.job-talk-convo { display:grid; grid-template-columns:minmax(0,1fr); gap:12px; padding:10px 12px; border-radius:10px; box-shadow:inset 0 0 0 1px var(--border-muted); transition:box-shadow .2s; }
 .job-talk-convo > .job-change { margin:0; }
 .job-talk-convo-head .job-title-loader { width:14ch; }
 .job-talk-convo-head .job-title-loader i + i { display:none; }
@@ -1938,7 +1944,6 @@ details.job-talk-card[open] > summary svg { transform:none; }
 .job-talk-convo-head small { color:var(--fg-muted); }
 .job-talk-tag.tone-working { color:var(--st-warn-fg); background:color-mix(in srgb, var(--st-warn) 18%, transparent); }
 .job-talk-convo-head[data-convo-fold] { cursor:pointer; user-select:none; }
-.job-talk-count { font-size:11.5px; }
 .job-talk-convo-tools { display:inline-flex; gap:2px; margin-left:auto; }
 .job-talk-convo-tools button { all:unset; display:inline-grid; place-items:center; width:24px; height:24px; border-radius:6px; color:var(--fg-muted); cursor:pointer; }
 .job-talk-convo-tools button:hover { color:var(--fg); background:var(--surface-2); }
