@@ -13,7 +13,7 @@ const stateOf = (s, over = {}) => { const j = job({ subJobs: [s], ...over }); re
 test('every state is a tone, a glyph and a name, and the order puts the urgent first', () => {
   assert.deepEqual(Object.fromEntries(Object.entries(STATES).map(([k, v]) => [k, v.tone])),
     { planned: 'idle', queued: 'idle', waiting: 'idle', running: 'run', needs: 'warn', read: 'read', change: 'warn', failing: 'bad', done: 'ok', paused: 'pause', dropped: 'idle' });
-  assert.deepEqual(STATE_ORDER.slice(0, 4), ['change', 'read', 'failing', 'needs'], 'a plan change, then what else the wrangler wrote for you, outrank red');
+  assert.deepEqual(STATE_ORDER.slice(0, 4), ['change', 'read', 'failing', 'needs'], 'a plan change, then what else Wrangler wrote for you, outrank red');
   assert.deepEqual([...STATE_ORDER].sort(), Object.keys(STATES).sort());
   for (const k of Object.keys(STATES)) assert.match(stateIconHtml(k), /^<svg class="icon/);
   assert.match(stateIconHtml('running'), /job-spin/, 'running is the one glyph that moves');

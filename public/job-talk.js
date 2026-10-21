@@ -1,5 +1,5 @@
 import { esc } from './util.js';
-import { ICONS } from './icons.js';
+import { ICONS, wranglerMark } from './icons.js';
 import { convoGroups, askPending, replanPending, convoNumber, convoRunning, replanQueued, queuedLabel } from './jobs.js';
 import { proseHtml, imageStripHtml, titleLoaderHtml } from './job-idea.js';
 import { shotButtonHtml } from './job-proof.js';
@@ -18,7 +18,7 @@ import { shotButtonHtml } from './job-proof.js';
 // the job too only once its wrangler escalated it. Pure markup; jobs-view.js draws and
 // wires the boxes. Every word is escaped.
 
-export const WRANGLER_NAME = 'The wrangler';
+export const WRANGLER_NAME = 'Wrangler';
 const time = (at) => at ? new Date(at).toLocaleTimeString(undefined, { timeStyle: 'short' }) : '';
 const MARK = { added: 'New', edited: 'Edited', removed: 'Cancelled', rework: 'Rework', forward: 'Forward', 'accept-red': 'Accept red', mark: 'Mark', recover: 'Recover', retry: 'Retry' };
 const OUTCOME = { approved: ['ok', 'Approved'], discarded: ['muted', 'Discarded'], revised: ['muted', 'Revised'] };
@@ -33,7 +33,7 @@ function humanHtml(job, m, onJob) {
   const pics = imageStripHtml(job, kept.map((i) => `talk:${i.file}`), 'job-sent-strip');
   return `<div class="job-sent" data-talk="${esc(m.id)}"><div class="job-sent-bubble">${pics}<span>${esc(m.text)}</span></div><span class="job-sent-meta">${esc(meta)}</span></div>`;
 }
-const wranglerHtml = (m, body, cls = '') => `<div class="job-idea-msg job-talk-msg ${cls}" data-talk="${esc(m.id)}"><span class="job-idea-orb small" aria-hidden="true"></span><div><div class="job-idea-who">${WRANGLER_NAME}<time>${esc(time(m.at))}</time></div>${body}</div></div>`;
+const wranglerHtml = (m, body, cls = '') => `<div class="job-idea-msg job-talk-msg ${cls}" data-talk="${esc(m.id)}">${wranglerMark('small')}<div><div class="job-idea-who">${WRANGLER_NAME}<time>${esc(time(m.at))}</time></div>${body}</div></div>`;
 
 // The card's state: what the human did with it, else waiting while it is the
 // proposal on the job, else gone (a red step's fate, a cancelled job).
@@ -96,7 +96,7 @@ const answersHtml = (job, m) => (m.forwarded || []).map(({ sub: id, message }) =
   const working = !got.length && sub.answering?.id === message ? `<div class="job-idea-thinking job-talk-working"><span class="job-talk-session-mark" aria-hidden="true">${ICONS.terminal}</span><span class="job-idea-shine">${esc(sub.title)}'s session is working on it…</span></div>` : '';
   return got.map((t) => sessionHtml(job, sub, t)).join('') + working;
 }).join('');
-const forwardHtml = (job, m) => `<div class="job-talk-forward" data-talk="${esc(m.id)}"><span class="job-idea-orb small" aria-hidden="true"></span><span>${esc(forwardLine(job, m))}</span><time>${esc(time(m.outcomeAt || m.at))}</time></div>`;
+const forwardHtml = (job, m) => `<div class="job-talk-forward" data-talk="${esc(m.id)}">${wranglerMark('small')}<span>${esc(forwardLine(job, m))}</span><time>${esc(time(m.outcomeAt || m.at))}</time></div>`;
 
 function messageHtml(job, m, onJob, kept) {
   if (m.from === 'human') return humanHtml(job, m, onJob);
@@ -110,8 +110,8 @@ function messageHtml(job, m, onJob, kept) {
 function workingHtml(job, convo) {
   const text = convo && askPending(job, convo) ? `${WRANGLER_NAME} ${convoRunning(job, convo) ? 'is looking into it' : 'will look into it'}…`
     : replanPending(job) && !job.replan.proposal && !(job.replan.red && !job.replan.red.human) && (job.replan.convo || null) === (convo?.id || null) ? `${WRANGLER_NAME} is drawing a proposal…` : '';
-  if (!text && convo && replanQueued(job).some((q) => q.convo === convo.id)) return '<div class="job-idea-thinking job-talk-working job-talk-queued"><span class="job-idea-orb small" aria-hidden="true"></span><span>Queued behind the plan change being drawn</span></div>';
-  return text ? `<div class="job-idea-thinking job-talk-working"><span class="job-idea-orb small" aria-hidden="true"></span><span class="job-idea-shine">${text}</span></div>` : '';
+  if (!text && convo && replanQueued(job).some((q) => q.convo === convo.id)) return `<div class="job-idea-thinking job-talk-working job-talk-queued">${wranglerMark('small')}<span>Queued behind the plan change being drawn</span></div>`;
+  return text ? `<div class="job-idea-thinking job-talk-working">${wranglerMark('small', true)}<span class="job-idea-shine">${text}</span></div>` : '';
 }
 
 // A conversation stays open while its wrangler is at it (answering, queued, a
@@ -144,8 +144,8 @@ function groupHtml(job, group, groups, sub, boxFor, fold, kept, target) {
   const open = target != null && convo ? convo.id === target : convoOpen(job, group, groups, fold);
   const step = onJob && convo?.sub ? job.subJobs.find((s) => s.id === convo.sub)?.title || convo.sub : '';
   const state = convo && askPending(job, convo) ? `<span class="job-talk-tag tone-working">${convoRunning(job, convo) ? 'Answering' : 'Queued'}</span>` : '';
-  const raised = convo?.sub && convo.escalatedAt ? `<span class="job-talk-tag" title="The wrangler judged it the whole job's, so the job's list shows it too">${onJob ? 'Escalated' : 'Also on the job'}</span>` : '';
-  const title = convo ? convoTitle(job, convo) : 'From the wrangler';
+  const raised = convo?.sub && convo.escalatedAt ? `<span class="job-talk-tag" title="Wrangler judged it the whole job's, so the job's list shows it too">${onJob ? 'Escalated' : 'Also on the job'}</span>` : '';
+  const title = convo ? convoTitle(job, convo) : 'From Wrangler';
   const name = convo?.titlePending ? titleLoaderHtml('small') : esc(title);
   const more = !open && messages.length > 2 ? `<small class="job-talk-count">${messages.length} messages</small>` : '';
   const tools = convo ? `<span class="job-talk-convo-tools"><button type="button" class="job-talk-fold" aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} ${esc(title)}">${ICONS.caret}</button>${liveIn(job, convo) ? '' : `<button type="button" class="job-talk-dismiss" data-convo-dismiss title="Dismiss this conversation" aria-label="Dismiss ${esc(title)}">${ICONS.x}</button>`}</span>` : '';
@@ -165,5 +165,5 @@ export function talkHtml(job, sub = null, boxFor = null, fold = null, kept = nul
   const loose = groups.some((g) => !g.convo) ? '' : workingHtml(job, null);
   if (!groups.length && !loose) return '';
   const many = groups.filter((g) => g.convo).length > 1;
-  return `<section class="job-talk"${target != null ? ' data-talk-target' : ''} aria-label="Conversations with the wrangler" aria-live="polite"><h4 class="job-talk-head">${ICONS.note}${many ? 'Conversations' : 'Conversation'} with the wrangler</h4>${groups.map((g) => groupHtml(job, g, groups, sub, boxFor, fold, kept, target)).join('')}${loose}</section>`;
+  return `<section class="job-talk"${target != null ? ' data-talk-target' : ''} aria-label="Conversations with Wrangler" aria-live="polite"><h4 class="job-talk-head">${ICONS.note}${many ? 'Conversations' : 'Conversation'} with Wrangler</h4>${groups.map((g) => groupHtml(job, g, groups, sub, boxFor, fold, kept, target)).join('')}${loose}</section>`;
 }

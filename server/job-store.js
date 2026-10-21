@@ -353,7 +353,7 @@ export class JobStore {
         d.jobs.push(sib);
       }
       if (own) approve(j, own.plan);
-      for (const x of [...siblings, ...(own ? [own] : [])]) record(j, null, 'accept-idea', null, own === x ? `Created the job from the wrangler's suggestion: ${quoted(x.title)}` : `Created a job beside this idea from the wrangler's suggestion: ${quoted(x.title)}`);
+      for (const x of [...siblings, ...(own ? [own] : [])]) record(j, null, 'accept-idea', null, own === x ? `Created the job from Wrangler's suggestion: ${quoted(x.title)}` : `Created a job beside this idea from Wrangler's suggestion: ${quoted(x.title)}`);
       j.updatedAt = now; j.revision++;
       return j;
     });
@@ -386,7 +386,7 @@ export class JobStore {
       }
       if (action === 'dismiss-convo') {
         dismissConvo(j, payload.convo, Date.now());
-        record(j, s, 'dismiss-convo', null, 'Dismissed a conversation with the wrangler');
+        record(j, s, 'dismiss-convo', null, 'Dismissed a conversation with Wrangler');
         return;
       }
       // The preview the agent left running (job-running.js): Stop owes its teardown
@@ -417,7 +417,7 @@ export class JobStore {
       if (action === 'leave-idea') {
         const made = leaveIdea(j, Date.now());
         cancelJob(j, Date.now());
-        record(j, null, 'leave-idea', null, `Left the rest of the wrangler's suggestions; this idea became ${made.map((x) => quoted(x.title)).join(', ')}`);
+        record(j, null, 'leave-idea', null, `Left the rest of Wrangler's suggestions; this idea became ${made.map((x) => quoted(x.title)).join(', ')}`);
         return;
       }
       if (['retry-main', 'dismiss-main', 'resolve-main'].includes(action)) {
@@ -707,7 +707,7 @@ export class JobStore {
   _reply(j, r, s, report) {
     if (r.parkedFor !== 'ready' || !s?.ready) throw new Error('A reply answers the human after you reported ready; there is nothing to answer');
     if (report.suggest) throw new Error('Only a new idea\'s planner suggests a job');
-    if (report.escalate) throw new Error('Only the wrangler answering a step\'s conversation escalates it');
+    if (report.escalate) throw new Error('Only Wrangler answering a step\'s conversation escalates it');
     if (r.parkedAt && !r.mailedAt) {
       if (JSON.stringify(r.lastReply) === JSON.stringify(report)) return;
       throw new Error('You already answered; wait for mail from the human');

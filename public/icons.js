@@ -15,6 +15,12 @@ export const FILE_ICON = svg('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M10.
 export const PIN_ICON = svg('<path d="M19 10c0 5.5-7 11-7 11s-7-5.5-7-11a7 7 0 0 1 14 0z"/><circle cx="12" cy="10" r="2.5"/>');
 export const GLOBE_ICON = svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>');
 export const ROCKET_PATH = '<path d="M12 2.5c3 2 5 5.5 5 9.5l-1.8 4H8.8L7 12c0-4 2-7.5 5-9.5z"/><circle cx="12" cy="9.5" r="1.6"/><path d="M9.5 19.5h5"/>';
+// Wrangler's mark, the planner's face on the board: the Agent Wrangler app icon's hat
+// ("Western hat" by Delapouite, game-icons.net, CC BY 3.0) knocked out of a disc in the
+// theme's CTA colours. `busy` shrinks it inside a turning lasso while Wrangler thinks.
+const HAT_PATH = 'M199.117 111.268c-2.435.007-4.816.524-7.117 1.675-18.365 9.194-38.59 129.65-50.16 164.987 45.64 13.262 87.106 16.556 115.314 16.425 28.21-.13 68.652-3.635 112.97-16.49C358.53 242.48 338.34 122.123 320 112.943c-21.065-10.53-48.73 31.998-64 32-13.6.002-37.05-33.734-56.883-33.675zM224 160c11.53 40.5 9.107 74.724 0 96-9.107 21.276-32 11.235-32 0 25.333-6.927 26.21-35.5 32-96zm64 0c5.79 60.5 6.667 89.073 32 96 0 11.235-22.893 21.276-32 0s-11.53-55.5 0-96zM46.79 263.127c-17.5.4-24.138 17.83-14.79 40.873 11.088 30.345 58.972 96.774 112 96 24.103-.352 31.438-15.483 112-16 80.562-.517 87.88 15.648 112 16 53.017.774 100.907-65.655 112-96 13.006-32.066-4.934-53.25-40.016-32.84-21.85 11.926-44.06 17.898-65.984 24.48-.02 0-.044.024-.064.024v-.006c-45.8 13.756-87.924 17.486-116.754 17.615-28.83.13-72.027-3.357-119.145-17.548-21.897-6.618-44.09-12.59-66.027-24.565-9.866-5.74-18.374-8.19-25.22-8.033z';
+const LASSO = '<g class="wrangler-mark-rope"><circle cx="256" cy="256" r="226" stroke-width="30" stroke-dasharray="44 16" stroke-linecap="round"/><ellipse cx="416" cy="416" rx="38" ry="24" transform="rotate(-45 416 416)" stroke-width="24"/></g>';
+export const wranglerMark = (cls = '', busy = false) => `<svg class="wrangler-mark${cls ? ` ${cls}` : ''}${busy ? ' busy' : ''}" viewBox="0 0 512 512" aria-hidden="true"><circle class="wrangler-mark-disk" cx="256" cy="256" r="${busy ? 196 : 256}"/><g class="wrangler-mark-hat"><path d="${HAT_PATH}" transform="translate(256 ${busy ? 266 : 270}) scale(${busy ? 0.5 : 0.66}) translate(-256 -256)"/></g>${busy ? LASSO : ''}</svg>`;
 export const ICONS = {
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
   x: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
