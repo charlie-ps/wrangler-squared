@@ -106,16 +106,16 @@ test('the Jobs step plays a mini board whose rail badge counts the amber rows', 
   createIntro({ storage: memoryStorage() }).open(1);
   const fig = () => document.querySelectorAll('.intro-panel')[1];
   for (const el of frames(1)) {
-    const amber = el.querySelectorAll('.intro-mini-job.tone-warn').length;
+    const amber = el.querySelectorAll('.intro-mini-job:is(.tone-warn,.tone-read)').length;
     assert.equal(el.querySelector('.intro-rail-badge').textContent, String(amber));
     assert.equal(el.querySelector('.intro-count-pill').textContent, String(amber));
     assert.equal(el.querySelector('.intro-rail-badge').classList.contains('zero'), amber === 0);
   }
-  assert.ok(frames(1).some((el) => el.querySelectorAll('.intro-mini-job.tone-warn').length === 2));
+  assert.ok(frames(1).some((el) => el.querySelectorAll('.intro-mini-job:is(.tone-warn,.tone-read)').length === 2));
   const idea = frames(1).map((el) => el.querySelector('.intro-mini-job'));
   assert.deepEqual(idea.map((r) => r.querySelector('.gx.nb[data-inflow]')?.dataset.stage ?? null), ['0', '0', '1', '0', '2', null, null], 'an idea under its forming sky, brighter as the planner asks and suggests, then the job it became');
   assert.deepEqual(idea.slice(0, 5).map((r) => r.querySelector('small').textContent), ['Idea · The wrangler is reading it', 'Idea · The wrangler is reading it', 'Idea · The wrangler asked you', 'Idea · The wrangler is reading it', 'Idea · Job suggested · review']);
-  assert.ok(idea[2].classList.contains('tone-warn'), 'a question waiting on you counts');
+  assert.ok(idea[2].classList.contains('tone-read'), 'a question waiting on you counts, in the to-read tone');
   assert.equal(idea[5].querySelector('small').textContent, 'Starting its sub-jobs', 'creating the suggested job approved its plan');
   const before = fig().querySelector('.intro-figure').innerHTML;
   await new Promise((r) => p.window.setTimeout(r, 1650));
@@ -202,7 +202,7 @@ test('Needs you plays a red step that Wrangler fixes uncounted, then a fix that 
   page(t);
   const seen = frames(step('Needs you')).map((el) => [el.querySelector('.job-status').textContent, el.querySelector('.intro-count-pill').textContent]);
   assert.deepEqual(seen.slice(0, 3), [['Ready for your review', '2'], ['Checks failing', '2'], ['Fixing · try 1 of 2', '1']], 'fixing is not counted');
-  assert.deepEqual(seen.at(-1), ['Fix ready · Review fix', '2']);
+  assert.deepEqual(seen.at(-1), ['Fix proposed · Review', '2']);
 });
 
 test('See it working fills the Show me checklist from the board’s own markup, then leaves the preview running, all inert', (t) => {

@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, budgetHeld, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber, worktreeKept, promptsWaiting } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, budgetHeld, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, touchedBy, wranglerUnread, ideaStage, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber, worktreeKept, promptsWaiting } from './jobs.js';
 
 // The one state vocabulary every surface draws: a tone (the colour, see the
 // .tone-* rules in jobs.css), a glyph and a short name. Every stage, run status,
@@ -10,17 +10,23 @@ export const STATES = {
   waiting: { tone: 'idle', icon: 'lock', label: 'Waiting' },
   running: { tone: 'run', icon: 'spin', label: 'Running' },
   needs: { tone: 'warn', icon: 'eye', label: 'Needs you' },
+  read: { tone: 'read', icon: 'note', label: 'To read' },
+  change: { tone: 'warn', icon: 'eye', label: 'Plan change' },
   failing: { tone: 'bad', icon: 'x', label: 'Failing' },
   done: { tone: 'ok', icon: 'check', label: 'Done' },
   paused: { tone: 'pause', icon: 'pause', label: 'Paused' },
   dropped: { tone: 'idle', icon: 'stop', label: 'Dropped' },
 };
 // Most urgent first: the board sorts by it and a job rolls up to its sub-jobs' first.
-export const STATE_ORDER = ['failing', 'needs', 'paused', 'running', 'queued', 'waiting', 'planned', 'done', 'dropped'];
+// A plan change waiting on you, then anything else the wrangler wrote for you (a plan,
+// a reply), outrank a red step: they are usually what gets past it, and a red card hid them.
+export const STATE_ORDER = ['change', 'read', 'failing', 'needs', 'paused', 'running', 'queued', 'waiting', 'planned', 'done', 'dropped'];
 export const stateIconHtml = (state) => ICONS[STATES[state].icon];
 // A solid tile is a step that is moving or settled; a hollow one has not begun.
 export const stateSolid = (state) => !['planned', 'queued', 'waiting', 'dropped'].includes(state);
 
+// A step a waiting proposal acts on, or the one its idea was typed on: what to read is the proposal.
+const inProposal = (job, sub) => replanProposed(job) && (job.replan.source?.sub === sub.id || touchedBy(job.replan.proposal).has(sub.id));
 // A plan's sub-jobs have no stage until approval makes them live.
 export function subState(job, sub) {
   if (!sub.stage) return 'planned';
@@ -30,8 +36,10 @@ export function subState(job, sub) {
   if (!job.error && redFixing(job, sub)) return 'running';
   if (!job.error && redFixReady(job, sub)) return 'needs';
   if (job.error || cancelledDependencies(job, sub).length || (eventFor(job, sub) && !deploymentStalled(sub))) return 'failing';
-  if (job.paused || budgetHeld(job) || heldByReplan(job, sub)) return 'paused';
+  if (job.paused || budgetHeld(job)) return 'paused';
+  if (heldByReplan(job, sub)) return inProposal(job, sub) ? 'change' : 'paused';
   if (jobNeedsReview(job, sub)) return 'needs';
+  if (wranglerUnread(job, sub).length) return 'read';
   if (jobStatus(job, sub).tone === 'working') return 'running';
   if (redPipeline(sub)) return 'failing';
   if (isWriteSub(sub)) return writeWaiting(job, sub) ? 'waiting' : 'queued';
@@ -44,7 +52,7 @@ export function jobState(job) {
   if (job.stage === 'done') return 'done';
   if (job.stage !== 'active') {
     if (job.paused || budgetHeld(job)) return 'paused';
-    if (jobNeedsReview(job, null)) return 'needs';
+    if (jobNeedsReview(job, null)) return runStatus(job, null) === 'needs-you' ? 'needs' : replanProposed(job) ? 'change' : 'read';
     if (job.runs.some((r) => !r.stopped)) return 'running';
     return job.stage === 'backlog' ? 'planned' : 'queued';
   }
@@ -52,8 +60,9 @@ export function jobState(job) {
   // re-planning, then a proposal that needs the human.
   const halted = job.paused || budgetHeld(job);
   const states = job.subJobs.filter((s) => halted || !heldByReplan(job, s)).map((s) => subState(job, s)).filter((s) => s !== 'dropped');
-  if (replanProposed(job) && !halted) states.push('needs');
+  if (replanProposed(job) && !halted) states.push('change');
   else if (replanPending(job) && !halted) states.push('running');
+  if (wranglerUnread(job).length) states.push('read');
   if (!states.length) return 'queued';
   if (states.every((s) => s === 'done')) return 'done';
   return STATE_ORDER.find((s) => states.includes(s));
@@ -64,7 +73,7 @@ export function jobState(job) {
 export const mainWaiting = (job) => (job.mainNotices || []).filter((n) => !n.retrying && !n.resolving);
 // A job needs you exactly when its plate draws an ask (job-plates.js plateAsk): the rail
 // badge and the Needs you tab count jobs by this, so both match the cards on the board.
-export const jobNeedsYou = (job) => !!job.error || budgetHeld(job) || promptsWaiting(job).length > 0 || ['needs', 'failing'].includes(jobState(job)) || mainWaiting(job).length > 0;
+export const jobNeedsYou = (job) => !!job.error || budgetHeld(job) || promptsWaiting(job).length > 0 || ['needs', 'change', 'read', 'failing'].includes(jobState(job)) || mainWaiting(job).length > 0;
 export const leadSub = (job, state = jobState(job)) => job.subJobs.find((s) => subState(job, s) === state) || null;
 const redChecks = (sub) => (sub.pr?.checks || []).filter((c) => ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT'].includes(c.state)).length;
 // A few words for what a sub-job is waiting for, where its state is one a human
@@ -90,6 +99,8 @@ export function subLabel(job, sub) {
     if (isWriteSub(sub)) return 'Review write';
     if (sub.stage === 'pr') return n ? `Merge #${n}` : 'Merge';
   }
+  if (state === 'change') return 'Plan change ready';
+  if (state === 'read') return 'Wrangler replied';
   return jobStatus(job, sub).text;
 }
 // The one coloured line under a stepper node: the PR it is, and how it stands.
@@ -103,14 +114,16 @@ export function jobLabel(job) {
   const state = jobState(job);
   if (job.cancelledAt) return jobStatus(job, null).text;
   if (job.error) return 'Needs attention';
-  if (!['needs', 'failing'].includes(state) && mainWaiting(job).length) return `Local ${mainWaiting(job)[0].base} behind`;
+  if (!['needs', 'change', 'read', 'failing'].includes(state) && mainWaiting(job).length) return `Local ${mainWaiting(job)[0].base} behind`;
   if (budgetHeld(job)) return 'Paused for budget';
   if (job.stage === 'backlog') return job.paused ? 'Paused' : 'Backlog';
-  if (job.stage === 'planning' && state === 'needs' && job.plan && !runStatus(job, null)) return 'Plan ready';
+  if (job.stage === 'planning' && state === 'read' && job.plan && !runStatus(job, null)) return 'Plan ready';
+  if (state === 'read' && ideaStage(job) === 'reply') return 'Wrangler asked';
   if (job.stage !== 'active') return jobStatus(job, null).text;
   if (state === 'done') return 'Delivered';
   if (state === 'paused') return 'Paused';
-  if (state === 'needs' && replanProposed(job) && !job.replan.red) return 'Plan change ready';
+  if (state === 'change') return job.replan.proposal.escalation ? 'Options ready' : job.replan.red ? 'Fix proposed' : 'Plan change ready';
+  if (state === 'read' && wranglerUnread(job).length) return 'Wrangler replied';
   if (state === 'running' && replanPending(job) && !replanProposed(job)) return job.replan.red ? 'Fixing' : 'Re-planning';
   const peers = job.subJobs.filter((s) => subState(job, s) === state);
   if (!peers.length) return jobStatus(job, null).text;

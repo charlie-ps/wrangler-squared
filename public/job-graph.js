@@ -52,7 +52,7 @@ const branchEditorHtml = (s, i, base, open) => `<details class="job-node-deps jo
   <input data-base="${i}" value="${esc(s.base || '')}" placeholder="${esc(base || 'Default branch')}" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Land on branch"></details>`;
 // A place pill's parts: the glyph, a short mono label, a dot per write in its
 // state, and ↗ once the place exists.
-const urgentOf = (states) => ['failing', 'needs'].find((st) => states.includes(st));
+const urgentOf = (states) => ['failing', 'needs', 'change', 'read'].find((st) => states.includes(st));
 const placePillClass = (p, states, base = 'job-place') => { const u = urgentOf(states); return `${base} ${p.exists ? '' : 'ghost'} ${p.type === 'other' ? 'other' : ''} ${u ? `tone-${STATES[u].tone} urgent` : ''}`; };
 // The ↗ is its own link straight to the place: a link inside a summary follows
 // without toggling it.

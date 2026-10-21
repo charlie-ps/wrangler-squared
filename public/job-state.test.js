@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, jobNeedsYou, mainWaiting } from './job-state.js';
-import { plateHtml } from './job-plates.js';
+import { plateHtml, plateAsk } from './job-plates.js';
 import { jobStatus } from './jobs.js';
 
 const sub = (id, over = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after: [], brief: 'b', sessions: [], repairs: [], stage: 'implementation', ...over });
@@ -12,12 +12,12 @@ const stateOf = (s, over = {}) => { const j = job({ subJobs: [s], ...over }); re
 
 test('every state is a tone, a glyph and a name, and the order puts the urgent first', () => {
   assert.deepEqual(Object.fromEntries(Object.entries(STATES).map(([k, v]) => [k, v.tone])),
-    { planned: 'idle', queued: 'idle', waiting: 'idle', running: 'run', needs: 'warn', failing: 'bad', done: 'ok', paused: 'pause', dropped: 'idle' });
-  assert.deepEqual(STATE_ORDER.slice(0, 2), ['failing', 'needs']);
+    { planned: 'idle', queued: 'idle', waiting: 'idle', running: 'run', needs: 'warn', read: 'read', change: 'warn', failing: 'bad', done: 'ok', paused: 'pause', dropped: 'idle' });
+  assert.deepEqual(STATE_ORDER.slice(0, 4), ['change', 'read', 'failing', 'needs'], 'a plan change, then what else the wrangler wrote for you, outrank red');
   assert.deepEqual([...STATE_ORDER].sort(), Object.keys(STATES).sort());
   for (const k of Object.keys(STATES)) assert.match(stateIconHtml(k), /^<svg class="icon/);
   assert.match(stateIconHtml('running'), /job-spin/, 'running is the one glyph that moves');
-  assert.deepEqual(Object.keys(STATES).filter(stateSolid), ['running', 'needs', 'failing', 'done', 'paused']);
+  assert.deepEqual(Object.keys(STATES).filter(stateSolid), ['running', 'needs', 'read', 'change', 'failing', 'done', 'paused']);
 });
 
 test('a sub-job maps onto the vocabulary from its stage, run, checks and gates', () => {
@@ -86,7 +86,7 @@ test('a red PR a plan change moved behind a fix waits for it instead of reading 
 
 test('a job rolls up to its most urgent sub-job, and before work starts follows its own stage', () => {
   assert.equal(jobState(job({ stage: 'backlog' })), 'planned');
-  assert.equal(jobState(job({ stage: 'planning', plan: { subJobs: [], stories: [] } })), 'needs');
+  assert.equal(jobState(job({ stage: 'planning', plan: { subJobs: [], stories: [] } })), 'read', 'a plan to review is the wrangler\'s to read');
   assert.equal(jobState(job({ stage: 'planning', runs: [run(null, { phase: 'planning' })] })), 'running');
   assert.equal(jobState(job({ stage: 'jira', runs: [run(null, { phase: 'jira' })] })), 'running');
   assert.equal(jobState(job({ stage: 'planning', paused: true })), 'paused');
@@ -200,9 +200,9 @@ test('a job held by a replan labels itself whatever the replan is', () => {
   const proposal = { plan: { subJobs: [] } };
   for (const [replan, state, label] of [
     [{}, 'running', 'Re-planning'],
-    [{ proposal }, 'needs', 'Plan change ready'],
+    [{ proposal }, 'change', 'Plan change ready'],
     [{ red }, 'running', 'Fixing'],
-    [{ red, proposal }, 'needs', null],
+    [{ red, proposal }, 'change', 'Fix proposed'],
   ]) {
     const j = job({ subJobs: [waiting], replan });
     assert.equal(jobState(j), state);
@@ -210,16 +210,54 @@ test('a job held by a replan labels itself whatever the replan is', () => {
     if (label) assert.equal(jobLabel(j), label);
   }
   const fixReady = job({ subJobs: [done], replan: { red, proposal } });
-  assert.equal(jobState(fixReady), 'needs');
+  assert.equal(jobState(fixReady), 'change');
   assert.equal(leadSub(fixReady), null);
-  assert.equal(jobLabel(fixReady), jobStatus(fixReady, null).text, 'a red triage proposal with no step of its own falls back to the job status');
+  assert.equal(jobLabel(fixReady), 'Fix proposed', 'a red triage proposal names itself even with no step of its own');
 });
 
 test('approving a session step while a red triage proposal is open moves the step to done and still labels the job', () => {
   const approved = sub('a', { kind: 'session', stage: 'done' });
   const later = sub('b', { kind: 'session', after: ['a'], stage: undefined });
   const j = job({ subJobs: [approved, later], replan: { red: { sub: 'a', auto: true, n: 1 }, proposal: { plan: { subJobs: [] } } } });
-  assert.equal(jobState(j), 'needs');
+  assert.equal(jobState(j), 'change');
   assert.doesNotThrow(() => jobLabel(j));
   assert.doesNotThrow(() => plateHtml(j, 'sonnet'));
+});
+
+test('a red job with a plan change waiting is the amber plan change, while its red step stays red', () => {
+  const api = sub('api', { stage: 'pr', error: 'Automatic repair limit reached', pr: pr({ checkStatus: 'failing' }) });
+  const j = job({ subJobs: [api, sub('web', { after: ['api'] })] });
+  api.red = { declared: { at: 1, ref: `${api.error}|h1||0` } };
+  assert.deepEqual([jobState(j), subState(j, api), subLabel(j, api)], ['failing', 'failing', 'Declared red']);
+  j.replan = { at: 2, source: { sub: 'api', at: 'pr', ref: 'h1' }, convo: 'c1', proposal: { id: 'run_p', plan: { subJobs: [] }, changes: { added: ['fix'], edited: [], removed: [], kept: ['api', 'web'], frozen: [] }, actions: [] } };
+  assert.deepEqual([jobState(j), jobLabel(j), jobNeedsYou(j)], ['change', 'Plan change ready', true]);
+  assert.deepEqual([subState(j, api), subLabel(j, api)], ['failing', 'Declared red'], 'the step itself is still red');
+  assert.deepEqual([plateAsk(j).tone, plateAsk(j).label, plateAsk(j).button, plateAsk(j).sub], ['warn', 'Plan change ready', 'Review', '']);
+  j.replan.red = { sub: 'api', auto: false, n: 1 };
+  assert.equal(jobLabel(j), 'Fix proposed');
+  j.paused = true;
+  assert.notEqual(jobState(j), 'change', 'a paused job holds its proposal');
+});
+
+test('a step a proposal acts on reads as the plan change; one it leaves alone keeps its own ask', () => {
+  const touched = sub('a', { kind: 'session' }), merge = sub('m', { stage: 'pr', pr: pr({ checkStatus: 'passing' }) });
+  const j = job({ subJobs: [touched, merge], replan: { at: 1, proposal: { id: 'p', plan: { subJobs: [] }, changes: { added: [], edited: [{ id: 'a' }], removed: [], kept: ['m'], frozen: [] }, actions: [] } } });
+  assert.deepEqual([subState(j, touched), subLabel(j, touched)], ['change', 'Plan change ready']);
+  assert.deepEqual([subState(j, merge), subLabel(j, merge)], ['needs', 'Merge #142'], 'Merge stays amber');
+  assert.equal(jobState(j), 'change');
+});
+
+test('a wrangler answer is to read until its conversation was shown, then the job is what it was', () => {
+  const answer = { id: 't2', at: 5, from: 'wrangler', kind: 'answer', text: 'It retries twice.\nThen it gives up.', convo: 'c1' };
+  const j = job({ subJobs: [sub('a', { stage: 'done' }), sub('b', { stage: 'pr', pr: pr() })], convos: [{ id: 'c1', at: 1, pending: null, seenAt: 1 }], talk: [{ id: 't1', at: 2, from: 'human', text: 'Does it retry?', convo: 'c1' }, answer] });
+  assert.deepEqual([jobState(j), jobLabel(j), jobNeedsYou(j)], ['read', 'Wrangler replied', true]);
+  assert.deepEqual([plateAsk(j).tone, plateAsk(j).label, plateAsk(j).detail, plateAsk(j).button], ['read', 'Wrangler replied', 'It retries twice.', 'Read']);
+  j.convos[0].seenAt = 5;
+  assert.deepEqual([jobState(j), jobNeedsYou(j)], ['running', false], 'back to its checks running');
+  const onStep = job({ subJobs: [sub('a')], convos: [{ id: 'c2', at: 1, sub: 'a', pending: null, seenAt: 0 }], talk: [{ ...answer, convo: 'c2', sub: 'a' }] });
+  assert.deepEqual([subState(onStep, onStep.subJobs[0]), subLabel(onStep, onStep.subJobs[0]), jobState(onStep)], ['read', 'Wrangler replied', 'read']);
+  assert.equal(plateAsk(onStep).sub, 'a', 'a step\'s answer opens on that step');
+  const review = sub('r', { stage: 'review', state: 'verified', ready: { checks: [] } });
+  const both = job({ subJobs: [review], convos: [{ id: 'c3', at: 1, sub: 'r', pending: null, seenAt: 0 }], talk: [{ ...answer, convo: 'c3', sub: 'r' }] });
+  assert.deepEqual([subState(both, review), subLabel(both, review)], ['needs', 'Review code'], 'Review code stays amber');
 });

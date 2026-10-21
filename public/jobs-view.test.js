@@ -37,7 +37,7 @@ test('every job is one tonal card in its state, and only jobs with attention ite
   const boards = () => [...document.querySelectorAll('.job-plate')].map((b) => b.dataset.board);
   assert.deepEqual(boards(), ['idea', 'job1'], 'newest first, and a backlog idea is not in flight until planning starts');
   assert.equal(f.q('[data-filter="all"] .jobs-rail-n').textContent, '2', 'nor counted in flight');
-  assert.ok(f.q('[data-board="job1"]').classList.contains('tone-warn'), 'a plan to review is amber');
+  assert.ok(f.q('[data-board="job1"]').classList.contains('tone-read'), 'a plan to review is the to-read teal');
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Plan ready');
   f.q('[data-filter="backlog"]').click();
   assert.deepEqual(boards(), ['backlog'], 'Backlog lists it');
@@ -2007,7 +2007,7 @@ test('a plan-change proposal locks landed work, marks removed work as cancelled 
     changes: { frozen: ['api'], kept: [], edited: [{ id: 'docs', fields: ['title'] }], added: ['cli'], removed: ['web'] }, then: { cli: 'Starts after “Docs <b>v2</b>”' } } };
   f.view.update(f.data);
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Plan change ready');
-  assert.ok(f.q('[data-board="job1"]').classList.contains('tone-warn'));
+  assert.ok(f.q('[data-board="job1"]').classList.contains('tone-warn'), 'a plan change to review is amber');
   assert.equal(jobNeedsReview(job, null), true); assert.equal(f.q('#jobs-review-count').textContent, '1');
   f.q('[data-board="job1"] .job-plate-open').click();
   const mark = (id) => f.q(`.job-node[data-node="${id}"] .job-mark`).textContent;
@@ -3368,7 +3368,8 @@ test('a fix waiting on you is Fix ready (Needs you); approving opens the proposa
   f.view.update(f.data);
   assert.deepEqual([subState(job, job.subJobs[0]), subLabel(job, job.subJobs[0]), jobNeedsReview(job, job.subJobs[0])], ['needs', 'Fix ready', true]);
   assert.equal(jobCards([job]).filter((c) => !c.sub).length, 0, 'the red step is the card: not counted twice');
-  assert.match(plateAsk(job).label, /Fix ready/); assert.deepEqual([plateAsk(job).button, plateAsk(job).sub], ['Review fix', '']);
+  assert.deepEqual([jobState(job), jobLabel(job)], ['change', 'Fix proposed'], 'the job is the fix proposed, the step stays Fix ready');
+  assert.deepEqual([plateAsk(job).label, plateAsk(job).tone, plateAsk(job).button, plateAsk(job).sub], ['Fix proposed', 'warn', 'Review', '']);
   f.view.openDetail('job1', 'api');
   const dialog = f.q('#job-dialog');
   assert.match(dialog.querySelector('.job-event-fix.ready').textContent, /The e2e times out on the SSO stub.*Waiting because Red steps is “You decide”/);
@@ -3729,4 +3730,23 @@ test('an emptied spend limit saves as no limit, and a saved one is shown as it i
   f.data.settings.spendLimit = null; f.view.update(f.data);
   f.q('#jobs-settings').click(); form = f.q('#job-settings-form');
   assert.equal(form.elements.spendLimit.value, '', 'null is no limit, never the default');
+});
+
+test('the red job with a plan change waiting is an amber plate saying so, and opening a wrangler reply marks it read once', (t) => {
+  const f = fixtureWithRed(t);
+  const job = redJob(f); const api = job.subJobs[0];
+  api.red = { attempts: [], declared: { at: 1, ref: redRef(job, api), summary: 'flaky', ask: 'Hold it?', auto: false } };
+  job.convos = [{ id: 'c1', at: 1, sub: 'api', escalatedAt: 2, pending: null, seenAt: 3 }];
+  job.talk = [{ id: 't1', at: 2, from: 'human', text: 'Skip the e2e for now', convo: 'c1', sub: 'api' }, { id: 't2', at: 4, from: 'wrangler', kind: 'answer', text: 'Only if QA agrees.', convo: 'c1', sub: 'api' }];
+  job.replan = { at: 5, source: { sub: 'api', at: 'pr', ref: 'h1' }, convo: 'c1', proposal: { id: 'run_p', label: 'Add a QA step', plan, merged: plan, changes: { frozen: [], kept: ['api'], edited: [], added: ['qa'], removed: [] }, actions: [], alternatives: [] } };
+  f.view.update(f.data);
+  const plate = f.q('[data-board="job1"]');
+  assert.ok(plate.classList.contains('tone-warn')); assert.match(plate.querySelector('.job-plate-stub').textContent, /Plan change ready/);
+  assert.doesNotMatch(plate.querySelector('.job-plate-stub').textContent, /Declared red/, 'only its red step says Declared red');
+  assert.ok(!f.q('#jobs-review-count').classList.contains('read'), 'a plan change is amber, not to read');
+  f.view.openDetail('job1');
+  assert.ok(f.q('#job-dialog [data-node="api"]').closest('.tone-bad'), 'the red step stays red in the stepper');
+  assert.deepEqual(f.sent.filter((m) => m.type === 'job-talk-seen'), [{ type: 'job-talk-seen', id: 'job1', convos: ['c1'] }]);
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  assert.equal(f.sent.filter((m) => m.type === 'job-talk-seen').length, 1, 'once per answer');
 });

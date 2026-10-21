@@ -216,6 +216,13 @@ text as public as the rest of this repo.
   `sub.catchUp` stops repairs and merges until its new prerequisites land, then the
   runner updates its branch once. Each proposal carries `then` (`thenOf`), the
   card's "Re-queued · starts after …" line, drawn in the thread and proposal view.
+- **`change` and `read` head `STATE_ORDER`, above `failing`** (`public/job-state.js`). `change` (amber) is a
+  waiting plan change and the steps it acts on, so a red job with a proposal waiting shows "Plan change ready" /
+  "Fix proposed" while its red step stays red. `read` (teal `--st-read`, core's `--rt`) is the rest of what the
+  wrangler wrote you: a first plan, an idea's question or suggestion, and a wrangler `answer` newer than its
+  conversation's `seenAt`. Everything else you act on stays amber `needs`. `seenAt` is
+  stamped by the human writing in the conversation (`say`) or by the board's silent `job-talk-seen` frame
+  while a dialog draws the answer (`jobs-view.js markSeen`); it is not a revision.
 - **Red steps go up one level before the human** (`server/job-red.js`). A sub-job
   with an `error` is sent to the planner by the runner's `triageRed` when
   `settings.maxReplans` > 0 (0 = the old "red waits for you"), one replan at a

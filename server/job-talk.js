@@ -24,11 +24,13 @@ export const convoRun = (job, convo) => job.runs.find((r) => !r.stopped && r.con
 export const unsentAsks = (convo) => (convo?.pending?.asks || []).filter((a) => !a.sentAt);
 const nextId = (job, now) => `talk_${now.toString(36)}${talkOf(job).length.toString(36)}`;
 
-// Anything new said in a dismissed conversation brings it back.
+// Anything new said in a dismissed conversation brings it back. The human writing
+// in one has read what was there (`seenAt`, the board's to-read state).
 export function say(job, entry, now) {
   const msg = { id: nextId(job, now), at: now, ...entry };
   const convo = convoById(job, entry.convo);
   if (convo?.dismissedAt) delete convo.dismissedAt;
+  if (convo && entry.from === 'human') convo.seenAt = now;
   (job.talk ||= []).push(msg);
   if (job.talk.length > TALK_MAX) job.talk.splice(0, job.talk.length - TALK_MAX);
   return msg;
@@ -37,7 +39,7 @@ export function say(job, entry, now) {
 // A conversation started from the job, or from one step's dialog (`sub`), which
 // is where it is drawn.
 export function openConvo(job, sub, now) {
-  const convo = { id: `convo_${now.toString(36)}${convosOf(job).length.toString(36)}`, at: now, ...(sub ? { sub: sub.id } : {}), pending: null };
+  const convo = { id: `convo_${now.toString(36)}${convosOf(job).length.toString(36)}`, at: now, ...(sub ? { sub: sub.id } : {}), pending: null, seenAt: 0 };
   (job.convos ||= []).push(convo);
   if (job.convos.length > CONVOS_MAX) job.convos.splice(0, job.convos.findIndex((c) => !c.pending) + 1);
   return convo;
@@ -185,10 +187,12 @@ export function askFailed(job, run, why, now) {
 // A job saved while it had one conversation (`job.ask`, messages with no
 // `convo`): its thread becomes the first conversation, its question that
 // conversation's, and an ask run still going keeps answering it.
-export function migrateTalk(job) {
+export function migrateTalk(job, now = Date.now()) {
+  // Answers given before the board tracked reading them are not news.
+  for (const c of job.convos || []) c.seenAt ??= now;
   if (job.convos || !(job.talk?.length || job.ask)) { delete job.ask; return; }
   const id = 'convo_0';
-  job.convos = [{ id, at: job.talk?.[0]?.at || job.ask?.at || 0, pending: job.ask ? { at: job.ask.at, asks: [{ messageId: job.ask.messageId, feedback: job.ask.feedback, sentAt: job.ask.at }], ...(job.ask.source ? { source: job.ask.source } : {}), ...(job.ask.images?.length ? { images: job.ask.images } : {}) } : null }];
+  job.convos = [{ id, at: job.talk?.[0]?.at || job.ask?.at || 0, seenAt: now, pending: job.ask ? { at: job.ask.at, asks: [{ messageId: job.ask.messageId, feedback: job.ask.feedback, sentAt: job.ask.at }], ...(job.ask.source ? { source: job.ask.source } : {}), ...(job.ask.images?.length ? { images: job.ask.images } : {}) } : null }];
   for (const m of job.talk || []) m.convo ??= id;
   for (const r of job.runs || []) if (r.ask && !r.convo) r.convo = id;
   if (job.replan) job.replan.convo ??= id;

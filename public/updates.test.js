@@ -42,7 +42,7 @@ test('the shipped registry is the two Writes pages, review defaults, See it work
   assert.match(at(0).chat.textContent, /The wrangler is reading the idea/, 'an idea opens on the planner reading it');
   assert.ok(at(0).plate.classList.contains('idea'));
   assert.deepEqual([0, 1, 2, 3].map((i) => at(i).sky.stage), ['0', '1', '0', '2'], 'its sky brightens as the planner asks, then suggests');
-  assert.match(at(1).plate.querySelector('.job-plate-stub').textContent, /Your reply/);
+  assert.match(at(1).plate.querySelector('.job-plate-stub').textContent, /Wrangler asked/);
   assert.ok(at(3).chat.querySelector('.job-launch.live [data-accept-idea]'), 'the suggestion is a launch strip with one button');
   assert.ok(at(3).plate.querySelector('.job-plate-stub').textContent.startsWith('Job suggested'));
   assert.ok(at(5).chat.querySelector('.job-launch.firing'));

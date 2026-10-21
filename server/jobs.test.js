@@ -3441,9 +3441,9 @@ test('a question never holds a step, and answers alongside a plan change being d
 test('a job saved with one conversation keeps it as its first', async () => {
   const { migrateTalk } = await import('./job-talk.js');
   const job = { talk: [{ id: 't1', at: 1, from: 'human', text: 'Why?' }], ask: { messageId: 't1', feedback: 'Why?', at: 1 }, runs: [{ id: 'r1', ask: 't1' }], replan: null };
-  migrateTalk(job);
+  migrateTalk(job, 5);
   assert.equal(job.ask, undefined);
-  assert.deepEqual(job.convos, [{ id: 'convo_0', at: 1, pending: { at: 1, asks: [{ messageId: 't1', feedback: 'Why?', sentAt: 1 }] } }]);
+  assert.deepEqual(job.convos, [{ id: 'convo_0', at: 1, seenAt: 5, pending: { at: 1, asks: [{ messageId: 't1', feedback: 'Why?', sentAt: 1 }] } }]);
   assert.equal(job.talk[0].convo, 'convo_0'); assert.equal(job.runs[0].convo, 'convo_0');
   const fresh = { talk: [], runs: [] }; migrateTalk(fresh);
   assert.equal(fresh.convos, undefined);
