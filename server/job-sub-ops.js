@@ -1,4 +1,4 @@
-import { planSchema, isWriteSub, isJiraWrite, isStoryCreate, reviewCode } from './jobs-schema.js';
+import { planSchema, isWriteSub, isHumanSub, MAX_BRIEF, MAX_HUMAN_BRIEF, isJiraWrite, isStoryCreate, reviewCode } from './jobs-schema.js';
 
 // What the runner, a plan change and request-change (job-change.js) share about
 // a sub-job: dropping one, reworking its code, validating a plan. Pure over the
@@ -16,7 +16,7 @@ const quoted = (title) => `“${title}”`;
 // names no session (`by`): the store failed it on load (job-store.js), it is
 // never what an edit changes, and it must not make every edit on its job fail.
 export function validatePlan(plan) {
-  const projected = { ...plan, subJobs: plan.subJobs.filter((s) => !(isWriteSub(s) && !s.by)).map((s) => ({ ...s, brief: String(s.brief || 'x').slice(0, 500) })) };
+  const projected = { ...plan, subJobs: plan.subJobs.filter((s) => !(isWriteSub(s) && !s.by)).map((s) => ({ ...s, brief: String(s.brief || 'x').slice(0, isHumanSub(s) ? MAX_HUMAN_BRIEF : MAX_BRIEF) })) };
   const parsed = planSchema.safeParse(projected);
   if (!parsed.success) throw new Error([...new Set(parsed.error.issues.map((i) => i.message))].join('; '));
 }

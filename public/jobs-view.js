@@ -959,7 +959,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // What the agent must show before the code is committed (server/jobs-schema.js show).
   const showMeHtml = (s) => showOf(s).length ? `<p>Show me:</p><ul class="job-show-list">${showOf(s).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
   function planMoreHtml(job, plan) {
-    const briefs = (plan?.subJobs || []).map((s) => `<h5>${kindChipHtml(s)} ${esc(s.title)}</h5><p>${esc(s.brief)}</p>${s.check ? `<p>Check: ${esc(s.check)}</p>` : ''}${showMeHtml(s)}`).join('');
+    const briefs = (plan?.subJobs || []).map((s) => `<h5>${kindChipHtml(s)} ${esc(s.title)}</h5><p${s.kind === 'human' ? ' class="job-brief"' : ''}>${esc(s.brief)}</p>${s.check ? `<p>Check: ${esc(s.check)}</p>` : ''}${showMeHtml(s)}`).join('');
     const fresh = (plan?.stories || []).filter((s) => !s.key).length;
     return more('plan', `${ICONS.doc}Plan details`, `${plan?.stories?.length ? `<h4>Stories <small>${fresh ? `${fresh} new` : 'existing'}</small></h4>${storiesHtml(plan.stories)}` : ''}
       ${plan?.context ? `<h4>Context</h4><p class="job-context">${esc(plan.context)}</p>` : ''}

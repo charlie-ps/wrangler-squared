@@ -714,7 +714,7 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-checks .failed { color:var(--red-fg); }
 .job-note { display:flex; align-items:center; gap:8px; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
 .job-context,.job-intent { white-space:pre-wrap; color:var(--fg) !important; }
-.job-brief { color:var(--fg) !important; }
+.job-brief { white-space:pre-line; color:var(--fg) !important; }
 .job-approve-split { order:-1; margin-right:6px; }
 .job-approve-split>button.primary,.job-retry-split>button { margin-right:2px; }
 .job-approve-pop { width:min(340px, 75vw); gap:8px; padding:10px; backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); }
