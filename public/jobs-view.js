@@ -912,7 +912,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const view = changeView(job, sub);
     // A step Wrangler is fixing is the wrangler's for now.
     const open = view && !(sub && redFixing(job, sub));
-    const talk = talkHtml(job, sub, open && view.at !== 'plan' ? (convo) => boxHtml(job, sub, view, convo) : null, convoFold);
+    const talk = talkHtml(job, sub, open && view.at !== 'plan' ? (convo) => boxHtml(job, sub, view, convo) : null, convoFold, openMore);
     return open ? `${talk}${boxHtml(job, sub, view, null)}` : talk + askSentHtml(job, sub);
   }
   // One control for reading the diff: Wrangler's own view, the desktop IDE in its menu.
