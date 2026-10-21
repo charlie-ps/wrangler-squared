@@ -118,7 +118,7 @@ text as public as the rest of this repo.
   (`pendingLaunch.adopt`) so the store's copy keeps its `cleanupHead` and rename.
 - **A job's spend limit is `settings.spendLimit` × (1 + `job.topUps`), never stored**
   (`server/job-budget.js`). The runner's `enforceBudget` runs first each tick: over, it sets
-  `job.budgetPaused` (claim and `allowed()` refuse it, as do `tendHelpers` and a main
+  `job.budgetPaused` (claim and `allowed()` refuse it, as does a main
   resolution) and interrupts each `working` run card through `sessions:interrupt`, one per card
   per `INTERRUPT_COOLDOWN_MS`, stamping `run.budgetHaltedAt`; under again it releases the job and
   mails each halted run to carry on. `settle()` never idle-reaps a budget-paused job's runs. The
@@ -194,7 +194,11 @@ text as public as the rest of this repo.
   (`stepConvoLine`), and it shows ONLY on that step's dialog until the wrangler
   escalates it (`reply {escalate:true}`, or any proposal it draws, `escalate` →
   `convo.escalatedAt`); then the job's list shows it too (`talkFor`, client-side
-  only). A step's dialog shows only what was said on it. A job
+  only). A step's dialog shows only what was said on it. A conversation not at work and not the one
+  the human spoke in last folds to a strip (`convoOpen`; clicks are client-side, per id), and its ×
+  (`dismiss-convo`, refused while it answers or holds a plan change) stamps `convo.dismissedAt`,
+  which hides it everywhere until anything new is said in it (`say` clears it, so a reply
+  from a stale box or a wrangler's message brings it back). A job
   saved with the old single `job.ask` is migrated on load (`migrateTalk`). Open PR #209
   keeps a step's sent ideas on `job.replan.asks`; once both land, the step dialog
   should draw them from the thread, not twice.
@@ -247,7 +251,10 @@ text as public as the rest of this repo.
   action (pinned to `{at:'round', ref: ready.receiptId}`, refused while `answering`; a `rework`
   of a parked step is refused in its favour) writes a `sub.thread` message (`askAgent`,
   `via: 'planner'`, `sentAt: null`) and the runner mails
-  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again). The
+  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again). In the
+  wrangler conversation a forwards-only card (`forward: true`, no prose) is one line, and its
+  approval stamps `forwarded: [{sub, message}]`, so `public/job-talk.js` draws the session's
+  answers from `sub.thread` right after it. The
   agent answers with `reply {text, shots?, run?}` (parks again; tree and round unchanged) or
   a fresh `ready`: round n+1, `receiptId` `<run>#n`, the old round kept in `sub.earlier`.
   Pasted images are copied into the round's folder and mailed as paths
@@ -308,22 +315,6 @@ text as public as the rest of this repo.
   A notice nothing is retrying or resolving (`job-state.js mainWaiting`) is a Needs you ask
   beside the stage roll-up, never part of it: `jobNeedsYou`, `jobLabel` ("Local main behind",
   even on a Delivered job) and `plateAsk` all read it, below any step's own ask.
-- **Ask an agent opens the human's own session about a step, never a step** (`server/job-helper.js`).
-  Every step's dialog has the button, at any stage and on a cancelled job. `ask-helper` queues
-  `{id, at, sessionId: null}` on `sub.helpers` (refused while one is queued: that is the double-click
-  guard) and marks a waiting human task `doing` unless a replan holds it; the runner's `tendHelpers`
-  spawns it inside the tick, like `tendMain`, so no `pendingLaunch` is in flight: a plain session (no
-  worktree, no PR automation; the job's agent/model/effort and task) in `helperCwd` (the step's checkout,
-  else a prerequisite PR's, else `''`, a scratch workspace; never a worktree), briefed by
-  `job-prompts.js helperPrompt`. A failed spawn is `error` on that entry, which frees the button. Its id is
-  kept OUT of `sub.sessions` (cleanup archives those; Open session and Review code read the last) and
-  `job.runs` (`runForSession` would hand it job_report, the worker skill and the job's sandbox). What it
-  finds comes back only through `send_step_idea` (`server/tools.js`), when the human asks: the store's
-  `helperIdea` resolves the caller against `sub.helpers[].sessionId` (anything else is refused) and runs
-  the step's own `requestChange`, pinned to `changeView` as it stands at the call, with `from: 'helper'`,
-  which marks the planner's words and the move (`helper-idea`). Only the server sets `from`: the board's
-  `request-change` overwrites it. The idea is kept on its entry (`helper.ideas`), drawn under that helper
-  in the step's dialog. It never edits the plan.
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one

@@ -188,8 +188,8 @@ export function applyActions(job, actions = [], { now, images = [] }) {
     if (a.type === 'forward') {
       // The runner mails it on its next tick (job-runner.js deliverThread), and the
       // thread shows it as the human's, come through the planner.
-      askAgent(sub, { from: 'human', via: 'planner', ...forwarded(sub, a.note, images) }, now);
-      lines.push({ sub, detail: `Forwarded your words to ${name}'s open session` });
+      const id = askAgent(sub, { from: 'human', via: 'planner', ...forwarded(sub, a.note, images) }, now);
+      lines.push({ sub, detail: `Forwarded your words to ${name}'s open session`, forwarded: id });
     } else if (a.type === 'accept-red') {
       // Accepting red at an open PR IS the merge approval for that head: the
       // human just said "merge it as it stands".

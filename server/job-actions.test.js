@@ -188,6 +188,22 @@ test('approving a forward posts the human\'s words into the open session\'s thre
   assert.match(lines.at(-1).detail, /Forwarded your words to “Deliver api”'s open session/);
 });
 
+test('a forwards-only proposal is noted as a forward with no prose, and its approval names the thread message it became; a plan change keeps its words', () => {
+  const j = parkedJob();
+  j.replan = { feedback: 'About api: Tighten it', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#2' } };
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'Tighten it' }], why: 'Passes your words straight to the agent.' }, 2);
+  const card = j.talk.at(-1);
+  assert.deepEqual([card.kind, card.forward, card.text, card.changes], ['proposal', true, '', [{ mark: 'forward', title: 'Deliver api', sub: 'api' }]]);
+  approveReplan(j, 'run_p', { now: 3, buildSubJob });
+  assert.deepEqual([card.outcome, card.forwarded], ['approved', [{ sub: 'api', message: subOf(j, 'api').thread[0].id }]]);
+
+  const k = parkedJob();
+  k.replan = { feedback: 'Add web2', at: 1, proposal: null, previous: null };
+  proposeReplan(k, { id: 'run_q' }, { kind: 'plan', plan: { ...empty(k), subJobs: [...empty(k).subJobs, { id: 'web2', title: 'Deliver web2', repo: '/r', brief: 'b' }] }, actions: [{ type: 'forward', sub: 'api', note: 'x' }], why: 'Adds web2.' }, 2);
+  const mixed = k.talk.at(-1);
+  assert.deepEqual([mixed.forward, mixed.text], [undefined, 'Adds web2.'], 'a real plan change is still a card with its words');
+});
+
 test('a forward or rework on the step the idea came from is refused once that view has moved: a new round is not what the human read', () => {
   const j = parkedJob();
   j.replan = { feedback: 'x', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#1' } };

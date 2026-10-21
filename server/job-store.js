@@ -10,14 +10,12 @@ import { setRunning, owe, runningOf } from './job-running.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub, retrySub } from './job-sub-ops.js';
-import { requestChange, CHANGE_TEXT_MAX } from './job-change.js';
+import { requestChange } from './job-change.js';
 import { resolutionsFor, resolutionLabel } from './job-main.js';
-import { queueHelper, helperFor } from './job-helper.js';
 import { limitStep, limitOf } from './job-budget.js';
-import { changeView } from './job-actions.js';
 import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan, requestReplan } from './job-replan.js';
-import { answerAsk, answerReplan, askToReplan, askFailed, replanFailed, convoById, migrateTalk } from './job-talk.js';
+import { answerAsk, answerReplan, askToReplan, askFailed, replanFailed, convoById, migrateTalk, dismissConvo } from './job-talk.js';
 import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
@@ -317,7 +315,7 @@ export class JobStore {
       if (action === 'cancel-job') { cancelJob(j, Date.now()); return; }
       // Retry and Discard are what is left to do on a cancelled job: a refused
       // cleanup (a worktree with work not on GitHub) is still the human's to clear.
-      if (j.cancelledAt && !['retry', 'discard-worktree', 'retry-main', 'dismiss-main', 'resolve-main', 'ask-helper'].includes(action)) throw new Error('Job was cancelled');
+      if (j.cancelledAt && !['retry', 'discard-worktree', 'retry-main', 'dismiss-main', 'resolve-main'].includes(action)) throw new Error('Job was cancelled');
       // A waiting proposal freezes the sub-jobs it touches where they stand: one
       // that moves on under it (approved, merged, marked done) is no longer what
       // the proposal was written against. The rest of the job carries on.
@@ -326,8 +324,13 @@ export class JobStore {
       // The one way an idea comes in (job-change.js): to the step's own agent
       // when it has one, else the planner.
       if (action === 'request-change') {
-        const { detail } = requestChange(j, s, { ...payload, from: null }, { now: Date.now() });
+        const { detail } = requestChange(j, s, payload, { now: Date.now() });
         record(j, s, 'request-change', payload.text, detail);
+        return;
+      }
+      if (action === 'dismiss-convo') {
+        dismissConvo(j, payload.convo, Date.now());
+        record(j, s, 'dismiss-convo', null, 'Dismissed a conversation with the wrangler');
         return;
       }
       // The preview the agent left running (job-running.js): Stop owes its teardown
@@ -368,14 +371,6 @@ export class JobStore {
           notice.resolveError = null;
           record(j, null, 'resolve-main', null, `Asked an agent to ${resolutionLabel(payload.resolution).toLowerCase()} in ${notice.path}`);
         }
-        return;
-      }
-      // Ask an agent (job-helper.js): any step, any stage, a cancelled job too;
-      // the runner's tick starts the session.
-      if (action === 'ask-helper') {
-        if (!s) throw new Error('Sub-job not found');
-        const { started } = queueHelper(j, s, Date.now());
-        record(j, s, 'ask-helper', null, `Asked an agent to help with ${quoted(s.title)}${started ? ', and started it' : ''}`);
         return;
       }
       if (action === 'pause') { j.paused = true; return; }
@@ -565,21 +560,6 @@ export class JobStore {
     if (!sub?.worktree) return false;
     this.update(job.id, (j) => { const s = j.subJobs.find((x) => x.id === sub.id); s.worktree = { ...s.worktree, branch }; });
     return true;
-  }
-  // A helper session's idea about the step it was opened from (send_step_idea in
-  // tools.js): the step's own Add idea box, pinned to the step as it stands now,
-  // marked as the helper's, and kept on its helper entry for the dialog to show.
-  helperIdea(sessionId, text) {
-    const hit = helperFor(this, sessionId);
-    if (!hit) throw new Error('Only a helper session opened from a step with Ask an agent can send an idea about it');
-    return this.update(hit.job.id, (j) => {
-      const s = j.subJobs.find((x) => x.id === hit.sub.id);
-      const view = changeView(j, s) || {};
-      const { detail } = requestChange(j, s, { at: view.at, ref: view.ref, text, from: 'helper' }, { now: Date.now() });
-      const said = String(text).trim().slice(0, CHANGE_TEXT_MAX);
-      (s.helpers.find((h) => h.sessionId === sessionId).ideas ||= []).push({ at: Date.now(), text: said });
-      record(j, s, 'helper-idea', said, detail);
-    });
   }
   // `meta.treeHash` is the working tree as the tool handler read it when a ready
   // receipt arrived (tools.js): the store is synchronous and takes no git.

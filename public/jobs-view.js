@@ -79,6 +79,7 @@ function commentsHtml(sub, shown) {
 }
 
 const minutesSince = (at) => Math.max(1, Math.round((Date.now() - at) / 60000));
+const PHASE_LABEL = { implementation: 'Implementation', repair: 'Repair', publish: 'Publish', verify: 'Verify', session: 'Session', write: 'Write', planning: 'Planning' };
 const when = (at) => at ? new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
 const staleHint = (sub) => {
   if (!deploymentStalled(sub)) return '';
@@ -566,6 +567,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (!dialog.open) dialog.showModal();
   }
   const more = (key, summary, body, cls = '') => `<details class="job-more ${cls}" data-keep="${key}" ${openMore.has(key) ? 'open' : ''}><summary>${summary}</summary>${body}</details>`;
+  // The conversations the human folded or unfolded by hand, by id; kept across redraws and dialogs.
+  const convoFold = new Map();
   // Which of a proposal's options is picked; it resets with a new proposal.
   let optionPick = { id: null, i: 0 };
   const pickedOption = (job) => (optionPick.id === job.replan?.proposal?.id && proposalOptions(job.replan.proposal)[optionPick.i] ? optionPick.i : 0);
@@ -775,15 +778,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // session reads last (server/job-prompts.js). A coordinator error has no session
   // to read it, so the job's own Retry stays plain.
   const retrySplitHtml = (primary) => `<span class="job-split job-retry-split"><button id="job-retry" ${primary ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button><details class="job-split-more" data-keep="retry-note" ${openMore.has('retry-note') ? 'open' : ''}><summary aria-label="Retry with a note for the retried session" title="Retry with a note for the retried session">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>Note for the retried session<textarea data-retry-note maxlength="180" rows="2" placeholder="Read last by the retried session, and shown on the card until it reports"></textarea></label><button type="button" data-retry-with-note>${ICONS.wrench}Retry with note</button></div></details></span>`;
-  // Ask an agent: the human's own sessions about this step (server/job-helper.js),
   // newest last. A queued one is the only state that holds the button.
-  const helperQueued = (sub) => (sub.helpers || []).some((h) => !h.sessionId && !h.error);
-  const askHelperHtml = (sub) => helperQueued(sub)
-    ? `<button type="button" data-ask-helper disabled title="An agent session is starting for this step">${ICONS.spin}Starting an agent</button>`
-    : `<button type="button" data-ask-helper title="Start your own agent session, briefed with this step and the job, to investigate or help. It never changes the step or the plan: when you ask, it sends what it finds to the wrangler, as Add idea does.">${ICONS.robot}Ask an agent</button>`;
-  const helpersHtml = (sub) => sub.helpers?.length ? `<h3>Helper sessions</h3><ul class="job-helpers">${sub.helpers.map((h, i) => `<li>${h.sessionId ? ICONS.robot : h.error ? ICONS.x : ICONS.spin}<span>Helper ${i + 1} · ${h.sessionId ? `started ${esc(when(h.at))}` : h.error ? `could not start: ${esc(h.error)}` : 'starting'}</span>${h.sessionId ? `<button type="button" data-helper-session="${esc(h.sessionId)}">${ICONS.terminal}${onBoard(h.sessionId) ? 'Open' : 'Restore'}</button>` : ''}${helperIdeasHtml(h)}</li>`).join('')}</ul>` : '';
-  // What a helper sent the planner (send_step_idea), as the step's Add idea box would.
-  const helperIdeasHtml = (h) => h.ideas?.length ? `<ul class="job-helper-ideas">${h.ideas.map((m) => `<li><span class="job-helper-from">${ICONS.robot}From the helper · sent to the wrangler ${esc(when(m.at))}</span><q>${esc(m.text)}</q></li>`).join('')}</ul>` : '';
+  // Every run's session, newest first: a repair or publish run hides the implementation one behind it.
+  const sessionSplitHtml = (job, sub, primary) => {
+    const button = `<button id="job-session" ${primary ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>`;
+    if (sub.sessions.length < 2) return button;
+    const items = sub.sessions.map((sid, i) => { const run = job.runs?.find((r) => r.sessionId === sid); return `<button type="button" data-step-session="${esc(sid)}">${ICONS.terminal}<span>${esc(PHASE_LABEL[run?.phase] || `Session ${i + 1}`)}${run?.startedAt ? ` · ${esc(when(run.startedAt))}` : ''}</span><span class="job-split-hint">${onBoard(sid) ? 'Open' : 'Restore'}</span></button>`; }).reverse().join('');
+    return `<span class="job-split job-session-split">${button}<details class="job-split-more" data-keep="session-menu" ${openMore.has('session-menu') ? 'open' : ''}><summary aria-label="Open an earlier session of this step" title="Open an earlier session of this step">${ICONS.caret}</summary><div class="job-split-menu">${items}</div></details></span>`;
+  };
   const approvalNoteFor = (sub) => sub.approvalNote ? `<h3>Context for later steps</h3><p class="job-approval-note">${esc(sub.approvalNote)}</p>` : '';
   // What a whole-job cancel did and what it left: the sub-job nodes say Dropped
   // one by one, this is the sentence that says why all of them do.
@@ -910,7 +912,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const view = changeView(job, sub);
     // A step Wrangler is fixing is the wrangler's for now.
     const open = view && !(sub && redFixing(job, sub));
-    const talk = talkHtml(job, sub, open && view.at !== 'plan' ? (convo) => boxHtml(job, sub, view, convo) : null);
+    const talk = talkHtml(job, sub, open && view.at !== 'plan' ? (convo) => boxHtml(job, sub, view, convo) : null, convoFold, openMore);
     return open ? `${talk}${boxHtml(job, sub, view, null)}` : talk + askSentHtml(job, sub);
   }
   // One control for reading the diff: Wrangler's own view, the desktop IDE in its menu.
@@ -1309,7 +1311,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       + (deploys ? chip(ICONS.rocket, sub.deploys.expected === false ? 'No deploy' : 'Deploys', { cls: 'job-deploys', title: deploys }) : '')
       + (sub.stage === 'review' ? runningChipHtml(job, sub, { open: openMore.has('running'), logs: runLogs.get(sub.id) }) : '');
     const kicker = `<button class="job-back" data-open-job title="Back to the job">${ICONS.back}<span>${esc(job.title)}</span></button>`;
-    const session = sub.sessions.length ? `<button id="job-session" ${runStatus(job, sub) === 'needs-you' ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>` : '';
+    const session = sub.sessions.length ? sessionSplitHtml(job, sub, runStatus(job, sub) === 'needs-you') : '';
     // Wrangler's own turn (Fixing) or a fix for you (Fix ready, a declared red's options)
     // outranks Retry as the primary action; Retry stays for a transient failure.
     const redAsk = sub.error && !job.error && (redFixReady(job, sub) || (redDeclared(job, sub) && job.replan?.proposal)) ? `<button class="primary" data-open-job title="Opens the job dialog on the proposal">${ICONS.eye}${redFixReady(job, sub) ? 'Review fix' : 'Decide'}</button>` : '';
@@ -1368,11 +1370,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       ${workflows.length ? `<h4>What runs on merge <small>${workflows.filter((w) => w.triggers).length} of ${workflows.length}</small></h4><ul class="job-checks">${workflows.map((w) => `<li class="${w.triggers ? 'passed' : ''}">${w.triggers ? '✓' : '○'} ${esc(w.name)} <small>${esc(w.reason)}</small></li>`).join('')}</ul>` : ''}
       ${sub.repairs.length ? `<h4>Changes after failed checks</h4>${sub.repairs.map((r, i) => `<div class="job-repair"><b>Repair ${i + 1}</b>${receiptHtml(r.changes)}<details><summary>Re-verified</summary>${receiptHtml(r.checks)}</details></div>`).join('')}` : ''}`;
     const detailsOpen = openMore.has('details');
-    actions += askHelperHtml(sub);
     if (!isWriteSub(sub)) actions += `<button type="button" class="job-details-toggle" data-details-toggle aria-expanded="${detailsOpen}">${ICONS.doc}Details</button>`;
     return `${appbar(sub.title, chips, kicker, line)}${depsHtml(job, sub)}
       ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub)}
-      ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}${helpersHtml(sub)}
+      ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}
       ${reviewing ? changeBoxHtml(job, sub) : ''}${actions.trim() ? `<div class="job-actions tone-${STATES[state].tone}">${actions}</div>` : ''}${reviewing ? '' : changeBoxHtml(job, sub)}
       ${isWriteSub(sub) ? '' : `<div class="job-details-body" ${detailsOpen ? '' : 'hidden'}>${details}</div>`}`;
   }
@@ -1464,7 +1465,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   function openShot(b) {
     const slots = [...b.closest('.job-msg-att').querySelectorAll('[data-shot-at] [data-ev-file]')];
-    shotBox = { jobId: selected.jobId, subId: selected.subId, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
+    shotBox = { jobId: slots[0].dataset.evJob, subId: slots[0].dataset.evSub, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
     shotZoom = document.createElement('dialog');
     shotZoom.className = 'job-shotbox';
     applyTheme(shotZoom);
@@ -1562,6 +1563,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     dialog.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
     dialog.querySelectorAll('[data-open-path]').forEach((b) => b.onclick = () => openPath(b));
     dialog.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
+    // A conversation folds and unfolds on its header or strip; × is for good (job-talk.js).
+    dialog.querySelectorAll('[data-convo-fold]').forEach((el) => el.onclick = (e) => {
+      if (e.target.closest('[data-convo-dismiss], a, .job-proof')) return;
+      const box = el.closest('[data-convo]');
+      convoFold.set(box.dataset.convo, box.classList.contains('is-folded'));
+      renderDetail();
+    });
+    dialog.querySelectorAll('[data-convo-dismiss]').forEach((b) => b.onclick = () => { if (pressBusy(b)) action('dismiss-convo', { convo: b.closest('[data-convo]').dataset.convo }, null); });
     dialog.querySelectorAll('[data-talk-review]').forEach((b) => b.onclick = () => dialog.querySelector('.job-replan-ask')?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });
     wireGraph();
@@ -1580,7 +1589,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim(), ...(box.dataset.changeConvo ? { convo: box.dataset.changeConvo } : {}), ...(images.length ? { images } : {}) });
         clearAskSent();
         askSent = { jobId: job.id, subId: sub?.id ?? null, convo: key, text: text.value.trim(), items: mine, images: mine.map((i) => i.url), to: box.dataset.changeTo, at: Date.now(), state: 'sending' };
-        askImages = askImages.filter((i) => i.box !== key); text.value = '';
+        askImages = askImages.filter((i) => i.box !== key); text.value = ''; convoFold.delete(key);
         renderDetail();
       };
       wireAskImages(box);
@@ -1618,8 +1627,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       };
     });
     bind('#job-session', () => { dialog.close(); onSession(sub.sessions.at(-1)); });
-    bind('[data-ask-helper]', (e) => { if (pressBusy(e.currentTarget)) action('ask-helper', {}, sub.id); });
-    dialog.querySelectorAll('[data-helper-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.helperSession); });
+    dialog.querySelectorAll('[data-step-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.stepSession); });
     // Reviewing the code is a round trip out to the board's diff panel, so hand over
     // where the reader came FROM as well as what to show — index.js re-opens this
     // same detail via openDetail once the panel closes. Every run of a sub-job
@@ -1660,7 +1668,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         if (!images) return;
         const busy = images.busy();
         form.querySelector('#job-share-images').hidden = !images.names().length && !busy;
-        form.querySelectorAll('.job-create-foot button').forEach((b) => { b.disabled = busy; b.title = busy ? 'Waiting for images to finish uploading' : ''; });
+        // A pressed Start planning holds both buttons until the job lands; an upload must not free them.
+        const foot = form.querySelectorAll('.job-create-foot button');
+        if (![...foot].some(isBusy)) foot.forEach((b) => { b.disabled = busy; b.title = busy ? 'Waiting for images to finish uploading' : ''; });
       },
     });
     dialog.addEventListener('close', () => images.dispose(), { once: true });
@@ -1679,7 +1689,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     };
     bindReviewPoints(form);
     form.onsubmit = (e) => {
-      e.preventDefault(); if (images.busy()) return; const values = new FormData(form);
+      e.preventDefault(); if (images.busy()) return;
+      if (!pressBusy(submitterOf(e), { also: form.querySelectorAll('.job-create-foot button') })) return;
+      const values = new FormData(form);
       const taskId = values.get('taskId');
       // Enter and the primary button both start planning; only the grey button parks it.
       send({ type: 'job-create', idea: true, start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', ...reviewFlagsOf(values), ...sandbox.value(), images: images.names(), shareImages: values.has('shareImages'), taskId: taskId && taskId !== '__new__' ? taskId : null } });
@@ -1854,8 +1866,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }
       return;
     }
-    // A Retry's, a fix's or a helper's outcome lands on a later tick, in the dialog it was pressed in.
-    if (['retry-main', 'dismiss-main', 'resolve-main', 'ask-helper'].includes(msg?.action)) return;
+    // A Retry's, a fix's or a dismissal's outcome lands on a later tick, in the dialog it was pressed in.
+    if (['retry-main', 'dismiss-main', 'resolve-main', 'dismiss-convo'].includes(msg?.action)) return;
     // A New idea that is planning opens on its conversation once the snapshot has it.
     if (msg?.event === 'job-created' && msg.idea && msg.started) { openOnCreate = msg.jobId; if (data.jobs.some((j) => j.id === msg.jobId)) { openOnCreate = null; openDetail(msg.jobId); } return; }
     // A reply stays in its conversation for the next tick. A created job closes the dialog it was pressed in,

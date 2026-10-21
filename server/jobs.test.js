@@ -13,8 +13,9 @@ import { JobGithub, prSummary } from './job-github.js';
 import { normaliseComments, commentsBlockMerge } from './job-comments.js';
 import { jobCreateHandler, makeJobCreateHandler, jobActionHandler, jobSettingsHandler } from './handlers.js';
 import { _resetForTests, runnerFor } from './jobs.js';
-import { jobReportTool, getJobContextTool, sendStepIdeaTool } from './tools.js';
+import { jobReportTool, getJobContextTool } from './tools.js';
 import { changeView } from './job-change.js';
+import { say } from './job-talk.js';
 import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 
@@ -3224,114 +3225,6 @@ test('Dismiss forgets a checkout notice and records it; a failed Retry keeps it 
   assert.match(f.store.get(f.job.id).moves.at(-1).detail, /Left \/home\/me\/repo as it was/);
 });
 
-test('Ask an agent queues one helper per press, the tick spawns it as a plain session briefed with the step, and it is never a step', async (t) => {
-  const f = fixture(t);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-helper-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  await f.approve(plan([spec('api', [], { repo: dir })]));
-  await f.tick();
-  f.store.update(f.job.id, (j) => { j.subJobs[0].pr = { url: PR_URL, head: 'h', base: 'main', checkStatus: 'pending' }; });
-  const before = f.store.get(f.job.id);
-  const spawned = [];
-  const real = new JobRuntime({ host: { sessions: { spawn: async (o) => { spawned.push(o); return { sessionId: `s_help${spawned.length}` }; } } } });
-  f.runtime.spawnHelper = (...a) => real.spawnHelper(...a);
-
-  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
-  assert.throws(() => f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' }), /already starting/, 'a second press before the tick is refused');
-  await f.tick();
-  assert.equal(spawned.length, 1);
-  const [s] = spawned;
-  assert.equal(s.cwd, dir, 'the step\'s own checkout');
-  assert.equal(s.worktree, undefined); assert.equal(s.addDirs, undefined);
-  assert.match(s.intent, /This is the human's own session and they drive it/);
-  assert.match(s.intent, /"title": "Deliver api"/);
-  assert.match(s.intent, new RegExp(`Pull request: ${PR_URL}`));
-  assert.doesNotMatch(s.intent, /runId/);
-  let job = f.store.get(f.job.id);
-  const sub = job.subJobs[0];
-  assert.deepEqual(sub.helpers.map((h) => h.sessionId), ['s_help1']);
-  assert.deepEqual(sub.sessions, before.subJobs[0].sessions, 'not one of the step\'s sessions: cleanup would archive it');
-  assert.equal(job.runs.length, before.runs.length, 'no run, so no job_report, worker skill or sandbox');
-  assert.match(job.moves.at(-1).detail, /Asked an agent to help with “Deliver api”/);
-
-  await f.tick();
-  assert.equal(spawned.length, 1, 'one session per press');
-  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
-  await f.tick();
-  assert.deepEqual(f.store.get(f.job.id).subJobs[0].helpers.map((h) => h.sessionId), ['s_help1', 's_help2'], 'a step may have several over time');
-  assert.deepEqual(new JobStore(f.store.file).get(f.job.id).subJobs[0].helpers, f.store.get(f.job.id).subJobs[0].helpers, 'kept across a restart');
-
-  f.store.action(f.job.id, 'cancel-job');
-  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
-  await f.tick();
-  assert.equal(spawned.length, 3, 'a cancelled job can still be looked into');
-  assert.throws(() => f.store.action(f.job.id, 'ask-helper', { subJobId: 'nope' }), /Sub-job not found/);
-});
-
-test('a human task\'s helper marks it in progress; a helper that cannot start says why and frees the button', async (t) => {
-  const f = fixture(t);
-  await f.approve(plan([humanSpec('vendor')]));
-  await f.tick();
-  assert.deepEqual([f.sub().stage, f.sub().state], ['human', 'queued']);
-  f.runtime.spawnHelper = async () => { throw new Error('no such agent'); };
-  f.store.action(f.job.id, 'ask-helper', { subJobId: 'vendor' });
-  let sub = f.store.get(f.job.id).subJobs[0];
-  assert.equal(sub.state, 'doing');
-  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /help with “Do vendor yourself”, and started it/);
-  await f.tick();
-  sub = f.store.get(f.job.id).subJobs[0];
-  assert.equal(sub.helpers[0].error, 'no such agent');
-  assert.equal(sub.helpers[0].sessionId, null);
-  assert.equal(f.store.get(f.job.id).error ?? null, null, 'the job is not blocked by it');
-  f.runtime.spawnHelper = async () => 's_ok';
-  f.store.action(f.job.id, 'ask-helper', { subJobId: 'vendor' });
-  await f.tick();
-  assert.deepEqual(f.store.get(f.job.id).subJobs[0].helpers.map((h) => h.sessionId), [null, 's_ok']);
-  assert.match(f.store.get(f.job.id).moves.at(-1).detail, /help with “Do vendor yourself”$/, 'already in progress');
-});
-
-test('a helper sends its idea through the step\'s own Add idea route, marked as the helper\'s; any other session is refused', async (t) => {
-  const f = fixture(t); await f.approve(plan([spec('api')]));
-  f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api')); await f.tick();
-  f.runtime.spawnHelper = async () => 's_help';
-  f.store.action(f.job.id, 'ask-helper', { subJobId: 'api' });
-  await f.tick();
-  const host = fakeHost(f);
-  const send = (caller, text) => sendStepIdeaTool.handler({ host, caller }, { text });
-
-  for (const caller of [f.workerFor('api').sid, 's_stranger', undefined]) {
-    const res = await send(caller, 'Merge it now');
-    assert.equal(res.isError, true); assert.match(res.content[0].text, /Only a helper session opened from a step/);
-  }
-  assert.equal(f.store.get(f.job.id).replan ?? null, null, 'nothing reached the planner');
-  assert.equal(host.rebuilds, 0);
-
-  const res = await send('s_help', 'The retry loop never backs off: add a delay');
-  assert.equal(res.structuredContent.accepted, true);
-  let job = f.store.get(f.job.id);
-  assert.equal(job.replan.feedback, 'About “Deliver api” (api, review/verified): (Sent by the human\'s helper session on this step, at the human\'s request) The retry loop never backs off: add a delay');
-  assert.deepEqual(job.replan.source, { sub: 'api', at: 'code', ref: job.subJobs[0].ready.receiptId }, 'pinned to the step as it stands, like the box');
-  assert.deepEqual(job.subJobs[0].helpers[0].ideas.map((m) => m.text), ['The retry loop never backs off: add a delay']);
-  assert.deepEqual([job.moves.at(-1).move, job.moves.at(-1).subJobId, job.moves.at(-1).note], ['helper-idea', 'api', 'The retry loop never backs off: add a delay']);
-  assert.match(job.moves.at(-1).detail, /^A helper session sent the wrangler an idea about “Deliver api”$/);
-  assert.equal(host.rebuilds, 1);
-
-  await f.tick();
-  const planner = f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub);
-  assert.match(jobPrompt(f.store.get(f.job.id), null, planner.run), /helper session on this step/);
-  f.report({ kind: 'plan', plan: plan([spec('api'), spec('backoff', ['api'])]) }, planner);
-  job = f.store.get(f.job.id);
-  assert.ok(job.replan.proposal, 'the planner\'s proposal waits for the human as a typed idea\'s does');
-  assert.equal(job.subJobs[0].stage, 'review', 'the helper changed nothing itself');
-
-  const g = fixture(t); await g.approve(plan([spec('api')]));
-  g.report({ kind: 'ready', checks: ['Tests pass'] }, g.workerFor('api')); await g.tick();
-  g.store.action(g.job.id, 'request-change', { subJobId: 'api', at: 'code', ref: g.sub().ready.receiptId, text: 'Rename it', from: 'helper' });
-  assert.doesNotMatch(g.store.get(g.job.id).replan.feedback, /helper session/, 'the board cannot claim to be a helper');
-  g.store.update(g.job.id, (j) => { j.subJobs[0].helpers = [{ id: 'hp_1', at: 1, sessionId: 's_late' }]; j.subJobs[0].stage = 'done'; });
-  assert.match((await sendStepIdeaTool.handler({ host: fakeHost(g), caller: 's_late' }, { text: 'x' })).content[0].text, /Nothing is left to change here/);
-});
-
 // ---- The job's conversation with the wrangler (job-talk.js) ----
 const talk = (f) => (f.store.get(f.job.id).talk || []).map((m) => [m.from, m.kind || null, m.text, m.sub || null]);
 
@@ -3569,4 +3462,49 @@ test('a question the wrangler could not answer is said in the conversation; the 
   f.report({ kind: 'blocked', summary: 'No access to the repo' }, plannerOf(f));
   assert.deepEqual(talk(f).at(-1).slice(1, 3), ['error', 'Could not answer: No access to the repo']);
   assert.equal(f.store.get(f.job.id).error, null);
+});
+
+test('dismiss-convo hides a conversation for good, never one whose wrangler is answering or has a plan change in it', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'What is left?');
+  const id = f.store.get(f.job.id).convos[0].id;
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'queued');
+  await f.tick();
+  const asker = plannerOf(f);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'answering');
+  f.report({ kind: 'reply', text: 'Only web.' }, asker);
+  await f.tick();
+  change(f, null, 'Add a CLI after web', id);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /plan change in progress/, 'a change being drawn');
+  await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli')]) }, plannerOf(f));
+  assert.ok(f.store.get(f.job.id).replan.proposal);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /plan change in progress/, 'a proposal waiting');
+  f.store.action(f.job.id, 'discard-replan');
+  await f.tick();
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  const job = f.store.get(f.job.id);
+  assert.equal(typeof job.convos[0].dismissedAt, 'number', 'kept on the job, so a reload still hides it');
+  assert.equal(job.moves.at(-1).move, 'dismiss-convo');
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /already gone/);
+  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: 'convo_nope' }), /already gone/);
+});
+
+test('a dismissed conversation comes back when anything new is said in it, by the human or the wrangler', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'What is left?');
+  await f.tick();
+  f.report({ kind: 'reply', text: 'Only web.' }, plannerOf(f));
+  await f.tick();
+  const id = f.store.get(f.job.id).convos[0].id;
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  change(f, null, 'Is web started?', id);
+  assert.equal(f.store.get(f.job.id).convos[0].dismissedAt, undefined, 'the human said something in it');
+  await f.tick();
+  f.report({ kind: 'reply', text: 'Not yet.' }, plannerOf(f));
+  await f.tick();
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  const job = f.store.get(f.job.id);
+  say(job, { from: 'wrangler', kind: 'answer', text: 'Web has started.', convo: id }, 9);
+  assert.equal(job.convos[0].dismissedAt, undefined, 'the wrangler said something in it');
 });

@@ -12,7 +12,6 @@ import { inConversation, unsentIdea } from './job-idea.js';
 import { askFailed, replanFailed, convosOf, convoById, convoRun, unsentAsks } from './job-talk.js';
 import { waitsOnReview, unsentFor } from './job-parked.js';
 import { noteMain } from './job-main.js';
-import { pendingHelper } from './job-helper.js';
 import { stderrLine } from './git.js';
 import { budgetOf, liveCards, budgetContinueMail } from './job-budget.js';
 import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps, stopSandbox } from './job-running.js';
@@ -68,7 +67,6 @@ export class JobRunner {
         try {
           await this.sweepRunning(job.id);
           await this.tendMain(job.id);
-          await this.tendHelpers(job.id);
           await this.settle(job.id);
           await this.advance(job.id);
         } catch (e) { this.store.update(job.id, (j) => { j.error = shortError(e); }); }
@@ -98,22 +96,6 @@ export class JobRunner {
       } else if (notice.resolving && await this.runtime.mainCaughtUp(notice)) {
         this.store.update(id, (j) => { if (same(j, notice.path)?.resolving) noteMain(j, notice.path, null, { ok: true }, this.now()); });
       }
-    }
-  }
-  // Ask an agent (job-helper.js): a queued helper is spawned here for the same
-  // reason as a resolution, on any job, paused, finished or cancelled. A failure
-  // stays on the entry, which frees the button and says why.
-  async tendHelpers(id) {
-    if (this.store.get(id).budgetPaused) return;
-    for (const sub of this.store.get(id).subJobs) {
-      const queued = pendingHelper(sub);
-      if (!queued) continue;
-      let sessionId = null, error = null;
-      try { sessionId = await this.runtime.spawnHelper(this.store.get(id), sub); if (!sessionId) error = 'The session did not start'; } catch (e) { error = shortError(e); }
-      this.patchSub(id, sub.id, (s) => {
-        const h = s?.helpers?.find((x) => x.id === queued.id);
-        if (h && !h.sessionId) Object.assign(h, error ? { error } : { sessionId });
-      });
     }
   }
   // What an agent left running for the human to try (job-running.js). A preview
