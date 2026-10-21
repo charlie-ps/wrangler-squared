@@ -878,6 +878,71 @@ test('a merged sub-job with nothing deployed past the stale window is flagged; a
   assert.ok(!f.sub().error, 'and is never a failed deploy');
 });
 
+// The real JobGithub.deploys over a `gh` that answers as GitHub would for
+// org/repo, with the local tree always holding a push workflow on main: the
+// runner must follow what GitHub runs, not what the local files say.
+function githubSees(f, api) {
+  const gh = new JobGithub(async (bin, args) => {
+    if (args[0] === 'pr') return JSON.stringify({ files: [{ path: 'src/a.js' }] });
+    const answer = api[args.at(-1)];
+    if (answer === undefined) throw new Error(`Command failed: gh api ${args.at(-1)}\ngh: Server Error (HTTP 500)`);
+    if (answer === 404) throw new Error(`Command failed: gh api ${args.at(-1)}\ngh: Not Found (HTTP 404)`);
+    return typeof answer === 'string' ? answer : JSON.stringify(answer);
+  });
+  gh.readWorkflows = () => [{ file: 'deploy.yml', text: 'name: Deploy\non:\n  push:\n    branches: [main]\n' }];
+  f.github.deploys = (sub, pr) => gh.deploys(sub, pr);
+}
+const R = 'repos/org/repo';
+
+test('a repo GitHub has Actions disabled on completes on merge, though its local files declare a push deploy', async (t) => {
+  const f = fixture(t); githubSees(f, { [`${R}/actions/permissions`]: { enabled: false } }); await atPr(f); await f.tick();
+  assert.equal(f.sub().deploys.summary, 'Merge completes it · Actions disabled'); assert.equal(f.sub().deploys.expected, false);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick();
+  assert.equal(f.sub().stage, 'cleanup'); assert.deepEqual(f.sub().deployed.checks, [MERGE_IS_DELIVERY]);
+  await f.tick(); assert.deepEqual(f.cleaned, ['api']); assert.equal(f.store.get(f.job.id).stage, 'done');
+});
+
+test('a workflow present locally but absent on GitHub at the PR head makes the merge the delivery', async (t) => {
+  const f = fixture(t);
+  githubSees(f, { [`${R}/actions/permissions`]: { enabled: true }, [`${R}/contents/.github/workflows?ref=head1`]: 404, [`${R}/commits/head1`]: { sha: 'head1' } });
+  await atPr(f); await f.tick();
+  assert.equal(f.sub().deploys.expected, false); assert.equal(f.sub().deploys.summary, 'Merge completes it · no workflows');
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick();
+  assert.equal(f.sub().stage, 'cleanup'); assert.equal(f.sub().deploymentStale, undefined);
+});
+
+test('a push workflow every GitHub workflow state has disabled makes the merge the delivery and says which', async (t) => {
+  const f = fixture(t);
+  githubSees(f, { [`${R}/actions/permissions`]: { enabled: true },
+    [`${R}/contents/.github/workflows?ref=head1`]: [{ type: 'file', name: 'deploy.yml', path: '.github/workflows/deploy.yml' }],
+    [`${R}/contents/.github/workflows/deploy.yml?ref=head1`]: 'name: Deploy\non:\n  push:\n    branches: [main]\n',
+    [`${R}/actions/workflows?per_page=100`]: { workflows: [{ path: '.github/workflows/deploy.yml', state: 'disabled_manually' }] } });
+  await atPr(f); await f.tick();
+  assert.equal(f.sub().deploys.summary, 'Merge completes it · Deploy disabled');
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); assert.equal(f.sub().stage, 'cleanup');
+});
+
+test('a genuine push workflow on GitHub still enters deployment, and silence there still goes stale', async (t) => {
+  const f = fixture(t);
+  githubSees(f, { [`${R}/actions/permissions`]: { enabled: true },
+    [`${R}/contents/.github/workflows?ref=head1`]: [{ type: 'file', name: 'deploy.yml', path: '.github/workflows/deploy.yml' }],
+    [`${R}/contents/.github/workflows/deploy.yml?ref=head1`]: 'name: Deploy\non:\n  push:\n    branches: [main]\n',
+    [`${R}/actions/workflows?per_page=100`]: { workflows: [{ path: '.github/workflows/deploy.yml', state: 'active' }] } });
+  await atPr(f); await f.tick();
+  assert.equal(f.sub().deploys.summary, 'Deploys on merge · Deploy');
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick();
+  assert.equal(f.sub().stage, 'deployment');
+  f.setDeployment({ status: 'pending', runs: [], commit: 'merge1' });
+  for (let i = 0; i < 31; i++) await f.tick();
+  assert.equal(f.sub().deploymentStale.since, f.sub().mergedAt); assert.equal(f.sub().stage, 'deployment');
+});
+
+test('when GitHub cannot be asked, the local push workflow is trusted as before', async (t) => {
+  const f = fixture(t); githubSees(f, {}); await atPr(f); await f.tick();
+  assert.equal(f.sub().deploys.expected, true);
+  f.setPr({ state: 'MERGED', mergeCommit: 'merge1' }); await f.tick(); assert.equal(f.sub().stage, 'deployment');
+});
+
 // --- Request changes ---
 
 const movesOf = (f) => f.store.get(f.job.id).moves;

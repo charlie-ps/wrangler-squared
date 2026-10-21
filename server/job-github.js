@@ -66,19 +66,57 @@ export class JobGithub {
     const raw = JSON.parse(await this.run('gh', ['api', 'graphql', '-f', `query=${COMMENTS_QUERY}`, '-f', `url=${sub.pr.url}`], sub.repo));
     return normaliseComments(raw?.data?.resource);
   }
-  // Whether merging this diff into this base starts anything at all, read from
-  // the repo's own workflow files: a sub-job no workflow reacts to is delivered
-  // by the merge itself, and would otherwise watch for a post-merge run GitHub
-  // never queues until the stale flag gives up on it.
+  // Whether merging this diff into this base starts anything at all, judged by
+  // what GitHub itself will run: a sub-job no workflow reacts to is delivered by
+  // the merge itself, and would otherwise watch for a post-merge run GitHub never
+  // queues until the stale flag gives up on it. Local files are only the fallback
+  // when GitHub cannot be asked — they can say a push workflow exists that GitHub
+  // will never run (unpushed, a checkout on another branch, Actions off on a fork).
   async deploys(sub, pr) {
     const files = JSON.parse(await this.run('gh', ['pr', 'view', pr.url || sub.pr.url, '--json', 'files'], sub.repo)).files || [];
+    const paths = files.map((f) => f.path);
+    const remote = await this.remoteWorkflows(sub, pr).catch(() => null);
+    if (remote?.actionsDisabled) return { head: pr.head, base: pr.base, expected: false, workflows: [], summary: 'Merge completes it · Actions disabled' };
+    if (remote) return { head: pr.head, base: pr.base, ...inferDeploys({ workflows: remote.workflows, files: paths, base: pr.base }) };
     // The worker pushed from the worktree, so that tree IS the PR head's; the
     // main checkout is only the fallback for a sub-job whose worktree is gone.
     const dirs = [sub.worktree?.path, sub.repo].filter(Boolean)
       .map((dir) => path.join(dir.startsWith('~/') ? path.join(os.homedir(), dir.slice(2)) : dir, '.github', 'workflows'));
     let workflows = [];
     for (const dir of dirs) { workflows = this.readWorkflows(dir); if (workflows.length) break; }
-    return { head: pr.head, base: pr.base, ...inferDeploys({ workflows, files: files.map((f) => f.path), base: pr.base }) };
+    return { head: pr.head, base: pr.base, ...inferDeploys({ workflows, files: paths, base: pr.base }) };
+  }
+  // The workflow files at the PR head as GitHub holds them, each tagged with its
+  // GitHub state when it is not active. Throws (so the caller reads local files)
+  // on any error but a missing workflows directory, which is GitHub's "none". The
+  // permissions and state reads need more than read access on some repos; either
+  // failing only drops that refinement, since an unknown is never "merge is delivery".
+  async remoteWorkflows(sub, pr) {
+    const slug = new URL(pr.url || sub.pr.url).pathname.split('/').slice(1, 3).join('/');
+    const api = async (endpoint, ...flags) => JSON.parse(await this.run('gh', ['api', ...flags, endpoint], sub.repo));
+    const permissions = await api(`repos/${slug}/actions/permissions`).catch(() => null);
+    if (permissions?.enabled === false) return { actionsDisabled: true };
+    const ref = encodeURIComponent(pr.head);
+    let listing;
+    try { listing = await api(`repos/${slug}/contents/.github/workflows?ref=${ref}`); } catch (e) {
+      // 404 is also a ref GitHub does not hold, which proves nothing about CI.
+      if (!/HTTP 404/.test(e.message)) throw e;
+      await api(`repos/${slug}/commits/${ref}`);
+      return { workflows: [] };
+    }
+    if (!Array.isArray(listing)) throw new Error('Unexpected workflows listing');
+    // A workflow GitHub lists as not active (disabled by hand, for inactivity, or
+    // on a fork until its owner enables Actions) is never queued by a push; one
+    // it does not list yet is new in this PR and runs once merged.
+    const states = await api(`repos/${slug}/actions/workflows?per_page=100`)
+      .then((r) => new Map((r.workflows || []).map((w) => [w.path, w.state]))).catch(() => new Map());
+    const workflows = await Promise.all(listing.filter((e) => e.type === 'file' && /\.ya?ml$/i.test(e.name)).map(async (e) => {
+      const text = await this.run('gh', ['api', '-H', 'Accept: application/vnd.github.raw+json',
+        `repos/${slug}/contents/${e.path.split('/').map(encodeURIComponent).join('/')}?ref=${ref}`], sub.repo);
+      const state = states.get(e.path);
+      return { file: e.name, text, ...(state && state !== 'active' ? { disabled: state } : {}) };
+    }));
+    return { workflows };
   }
   readWorkflows(dir) {
     let entries;
