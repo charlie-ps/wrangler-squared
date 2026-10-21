@@ -98,6 +98,8 @@ export function inferDeploys({ workflows = [], files = [], base = '' } = {}) {
     const named = !failed && doc && typeof doc === 'object' && typeof doc.name === 'string' && doc.name.trim();
     const name = named || wf.name || basename(wf.file);
     const head = { name, file: wf.file };
+    // GitHub does not queue a disabled workflow, whatever its triggers say.
+    if (wf.disabled) return { ...head, triggers: false, reason: 'disabled' };
     if (failed || (doc != null && (typeof doc !== 'object' || Array.isArray(doc)))) return { ...head, triggers: false, reason: UNPARSEABLE };
     const config = doc && pushConfig(doc);
     if (!config) return { ...head, triggers: false, reason: NO_PUSH };

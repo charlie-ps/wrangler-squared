@@ -117,9 +117,85 @@ test('an unknown file list expects the deploy rather than claiming the merge del
   assert.equal(infer('on:\n  push:\n    paths: ["src/**"]\n', []).triggers, true);
 });
 
-test('JobGithub.deploys reads the PR files, prefers the worktree tree and carries head and base', async () => {
+// A `gh` that answers `pr view` with the diff's files and routes `gh api` by
+// endpoint; an endpoint it has no answer for fails as GitHub would.
+const PR = { url: 'https://github.com/o/r/pull/7', head: 'sha7', base: 'main' };
+const ghFake = (files, api = {}, calls = []) => async (bin, args, cwd) => {
+  calls.push({ bin, args, cwd });
+  if (args[0] === 'pr') return JSON.stringify({ files: files.map((p) => ({ path: p })) });
+  const endpoint = args.at(-1);
+  const hit = Object.entries(api).find(([k]) => endpoint.startsWith(k));
+  if (!hit) throw new Error(`Command failed: gh api ${endpoint}\ngh: Server Error (HTTP 500)`);
+  if (hit[1] === 404) throw new Error(`Command failed: gh api ${endpoint}\ngh: Not Found (HTTP 404)`);
+  return typeof hit[1] === 'string' ? hit[1] : JSON.stringify(hit[1]);
+};
+const R = 'repos/o/r';
+const listing = (...names) => names.map((name) => ({ type: 'file', name, path: `.github/workflows/${name}` }));
+const PUSH = 'name: Deploy\non:\n  push:\n    branches: [main]\n';
+const local = (github) => { github.readWorkflows = () => [{ file: 'deploy.yml', text: PUSH }]; return github; };
+
+test('JobGithub.deploys: Actions disabled on the repo makes the merge the delivery, whatever the files say', async () => {
   const calls = [];
-  const github = new JobGithub(async (bin, args, cwd) => { calls.push({ bin, args, cwd }); return JSON.stringify({ files: [{ path: 'README.md' }, { path: 'src/a.js' }] }); });
+  const github = local(new JobGithub(ghFake(['src/a.js'], { [`${R}/actions/permissions`]: { enabled: false } }, calls)));
+  const out = await github.deploys({ repo: '/r', pr: PR }, PR);
+  assert.deepEqual(out, { head: 'sha7', base: 'main', expected: false, workflows: [], summary: 'Merge completes it · Actions disabled' });
+  assert.equal(calls.length, 2, 'nothing else is asked once Actions is off');
+});
+
+test('JobGithub.deploys: a push workflow GitHub has disabled (by hand, or on a fork) is never expected to run', async () => {
+  for (const state of ['disabled_manually', 'disabled_fork', 'disabled_inactivity']) {
+    const github = local(new JobGithub(ghFake(['src/a.js'], {
+      [`${R}/actions/permissions`]: { enabled: true },
+      [`${R}/contents/.github/workflows?ref=sha7`]: listing('deploy.yml', 'pr.yml'),
+      [`${R}/contents/.github/workflows/deploy.yml?ref=sha7`]: PUSH,
+      [`${R}/contents/.github/workflows/pr.yml?ref=sha7`]: 'on: pull_request\n',
+      [`${R}/actions/workflows`]: { workflows: [{ path: '.github/workflows/deploy.yml', state }, { path: '.github/workflows/pr.yml', state: 'active' }] },
+    })));
+    const out = await github.deploys({ repo: '/r', pr: PR }, PR);
+    assert.equal(out.expected, false, state);
+    assert.equal(out.summary, 'Merge completes it · Deploy disabled');
+  }
+});
+
+test('JobGithub.deploys: a workflow only in the local tree (absent on GitHub at the PR head) means merge is delivery', async () => {
+  const calls = [];
+  const github = local(new JobGithub(ghFake(['src/a.js'], {
+    [`${R}/actions/permissions`]: { enabled: true },
+    [`${R}/contents/.github/workflows?ref=sha7`]: 404,
+    [`${R}/commits/sha7`]: { sha: 'sha7' },
+  }, calls)));
+  const out = await github.deploys({ repo: '/r', worktree: { path: '/wt' }, pr: PR }, PR);
+  assert.equal(out.expected, false); assert.equal(out.summary, 'Merge completes it · no workflows');
+  assert.ok(calls.some((c) => c.args.at(-1) === `${R}/commits/sha7`), 'the 404 is proven to be the directory, not the ref');
+  // A 404 because GitHub does not hold the ref proves nothing: back to the local files.
+  const lost = local(new JobGithub(ghFake(['src/a.js'], { [`${R}/contents/.github/workflows?ref=sha7`]: 404, [`${R}/commits/sha7`]: 404 })));
+  assert.equal((await lost.deploys({ repo: '/r', pr: PR }, PR)).expected, true);
+});
+
+test('JobGithub.deploys: a real push workflow on GitHub is still expected, a new one in this PR included, read raw at the head', async () => {
+  const calls = [];
+  const github = new JobGithub(ghFake(['src/a.js'], {
+    [`${R}/actions/permissions`]: { enabled: true },
+    [`${R}/contents/.github/workflows?ref=sha7`]: [...listing('deploy.yml', 'new.yaml'), { type: 'dir', name: 'x', path: '.github/workflows/x' }],
+    [`${R}/contents/.github/workflows/deploy.yml?ref=sha7`]: PUSH,
+    [`${R}/contents/.github/workflows/new.yaml?ref=sha7`]: 'name: Release\non: push\n',
+    [`${R}/actions/workflows`]: { workflows: [{ path: '.github/workflows/deploy.yml', state: 'active' }] },
+  }, calls));
+  github.readWorkflows = () => { throw new Error('GitHub answered; local files are not read'); };
+  const out = await github.deploys({ repo: '/r', pr: PR }, PR);
+  assert.equal(out.expected, true); assert.equal(out.summary, 'Deploys on merge · Deploy · Release');
+  assert.deepEqual(calls.find((c) => c.args.at(-1).endsWith('deploy.yml?ref=sha7')).args.slice(0, 3), ['api', '-H', 'Accept: application/vnd.github.raw+json']);
+  // Permissions and workflow states are refinements: a 403 on either keeps the push workflow expected.
+  const narrow = new JobGithub(ghFake(['src/a.js'], {
+    [`${R}/contents/.github/workflows?ref=sha7`]: listing('deploy.yml'),
+    [`${R}/contents/.github/workflows/deploy.yml?ref=sha7`]: PUSH,
+  }));
+  assert.equal((await narrow.deploys({ repo: '/r', pr: PR }, PR)).expected, true);
+});
+
+test('JobGithub.deploys reads the PR files, prefers the worktree tree and carries head and base when GitHub cannot be asked', async () => {
+  const calls = [];
+  const github = new JobGithub(ghFake(['README.md', 'src/a.js'], {}, calls));
   const dirs = [];
   github.readWorkflows = (dir) => { dirs.push(dir); return dir.includes('worktrees') ? [{ file: 'deploy.yml', text: 'on:\n  push:\n    paths: ["src/**"]\n' }] : []; };
   const sub = { repo: '~/IdeaProjects/thing', worktree: { path: '/tmp/worktrees/thing-1' }, pr: { url: 'https://github.com/o/r/pull/7' } };
@@ -133,7 +209,7 @@ test('JobGithub.deploys reads the PR files, prefers the worktree tree and carrie
 });
 
 test('JobGithub.deploys falls back to the checkout with ~ expanded, and to no workflows at all', async () => {
-  const github = new JobGithub(async () => JSON.stringify({ files: [{ path: 'AGENTS.md' }] }));
+  const github = new JobGithub(ghFake(['AGENTS.md']));
   const dirs = [];
   github.readWorkflows = (dir) => { dirs.push(dir); return dir.startsWith('/') && !dir.includes('missing') ? [{ file: 'pipeline.yml', text: 'on:\n  push:\n    paths-ignore: ["**.md"]\n' }] : []; };
   const sub = { repo: '~/IdeaProjects/thing', worktree: { path: '/tmp/missing/wt' }, pr: { url: 'u' } };
@@ -141,7 +217,7 @@ test('JobGithub.deploys falls back to the checkout with ~ expanded, and to no wo
   assert.equal(dirs[1], `${process.env.HOME}/IdeaProjects/thing/.github/workflows`);
   assert.equal(out.expected, false);
   assert.equal(out.summary, 'Merge completes it · pipeline ignores **.md');
-  const bare = new JobGithub(async () => JSON.stringify({ files: [] }));
+  const bare = new JobGithub(ghFake([]));
   bare.readWorkflows = () => [];
   assert.equal((await bare.deploys({ repo: '/r', pr: { url: 'u' } }, { head: 'h', base: 'main' })).summary, 'Merge completes it · no workflows');
 });
