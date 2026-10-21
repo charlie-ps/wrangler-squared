@@ -1664,6 +1664,23 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       convoFold.set(box.dataset.convo, folded);
       renderDetail();
     });
+    // Its foot folds it as its header does, then brings that header back into view.
+    dialog.querySelectorAll('[data-convo-collapse]').forEach((b) => b.onclick = () => {
+      const id = b.closest('[data-convo]').dataset.convo;
+      if (b.closest('[data-talk-target]')) aimBox(sub, '');
+      else { convoFold.set(id, false); renderDetail(); }
+      [...dialog.querySelectorAll('[data-convo]')].find((c) => c.dataset.convo === id)?.querySelector('.job-talk-convo-head')?.scrollIntoView?.({ block: 'nearest' });
+    });
+    // The waiting card in a conversation jumps to the decision card at the top, which flashes once.
+    dialog.querySelectorAll('[data-goto-plan]').forEach((b) => b.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const card = dialog.querySelector('.job-decision');
+      if (!card) return;
+      const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      card.scrollIntoView?.({ behavior: calm ? 'auto' : 'smooth', block: 'start' });
+      card.classList.remove('is-flash'); void card.offsetWidth; card.classList.add('is-flash');
+      setTimeout(() => card.classList.remove('is-flash'), 1600);
+    });
     dialog.querySelectorAll('[data-convo-dismiss]').forEach((b) => b.onclick = () => {
       const id = b.closest('[data-convo]').dataset.convo;
       if (!pressBusy(b)) return;
@@ -1671,7 +1688,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       action('dismiss-convo', { convo: id }, null);
     });
     // Pressing one must not blur the box: it would fold shut and shift the rows from under the pointer.
-    dialog.querySelectorAll('[data-talk-target] [data-convo-fold], [data-change-new]').forEach((b) => b.onmousedown = (e) => e.preventDefault());
+    dialog.querySelectorAll('[data-talk-target] [data-convo-fold], [data-talk-target] [data-convo-collapse], [data-change-new]').forEach((b) => b.onmousedown = (e) => e.preventDefault());
     dialog.querySelectorAll('[data-change-new]').forEach((b) => b.onclick = () => aimBox(sub, ''));
     dialog.querySelectorAll('[data-open-idea-job]').forEach((b) => b.onclick = () => openDetail(b.dataset.openIdeaJob, ''));
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });

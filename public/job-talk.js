@@ -61,7 +61,9 @@ function proposalHtml(job, m, onJob, kept) {
   // On the job the waiting proposal is the decision card at the top, so here it folds like a decided one.
   if (live && !onJob) return `<div class="job-talk-card tone-${tone}"><header>${title}</header>${body}${button ? `<footer>${button}</footer>` : ''}</div>`;
   const key = `talk-card:${m.id}`;
-  return `<details class="job-talk-card tone-${tone}" data-keep="${esc(key)}" ${kept?.has(key) ? 'open' : ''}><summary>${title}<span class="job-talk-counts">${esc(countsOf(m.changes || []))}</span>${ICONS.caret}</summary>${body}</details>`;
+  // Its Go to plan scrolls the dialog up to that card (jobs-view.js).
+  const jump = live ? `<button type="button" class="job-talk-goto" data-goto-plan title="Scroll up to the plan change waiting for you">${ICONS.eye}Go to plan</button>` : '';
+  return `<details class="job-talk-card tone-${tone}" data-keep="${esc(key)}" ${kept?.has(key) ? 'open' : ''}><summary>${title}<span class="job-talk-counts">${esc(countsOf(m.changes || []))}</span>${jump}${ICONS.caret}</summary>${body}</details>`;
 }
 
 // A proposal that only forwarded the human's words (server/job-talk.js
@@ -158,7 +160,9 @@ function groupHtml(job, group, groups, sub, boxFor, fold, kept, target) {
   const head = `<header class="job-talk-convo-head"${convo ? ' data-convo-fold' : ''}><b>${name}</b>${step && open ? `<small>on ${esc(step)}</small>` : ''}${raised}${state}${more}${tools}</header>`;
   // The header names the step once; its messages never say it again.
   const here = convo?.sub || sub?.id || null;
-  const body = open ? `${messages.map((m) => messageHtml(job, m, onJob, kept, here)).join('')}${workingHtml(job, convo)}${convo && boxFor ? boxFor(convo) : ''}` : '';
+  // A long one folds from its foot too, so the human need not scroll back up to its header.
+  const foot = open && convo ? `<div class="job-talk-convo-foot"><button type="button" class="job-talk-collapse" data-convo-collapse aria-label="Collapse ${esc(title)}">${ICONS.caret}Collapse</button></div>` : '';
+  const body = open ? `${messages.map((m) => messageHtml(job, m, onJob, kept, here)).join('')}${workingHtml(job, convo)}${convo && boxFor ? boxFor(convo) : ''}${foot}` : '';
   return `<div class="job-talk-convo${open ? '' : ' is-folded'}" data-convo="${esc(convo?.id || '')}">${head}${body}</div>`;
 }
 
