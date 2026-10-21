@@ -15,7 +15,7 @@ import { resolutionsFor, resolutionLabel } from './job-main.js';
 import { queueHelper, helperFor } from './job-helper.js';
 import { limitStep, limitOf } from './job-budget.js';
 import { changeView } from './job-actions.js';
-import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
+import { plannerReply, humanReply, acceptIdea, leaveIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
 import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
@@ -72,6 +72,10 @@ export function buildSubJob(plan, s) {
     repairs: [], sessions: [], pr: null, prComments: null, commentSummary: null, deploys: null,
     deploymentResult: null, result: null, ready: null, note: null, fixRequested: null, blocked: null };
 }
+// What a job made from one of an idea's suggestions takes from the idea: everything
+// the human set on New idea, already resolved against their defaults.
+const IDEA_SETTINGS = ['repos', 'agent', 'model', 'effort', 'planningPrompt', ...Object.keys(REVIEW_DEFAULTS), 'base', 'taskId', 'images', 'shareImages', 'sandbox', 'writableDirs'];
+const ideaSettings = (j) => Object.fromEntries(IDEA_SETTINGS.filter((k) => j[k] !== undefined).map((k) => [k, structuredClone(j[k])]));
 function activate(j) {
   j.subJobs = j.plan.subJobs.map((s) => buildSubJob(j.plan, s));
   j.stage = 'active';
@@ -302,12 +306,40 @@ export class JobStore {
       approve(j, editedPlan || j.plan);
     });
   }
+  // New idea's press (job-idea.js): each suggestion created is that job's plan receipt
+  // and its approval at once, so Plan review never asks again. The last one left turns
+  // the idea itself into its job; each other is a new job beside it, made from the
+  // idea's own settings and sharing its pictures (JobRunner.finish releases a picture
+  // only once no other unfinished job holds it). One write, so a refused plan creates
+  // nothing.
+  acceptIdea(id, payload) {
+    return this.change((d) => {
+      const j = d.jobs.find((x) => x.id === id);
+      if (!j) throw new Error('Job not found');
+      if (j.cancelledAt) throw new Error('Job was cancelled');
+      const now = Date.now();
+      const { siblings, own } = acceptIdea(j, { messageId: payload.messageId, index: Number(payload.index) || 0, all: payload.all === true }, now);
+      for (const x of siblings) {
+        const sib = { ...ideaSettings(j), title: x.title, intent: `${x.title}\n\nFrom the idea ${quoted(j.title)}: ${j.intent}`.slice(0, 16000), id: uid('job'), stage: 'planning', revision: 0,
+          createdAt: now, updatedAt: now, paused: false, plan: null, subJobs: [], runs: [], moves: [], fromIdea: { jobId: j.id, messageId: payload.messageId } };
+        approve(sib, x.plan);
+        record(sib, null, 'accept-idea', null, `Created from the idea ${quoted(j.title)}: ${quoted(x.title)}`);
+        x.jobId = sib.id;
+        d.jobs.push(sib);
+      }
+      if (own) approve(j, own.plan);
+      for (const x of [...siblings, ...(own ? [own] : [])]) record(j, null, 'accept-idea', null, own === x ? `Created the job from the planner's suggestion: ${quoted(x.title)}` : `Created a job beside this idea from the planner's suggestion: ${quoted(x.title)}`);
+      j.updatedAt = now; j.revision++;
+      return j;
+    });
+  }
   // Every action carries its own fields on the control message, so the payload
   // rides through whole rather than as a fixed parameter list.
   action(id, action, payload = {}) {
     const { subJobId, revision, plan, head, sessionReceiptId, readyReceiptId } = payload;
     const note = String(payload.note || '').trim().slice(0, 180) || null;
     if (action === 'approve-plan') return this.approvePlan(id, revision, plan);
+    if (action === 'accept-idea') return this.acceptIdea(id, payload);
     return this.update(id, (j) => {
       const s = subJobId ? j.subJobs.find((s) => s.id === subJobId) : null;
       if (subJobId && !s) throw new Error('Sub-job not found');
@@ -344,12 +376,12 @@ export class JobStore {
         return;
       }
       // New idea's conversation (job-idea.js): the human's answer to the planner, and
-      // the press that turns its suggestion into the job's plan. That press is the plan
-      // approval, so Plan review never asks again for the plan just accepted.
+      // Leave the rest closes one that already gave the jobs wanted from it (acceptIdea).
       if (action === 'idea-reply') { humanReply(j, payload.text, Date.now(), payload.attachments); return; }
-      if (action === 'accept-idea') {
-        approve(j, acceptIdea(j, payload.messageId, Date.now()));
-        record(j, null, 'accept-idea', null, `Created the job from the planner's suggestion: ${quoted(j.title)}`);
+      if (action === 'leave-idea') {
+        const made = leaveIdea(j, Date.now());
+        cancelJob(j, Date.now());
+        record(j, null, 'leave-idea', null, `Left the rest of the planner's suggestions; this idea became ${made.map((x) => quoted(x.title)).join(', ')}`);
         return;
       }
       if (['retry-main', 'dismiss-main', 'resolve-main'].includes(action)) {

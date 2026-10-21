@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, uncreatedSuggestions, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT } from './jobs.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener, fieldName } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, askActs } from './job-plates.js';
@@ -1416,21 +1416,27 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     wireAskImages(box);
     hydrateStrips();
     dialog.querySelectorAll('[data-idea-refine]').forEach((b) => b.onclick = () => text.focus());
-    dialog.querySelectorAll('[data-accept-idea]').forEach((b) => b.onclick = () => {
-      if (b.getAttribute('aria-disabled') === 'true' || ideaFiring) return;
-      const id = b.dataset.acceptIdea;
-      ideaFiring = { jobId: job.id, id, state: 'firing' };
+    // Every press but the last makes a job beside the idea (`own` false), so the dialog stays.
+    const fire = (id, pick) => {
+      if (ideaFiring) return;
+      const left = uncreatedSuggestions(ideaThread(job).find((m) => m.id === id)).length;
+      ideaFiring = { jobId: job.id, id, ...pick, own: !!pick.all || left === 1, state: 'firing' };
       renderDetail();
-      const go = dialog.querySelector(`[data-accept-idea="${CSS.escape(id)}"]`);
-      if (go) spinTo(go, 40);
+      dialog.querySelectorAll(`.job-launch.firing [data-accept-idea="${CSS.escape(id)}"]`).forEach((go) => spinTo(go, 40));
       const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
       setTimeout(() => {
         if (ideaFiring?.id !== id) return;
         ideaFiring.state = 'sent';
-        action('accept-idea', { messageId: id }, '');
+        action('accept-idea', { messageId: id, ...pick }, '');
         if (dialog.open && selected?.jobId === job.id) renderDetail();
       }, calm ? 0 : 900);
+    };
+    dialog.querySelectorAll('[data-accept-idea]').forEach((b) => b.onclick = () => {
+      if (b.getAttribute('aria-disabled') !== 'true') fire(b.dataset.acceptIdea, { index: Number(b.dataset.index) || 0 });
     });
+    dialog.querySelectorAll('[data-accept-all]').forEach((b) => b.onclick = () => fire(b.dataset.acceptAll, { all: true }));
+    dialog.querySelectorAll('[data-open-idea-job]').forEach((b) => b.onclick = () => openDetail(b.dataset.openIdeaJob, ''));
+    dialog.querySelectorAll('[data-leave-idea]').forEach((b) => b.onclick = () => action('leave-idea', {}, ''));
   }
   // A thread or earlier-round shot opened full size: a modal of its own on <body>
   // (like job-images.js's zoom), so Esc closes it and leaves the step open, and a
@@ -1554,6 +1560,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     dialog.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
     dialog.querySelectorAll('[data-open-path]').forEach((b) => b.onclick = () => openPath(b));
     dialog.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
+    dialog.querySelectorAll('[data-open-idea-job]').forEach((b) => b.onclick = () => openDetail(b.dataset.openIdeaJob, ''));
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });
     wireGraph();
     fitAsk();
@@ -1855,7 +1862,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // A reply stays in its conversation for the next tick. A created job closes the dialog it was pressed in,
     // so the board's forming animation plays in view; one the human has since navigated away from is left alone.
     if (msg?.action === 'idea-reply') { if (ideaSent?.jobId === msg.jobId) ideaSent.state = 'sent'; return; }
-    if (msg?.action === 'accept-idea') { if (ideaFiring?.jobId === msg.jobId && ideaFiring.state === 'sent' && dialog.open && selected?.jobId === msg.jobId) dialog.close(); return; }
+    if (msg?.action === 'accept-idea') {
+      if (ideaFiring?.jobId !== msg.jobId || ideaFiring.state !== 'sent') return;
+      if (!ideaFiring.own) { ideaFiring = null; if (dialog.open && selected?.jobId === msg.jobId) renderDetail(); return; }
+      if (dialog.open && selected?.jobId === msg.jobId) dialog.close();
+      return;
+    }
     // An idea stays on screen as its bubble: the tick is the confirmation, not a closed dialog.
     if (msg?.action === 'request-change' && askSent?.state === 'sending' && msg.jobId === askSent.jobId && (msg.subJobId ?? null) === askSent.subId) { askSent.state = 'sent'; askSent.at = Date.now(); if (dialog.open) renderDetail(); return; }
     if (dialog.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;

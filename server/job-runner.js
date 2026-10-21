@@ -570,7 +570,9 @@ export class JobRunner {
     try {
       const job = this.store.get(id);
       await this.runtime.cleanupPlanning(job);
-      this.runtime.releaseImages(job);
+      // A job made from an idea's suggestion shares the idea's pictures (JobStore.acceptIdea).
+      const held = new Set(this.store.snapshot().jobs.filter((o) => o.id !== id && o.stage !== 'done').flatMap((o) => o.images || []));
+      this.runtime.releaseImages({ ...job, images: (job.images || []).filter((n) => !held.has(n)) });
       this.store.update(id, (j) => { j.stage = 'done'; j.completedAt = this.now(); });
     } catch (e) { this.store.update(id, (j) => { j.error = shortError(e); }); }
   }
