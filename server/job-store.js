@@ -15,7 +15,7 @@ import { resolutionsFor, resolutionLabel } from './job-main.js';
 import { queueHelper, helperFor } from './job-helper.js';
 import { limitStep, limitOf } from './job-budget.js';
 import { changeView } from './job-actions.js';
-import { plannerReply, humanReply, acceptIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
+import { plannerReply, humanReply, acceptIdea, editIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
 import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
 import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
@@ -347,6 +347,12 @@ export class JobStore {
       // the press that turns its suggestion into the job's plan. That press is the plan
       // approval, so Plan review never asks again for the plan just accepted.
       if (action === 'idea-reply') { humanReply(j, payload.text, Date.now(), payload.attachments); return; }
+      // A backlog idea's own words, before any planner has read them (job-idea.js editIdea).
+      if (action === 'edit-idea') {
+        const detail = editIdea(j, { title: payload.title, text: payload.text });
+        if (detail) record(j, null, 'edit-idea', null, detail);
+        return;
+      }
       if (action === 'accept-idea') {
         approve(j, acceptIdea(j, payload.messageId, Date.now()));
         record(j, null, 'accept-idea', null, `Created the job from the planner's suggestion: ${quoted(j.title)}`);

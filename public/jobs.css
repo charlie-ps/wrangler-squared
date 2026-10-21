@@ -1856,3 +1856,5 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .bhx-wave { box-sizing:border-box; opacity:0; border:1.5px solid rgba(255,236,228,.9); box-shadow:0 0 16px rgba(240,138,154,.55), inset 0 0 16px rgba(158,171,255,.4); }
 @media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-dock { padding-left:16px; padding-right:16px; } }
 @media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-title-loader i,.job-dialog .job-idea-band h2.titled > *,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-dialog .job-idea-band h2.titled > .job-title-loader { display:none; } }
+.job-idea-edit textarea { min-height:140px; resize:vertical; font:13.5px/1.5 var(--font); }
+.job-idea-edit-note { color:var(--fg-muted); }

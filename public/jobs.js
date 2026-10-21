@@ -30,6 +30,8 @@ export const ideaThread = (job) => job?.idea?.thread || [];
 export const inConversation = (job) => !!job?.idea && job.stage === 'planning' && !job.plan && !job.replan && !job.cancelledAt;
 // An idea's plate on the board: talked through, or parked in the backlog, until it has a plan.
 export const ideaOpen = (job) => !!job?.idea && ['planning', 'backlog'].includes(job.stage) && !job.plan && !job.replan && !job.cancelledAt;
+// A backlog idea no planner has read yet: its title and words are still the human's to change.
+export const ideaEditable = (job) => !!job?.idea && job.stage === 'backlog' && !job.plan && !job.replan && !job.cancelledAt && !ideaThread(job).length && !job.runs?.length;
 export function liveSuggestion(job) {
   const last = ideaThread(job).at(-1);
   return last?.from === 'planner' && last.suggest && !last.acceptedAt ? last : null;
