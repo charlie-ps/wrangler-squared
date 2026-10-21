@@ -33,13 +33,24 @@ function cardState(job, m) {
   if (m.outcome) return OUTCOME[m.outcome] || ['muted', m.outcome];
   return job.replan?.proposal?.id === m.proposalId && !job.cancelledAt ? ['needs', 'Waiting for you'] : ['muted', 'No longer waiting'];
 }
-function proposalHtml(job, m, onJob) {
+// A decided card folds to its title, outcome and how many of each kind of change.
+const countsOf = (changes) => {
+  const n = new Map();
+  for (const c of changes) n.set(c.mark, (n.get(c.mark) || 0) + 1);
+  const order = Object.keys(MARK);
+  return [...n].sort(([a], [b]) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99)).map(([k, v]) => `${v} ${(MARK[k] || k).toLowerCase()}`).join(', ') || 'no sub-job changes';
+};
+function proposalHtml(job, m, onJob, kept) {
   const [tone, label] = cardState(job, m);
   const live = tone === 'needs';
   const rows = (m.changes || []).map((c) => `<li class="job-talk-change job-mark-${esc(c.mark)}"><span class="job-mark">${esc(MARK[c.mark] || c.mark)}</span><span class="job-talk-change-title">${esc(c.mark === 'forward' ? `To ${c.title}'s session` : c.title)}${c.detail ? ` <small>${esc(c.detail)}</small>` : ''}${c.then ? `<span class="job-talk-then">${esc(c.then)}</span>` : ''}</span></li>`).join('');
   const button = live ? onJob ? `<button type="button" data-talk-review title="The proposal is drawn at the top of this dialog">${ICONS.eye}Review proposal</button>` : `<button type="button" data-open-job title="Opens the job dialog on the proposal">${ICONS.eye}Review proposal</button>` : '';
   const options = m.options > 1 ? `<small class="job-talk-options">${m.options} options</small>` : '';
-  return `<div class="job-talk-card tone-${tone}"><header><b>${isForward(m) ? 'Forward your words' : m.red ? 'Proposed a fix' : 'Proposed a change'}</b><span class="job-talk-tag">${esc(label)}</span>${options}</header>${m.text ? `<div class="job-idea-body">${proseHtml(m.text)}</div>` : ''}${rows ? `<ul class="job-talk-changes">${rows}</ul>` : '<p class="job-talk-none">No sub-job changes</p>'}${button ? `<footer>${button}</footer>` : ''}</div>`;
+  const title = `<b>${isForward(m) ? 'Forward your words' : m.red ? 'Proposed a fix' : 'Proposed a change'}</b><span class="job-talk-tag">${esc(label)}</span>${options}`;
+  const body = `${m.text ? `<div class="job-idea-body">${proseHtml(m.text)}</div>` : ''}${rows ? `<ul class="job-talk-changes">${rows}</ul>` : '<p class="job-talk-none">No sub-job changes</p>'}`;
+  if (live) return `<div class="job-talk-card tone-${tone}"><header>${title}</header>${body}${button ? `<footer>${button}</footer>` : ''}</div>`;
+  const key = `talk-card:${m.id}`;
+  return `<details class="job-talk-card tone-${tone}" data-keep="${esc(key)}" ${kept?.has(key) ? 'open' : ''}><summary>${title}<span class="job-talk-counts">${esc(countsOf(m.changes || []))}</span>${ICONS.caret}</summary>${body}</details>`;
 }
 
 // A proposal that only forwarded the human's words (server/job-talk.js
@@ -78,10 +89,10 @@ const answersHtml = (job, m) => (m.forwarded || []).map(({ sub: id, message }) =
 }).join('');
 const forwardHtml = (job, m) => `<div class="job-talk-forward" data-talk="${esc(m.id)}"><span class="job-idea-orb small" aria-hidden="true"></span><span>${esc(forwardLine(job, m))}</span><time>${esc(time(m.outcomeAt || m.at))}</time></div>`;
 
-function messageHtml(job, m, onJob) {
+function messageHtml(job, m, onJob, kept) {
   if (m.from === 'human') return humanHtml(job, m, onJob);
   if (isForward(m) && m.outcome === 'approved') return forwardHtml(job, m) + answersHtml(job, m);
-  if (m.kind === 'proposal') return wranglerHtml(m, proposalHtml(job, m, onJob), 'proposal') + answersHtml(job, m);
+  if (m.kind === 'proposal') return wranglerHtml(m, proposalHtml(job, m, onJob, kept), 'proposal') + answersHtml(job, m);
   return wranglerHtml(m, `<div class="job-idea-body">${proseHtml(m.text)}</div>`, m.kind === 'error' ? 'error' : '');
 }
 
@@ -116,7 +127,7 @@ function stripHtml(job, messages) {
   return `<div class="job-talk-strip" data-convo-fold>${asked ? humanHtml(job, asked, false) : ''}${said ? wranglerHtml(said, `<div class="job-idea-body job-talk-clip">${proseHtml(words || '')}</div>`, said.kind === 'error' ? 'error' : '') : ''}</div>`;
 }
 
-function groupHtml(job, group, groups, sub, boxFor, fold) {
+function groupHtml(job, group, groups, sub, boxFor, fold, kept) {
   const { convo, messages } = group;
   const onJob = !sub;
   const open = convoOpen(job, group, groups, fold);
@@ -127,16 +138,17 @@ function groupHtml(job, group, groups, sub, boxFor, fold) {
   const more = !open && messages.length > 2 ? `<small class="job-talk-count">${messages.length} messages</small>` : '';
   const tools = convo ? `<span class="job-talk-convo-tools"><button type="button" class="job-talk-fold" aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} ${esc(title)}">${ICONS.caret}</button>${liveIn(job, convo) ? '' : `<button type="button" class="job-talk-dismiss" data-convo-dismiss title="Dismiss this conversation" aria-label="Dismiss ${esc(title)}">${ICONS.x}</button>`}</span>` : '';
   const head = `<header class="job-talk-convo-head"${convo ? ' data-convo-fold' : ''}><b>${esc(title)}</b>${step ? `<small>on ${esc(step)}</small>` : ''}${raised}${state}${more}${tools}</header>`;
-  const body = open ? `${messages.map((m) => messageHtml(job, m, onJob)).join('')}${workingHtml(job, convo)}${convo && boxFor ? boxFor(convo) : ''}` : stripHtml(job, messages);
+  const body = open ? `${messages.map((m) => messageHtml(job, m, onJob, kept)).join('')}${workingHtml(job, convo)}${convo && boxFor ? boxFor(convo) : ''}` : stripHtml(job, messages);
   return `<div class="job-talk-convo${open ? '' : ' is-folded'}" data-convo="${esc(convo?.id || '')}">${head}${body}</div>`;
 }
 
 // `boxFor(convo)` draws that conversation's own box (jobs-view.js), or nothing
-// where the view takes no idea; `fold` maps a conversation id to open or not.
-export function talkHtml(job, sub = null, boxFor = null, fold = null) {
+// where the view takes no idea; `fold` maps a conversation id to open or not;
+// `kept` is the set of decided proposal cards the human opened.
+export function talkHtml(job, sub = null, boxFor = null, fold = null, kept = null) {
   const groups = convoGroups(job, sub);
   const loose = groups.some((g) => !g.convo) ? '' : workingHtml(job, null);
   if (!groups.length && !loose) return '';
   const many = groups.filter((g) => g.convo).length > 1;
-  return `<section class="job-talk" aria-label="Conversations with the wrangler" aria-live="polite"><h4 class="job-talk-head">${ICONS.note}${many ? 'Conversations' : 'Conversation'} with the wrangler</h4>${groups.map((g) => groupHtml(job, g, groups, sub, boxFor, fold)).join('')}${loose}</section>`;
+  return `<section class="job-talk" aria-label="Conversations with the wrangler" aria-live="polite"><h4 class="job-talk-head">${ICONS.note}${many ? 'Conversations' : 'Conversation'} with the wrangler</h4>${groups.map((g) => groupHtml(job, g, groups, sub, boxFor, fold, kept)).join('')}${loose}</section>`;
 }
