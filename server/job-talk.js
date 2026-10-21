@@ -37,9 +37,10 @@ export function say(job, entry, now) {
 }
 
 // A conversation started from the job, or from one step's dialog (`sub`), which
-// is where it is drawn.
+// is where it is drawn. `titlePending` until Haiku names it from its first message
+// (handlers.js nameConvos); the board draws a loader for it.
 export function openConvo(job, sub, now) {
-  const convo = { id: `convo_${now.toString(36)}${convosOf(job).length.toString(36)}`, at: now, ...(sub ? { sub: sub.id } : {}), pending: null, seenAt: 0 };
+  const convo = { id: `convo_${now.toString(36)}${convosOf(job).length.toString(36)}`, at: now, ...(sub ? { sub: sub.id } : {}), pending: null, seenAt: 0, titlePending: true };
   (job.convos ||= []).push(convo);
   if (job.convos.length > CONVOS_MAX) job.convos.splice(0, job.convos.findIndex((c) => !c.pending) + 1);
   return convo;
@@ -78,7 +79,7 @@ export function escalate(convo, now) {
 export function dismissConvo(job, id, now) {
   const convo = convoById(job, id);
   if (!convo || convo.dismissedAt) throw new Error('That conversation is already gone');
-  if (convo.pending || convoRun(job, convo)) throw new Error('The wrangler is still answering in that conversation');
+  if (convo.pending || convoRun(job, convo)) throw new Error('Wrangler is still answering in that conversation');
   if (job.replan && job.replan.convo === convo.id) throw new Error('That conversation has a plan change in progress. Approve or discard it first.');
   convo.dismissedAt = now;
   return convo;
@@ -188,8 +189,9 @@ export function askFailed(job, run, why, now) {
 // `convo`): its thread becomes the first conversation, its question that
 // conversation's, and an ask run still going keeps answering it.
 export function migrateTalk(job, now = Date.now()) {
-  // Answers given before the board tracked reading them are not news.
-  for (const c of job.convos || []) c.seenAt ??= now;
+  // Answers given before the board tracked reading them are not news. A pending
+  // title's Haiku run died with the last process.
+  for (const c of job.convos || []) { c.seenAt ??= now; delete c.titlePending; }
   if (job.convos || !(job.talk?.length || job.ask)) { delete job.ask; return; }
   const id = 'convo_0';
   job.convos = [{ id, at: job.talk?.[0]?.at || job.ask?.at || 0, seenAt: now, pending: job.ask ? { at: job.ask.at, asks: [{ messageId: job.ask.messageId, feedback: job.ask.feedback, sentAt: job.ask.at }], ...(job.ask.source ? { source: job.ask.source } : {}), ...(job.ask.images?.length ? { images: job.ask.images } : {}) } : null }];

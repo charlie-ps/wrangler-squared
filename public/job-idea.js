@@ -1,5 +1,5 @@
 import { esc, tildify } from './util.js';
-import { ICONS } from './icons.js';
+import { ICONS, wranglerMark } from './icons.js';
 import { isPrSub, isSessionSub, isHumanSub, isWriteSub, placeOf, placeShort, PLACES, kindChipHtml, ideaThread, ideaStage, liveSuggestion, suggestionsOf } from './jobs.js';
 import { inflowHtml, arcHtml } from './job-skylines.js';
 
@@ -71,7 +71,7 @@ export function suggestionHtml(job, msg, state = 'live', { index = 0, of = 1, la
   const done = state === 'done', stale = state === 'stale', created = state === 'created';
   const label = created ? 'Job created' : done ? 'Creating the job' : 'Create job';
   // The press is the plan approval, whatever Plan review says (job-store.js accept-idea).
-  const fine = stale ? '<b>Replaced by a newer reply</b> · the wrangler suggests again once it answers.'
+  const fine = stale ? '<b>Replaced by a newer reply</b> · Wrangler suggests again once it answers.'
     : created ? '<b>Created</b> · it runs as its own job on the board.'
       : done ? `<b>Job starting</b> · ${last ? 'it takes this idea\'s place on the board.' : 'it joins the board beside this idea.'}`
         : '<b>Creating it approves this plan</b> · the job starts as soon as you press; your other checkpoints still apply.';
@@ -109,7 +109,7 @@ const humanHtml = (text, at, extra = '', pics = '') => `<div class="job-sent ${e
 export const imageStripHtml = (job, names = [], cls = '') => names.length ? `<div class="job-image-strip${cls ? ` ${cls}` : ''}" data-strip="${esc(job.id)}">${names.map((n, i) => `<button type="button" class="job-image-thumb" data-image="${esc(n)}" aria-label="Enlarge image ${i + 1}"><span class="job-image-num">${i + 1}</span></button>`).join('')}</div>` : '';
 const keptPics = (job, names) => imageStripHtml(job, names, 'job-sent-strip');
 const pendingPics = (urls = []) => urls.length ? `<span class="job-sent-imgs">${urls.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
-const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh ? ' fresh' : ''}" data-msg="${esc(m.id)}"><span class="job-idea-orb" aria-hidden="true"></span><div><div class="job-idea-who">The wrangler<time>${esc(time(m.at))}</time></div><div class="job-idea-body">${proseHtml(m.text)}</div>${launch}</div></div>`;
+const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh ? ' fresh' : ''}" data-msg="${esc(m.id)}">${wranglerMark()}<div><div class="job-idea-who">Wrangler<time>${esc(time(m.at))}</time></div><div class="job-idea-body">${proseHtml(m.text)}</div>${launch}</div></div>`;
 
 // `pending` is the reply this tab just sent, drawn until the thread holds it; `firing`
 // the suggestion pressed here ({id, index} or {id, all}), whose hole flares before the job is made;
@@ -123,7 +123,7 @@ export function ideaThreadHtml(job, { pending = null, firing = null, fresh = () 
   }
   const held = pending && !thread.some((m) => m.from === 'human' && m.text === pending.text && m.at >= pending.at - 60000);
   if (held) rows.push(humanHtml(pending.text, pending.at, `fresh ${pending.state === 'failed' ? 'failed' : 'sending'}`, pendingPics(pending.images)));
-  if (ideaStage(job) === 'thinking' || held && pending.state !== 'failed') rows.push(`<div class="job-idea-thinking"><span class="job-idea-orb small" aria-hidden="true"></span><span class="job-idea-shine">${thread.length ? 'The wrangler is thinking…' : 'The wrangler is reading the idea…'}</span></div>`);
+  if (ideaStage(job) === 'thinking' || held && pending.state !== 'failed') rows.push(`<div class="job-idea-thinking">${wranglerMark('small', true)}<span class="job-idea-shine">${thread.length ? 'Wrangler is thinking…' : 'Wrangler is reading the idea…'}</span></div>`);
   return `<div class="job-idea-thread" aria-live="polite">${rows.join('')}</div>`;
 }
 
@@ -132,7 +132,7 @@ export function ideaThreadHtml(job, { pending = null, firing = null, fresh = () 
 export function ideaComposerHtml(draft = '', tray = '') {
   return `<div class="job-change job-idea-composer is-open" data-idea-composer>
     <ul class="job-change-tray" ${tray ? '' : 'hidden'}>${tray}</ul>
-    <div class="job-change-row"><span class="job-change-to" title="Who hears it"><span class="job-idea-orb small" aria-hidden="true"></span>To the wrangler</span><textarea rows="1" maxlength="8000" placeholder="Reply, or ask for a change to the suggestion…" aria-label="Reply to the wrangler">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-idea-send aria-label="Send to the planner" title="Send (↵)" ${draft.trim() ? '' : 'disabled'}>${ICONS.send}</button></div>
+    <div class="job-change-row"><span class="job-change-to" title="Who hears it">${wranglerMark('small')}To Wrangler</span><textarea rows="1" maxlength="8000" placeholder="Reply, or ask for a change to the suggestion…" aria-label="Reply to Wrangler">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-idea-send aria-label="Send to Wrangler" title="Send (↵)" ${draft.trim() ? '' : 'disabled'}>${ICONS.send}</button></div>
     <p class="job-change-error" role="alert" hidden></p>
     <div class="job-change-foot"><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 }

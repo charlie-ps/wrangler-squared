@@ -186,7 +186,7 @@ export class JobRunner {
         // away ends it.
         else if (run.parkedAt && !run.mailedAt) {
           if (await this.runtime.exists(run)) continue;
-          error = run.parkedFor === 'idea' ? 'The wrangler\'s session was closed while it waited for your reply. Retry to plan again.' : 'Session was closed while its drafts waited for review. Retry to run it again.';
+          error = run.parkedFor === 'idea' ? 'Wrangler\'s session was closed while it waited for your reply. Retry to plan again.' : 'Session was closed while its drafts waited for review. Retry to run it again.';
         }
         else if (!(await this.runtime.isAlive(run))) error = 'Session stopped without a receipt. Open it to see why, then retry.';
         // Stopped at the spend limit, a session sits idle by design until a top-up.
@@ -505,7 +505,9 @@ export class JobRunner {
     for (const run of job.runs.filter((r) => draftsDecided(job, r))) await this.resumeDrafted(id, run);
     for (const run of job.runs.filter((r) => runnable(r) && r.parkedFor === 'ready')) {
       const sub = job.subJobs.find((s) => s.id === run.subJobId);
-      if (unsentFor(sub).length) await this.deliverThread(id, run);
+      // One message at a time, and only to a session waiting: one queued while it
+      // answers goes once that reply is in, so each reply answers one message.
+      if (!run.mailedAt && unsentFor(sub).length) await this.deliverThread(id, run);
     }
     job = this.store.get(id);
     if (job.subJobs.length && job.subJobs.every((s) => s.stage === 'done')) await this.finish(id);
@@ -547,7 +549,7 @@ export class JobRunner {
   async deliverThread(id, run) {
     const job = this.store.get(id);
     const sub = job.subJobs.find((s) => s.id === run.subJobId);
-    const batch = unsentFor(sub);
+    const batch = unsentFor(sub).slice(0, 1);
     try {
       await this.runtime.resumeWithMail(run, threadMail(job, run, sub, batch));
       const now = this.now();
@@ -581,7 +583,7 @@ export class JobRunner {
       this.patchRun(id, run.id, (r) => { r.mailedAt = now; r.idleSince = null; });
       this.store.update(id, (j) => { for (const m of j.idea.thread) if (batch.some((b) => b.id === m.id)) m.sentAt = now; j.idea.error = null; });
     } catch (e) {
-      const note = `Could not send your reply to the wrangler: ${shortError(e)}`;
+      const note = `Could not send your reply to Wrangler: ${shortError(e)}`;
       if (job.idea.error !== note) this.store.update(id, (j) => { j.idea.error = note; });
     }
   }

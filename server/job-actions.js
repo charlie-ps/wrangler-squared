@@ -64,7 +64,6 @@ export function gateAction(job, action, plan) {
   if (action.type === 'forward') {
     if (!action.note) throw new Error(`forward ${name}: put the human's words for it in \`note\``);
     if (!parked || sub.stage !== 'review' || sub.state !== 'verified' || !sub.ready) throw new Error(`${name} has no session open on its review to forward to: use rework instead`);
-    if (sub.answering) throw new Error(`${name}'s session is still answering the last message; ask again once it has`);
     return { sub, pin: { at: 'round', ref: String(sub.ready.receiptId), round: sub.ready.round || 1 } };
   }
   if (parked) throw new Error(action.type === 'rework' ? `${name}'s session is still open: forward the feedback to it instead` : `Wait for the step on ${name} to stop`);

@@ -112,7 +112,7 @@ export default {
     slots.onMessage?.((msg) => {
       if (msg.event === 'job-created') {
         view?.created(msg);
-        toast(msg.started ? (msg.idea ? 'Idea sent to the wrangler' : 'Job started — planning') : msg.idea ? 'Idea added to backlog' : 'Job added to backlog');
+        toast(msg.started ? (msg.idea ? 'Idea sent to Wrangler' : 'Job started — planning') : msg.idea ? 'Idea added to backlog' : 'Job added to backlog');
       } else if (msg.event === 'job-create-failed') {
         toastError(msg.error);
       } else if (msg.event === 'job-action-complete') {

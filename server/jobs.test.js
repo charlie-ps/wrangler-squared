@@ -11,13 +11,16 @@ import { JobRuntime, CleanupRefused } from './job-runtime.js';
 import { jobPrompt } from './job-prompts.js';
 import { JobGithub, prSummary } from './job-github.js';
 import { normaliseComments, commentsBlockMerge } from './job-comments.js';
-import { jobCreateHandler, makeJobCreateHandler, jobActionHandler, jobSettingsHandler } from './handlers.js';
+import { jobCreateHandler, makeJobCreateHandler, makeJobActionHandler, jobSettingsHandler } from './handlers.js';
 import { _resetForTests, runnerFor } from './jobs.js';
 import { jobReportTool, getJobContextTool } from './tools.js';
 import { changeView } from './job-change.js';
 import { say } from './job-talk.js';
 import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
+
+// Never a real Haiku run: a conversation an idea opens is named after the action.
+const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
 
 const execFileP = promisify(execFile);
 const execGit = (cwd, args) => execFileP('git', ['-C', cwd, ...args]).then((r) => r.stdout.trim());
@@ -1614,7 +1617,7 @@ test('a session that ends without a receipt holds its writes; a plan change bein
   change(f, null, 'Also cover SSO');
   f.report({ kind: 'published', url: PR_URL }, f.workerFor('api', 'implementation')); await f.tick();
   job = f.store.get(f.job.id);
-  assert.equal(f.launched.filter((l) => l.sub?.id === 'later').length, 1, 'talking to the wrangler pauses nothing');
+  assert.equal(f.launched.filter((l) => l.sub?.id === 'later').length, 1, 'talking to Wrangler pauses nothing');
 });
 
 test('every write names the session that makes it; only a session waits on a milestone, which must be reachable; links are ordered', async (t) => {
@@ -2196,6 +2199,40 @@ test('a request-change arrives as a job-action with its own fields and reaches t
   assert.equal(f.sub().stage, 'review', 'the planner has it; the step waits for the proposal');
 });
 
+test('an idea that opens a conversation has Haiku name it from its first message, after the send', async (t) => {
+  const f = fixture(t); await f.approve(); f.report({ kind: 'ready', checks: ['Tests pass'] }); f.alive.delete(f.last().sid); await f.tick();
+  const host = fakeHost(f); const billed = [];
+  host.sessions.bill = (sid, live) => billed.push([sid, live]);
+  stubRunner(t, host);
+  const asked = []; let answer;
+  const handler = makeJobActionHandler({ run: (prompt, stdin) => { asked.push(stdin); return new Promise((resolve) => { answer = resolve; }); } });
+  await handler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: 'code', ref: f.sub().ready.receiptId, text: 'Use the retry helper' }, host);
+  assert.equal(host.broadcasts[0].event, 'job-action-complete', 'the send does not wait for a title');
+  const convo = () => f.store.get(f.job.id).convos[0];
+  assert.equal(convo().titlePending, true, 'the board draws a loader until Haiku answers');
+  assert.deepEqual(asked, ['<first_message>\nUse the retry helper\n</first_message>']);
+  const { revision } = f.store.get(f.job.id); const rebuilds = host.rebuilds;
+  answer({ text: 'Retry helper for the API', liveSessionId: 'live-1', error: null });
+  await new Promise(setImmediate);
+  assert.deepEqual([convo().title, convo().titlePending], ['Retry helper for the API', undefined]);
+  assert.equal(f.store.get(f.job.id).revision, revision, 'a title is not a revision');
+  assert.equal(host.rebuilds, rebuilds + 1);
+  assert.equal(billed.length, 1, 'billed to the job\'s card');
+  await handler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: 'code', ref: f.sub().ready.receiptId, text: 'And log it', convo: convo().id }, host);
+  await new Promise(setImmediate);
+  assert.equal(asked.length, 1, 'a reply in a named conversation names nothing');
+});
+
+test('a failed conversation title ends the wait, and a restart drops one still pending', (t) => {
+  const f = fixture(t);
+  const job = f.store.create({ intent: 'Make sign-in reliable' });
+  f.store.change((d) => { d.jobs.find((j) => j.id === job.id).convos = [{ id: 'c1', at: 1, pending: null, seenAt: 0, titlePending: true }, { id: 'c2', at: 1, pending: null, seenAt: 0, titlePending: true }]; });
+  assert.equal(f.store.titleConvo(job.id, 'c1', null), false);
+  assert.deepEqual(f.store.get(job.id).convos[0], { id: 'c1', at: 1, pending: null, seenAt: 0 }, 'no title: the board falls back to Conversation N');
+  assert.equal(f.store.titleConvo(job.id, 'c1', 'Late answer'), false, 'only a pending title is replaced');
+  assert.equal(new JobStore(f.store.file).get(job.id).convos[1].titlePending, undefined);
+});
+
 test('a refused job-action is broadcast with its reason instead of thrown, so the footer can snap back', async (t) => {
   const f = fixture(t); await f.approve();
   const host = fakeHost(f); const ticks = stubRunner(t, host);
@@ -2584,7 +2621,7 @@ test('a plan change that moves a green PR behind new work reworks it, and neithe
   f.report({ kind: 'published', url: PR_URL }, f.workerFor('web')); f.setPr({ checkStatus: 'passing' }); await f.tick();
   f.store.action(f.job.id, 'approve-merge', { subJobId: 'web', head: 'head1' });
   change(f, 'web', 'Web needs the new api'); await f.tick();
-  assert.deepEqual(f.merged, [], 'the step the idea was typed on waits for the wrangler');
+  assert.deepEqual(f.merged, [], 'the step the idea was typed on waits for Wrangler');
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web', ['api'], { brief: 'Implement web on the new api' })]) }, f.last());
   f.store.action(f.job.id, 'approve-replan', { proposalId: f.last().run.id });
   const web = () => f.store.get(f.job.id).subJobs.find((s) => s.id === 'web');
@@ -2616,7 +2653,7 @@ test('an idea typed on the job holds nothing while the wrangler draws it: a gree
   change(f, null, 'Also cover SSO'); await f.tick();
   assert.ok(f.store.get(f.job.id).replan, 'the change is being drawn');
   f.setPr({ checkStatus: 'passing' }); await f.tick();
-  assert.equal(f.merged.length, 1, 'the PR merges under the wrangler');
+  assert.equal(f.merged.length, 1, 'the PR merges under Wrangler');
   f.setPr({ state: 'MERGED', mergeCommit: 'm1' }); f.store.update(f.job.id, (j) => { j.subJobs[0].nextPollAt = 0; }); await f.tick(); await f.tick();
   assert.ok(f.workerFor('notes', 'session'), 'and the step after it starts');
 });
@@ -2862,8 +2899,8 @@ test('a proposal whose step merged before approval goes back to the planner, and
   const job = f.store.get(f.job.id);
   assert.equal(job.replan.proposal, null);
   assert.deepEqual(job.moves.slice(-2).map((m) => [m.move, m.subJobId, m.detail]), [
-    ['replan-sent-back', null, 'Sent the plan change back to the wrangler: “Deliver api” has merged since it was proposed'],
-    ['replan-sent-back', 'api', '“Deliver api” has merged since the plan change was proposed, so it went back to the wrangler']]);
+    ['replan-sent-back', null, 'Sent the plan change back to Wrangler: “Deliver api” has merged since it was proposed'],
+    ['replan-sent-back', 'api', '“Deliver api” has merged since the plan change was proposed, so it went back to Wrangler']]);
   await f.tick();
   const again = plannerOf(f);
   assert.notEqual(again.run.id, planner.run.id, 'a fresh planning run picks it up');
@@ -3254,7 +3291,7 @@ test('a question is answered in the job\'s conversation: an ask run that holds n
   assert.match(prompt, /^Answer a question about this running job/);
   assert.match(prompt, /ASKED YOU A QUESTION/); assert.match(prompt, /The question: About “Deliver api” \(api, implementation\/\w+\): Why did the api step/);
   assert.match(prompt, /read_session_transcript/); assert.match(prompt, /kind:"reply"/);
-  assert.match(prompt, /only the FIRST LINE of your text until the human opens the conversation, so the first line is the answer itself/, 'the reply leads with the answer');
+  assert.match(prompt, /reads the FIRST LINE of your text at a glance, so the first line is the answer itself/, 'the reply leads with the answer');
   assert.match(prompt, /what they can do, and what happens if they leave it\. Cut background, history and explanation they did not ask for/);
   assert.doesNotMatch(prompt, /short paragraphs|at most 4000 characters/, 'phrasing rules, never a length');
   assert.match(prompt, /The human \(on api\): "Why did the api step take so long\?"/, 'the conversation so far rides along');
@@ -3415,7 +3452,7 @@ test('a message sent before the wrangler replies reaches the same running sessio
   assert.match(talk(f).at(-1)[2], /is api deployed/);
   await f.tick();
   assert.equal(runs(), 1, 'no new run');
-  assert.deepEqual(f.mailed.map((m) => m.sid), [asker.sid], 'mailed to the wrangler that is answering');
+  assert.deepEqual(f.mailed.map((m) => m.sid), [asker.sid], 'mailed to Wrangler that is answering');
   assert.match(f.mailed[0].text, /wrote again in your conversation[\s\S]*The human added: Also, is api deployed\?[\s\S]*ONE reply/);
   await f.tick();
   assert.equal(f.mailed.length, 1, 'mailed once');
@@ -3521,5 +3558,5 @@ test('a dismissed conversation comes back when anything new is said in it, by th
   f.store.action(f.job.id, 'dismiss-convo', { convo: id });
   const job = f.store.get(f.job.id);
   say(job, { from: 'wrangler', kind: 'answer', text: 'Web has started.', convo: id }, 9);
-  assert.equal(job.convos[0].dismissedAt, undefined, 'the wrangler said something in it');
+  assert.equal(job.convos[0].dismissedAt, undefined, 'Wrangler said something in it');
 });

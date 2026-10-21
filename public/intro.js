@@ -64,7 +64,7 @@ function graph(phase) {
 // row is an idea, drawn under its forming sky (job-skylines.js inflowHtml) while
 // the planner talks it through, then the job it became.
 const BOARD = [['Dark mode for reports', 3], ['CSV export', 3], ['Rotate secret', 3], ['Node 22', 4]];
-const IDEA = { thinking: ['idle', 0, 'The wrangler is reading it'], reply: ['warn', 1, 'The wrangler asked you'], suggested: ['warn', 2, 'Job suggested · review'] };
+const IDEA = { thinking: ['idle', 0, 'Wrangler is reading it'], reply: ['warn', 1, 'Wrangler asked you'], suggested: ['warn', 2, 'Job suggested · review'] };
 const BOARD_FRAMES = [
   [['thinking'], ['running', '2 agents working', 0], ['running', 'Writing the PR', 1], ['planned', 'Backlog', 0]],
   [['thinking'], ['running', '2 agents working', 1], ['review', 'Ready for your review', 1], ['planned', 'Backlog', 0]],
@@ -131,7 +131,7 @@ const newIdeaFigure = (phase) => {
   const fresh = (id) => id === SAID[n - 1]?.id && !pressed;
   return `<div class="intro-flow">${flowNode('ok', 'edit', 'Idea')}<span class="intro-flow-line"></span>${flowNode(talk, 'robot', 'Wrangler')}<span class="intro-flow-line"></span>${flowNode(start, 'play', 'Job')}</div>
   <div class="intro-chat" inert>${ideaThreadHtml(job, { fresh })}${plan ? `<div class="intro-chat-plan"><div class="job-chips"><span class="job-chip job-plan-branch">${ICONS.branch}<span>next</span></span><span class="job-chip">${ICONS.pr}<span>2 PRs · 1 session</span></span></div>
-  ${composer('The wrangler', 'Add an idea for the wrangler…', 'Sorts it into feedback for a step or a change to the plan.', 'Design the switch first')}</div>` : ''}</div>`;
+  ${composer('Wrangler', 'Add an idea for Wrangler…', 'Sorts it into feedback for a step or a change to the plan.', 'Design the switch first')}</div>` : ''}</div>`;
 };
 
 // Sub-jobs: three kinds of tile, and the places a session writes to as pills.
@@ -187,7 +187,7 @@ export const INTRO_STEPS = [
     figure: (reviews, phase) => board(phase) },
   { tab: 'New idea',
     title: 'New idea, then a plan you approve before anything runs.',
-    body: `<p>Press <b>New idea</b> and describe the outcome, in words or with screenshots. If it is unclear, the wrangler asks you, then suggests a job; if it is clear, ${W2} drafts the <b>plan</b> straight away. It picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>A drafted plan is ordered sub-jobs. To change it, write in <b>Add idea</b> under it. Once the job runs, the same box is a conversation with the wrangler: ask it anything about the job and it answers there, or say what to change and it proposes the change for you to approve. Nothing runs until you <b>Approve</b>: no session, ticket or PR. A suggested job needs no second look: pressing <b>Create job</b> approves its plan and starts it. You can also save an idea to the backlog and come back to it.</p>`,
+    body: `<p>Press <b>New idea</b> and describe the outcome, in words or with screenshots. If it is unclear, Wrangler asks you, then suggests a job; if it is clear, ${W2} drafts the <b>plan</b> straight away. It picks the branch each PR lands on from what you wrote, like “land it on next”.</p><p>A drafted plan is ordered sub-jobs. To change it, write in <b>Add idea</b> under it. Once the job runs, the same box is a conversation with Wrangler: ask it anything about the job and it answers there, or say what to change and it proposes the change for you to approve. Nothing runs until you <b>Approve</b>: no session, ticket or PR. A suggested job needs no second look: pressing <b>Create job</b> approves its plan and starts it. You can also save an idea to the backlog and come back to it.</p>`,
     cls: 'intro-idea', anim: { frames: IDEA_FRAMES.length, ms: 1700, still: 5 },
     figure: (reviews, phase) => newIdeaFigure(phase) },
   { tab: 'Sub-jobs',
@@ -196,7 +196,7 @@ export const INTRO_STEPS = [
     figure: () => kindsFigure() },
   { tab: 'Needs you',
     title: 'Amber means it is waiting on you.',
-    body: `<p>Each job is a card coloured by its state: blue while agents work, <b>amber when it needs you</b> (a plan to review included), <b>teal when the wrangler replied to you</b>, red when something failed, green when delivered. A plan waiting on you outranks red: when one would get a red step past its failure, the card shows it in amber. A job turns amber at each checkpoint you marked ${YOU}, and whenever an agent needs your decision. The <b>Needs me</b> chip filters the board down to those cards.</p><p>Red goes to the wrangler first. It fixes the step or changes the plan while the rest of the job carries on, and only that step and the ones after it wait. If it can’t, the step is <b>declared red</b> and waits for you to decide.</p>`,
+    body: `<p>Each job is a card coloured by its state: blue while agents work, <b>amber when it needs you</b> (a plan to review included), <b>teal when Wrangler replied to you</b>, red when something failed, green when delivered. A plan waiting on you outranks red: when one would get a red step past its failure, the card shows it in amber. A job turns amber at each checkpoint you marked ${YOU}, and whenever an agent needs your decision. The <b>Needs me</b> chip filters the board down to those cards.</p><p>Red goes to Wrangler first. It fixes the step or changes the plan while the rest of the job carries on, and only that step and the ones after it wait. If it can’t, the step is <b>declared red</b> and waits for you to decide.</p>`,
     anim: { frames: RED.length, ms: 1500, still: 4 },
     figure: (reviews, phase) => needsFigure(phase) },
   { tab: 'Receipts',
@@ -219,7 +219,7 @@ export const INTRO_STEPS = [
     figure: (reviews, phase) => writesFigure(phase) },
   { tab: 'Start',
     title: 'You’re ready to start a job.',
-    body: `<p>Start with something small you would normally hand to one agent, so you can watch each step once.</p><ul class="intro-done">${['Jobs in the rail, with the needs-you count', 'New idea: talk it through with the wrangler, then approve the plan', 'PR, session and human sub-jobs, and the places they write to', 'Short receipts, and each PR shown working', 'Ask the wrangler about a running job, and red steps go to it before you', `Six checkpoints you set per job: ${YOU} or ${AUTO}`].map((t) => `<li>${ICONS.check}${t}</li>`).join('')}</ul><p>Open this again from the ${ICONS.info} button in the Jobs header, or from <b>Automation settings</b>.</p>`,
+    body: `<p>Start with something small you would normally hand to one agent, so you can watch each step once.</p><ul class="intro-done">${['Jobs in the rail, with the needs-you count', 'New idea: talk it through with Wrangler, then approve the plan', 'PR, session and human sub-jobs, and the places they write to', 'Short receipts, and each PR shown working', 'Ask Wrangler about a running job, and red steps go to it before you', `Six checkpoints you set per job: ${YOU} or ${AUTO}`].map((t) => `<li>${ICONS.check}${t}</li>`).join('')}</ul><p>Open this again from the ${ICONS.info} button in the Jobs header, or from <b>Automation settings</b>.</p>`,
     figure: () => `<div class="intro-flow">${node('ok', 'pr', 'Add CSV export', 'Delivered', 'check', true)}<span class="intro-flow-line"></span>${node('ok', 'robot', 'Backfill data', 'Delivered', 'check', true)}</div>` },
 ];
 

@@ -107,10 +107,10 @@ test('code review is a stop before anything is committed: the card asks for a re
   const box = f.q('.job-change');
   assert.deepEqual([box.dataset.changeAt, box.dataset.changeRef], ['code', 'run_1'], 'the idea box is on the review itself, pinned to the receipt that was read');
   assert.equal(box.querySelector('textarea').placeholder, 'Ask about this step, or say what to change…');
-  assert.equal(box.querySelector('.job-change-to').textContent, 'WThe wrangler', 'one recipient'); assert.equal(box.querySelector('.job-change-foot').textContent, '↵ send · ⇧↵ new line'); assert.equal(f.q('.job-moves'), null, 'no Moves menu');
+  assert.equal(box.querySelector('.job-change-to').textContent, 'Wrangler', 'one recipient'); assert.equal(box.querySelector('.job-change-foot').textContent, '↵ send · ⇧↵ new line'); assert.equal(f.q('.job-moves'), null, 'no Moves menu');
   job.runs = [{ id: 'run_1', subJobId: 'api', phase: 'implementation', stopped: false, parkedFor: 'ready' }]; f.view.update(f.data);
   const parked = f.q('.job-change');
-  assert.deepEqual([parked.querySelector('.job-change-to').textContent, parked.querySelector('textarea').placeholder, parked.querySelector('[data-change-send]').getAttribute('aria-label')], ['WThe wrangler', 'Ask about it, or say what to change…', 'Send to the wrangler'], 'its session is open, and the idea still goes to the wrangler');
+  assert.deepEqual([parked.querySelector('.job-change-to').textContent, parked.querySelector('textarea').placeholder, parked.querySelector('[data-change-send]').getAttribute('aria-label')], ['Wrangler', 'Ask about it, or say what to change…', 'Send to Wrangler'], 'its session is open, and the idea still goes to Wrangler');
   job.runs = []; f.view.update(f.data);
   f.q('[data-action="approve-code"]').click();
   assert.equal(f.sent.at(-1).action, 'approve-code'); assert.equal(f.sent.at(-1).readyReceiptId, 'run_1');
@@ -241,7 +241,7 @@ test('the event box names what happened, escaped, and Add idea is the way to ans
   assert.equal(dialog.querySelector('details[data-keep="change"]'), null, 'no fold to open: the box is always there');
   assert.ok(dialog.querySelector('.job-change').classList.contains('is-open'), 'a failing step starts with the box open, its hint showing');
   assert.equal(dialog.querySelector('.job-change').dataset.changeAt, 'step');
-  assert.equal(dialog.querySelector('.job-change-to').textContent, 'WThe wrangler', 'a step with no agent of its own sends the idea to the planner');
+  assert.equal(dialog.querySelector('.job-change-to').textContent, 'Wrangler', 'a step with no agent of its own sends the idea to the planner');
   assert.ok(dialog.querySelector('#job-retry'), 'the plain retry is still there for a transient failure');
 });
 
@@ -1726,7 +1726,7 @@ test('Add idea on a running job asks the planner for a proposal; the sent idea s
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
   assert.equal(f.q('#job-refine'), null, 'there is no separate Change plan dialog: the box is on the job');
-  assert.equal(f.q('.job-change textarea').placeholder, 'Ask the wrangler, or say what to change…');
+  assert.equal(f.q('.job-change textarea').placeholder, 'Ask Wrangler, or say what to change…');
   assert.equal(f.q('.job-change-foot').textContent, '↵ send · ⇧↵ new line');
   const text = f.q('.job-change textarea'); text.value = 'Split web in two'; text.dispatchEvent(f.event('input')); f.q('[data-change-send]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', at: 'job', ref: 'job', text: 'Split web in two' });
@@ -1753,11 +1753,11 @@ test('the box is a conversation with the wrangler: a question and its answer in 
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
   const thread = () => f.q('#job-dialog .job-talk');
-  assert.match(thread().querySelector('.job-talk-head').textContent, /Conversation with the wrangler/);
+  assert.match(thread().querySelector('.job-talk-head').textContent, /Conversation with Wrangler/);
   assert.equal(thread().querySelector('.job-sent-bubble').innerHTML, '<span>Why is &lt;b&gt;web&lt;/b&gt; slow?</span>', 'the human\'s words, escaped');
   assert.match(thread().querySelector('.job-talk-convo-head').textContent, /on Deliver web/);
-  assert.doesNotMatch(thread().querySelector('.job-sent-meta').textContent, /Deliver web/, 'the header names the step, once');
-  assert.match(thread().querySelector('.job-talk-working').textContent, /The wrangler is looking into it…/);
+  assert.doesNotMatch(thread().querySelector('.job-sent-meta').textContent, /Deliver web/, 'the header names the step, the message does not again');
+  assert.match(thread().querySelector('.job-talk-working').textContent, /Wrangler is looking into it…/);
   assert.equal(f.q('#job-dialog .job-change textarea').placeholder, 'Add to your question…', 'what is said before the reply goes to the same wrangler');
   assert.equal(f.q('#job-dialog .job-change').dataset.changeConvo, 'c1');
   assert.equal(jobStatus(job, job.subJobs[1]).text === 'Held for the plan change', false, 'a question holds nothing');
@@ -1766,23 +1766,24 @@ test('the box is a conversation with the wrangler: a question and its answer in 
   job.talk.push({ id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'It waits on `api`:\n\n- tests\n- lint', sub: 'web', convo: 'c1' });
   job.convos[0].pending = null; job.runs = [];
   f.view.update(f.data);
-  assert.equal(thread().querySelector('.job-talk-line').textContent, 'It waits on api:', 'answered, it folds to the answer\'s first line');
-  unfold(f);
   const answer = thread().querySelector('.job-talk-msg');
-  assert.match(answer.querySelector('.job-idea-who').textContent, /^The wrangler/);
+  assert.ok(answer.querySelector(':scope > svg.wrangler-mark.small'), 'it speaks under Wrangler\'s mark');
+  assert.match(answer.querySelector('.job-idea-who').textContent, /^Wrangler/);
   assert.equal(answer.querySelector('code').textContent, 'api'); assert.equal(answer.querySelectorAll('li').length, 2);
   assert.equal(thread().querySelector('.job-talk-working'), null);
   assert.ok(f.q('#job-dialog .job-change textarea'), 'the box is back');
   assert.doesNotMatch(f.q('#job-dialog').textContent, /[Pp]lanner/, 'no planner in what the human reads');
   f.view.openDetail('job1', 'web');
-  unfold(f);
   assert.equal(f.q('#job-dialog .job-talk .job-sent-meta').textContent.includes('on Deliver web'), false, 'on its own step the step goes without saying');
   assert.equal(f.q('#job-dialog .job-talk').querySelectorAll('[data-talk]').length, 2);
   f.view.openDetail('job1', 'api');
   assert.equal(f.q('#job-dialog .job-talk'), null, 'only on the step it was asked on');
 });
 
-test('several conversations at once: one section each, both answering, each with its own box, and a box below them that starts a new one', (t) => {
+// A conversation's header without its Reply, fold and × buttons.
+const headText = (c) => [...c.querySelector('.job-talk-convo-head').childNodes].filter((n) => !n.classList?.contains('job-talk-convo-tools')).map((n) => n.textContent).join('');
+
+test('several conversations at once: one open at a time with the one box at its foot; a title row opens another in its place, and × starts a new one', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
   const pending = (id) => ({ at: 1, asks: [{ messageId: id, feedback: 'x', sentAt: 1 }] });
@@ -1792,34 +1793,87 @@ test('several conversations at once: one section each, both answering, each with
   job.runs = [{ id: 'a1', subJobId: null, phase: 'planning', stopped: false, ask: 't1', convo: 'c1' }, { id: 'w1', subJobId: 'api', phase: 'implementation', stopped: false }];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
-  const convos = () => [...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo')];
-  assert.match(f.q('#job-dialog .job-talk-head').textContent, /Conversations with the wrangler/);
-  assert.deepEqual(convos().map((c) => c.querySelector('.job-talk-convo-head').textContent), ['Conversation 1Answering', 'Conversation 2on Deliver webEscalatedWeb waits on api.'], 'the answered one is folded to its answer');
-  unfold(f);
-  assert.deepEqual(convos().map((c) => [c.querySelector('.job-change').dataset.changeConvo, c.querySelector('textarea').placeholder]),
-    [['c1', 'Add to your question…'], ['c2', 'Reply in this conversation…']], 'a box in each, saying where its words go');
-  const boxes = [...f.q('#job-dialog').querySelectorAll('.job-change')];
-  assert.equal(boxes.length, 3);
-  assert.equal(boxes[2].dataset.changeConvo, '', 'the last box starts a new conversation');
-  assert.match(boxes[2].querySelector('.job-change-to').textContent, /New conversation/);
-  const say = (box, words) => { const text = box.querySelector('textarea'); text.value = words; text.dispatchEvent(f.event('input')); box.querySelector('[data-change-send]').click(); };
-  say(convos()[0].querySelector('.job-change'), 'And docs?');
+  const convo = (id) => f.q(`#job-dialog [data-convo="${id}"]`);
+  const open = () => [...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo:not(.is-folded)')].map((c) => c.dataset.convo);
+  const box = () => { const all = f.q('#job-dialog').querySelectorAll('.job-change'); assert.equal(all.length, 1, 'one box, never one per conversation'); return all[0]; };
+  const where = () => box().closest('[data-convo]')?.dataset.convo ?? null;
+  const row = (id) => convo(id).querySelector('.job-talk-convo-head');
+  assert.match(f.q('#job-dialog .job-talk-head').textContent, /Conversations with Wrangler/);
+  assert.deepEqual([...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo')].map(headText), ['Conversation 1Answering', 'Conversation 2on Deliver webEscalated']);
+  assert.deepEqual(open(), ['c2'], 'only the one spoken in last is open');
+  assert.deepEqual([where(), box().dataset.changeConvo, box().querySelector('textarea').placeholder], ['c2', 'c2', 'Reply in this conversation…'], 'and the box is at its foot');
+  assert.match(box().querySelector('.job-change-to').textContent, /↩ Conversation 2/, 'the chip names it');
+  const type = (words) => { const text = box().querySelector('textarea'); text.value = words; text.dispatchEvent(f.event('input')); };
+  type('Half a thought');
+  row('c1').click();
+  assert.deepEqual(open(), ['c1'], 'a title row opens that one and folds the other');
+  assert.deepEqual([where(), box().querySelector('textarea').placeholder, box().querySelector('textarea').value], ['c1', 'Add to your question…', ''], 'the box goes with it, saying it is still answering');
+  box().querySelector('[data-change-new]').click();
+  assert.deepEqual(open(), [], '× folds it');
+  assert.deepEqual([where(), box().dataset.changeConvo], [null, ''], 'and the box below them all starts a new conversation');
+  assert.match(box().querySelector('.job-change-to').textContent, /New conversation/);
+  row('c2').click();
+  assert.equal(box().querySelector('textarea').value, 'Half a thought', 'each conversation keeps its own draft');
+  const say = (words) => { type(words); box().querySelector('[data-change-send]').click(); };
+  row('c1').click();
+  say('And docs?');
   assert.equal(f.sent.at(-1).convo, 'c1', 'sent before it replied, to the same wrangler');
-  assert.equal(convos()[0].querySelector('[data-sent-state] .job-sent-bubble').textContent, 'And docs?', 'the bubble stays in its conversation');
-  say(convos()[1].querySelector('.job-change'), 'Can it go faster?');
-  assert.equal(f.sent.at(-1).convo, 'c2');
-  say([...f.q('#job-dialog').querySelectorAll('.job-change')].at(-1), 'Is api deployed?');
+  assert.equal(convo('c1').querySelector('[data-sent-state] .job-sent-bubble').textContent, 'And docs?', 'the bubble lands at the end of its conversation');
+  assert.equal(where(), 'c1', 'and the box stays there');
+  f.view.created({ event: 'job-action-complete', jobId: 'job1', action: 'request-change' });
+  row('c1').click();
+  assert.deepEqual([open(), box().dataset.changeConvo], [[], ''], 'its own title row folds the open one');
+  say('Is api deployed?');
   assert.equal(f.sent.at(-1).convo, undefined, 'a new conversation of its own');
+  assert.equal(f.q('#job-dialog [data-sent-state]').closest('.job-talk'), null, 'its bubble sits above the box');
   assert.equal(jobStatus(job, job.subJobs[0]).text === 'Held for the plan change', false, 'its steps keep running');
   f.view.openDetail('job1', 'web');
-  assert.deepEqual(convos().map((c) => c.dataset.convo), ['c2'], 'a step shows only what was said on it');
+  assert.deepEqual([...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo')].map((c) => c.dataset.convo), ['c2'], 'a step shows only what was said on it');
+  assert.equal(where(), 'c2');
 });
 
-test('an idle conversation folds to one line, the start of what was said back last; only the one at work stays open; a click toggles and the choice survives a tick', (t) => {
+test('a conversation is named by Haiku: a loader while it is pending, its title once it lands, Conversation N without one', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'human', text: 'Add a <CLI>', convo: 'c2' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }, { id: 'c2', at: 2, pending: null, titlePending: true }];
+  job.runs = [];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const head = (id) => f.q(`#job-dialog [data-convo="${id}"] .job-talk-convo-head b`);
+  assert.equal(head('c1').textContent, 'Conversation 1');
+  assert.ok(head('c2').querySelector('.job-title-loader[role="status"]'), 'a loader while Haiku names it');
+  delete job.convos[1].titlePending; job.convos[1].title = 'A <CLI> for the API';
+  f.view.update(f.data);
+  assert.equal(head('c2').innerHTML, 'A &lt;CLI&gt; for the API', 'escaped');
+  assert.match(f.q('#job-dialog .job-change-to').textContent, /↩ A <CLI> for the API/, 'the box names it the same way');
+});
+
+test('a failing step opens the box on a new conversation, and dismissing the open one moves the box below them all', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued', error: 'Tests failed' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'Why red?', sub: 'api', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'A flaky suite.', sub: 'api', convo: 'c1' }];
+  job.convos = [{ id: 'c1', at: 1, sub: 'api', pending: null, seenAt: 3 }];
+  job.runs = [];
+  f.view.update(f.data);
+  f.view.openDetail('job1', 'api');
+  const box = () => f.q('#job-dialog .job-change');
+  assert.deepEqual([box().dataset.changeConvo, box().classList.contains('is-open'), f.q('#job-dialog [data-convo="c1"]').classList.contains('is-folded')], ['', true, true], 'what to do about it is a new decision');
+  f.q('#job-dialog [data-convo="c1"] .job-talk-convo-head').click();
+  assert.deepEqual([box().dataset.changeConvo, box().classList.contains('is-open')], ['c1', false]);
+  f.q('#job-dialog [data-convo-dismiss]').focus();
+  f.q('#job-dialog [data-convo-dismiss]').click();
+  assert.equal(f.sent.at(-1).action, 'dismiss-convo');
+  job.convos[0].dismissedAt = 4;
+  f.view.update(f.data);
+  assert.equal(box().dataset.changeConvo, '');
+});
+
+test('an idle conversation folds to its title row alone; only the one answering or last asked in is open; a title row opens one in its place and the choice survives a tick', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
   job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is <left>?', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Only web.\n\nAnd docs, later.', convo: 'c1' },
-    { id: 't3', at: 3, from: 'human', text: 'Fine', convo: 'c1' }, { id: 't4', at: 4, from: 'wrangler', kind: 'answer', text: 'Noted <b>it</b>.\nMore below.', convo: 'c1' },
+    { id: 't3', at: 3, from: 'human', text: 'Fine', convo: 'c1' }, { id: 't4', at: 4, from: 'wrangler', kind: 'answer', text: 'Noted.', convo: 'c1' },
     { id: 't5', at: 5, from: 'human', text: 'Is api deployed?', convo: 'c2' }, { id: 't6', at: 6, from: 'wrangler', kind: 'answer', text: 'Not yet.', convo: 'c2' },
     { id: 't7', at: 7, from: 'human', text: 'Why slow?', convo: 'c3' }];
   job.convos = [{ id: 'c1', at: 1, pending: null }, { id: 'c2', at: 5, pending: null }, { id: 'c3', at: 7, pending: { at: 7, asks: [{ messageId: 't7', feedback: 'x', sentAt: 7 }] } }];
@@ -1828,28 +1882,33 @@ test('an idle conversation folds to one line, the start of what was said back la
   f.q('[data-board="job1"] .job-plate-open').click();
   const convo = (id) => f.q(`#job-dialog [data-convo="${id}"]`);
   const folded = () => ['c1', 'c2', 'c3'].filter((id) => convo(id).classList.contains('is-folded'));
-  assert.deepEqual(folded(), ['c1', 'c2'], 'the one answering stays open; the others fold');
-  assert.equal(convo('c1').querySelector('.job-talk-line').innerHTML, 'Noted &lt;b&gt;it&lt;/b&gt;.', 'one line: the first of the latest reply, escaped');
-  assert.equal(convo('c1').querySelectorAll('[data-talk]').length, 0, 'no question, no messages');
-  assert.equal(convo('c1').querySelector('.job-change'), null, 'no box while folded');
+  assert.deepEqual(folded(), ['c1', 'c2'], 'the one answering is open; the others fold');
+  assert.deepEqual([...convo('c1').children].map((c) => c.tagName), ['HEADER'], 'folded, nothing but the title row');
+  assert.equal(convo('c1').querySelectorAll('[data-talk]').length, 0, 'not even the first message');
+  assert.equal(headText(convo('c1')), 'Conversation 14 messages');
   assert.equal(convo('c3').querySelector('[data-convo-dismiss]'), null, 'no × while it is answering');
-  assert.ok(convo('c3').querySelector('.job-change'));
+  assert.ok(convo('c3').querySelector('.job-change'), 'the box is at the open one\'s foot');
 
   job.talk.push({ id: 't8', at: 8, from: 'wrangler', kind: 'answer', text: 'A slow suite.', convo: 'c3' });
   job.convos[2].pending = null; job.runs = [];
   f.view.update(f.data);
-  assert.deepEqual(folded(), ['c1', 'c2', 'c3'], 'answered, it folds to its answer');
-  assert.equal(convo('c3').querySelector('.job-talk-line').textContent, 'A slow suite.');
+  assert.deepEqual(folded(), ['c1', 'c2'], 'answered, it stays open: the human asked in it last');
 
   convo('c1').querySelector('.job-talk-convo-head').click();
-  assert.deepEqual(folded(), ['c2', 'c3'], 'a click on the header unfolds it');
+  assert.deepEqual(folded(), ['c2', 'c3'], 'a click on a title row opens it in place of the other');
   assert.equal(convo('c1').querySelectorAll('[data-talk]').length, 4);
   assert.equal(convo('c1').querySelector('.job-talk-fold').getAttribute('aria-expanded'), 'true');
-  assert.equal(convo('c1').querySelector('.job-talk-line'), null);
+  assert.ok(convo('c1').querySelector('.job-change'));
   f.view.update(f.data);
   assert.deepEqual(folded(), ['c2', 'c3'], 'the choice survives a tick');
   convo('c1').querySelector('.job-talk-convo-head').click();
-  assert.deepEqual(folded(), ['c1', 'c2', 'c3'], 'and folds again');
+  assert.deepEqual(folded(), ['c1', 'c2', 'c3'], 'its own header folds it');
+  assert.equal(f.q('#job-dialog .job-change').closest('.job-talk'), null, 'and the box goes below them all');
+  convo('c1').querySelector('.job-talk-convo-head').click();
+  const text = f.q('#job-dialog .job-change textarea'); text.value = 'And tests?'; text.dispatchEvent(f.event('input')); f.q('#job-dialog [data-change-send]').click();
+  job.talk.push({ id: 't9', at: 9, from: 'human', text: 'And tests?', convo: 'c1' });
+  f.view.update(f.data);
+  assert.deepEqual(folded(), ['c2', 'c3'], 'just asked in, it is open');
 });
 
 test('× dismisses an idle conversation through dismiss-convo, and one dismissed is drawn nowhere', (t) => {
@@ -1886,18 +1945,18 @@ test('a question asked on a step stays on that step until the wrangler escalates
   job.runs = [];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
-  const convos = () => [...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo')].map((c) => [c.dataset.convo, c.querySelector('.job-talk-convo-head').textContent]);
-  assert.deepEqual(convos(), [['c1', 'Conversation 1What is left?']], 'the step\'s conversation is not on the job');
+  const convos = () => [...f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-convo')].map((c) => [c.dataset.convo, headText(c)]);
+  assert.deepEqual(convos(), [['c1', 'Conversation 1']], 'the step\'s conversation is not on the job');
   f.view.openDetail('job1', 'web');
-  assert.deepEqual(convos(), [['c2', 'Conversation 2Web waits on api.']], 'only on its step');
+  assert.deepEqual(convos(), [['c2', 'Conversation 2']], 'only on its step');
   f.view.openDetail('job1', 'api');
   assert.equal(f.q('#job-dialog .job-talk'), null);
 
   job.convos[1].escalatedAt = 3;
   f.view.openDetail('job1');
-  assert.deepEqual(convos(), [['c1', 'Conversation 1What is left?'], ['c2', 'Conversation 2on Deliver webEscalatedWeb waits on api.']]);
+  assert.deepEqual(convos(), [['c1', 'Conversation 1'], ['c2', 'Conversation 2on Deliver webEscalated']], 'folded, c1 drops what it was on');
   f.view.openDetail('job1', 'web');
-  assert.deepEqual(convos(), [['c2', 'Conversation 2Also on the jobWeb waits on api.']]);
+  assert.deepEqual(convos(), [['c2', 'Conversation 2Also on the job']]);
   f.view.openDetail('job1', 'api');
   assert.equal(f.q('#job-dialog .job-talk'), null, 'never on another step');
 });
@@ -1910,27 +1969,25 @@ test('a change idea goes straight to a proposal card in the same thread, with it
   job.runs = [{ id: 'plan2', subJobId: null, phase: 'planning', stopped: false }];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
-  assert.match(f.q('#job-dialog .job-talk-working').textContent, /The wrangler is drawing a proposal…/);
+  assert.match(f.q('#job-dialog .job-talk-working').textContent, /Wrangler is drawing a proposal…/);
   job.runs = [];
   const plan = { ...job.plan, subJobs: [...job.plan.subJobs, { id: 'cli', title: 'Deliver cli', after: ['web'] }] };
   job.replan.proposal = { id: 'plan2', plan, merged: plan, changes: { frozen: ['api'], kept: [], edited: [{ id: 'web', fields: ['brief', 'show'] }], added: ['cli'], removed: [] }, actions: [], alternatives: [] };
   job.talk.push({ id: 't2', at: 2, from: 'wrangler', kind: 'proposal', proposalId: 'plan2', text: 'Adds the CLI once web lands.', options: 1,
     changes: [{ mark: 'added', title: 'Deliver cli' }, { mark: 'edited', title: 'Deliver web', detail: 'brief, show' }] });
   f.view.update(f.data);
-  assert.equal(f.q('#job-dialog .job-talk-line').textContent, 'Adds the CLI once web lands.', 'drawn, its thread folds: the decision card above says it');
-  unfold(f);
   const card = f.q('#job-dialog .job-talk-card');
-  assert.equal(card.tagName, 'DETAILS', 'on the job the waiting card folds like a decided one');
+  assert.equal(card.tagName, 'DETAILS', 'on the job the waiting card folds like a decided one: the decision card above says it');
   assert.match(card.querySelector('summary').textContent, /Proposed a change.*Waiting for you/);
   assert.deepEqual([...card.querySelectorAll('.job-talk-change')].map((li) => [li.querySelector('.job-mark').textContent, li.querySelector('.job-talk-change-title').textContent]),
     [['New', 'Deliver cli'], ['Edited', 'Deliver web brief, show']]);
+  assert.equal(card.querySelector('[data-talk-review]'), null);
   assert.ok(f.q('.job-decision [data-action="approve-replan"]'), 'the proposal is approved on the decision card');
   f.view.openDetail('job1', 'web');
   assert.equal(f.q('#job-dialog .job-talk'), null, 'a job-level idea stays on the job');
   f.view.openDetail('job1');
   job.replan = null; job.talk[1].outcome = 'approved';
   f.view.update(f.data);
-  unfold(f);
   assert.match(f.q('#job-dialog .job-talk-card summary').textContent, /Approved/);
   assert.equal(f.q('#job-dialog .job-talk-card [data-talk-review]'), null);
 });
@@ -1948,16 +2005,16 @@ test('a forwarded idea is one line in the conversation, and the session\'s reply
       changes: [{ mark: 'forward', title: 'Deliver api', sub: 'api' }], outcome: 'approved', outcomeAt: 3, forwarded: [{ sub: 'api', message: 'm1' }] }];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
-  assert.equal(f.q('#job-dialog .job-talk-line').textContent, 'Checked at 375px: it <wraps> fine.', 'folded, the session\'s answer is the line');
-  unfold(f);
   const talk = f.q('#job-dialog .job-talk');
   assert.equal(talk.querySelector('.job-talk-card'), null, 'no Proposed a change card, no Approved tag');
-  assert.equal(talk.querySelector('.job-talk-forward').textContent.replace(/\d.*$/, '').trim(), 'The wrangler forwarded this to Deliver api\'s session');
+  assert.equal(talk.querySelector('.job-talk-forward').textContent.replace(/\d.*$/, '').trim(), 'Forwarded toDeliver api');
+  assert.equal(talk.querySelector('.job-talk-forward .job-talk-step').textContent, 'Deliver api', 'the step is its own muted span');
   const said = [...talk.querySelectorAll('.job-talk-session')];
   assert.equal(said.length, 1, 'only what answered this message, not what came after the next one');
-  assert.match(said[0].querySelector('.job-idea-who').textContent, /^Session · Deliver api/);
+  assert.match(said[0].querySelector('.job-idea-who').textContent, /^SessionDeliver api/);
+  assert.equal(said[0].querySelector('.job-idea-who .job-talk-step').textContent, 'Deliver api');
   assert.equal(said[0].querySelector('.job-idea-body').textContent, 'Checked at 375px: it <wraps> fine.');
-  assert.equal(said[0].querySelector('.job-idea-orb'), null, 'not the wrangler\'s orb');
+  assert.equal(said[0].querySelector('.wrangler-mark'), null, 'not Wrangler\'s mark');
   assert.deepEqual([...said[0].querySelectorAll('[data-shot-at] [data-ev-file]')].map((e) => [e.dataset.evSub, e.dataset.evFile]), [['api', 'narrow.png']]);
   assert.ok(f.sent.some((m) => m.type === 'job-evidence' && m.subJobId === 'api' && m.round === 1), 'its shot is fetched');
 
@@ -1989,7 +2046,7 @@ test('a forward the human discarded never claims it went, and a forward inside a
   job.talk[1].forwarded = [{ sub: 'api', message: 'm1' }];
   f.view.update(f.data);
   const after = f.q('#job-dialog .job-talk-card.tone-ok').closest('.job-talk-msg').nextElementSibling;
-  assert.match(after.textContent, /^Session · Deliver api.*Done\./, 'what the session said follows the change that forwarded to it');
+  assert.match(after.textContent, /^SessionDeliver api.*Done\./, 'what the session said follows the change that forwarded to it');
 });
 
 test('a decided proposal card folds to one line of counts by kind, opens on a click and stays as the human left it', (t) => {
@@ -2781,26 +2838,26 @@ test('a red PR\'s box is plain words: no Instant or Claude chips, and the idea g
   f.view.update(f.data); f.q('.job-plate-graph [data-sub="api"]').dispatchEvent(f.event('click'));
   assert.deepEqual([f.q('.job-quick'), f.q('[data-quick]'), f.q('[data-fill]')], [null, null, null], 'no chips');
   const box = f.q('.job-change');
-  assert.deepEqual([box.querySelector('.job-change-to').textContent, box.querySelector('textarea').placeholder, box.querySelector('[data-change-send]').getAttribute('aria-label')], ['WThe wrangler', 'Ask about this step, or say what to change…', 'Send to the wrangler']);
+  assert.deepEqual([box.querySelector('.job-change-to').textContent, box.querySelector('textarea').placeholder, box.querySelector('[data-change-send]').getAttribute('aria-label')], ['Wrangler', 'Ask about this step, or say what to change…', 'Send to Wrangler']);
   assert.ok(box.querySelector('.job-change-attach input[type="file"]'), 'a picture can be picked as well as pasted or dropped');
   const text = box.querySelector('textarea'); text.value = 'Accept the flaky e2e'; text.dispatchEvent(f.event('input'));
   box.querySelector('[data-change-send]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', at: 'pr', ref: 'h1', text: 'Accept the flaky e2e' }, 'pinned to the head on screen');
   f.q('.job-dialog-close').click();
   f.q('.job-plate-graph [data-sub="web"]').dispatchEvent(f.event('click'));
-  assert.deepEqual([f.q('.job-quick'), f.q('.job-change-to').textContent], [null, 'WThe wrangler']);
+  assert.deepEqual([f.q('.job-quick'), f.q('.job-change-to').textContent], [null, 'Wrangler']);
 });
 
 test('a merged sub-job\'s idea goes to the planner; the box stays while the planner draws (a question is its own conversation), and adds to the proposal once one waits', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'deployment', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', mergeCommit: 'm1' }, deploymentResult: { status: 'failing', runs: [] } }, { ...sub('web'), stage: 'implementation', state: 'queued' }];
   f.view.update(f.data); f.q('.job-plate-graph [data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.deepEqual([f.q('.job-change').dataset.changeAt, f.q('.job-change-to').textContent, f.q('.job-quick')], ['step', 'WThe wrangler', null]);
+  assert.deepEqual([f.q('.job-change').dataset.changeAt, f.q('.job-change-to').textContent, f.q('.job-quick')], ['step', 'Wrangler', null]);
   job.replan = { feedback: 'x', at: 1, proposal: null }; f.view.update(f.data);
   assert.ok(f.q('.job-change textarea'), 'a question can go to a conversation of its own meanwhile');
   job.replan.proposal = { id: 'run_p', plan: job.plan, merged: job.plan, changes: { frozen: [], kept: [], edited: [], added: [], removed: [] }, actions: [] }; f.view.update(f.data);
   assert.equal(f.q('.job-quick'), null);
-  assert.deepEqual([f.q('.job-change').dataset.changeAt, f.q('.job-change-to').textContent], ['step', 'WThe wrangler']);
+  assert.deepEqual([f.q('.job-change').dataset.changeAt, f.q('.job-change-to').textContent], ['step', 'Wrangler']);
 });
 
 test('a plan change reads as one decision card holding both buttons; under it the graph and each edit, unchanged work fading (charlie-ps/wrangler-squared#214)', (t) => {
@@ -3277,7 +3334,7 @@ test('a screenshot pasted into the Code review box is staged, held back from Sen
 
 test('an upload that fails stays in the tray, says it could not attach, holds Send back, and goes once a retry lands', async (t) => {
   const f = fixture(t); parkedJob(f);
-  let fail = true; f.staging.stage = async () => { if (fail) throw new Error('Not connected to the wrangler — try again in a moment.'); return { name: 'paste-1700000000000-cccc3333.png' }; };
+  let fail = true; f.staging.stage = async () => { if (fail) throw new Error('Not connected to Wrangler — try again in a moment.'); return { name: 'paste-1700000000000-cccc3333.png' }; };
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   const box = () => f.q('#job-dialog .job-change'), text = box().querySelector('textarea');
   text.value = 'This hover is still illegible'; text.dispatchEvent(f.event('input'));
@@ -3286,7 +3343,7 @@ test('an upload that fails stays in the tray, says it could not attach, holds Se
   await new Promise((r) => setTimeout(r, 0)); await new Promise((r) => setTimeout(r, 0));
   const tile = box().querySelector('.job-change-tray li');
   assert.ok(tile?.classList.contains('failed'), 'the picture is still there, marked');
-  assert.match(box().querySelector('.job-change-error').textContent, /Couldn’t attach this image: Not connected to the wrangler/);
+  assert.match(box().querySelector('.job-change-error').textContent, /Couldn’t attach this image: Not connected to Wrangler/);
   assert.equal(box().querySelector('.job-change-error').hidden, false);
   assert.equal(box().querySelector('[data-change-send]').disabled, true, 'Send would lose it');
   fail = false; box().querySelector('[data-ask-retry]').click();
@@ -3343,7 +3400,7 @@ test('the sent moment: the idea lifts into a bubble that says sending, ticks to 
   send('Pin the client to v3');
   const sent = () => f.q('#job-dialog .job-sent');
   assert.deepEqual([sent().dataset.sentState, sent().querySelector('.job-sent-bubble').textContent], ['sending', 'Pin the client to v3']);
-  assert.match(sent().textContent, /Sending to the wrangler…/);
+  assert.match(sent().textContent, /Sending to Wrangler…/);
   assert.equal(f.q('.job-change textarea').value, '', 'the box is empty again');
   assert.equal(f.q('[data-change-send]').disabled, true);
   assert.ok(sent().classList.contains('fresh'), 'it rises once');
@@ -3352,7 +3409,7 @@ test('the sent moment: the idea lifts into a bubble that says sending, ticks to 
   f.view.created({ event: 'job-action-complete', jobId: 'job1', subJobId: 'api', action: 'request-change' });
   assert.equal(f.q('#job-dialog').open, true, 'the dialog stays: the bubble is the confirmation');
   assert.equal(sent().dataset.sentState, 'sent');
-  assert.match(sent().textContent, /Sent to the wrangler · /);
+  assert.match(sent().textContent, /Sent to Wrangler · /);
   assert.doesNotMatch(sent().textContent, /The planner sends feedback back to this step/, 'the routing hint is the box\'s own footer, not repeated under the bubble');
   assert.ok(sent().querySelector('.job-sent-tick'));
   send('Also bump the lockfile');
@@ -3381,7 +3438,7 @@ test('a follow-up the thread holds before its ack shows once: the conversation\'
   job.talk.push({ id: 't3', at: Date.now(), from: 'human', text: 'What other options do I have?', convo: 'c1' });
   f.view.update(f.data);
   assert.equal(copies(), 1, 'the thread has it before the ack: its row is the one copy');
-  assert.doesNotMatch(f.q('#job-dialog').textContent, /Sending to the wrangler…/);
+  assert.doesNotMatch(f.q('#job-dialog').textContent, /Sending to Wrangler…/);
   f.view.created({ event: 'job-action-complete', jobId: 'job1', subJobId: null, action: 'request-change' });
   assert.equal(copies(), 1, 'and still one once the ack lands');
   assert.equal(f.q('#job-dialog [data-convo="c1"]').classList.contains('is-folded'), false, 'written in, it stays open');
@@ -3444,7 +3501,7 @@ test('a declared red is the only red you act on: counted in Needs you, with what
   f.view.update(f.data);
   assert.deepEqual([subState(job, api), subLabel(job, api), subLine(job, api), jobNeedsReview(job, api), jobState(job)], ['failing', 'Declared red', '#412 · Declared red', true, 'failing']);
   assert.deepEqual([plateAsk(job).label, plateAsk(job).button, plateAsk(job).sub], ['Declared red', 'Decide', 'api']);
-  assert.equal(changeRoute('pr', job, api).placeholder, 'Ask the wrangler, or say what to change…');
+  assert.equal(changeRoute('pr', job, api).placeholder, 'Ask Wrangler, or say what to change…');
   f.view.openDetail('job1', 'api');
   const dialog = f.q('#job-dialog');
   const box = dialog.querySelector('.job-event-fix.declared');
@@ -3490,8 +3547,8 @@ test('a red the planner declared after a real failure still shows both, and a de
   let event = f.q('#job-dialog .job-event');
   assert.match(event.querySelector('p').textContent, /Automatic repair limit reached/);
   assert.ok(event.querySelector('.job-event-fix.declared:not(.alone)'));
-  assert.equal(event.querySelector('small').textContent, 'Declared by the wrangler');
-  for (const [auto, footer] of [[false, 'Declared by the wrangler'], [true, 'Declared automatically']]) {
+  assert.equal(event.querySelector('small').textContent, 'Declared by Wrangler');
+  for (const [auto, footer] of [[false, 'Declared by Wrangler'], [true, 'Declared automatically']]) {
     api.red = { declared: { at: 1, ref: redRef(job, api), summary: 'Still red', tried: [], ask: '', auto } };
     f.view.update(f.data); f.view.openDetail('job1', 'api');
     event = f.q('#job-dialog .job-event');
@@ -3666,7 +3723,7 @@ test('a forward reads as the quote the session will be told, pinned to its round
   const job = { id: 'job1', runs: [{ id: 'run_1', subJobId: 'api', stopped: false, parkedFor: 'ready', sessionId: 's1' }] };
   const sub = { id: 'api', ready: { round: 2 }, answering: { kind: 'change', round: 2 }, thread: [{ id: 'm1', at: 1, from: 'human', via: 'planner', to: 'agent', text: 'Not enough <b>spacing</b>', round: 2, sentAt: null }] };
   const html = threadHtml(job, sub);
-  assert.match(html, /<span class="job-msg-via">via the wrangler<\/span>/);
+  assert.match(html, /<span class="job-msg-via">via Wrangler<\/span>/);
   assert.match(html, /Not enough &lt;b&gt;spacing&lt;\/b&gt;/, 'the words are escaped');
   assert.doesNotMatch(threadHtml(job, { ...sub, thread: [{ ...sub.thread[0], via: undefined }] }), /job-msg-via/);
 });

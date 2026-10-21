@@ -367,8 +367,8 @@ function sendBack(job, moved, now) {
   const view = step && changeView(job, step);
   requestReplan(job, `Wrangler, not the human: the human approved your last proposal, but it could not apply because the job moved under it: ${what}. Propose again against the job as it stands now; the human's ideas above still stand.`,
     now, null, { source: view ? { sub: step.id, ...view } : source });
-  return { lines: moved.map(({ sub, how }) => ({ sub, detail: `${quoted(sub.title)} ${how} since the plan change was proposed, so it went back to the wrangler` })),
-    detail: `Sent the plan change back to the wrangler: ${moved.map(({ sub, how }) => `${quoted(sub.title)} ${how}`).join(', ')} since it was proposed`, feedback: job.replan.feedback, sentBack: true };
+  return { lines: moved.map(({ sub, how }) => ({ sub, detail: `${quoted(sub.title)} ${how} since the plan change was proposed, so it went back to Wrangler` })),
+    detail: `Sent the plan change back to Wrangler: ${moved.map(({ sub, how }) => `${quoted(sub.title)} ${how}`).join(', ')} since it was proposed`, feedback: job.replan.feedback, sentBack: true };
 }
 
 // The re-planner's view of the job: every sub-job as it stands, which ones are
@@ -379,7 +379,7 @@ export function replanStatus(job, sub) {
     : sub.on ? ` · on ${sub.on.sub}/${sub.on.at}` : '';
   const red = sub.pr?.checkStatus === 'failing' && sub.stage === 'pr' ? ` · checks FAILING at head ${sub.pr.head}${sub.pr.dirty ? ' (merge conflicts)' : ''}`
     : sub.stage === 'deployment' && sub.deploymentResult?.status === 'failing' ? ` · post-merge run FAILING at merge ${sub.pr?.mergeCommit}${sub.recoveredBy ? ` (recovering via ${sub.recoveredBy})` : ''}` : '';
-  const run = liveRun(job, sub.id) ? ' · a step is running' : parkedReadyRun(job, sub) && sub.ready ? ` · its session is OPEN on review round ${sub.ready.round || 1}${sub.answering ? ' (answering the last message)' : ' (forward feedback to it)'}` : '';
+  const run = liveRun(job, sub.id) ? ' · a step is running' : parkedReadyRun(job, sub) && sub.ready ? ` · its session is OPEN on review round ${sub.ready.round || 1}${sub.answering ? ' (answering the last message; forward feedback to it, it is read next)' : ' (forward feedback to it)'}` : '';
   const state = sub.cancelledAt ? 'cancelled' : `${sub.stage}${sub.state ? `/${sub.state}` : ''}`;
   return `- ${sub.id} (${sub.kind || 'pr'}) ${JSON.stringify(sub.title)}: ${state}${pr}${red}${write}${run}${isFrozen(sub) ? ' · FROZEN' : ''}`;
 }

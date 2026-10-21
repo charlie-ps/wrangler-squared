@@ -186,17 +186,23 @@ text as public as the rest of this repo.
   `reply` when the idea was only a question (`answerReplan`, refused once a red or
   earlier proposal rides on it). An ask run that dies or blocks says so in its
   conversation (`askFailed`), never `job.error`. `planningRun` (client) ignores ask
-  runs, so Approve stays live while one answers. Every conversation ends in
-  its own box (`boxHtml`, `data-change-convo`), and the box below them all starts a
-  new one; pasted pictures and the sent bubble belong to the box they were used in
-  (`askImages[].box`, `askSent.convo`). A conversation opened from a step
+  runs, so Approve stays live while one answers. ONE box, and ONE
+  conversation open at a time, with the box at its foot (`boxHtml`, `data-change-convo`):
+  `replyTarget` is the human's pick (a title row opens that one and folds the other, the
+  open one's header or the chip's × folds it), else `defaultTarget`, the one at work or
+  spoken in last; '' (none open, always on a failing step) puts the box below them all
+  for a new one. Drafts are kept per target (`boxDrafts`), pasted pictures by
+  `askImages[].box`, and the sent bubble lands at the end of its conversation
+  (`askSent.convo`) or above the box. Haiku names each new conversation from its
+  first message after the send (`handlers.js nameConvo`, `convo.titlePending` drawn
+  as a loader, `titleConvo`); without a title it is "Conversation N". Folded, a
+  conversation is its title row alone. A conversation opened from a step
   (`convo.sub`) is that step's: its wrangler's prompt names the step
   (`stepConvoLine`), and it shows ONLY on that step's dialog until the wrangler
   escalates it (`reply {escalate:true}`, or any proposal it draws, `escalate` →
   `convo.escalatedAt`); then the job's list shows it too (`talkFor`, client-side
-  only). A step's dialog shows only what was said on it. A conversation not at work folds to its
-  header and ONE line, the first line of what was said back last (`convoOpen`, `foldLine`; clicks
-  and the human writing in it open it, client-side, per id; it names its step once, in the header), and its ×
+  only). A step's dialog shows only what was said on it. Where the view takes no reply, a conversation not at work
+  and not the one the human spoke in last folds to its title row (`convoOpen`; clicks are client-side, per id). Its ×
   (`dismiss-convo`, refused while it answers or holds a plan change) stamps `convo.dismissedAt`,
   which hides it everywhere until anything new is said in it (`say` clears it, so a reply
   from a stale box or a wrangler's message brings it back). A job
@@ -223,7 +229,7 @@ text as public as the rest of this repo.
   and Approve/Discard; what Wrangler found, its evidence and the asks wait behind Why, other options fold to their
   labels, and the graph, every change and the plan details are drawn under the card as before. A
   declaration leads with its `ask` and the summary's first sentence (`ESCALATE_VOICE`), and an answer
-  is folded to its first line (`REPLY_RULES`). The prompts are PHRASING rules, never sentence counts
+  leads with the answer in its first line (`REPLY_RULES`). The prompts are PHRASING rules, never sentence counts
   or length caps: text may grow when a case needs it, because the UI folds it.
 - **`change` and `read` head `STATE_ORDER`, above `failing`** (`public/job-state.js`). `change` (amber) is a
   plan waiting on you: a plan change and the steps it acts on (so a red job with a proposal waiting shows "Plan
@@ -263,10 +269,12 @@ text as public as the rest of this repo.
   drafts park (no slot, `settle()` holds it only to its card existing) but never matched by
   `draftsDecided`. The run waits on `waitsOnReview`; approve, a rework, drop or a retry end
   it quietly and the publish run then claims the sub-job. An approved `forward {sub, note}`
-  action (pinned to `{at:'round', ref: ready.receiptId}`, refused while `answering`; a `rework`
+  action (pinned to `{at:'round', ref: ready.receiptId}`; one made while it is `answering` queues behind
+  that reply, mailed one at a time to a waiting run, `answered` moving `answering` on; a `rework`
   of a parked step is refused in its favour) writes a `sub.thread` message (`askAgent`,
   `via: 'planner'`, `sentAt: null`) and the runner mails
-  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again). In the
+  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again); the session's
+  words go above anything still queued (`sayInThread`), so each reply sits under its message. In the
   wrangler conversation a forwards-only card (`forward: true`, no prose) is one line, and its
   approval stamps `forwarded: [{sub, message}]`, so `public/job-talk.js` draws the session's
   answers from `sub.thread` right after it. The

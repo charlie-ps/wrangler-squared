@@ -39,7 +39,7 @@ test('the shipped registry is the two Writes pages, review defaults, See it work
   const idea = UPDATES.find((u) => u.id === 'new-idea');
   const drawn = (i) => { const d = document.createElement('div'); d.innerHTML = idea.figure(i); return d; };
   const at = (i) => { const d = drawn(i); return { plate: d.querySelector('.wn-ideas-plate .job-plate'), sky: d.querySelector('.wn-ideas-plate .gx')?.dataset, chat: d.querySelector('.wn-ideas-chat .job-idea-thread') }; };
-  assert.match(at(0).chat.textContent, /The wrangler is reading the idea/, 'an idea opens on the planner reading it');
+  assert.match(at(0).chat.textContent, /Wrangler is reading the idea/, 'an idea opens on the planner reading it');
   assert.ok(at(0).plate.classList.contains('idea'));
   assert.deepEqual([0, 1, 2, 3].map((i) => at(i).sky.stage), ['0', '1', '0', '2'], 'its sky brightens as the planner asks, then suggests');
   assert.match(at(1).plate.querySelector('.job-plate-stub').textContent, /Wrangler asked/);
@@ -55,7 +55,7 @@ test('the shipped registry is the two Writes pages, review defaults, See it work
   const said = (i) => { const d = document.createElement('div'); d.innerHTML = talk.figure(i); return d; };
   assert.equal(said(0).querySelector('.job-talk'), null, 'a running job with nothing said yet');
   assert.match(said(1).querySelector('.job-change-text').textContent, /column order/);
-  assert.match(said(3).querySelector('.job-talk-convo').textContent, /Answering.*The wrangler is looking into it/s, 'the question opens Conversation 1');
+  assert.match(said(3).querySelector('.job-talk-convo').textContent, /Answering.*Wrangler is looking into it/s, 'the question opens Conversation 1');
   assert.match(said(3).querySelector('.job-node .job-status').textContent, /Checks running/, 'and the PR carries on meanwhile');
   assert.match(said(4).querySelector('.job-talk-msg').textContent, /follows the table’s visible columns/);
   const second = said(6);
@@ -94,7 +94,7 @@ test('the shipped registry is the two Writes pages, review defaults, See it work
   assert.equal(p.title(), 'Start with an idea, not a plan');
   assert.ok(p.q('.update-panel .wn-ideas .job-plate.idea .gx.nb[data-inflow]'), 'the idea’s plate with its forming sky');
   p.click('[data-update="next"]');
-  assert.equal(p.title(), 'Talk it through with the wrangler');
+  assert.equal(p.title(), 'Talk it through with Wrangler');
   assert.ok(p.q('.update-panel .wn-talk .job-change'));
   assert.equal(p.q('[data-update="next"]').textContent, 'Got it');
   p.click('[data-update="next"]');
@@ -237,7 +237,7 @@ test('a browser that has seen every older update opens just the wrangler convers
   const p = page(t);
   const storage = memoryStorage({ [SEEN_UPDATES_KEY]: JSON.stringify(UPDATES.filter((u) => u.id !== 'wrangler-talk').map((u) => u.id)) });
   assert.equal(createUpdates({ storage }).maybeShow(), true);
-  assert.equal(p.title(), 'Talk it through with the wrangler');
+  assert.equal(p.title(), 'Talk it through with Wrangler');
   assert.equal(p.q('.intro-count').textContent, '');
   p.click('[data-update="next"]');
   assert.ok(seenIds(storage).includes('wrangler-talk'));

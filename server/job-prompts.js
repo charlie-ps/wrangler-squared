@@ -192,9 +192,8 @@ const PROPOSAL_VOICE = [
   '- alternatives: the same rules. Offer one only when a different choice is genuinely reasonable.',
   'Say each fact once across the whole card. No preamble, no restating the question, no reassurance, no hedging. Name things as the human sees them (the message, the button, the PR, the step\'s title), never file or function names, sub-job ids, or the plan\'s own words: brief, show, check, context, round, forward, rework, frozen, pinned. Paths, ids, commands, plan lines and run numbers go in evidence only. The session open on a step\'s review is the agent that did that work, now waiting on the human\'s verdict: call it that (the agent that built it), never a reviewer.',
 ].join('\n');
-// An answer is folded to its first line until the human opens the conversation
-// (public/job-talk.js), so that line is the answer. Phrasing rules, never a length.
-export const REPLY_RULES = 'The board shows only the FIRST LINE of your text until the human opens the conversation, so the first line is the answer itself, with no preamble ("Yes.", "This answer is about…" are wasted) and no saying which step this is about (the conversation already says it). After it, include only what the human needs to act: what they can do, and what happens if they leave it. Cut background, history and explanation they did not ask for, however true. End with one line starting "How I know:" naming the runs, commits or files. Let the question set the length: a yes/no gets a line, a tangled one may need more, but never pad and never repeat. No headings.';
+// The human reads an answer at a glance, so its first line is the answer. Phrasing rules, never a length.
+export const REPLY_RULES = 'The human reads the FIRST LINE of your text at a glance, so the first line is the answer itself, with no preamble ("Yes.", "This answer is about…" are wasted) and no saying which step this is about (the conversation already says it). After it, include only what the human needs to act: what they can do, and what happens if they leave it. Cut background, history and explanation they did not ask for, however true. End with one line starting "How I know:" naming the runs, commits or files. Let the question set the length: a yes/no gets a line, a tangled one may need more, but never pad and never repeat. No headings.';
 // A pasted picture is a file the planner reads by path, as threadMail's are.
 const sayings = (job, messages) => messages.map((m) => `${m.from === 'planner' ? 'You' : 'The human'}: ${JSON.stringify(m.text)}${m.images?.length ? ` (pasted images, read them: ${m.images.map((i) => JSON.stringify(path.join(ideasDir(job.id), i.file))).join(', ')})` : ''}${suggestedLine(m)}`);
 const titles = (list) => list.map((x) => JSON.stringify(x.title)).reduce((acc, t, i, all) => (i === 0 ? t : `${acc}${i === all.length - 1 ? ' and' : ','} ${t}`), '');
@@ -389,7 +388,7 @@ const replanBlock = (job, run) => lines(
 // planned. The board calls the planner "the wrangler", so that is who the human is
 // talking to.
 const askBlock = (job, run, convo) => lines(
-  'This job is ALREADY RUNNING and the human has ASKED YOU A QUESTION about it in one of the job\'s conversations (the board calls you "the wrangler"). Where each sub-job stands now:',
+  'This job is ALREADY RUNNING and the human has ASKED YOU A QUESTION about it in one of the job\'s conversations (the board calls you "Wrangler"). Where each sub-job stands now:',
   ...standing(job),
   job.replan?.proposal ? `A plan change you proposed is waiting for the human: ${JSON.stringify({ plan: job.replan.proposal.plan, actions: job.replan.proposal.actions, diagnosis: job.replan.proposal.diagnosis })}` : '',
   `Current plan: ${JSON.stringify(job.plan)}`,
