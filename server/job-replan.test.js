@@ -171,3 +171,39 @@ test('an approved base change reaches the live sub-job, which is what the launch
   approveReplan(k, 'p1', { now: 1 });
   assert.equal(k.subJobs[0].base, 'main');
 });
+
+// A write the proposal kept as it stood, edited by the human outside a red
+// replan's hold and then made, or a step already landed whose stored entry no
+// longer matches: either way the proposal now asks a landed step to change, and
+// approving it must send it back to the planner, never refuse it forever.
+test('a landed step whose stored spec moved after the proposal goes back to the planner on approval', () => {
+  const subs = [spec('a'), session('n'), write('w-local', 'n', { type: 'comment', comment: 'Old words' })];
+  const proposal = (j) => ({ id: 'p1', plan: { context: '', subJobs: [spec('a', [], { brief: 'Redo a' }), subs[1], subs[2]] }, ...mergeReplan(j, { context: '', subJobs: [spec('a', [], { brief: 'Redo a' }), subs[1], subs[2]] }) });
+  const build = (wLive) => {
+    const j = { ...job(structuredClone(subs), [live(subs[0]), live(subs[1], { stage: 'session' }), live(subs[2], wLive)]), stage: 'active', replan: { feedback: 'Redo a' } };
+    const { merged, changes } = proposal(j);
+    j.replan.proposal = { id: 'p1', plan: { context: '', subJobs: [spec('a', [], { brief: 'Redo a' }), subs[1], subs[2]] }, merged, changes, actions: [] };
+    return { j, changes };
+  };
+  const moveSpec = (j) => { const p = j.plan.subJobs.find((s) => s.id === 'w-local'); p.action = { type: 'comment', comment: 'New words' }; Object.assign(j.subJobs.find((s) => s.id === 'w-local'), { action: p.action }); };
+
+  const { j: kept, changes } = build({ stage: 'write' });
+  assert.deepEqual(changes.kept.includes('w-local'), true);
+  moveSpec(kept); Object.assign(kept.subJobs.find((s) => s.id === 'w-local'), { stage: 'done', state: 'done' });
+  const back = approveReplan(kept, 'p1', { now: 9, buildSubJob: (_, s) => s });
+  assert.equal(back.sentBack, true, 'edited, then made: back to the planner, not “w-local has already landed”');
+  assert.deepEqual(back.lines.map((l) => l.detail), ['“Write w-local” has finished and changed since the plan change was proposed, so it went back to the planner']);
+  assert.match(kept.replan.feedback, /“Write w-local” \(w-local\) has finished and changed/);
+  assert.equal(kept.replan.proposal, null);
+  assert.equal(kept.subJobs.find((s) => s.id === 'a').brief, 'Implement a', 'nothing of the proposal applied');
+
+  const { j: frozen, changes: was } = build({ stage: 'done', state: 'done' });
+  assert.deepEqual(was.frozen, ['w-local']);
+  moveSpec(frozen);
+  assert.equal(approveReplan(frozen, 'p1', { now: 9, buildSubJob: (_, s) => s }).sentBack, true, 'frozen when proposed, its stored entry moved since');
+
+  // Unchanged, the same landed write is no reason to stop the approval.
+  const { j: still } = build({ stage: 'done', state: 'done' });
+  assert.equal(approveReplan(still, 'p1', { now: 9, buildSubJob: (_, s) => s }).sentBack, undefined);
+  assert.equal(still.subJobs.find((s) => s.id === 'a').brief, 'Redo a');
+});
