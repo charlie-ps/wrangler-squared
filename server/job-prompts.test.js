@@ -218,7 +218,14 @@ test('the planner is told to write the context once and never to describe a depl
   assert.match(text, /kind:"pr"\|"session"\|"human"/);
   assert.match(text, /kind:"plan", plan:\{context, stories:\[\{id,key\?,project\?,title,fields\?:\[\{name,value\}\]\}\]/);
   assert.doesNotMatch(text, /deployment:\{|pendingChecks|value[?:]|business value/);
-  assert.ok(text.split(/\s+/).length < 1100, 'the protocol lives in the job-worker skill, not in every prompt');
+  assert.ok(text.split(/\s+/).length < 1150, 'the protocol lives in the job-worker skill, not in every prompt');
+});
+
+test('the planner writes a human step as a ready-to-follow instruction, on a first plan and when a replan edits one', () => {
+  const rule = /Except a human sub-job's brief \(≤1000 chars\), the whole instruction the human follows: the exact URL, the command to paste, or numbered steps one per line, with real names, ids and settings looked up READ-ONLY \(never invented\), then how they know it is done\. Never vague intent/;
+  assert.match(jobPrompt({ ...planned, plan: null }, null, { ...run, phase: 'planning' }), rule);
+  const replanned = jobPrompt({ ...planned, subJobs: [], replan: { text: 'Add the vendor sign-off' } }, null, { ...run, phase: 'planning' });
+  assert.match(replanned, rule); assert.match(replanned, /A human sub-job you add or whose brief you edit follows the human-brief rule above/);
 });
 
 test('the planner is told stories are optional, and a ticketless sub-job is told to name its branch without a key', () => {
