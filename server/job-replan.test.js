@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isFrozen, mergeReplan, approveReplan, replanStatus } from './job-replan.js';
+import { isFrozen, mergeReplan, approveReplan, replanStatus, requestReplan, discardReplan, startQueued, queuedReady } from './job-replan.js';
 
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, kind: 'pr', repo: '/repo', after, brief: `Implement ${id}`, ...extra });
 const live = (s, extra = {}) => ({ ...s, stage: 'implementation', state: 'queued', ...extra });
@@ -190,4 +190,61 @@ test('an approved base change reaches the live sub-job, which is what the launch
   const k = { ...job(subs, [live(subs[0], { base: 'next' })]), replan: { feedback: 'Land on main', proposal: { id: 'p1', plan: { context: '', stories: [], subJobs: [spec('a', [], { base: 'main' })] } } } };
   approveReplan(k, 'p1', { now: 1 });
   assert.equal(k.subJobs[0].base, 'main');
+});
+
+// A running job with a planner drafting `first`, conversation c1 open.
+const drafting = () => {
+  const subs = [spec('a')];
+  const j = { ...job(subs, [live(subs[0])]), stage: 'active', talk: [], convos: [{ id: 'c1', at: 1, pending: null }, { id: 'c2', at: 1, pending: null }] };
+  requestReplan(j, 'first', 1, null, { convo: 'c1' });
+  j.runs.push({ id: 'run_plan', subJobId: null, stopped: false });
+  return j;
+};
+
+test('a change sent while the wrangler drafts queues FIFO with its convo, source and images, and says so in its conversation', () => {
+  const j = drafting();
+  assert.deepEqual(requestReplan(j, 'second', 2, null, { convo: 'c2', source: { sub: 'a', at: 'step', ref: 'x' }, images: [{ path: '/p.png' }] }), { queued: 1 });
+  assert.deepEqual(requestReplan(j, 'third', 3, null, { convo: 'c1' }), { queued: 2 });
+  assert.equal(j.replan.feedback, 'first', 'the change being drawn is untouched');
+  assert.deepEqual(j.replanQueue.map((q) => [q.feedback, q.convo]), [['second', 'c2'], ['third', 'c1']]);
+  assert.deepEqual(j.replanQueue[0].images, [{ path: '/p.png' }]); assert.equal(j.replanQueue[0].source.sub, 'a');
+  assert.deepEqual(j.talk.map((m) => [m.kind, m.convo]), [['queued', 'c2'], ['queued', 'c1']]);
+  assert.match(j.talk[0].text, /^Queued behind the plan change I am drawing now \(next in line\)/);
+  assert.match(j.talk[1].text, /\(number 2 in line\)/);
+  // The ask run handing over its own question is not the planner it waits behind.
+  const ask = drafting(); ask.runs[0].stopped = true; ask.runs.push({ id: 'run_ask', subJobId: null, ask: 'm1', stopped: false });
+  assert.deepEqual(requestReplan(ask, 'more', 2, null, { running: 'run_ask', convo: 'c2' }), {}, 'no planner drafting: it folds in as before');
+  assert.match(ask.replan.feedback, /^Earlier: first\n\nNow: more$/);
+});
+
+test('approving the current change starts a planning round for the next queued one against the plan as it stands', () => {
+  const j = drafting();
+  requestReplan(j, 'second', 2, null, { convo: 'c2' });
+  requestReplan(j, 'third', 3, null, { convo: 'c1' });
+  j.runs[0].report = { kind: 'plan' };
+  j.replan.proposal = { id: 'p1', plan: { context: '', stories: [], subJobs: [spec('a', [], { title: 'Renamed a' })] }, actions: [] };
+  approveReplan(j, 'p1', { now: 5 });
+  assert.equal(j.plan.subJobs[0].title, 'Renamed a');
+  assert.deepEqual([j.replan.feedback, j.replan.convo, j.replan.proposal, j.replan.previous], ['second', 'c2', null, null], 'its own round, not folded into the last');
+  assert.deepEqual(j.replanQueue.map((q) => q.feedback), ['third']);
+  assert.equal(j.talk.at(-1).kind, 'dequeued'); assert.equal(j.talk.at(-1).convo, 'c2');
+  assert.deepEqual(requestReplan(j, 'fourth', 6), {}, 'nothing drafting yet: a new idea folds into the next change as before');
+});
+
+test('discarding starts the next queued change once the discarded planner has stopped; the runner retries until then', () => {
+  const j = drafting();
+  requestReplan(j, 'second', 2, null, { convo: 'c2' });
+  discardReplan(j);
+  assert.equal(j.replan, null, 'the discarded planner is still drafting');
+  assert.equal(queuedReady(j), false);
+  assert.deepEqual(requestReplan(j, 'third', 3), { queued: 2 }, 'still behind the queue');
+  j.runs[0].stopped = true;
+  assert.equal(queuedReady(j), true);
+  assert.equal(startQueued(j, 4), true);
+  assert.equal(j.replan.feedback, 'second');
+  assert.deepEqual(j.replanQueue.map((q) => q.feedback), ['third']);
+  // With nothing drafting, discard starts the next one itself.
+  discardReplan(j);
+  assert.equal(j.replan.feedback, 'third'); assert.equal(j.replanQueue, undefined);
+  assert.equal(startQueued(j, 5), false, 'one change at a time');
 });

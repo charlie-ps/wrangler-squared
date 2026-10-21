@@ -67,7 +67,8 @@ test('every idea goes to the planner, pinned to the step and view it was typed o
   assert.throws(() => requestChange(open, open.subJobs[0], { at: 'pr', ref: 'h0', text: 'x' }, { now: 1 }), /changed since you looked/);
   assert.throws(() => requestChange(open, open.subJobs[0], { at: 'pr', ref: 'h1', text: '  ' }, { now: 1 }), /Explain/);
   const busy = job(); busy.runs.push({ id: 'run_p', subJobId: null, stopped: false });
-  assert.throws(() => ask(busy, 'api'), /Wait for the wrangler to finish/);
+  assert.match(ask(busy, 'api').detail, /^Queued an idea about “Deliver api” behind the one the wrangler is drawing$/);
+  assert.ok(!busy.replan); assert.equal(busy.replanQueue[0].source.sub, 'api');
 });
 
 test('a second idea adds to the waiting proposal: earlier words, plan and actions all carry over', () => {

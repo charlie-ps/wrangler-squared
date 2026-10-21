@@ -26,11 +26,11 @@ export const CHANGE_TEXT_MAX = 8000;
 // (server/handlers.js prepare kept them on disk).
 const withImages = (idea, attachments) => attachments?.length ? `${idea}\n(Pasted images, read them: ${attachments.map((a) => JSON.stringify(a.path)).join(', ')})` : idea;
 
-export function requestChange(job, sub, { at, ref, text, attachments, from, convo: convoId }, { now }) {
+export function requestChange(job, sub, { at, ref, text, attachments, convo: convoId }, { now }) {
   const typed = String(text || '').trim().slice(0, CHANGE_TEXT_MAX);
   if (!typed) throw new Error('Explain the change you want');
   const files = (attachments || []).filter((a) => typeof a?.path === 'string');
-  const idea = withImages(from === 'helper' ? `(Sent by the human's helper session on this step, at the human's request) ${typed}` : typed, files);
+  const idea = withImages(typed, files);
   const view = changeView(job, sub);
   if (!view) throw new Error(sub ? 'Nothing is left to change here' : 'The job has nothing to change right now');
   if (view.at !== at || view.ref !== String(ref)) throw new Error('This changed since you looked. Review the latest version and ask again.');
@@ -57,7 +57,7 @@ export function requestChange(job, sub, { at, ref, text, attachments, from, conv
     const convo = target || openConvo(job, sub, now);
     say(job, { ...said, convo: convo.id }, now);
     requestReplan(job, `About ${quoted(sub.title)} (${sub.id}), which was declared red: ${d.summary}${d.tried?.length ? `\nTried: ${d.tried.join(' | ')}` : ''}${d.ask ? `\nThe decision asked of the human: ${d.ask}` : ''}\nThe human says: ${idea}`, now, { sub: sub.id, auto: false, human: true }, { source, images, convo: convo.id });
-    return { detail: `${from === 'helper' ? 'A helper session sent' : 'Sent'} the declared red on ${quoted(sub.title)} back to the wrangler`, route: 'planner' };
+    return { detail: `Sent the declared red on ${quoted(sub.title)} back to the wrangler`, route: 'planner' };
   }
   // Anything else is a question, answered in the thread, or a change of plan on a
   // running job, even a word for one step's open session: the planner proposes,
@@ -67,9 +67,11 @@ export function requestChange(job, sub, { at, ref, text, attachments, from, conv
   if (job.stage === 'active' && (convo.pending || looksLikeQuestion(typed))) {
     const sent = ask(convo, say(job, { ...said, convo: convo.id }, now), { feedback, source, images }, now);
     if (sent === 'follow-up') return { detail: 'Sent to the wrangler that is answering', route: 'planner' };
-    return { detail: sub ? `${from === 'helper' ? 'A helper session asked' : 'Asked'} the wrangler about ${quoted(sub.title)}` : 'Asked the wrangler', route: 'planner' };
+    return { detail: sub ? `Asked the wrangler about ${quoted(sub.title)}` : 'Asked the wrangler', route: 'planner' };
   }
-  requestReplan(job, feedback, now, null, { source, images, convo: convo.id });
   say(job, { ...said, convo: convo.id }, now);
-  return { detail: sub ? `${from === 'helper' ? 'A helper session sent' : 'Sent'} the wrangler an idea about ${quoted(sub.title)}` : 'Asked the wrangler to change the plan', route: 'planner' };
+  if (requestReplan(job, feedback, now, null, { source, images, convo: convo.id }).queued) {
+    return { detail: `Queued ${sub ? `an idea about ${quoted(sub.title)}` : 'a plan change'} behind the one the wrangler is drawing`, route: 'planner' };
+  }
+  return { detail: sub ? `Sent the wrangler an idea about ${quoted(sub.title)}` : 'Asked the wrangler to change the plan', route: 'planner' };
 }

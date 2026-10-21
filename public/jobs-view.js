@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun } from './jobs.js';
+import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel } from './jobs.js';
 import { talkHtml } from './job-talk.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener, fieldName } from './job-graph.js';
@@ -778,12 +778,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // session reads last (server/job-prompts.js). A coordinator error has no session
   // to read it, so the job's own Retry stays plain.
   const retrySplitHtml = (primary) => `<span class="job-split job-retry-split"><button id="job-retry" ${primary ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button><details class="job-split-more" data-keep="retry-note" ${openMore.has('retry-note') ? 'open' : ''}><summary aria-label="Retry with a note for the retried session" title="Retry with a note for the retried session">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>Note for the retried session<textarea data-retry-note maxlength="180" rows="2" placeholder="Read last by the retried session, and shown on the card until it reports"></textarea></label><button type="button" data-retry-with-note>${ICONS.wrench}Retry with note</button></div></details></span>`;
-  // Ask an agent: the human's own sessions about this step (server/job-helper.js),
   // newest last. A queued one is the only state that holds the button.
-  const helperQueued = (sub) => (sub.helpers || []).some((h) => !h.sessionId && !h.error);
-  const askHelperHtml = (sub) => helperQueued(sub)
-    ? `<button type="button" data-ask-helper disabled title="An agent session is starting for this step">${ICONS.spin}Starting an agent</button>`
-    : `<button type="button" data-ask-helper title="Start your own agent session, briefed with this step and the job, to investigate or help. It never changes the step or the plan: when you ask, it sends what it finds to the wrangler, as Add idea does.">${ICONS.robot}Ask an agent</button>`;
   // Every run's session, newest first: a repair or publish run hides the implementation one behind it.
   const sessionSplitHtml = (job, sub, primary) => {
     const button = `<button id="job-session" ${primary ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>`;
@@ -791,9 +786,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const items = sub.sessions.map((sid, i) => { const run = job.runs?.find((r) => r.sessionId === sid); return `<button type="button" data-step-session="${esc(sid)}">${ICONS.terminal}<span>${esc(PHASE_LABEL[run?.phase] || `Session ${i + 1}`)}${run?.startedAt ? ` · ${esc(when(run.startedAt))}` : ''}</span><span class="job-split-hint">${onBoard(sid) ? 'Open' : 'Restore'}</span></button>`; }).reverse().join('');
     return `<span class="job-split job-session-split">${button}<details class="job-split-more" data-keep="session-menu" ${openMore.has('session-menu') ? 'open' : ''}><summary aria-label="Open an earlier session of this step" title="Open an earlier session of this step">${ICONS.caret}</summary><div class="job-split-menu">${items}</div></details></span>`;
   };
-  const helpersHtml = (sub) => sub.helpers?.length ? `<h3>Helper sessions</h3><ul class="job-helpers">${sub.helpers.map((h, i) => `<li>${h.sessionId ? ICONS.robot : h.error ? ICONS.x : ICONS.spin}<span>Helper ${i + 1} · ${h.sessionId ? `started ${esc(when(h.at))}` : h.error ? `could not start: ${esc(h.error)}` : 'starting'}</span>${h.sessionId ? `<button type="button" data-helper-session="${esc(h.sessionId)}">${ICONS.terminal}${onBoard(h.sessionId) ? 'Open' : 'Restore'}</button>` : ''}${helperIdeasHtml(h)}</li>`).join('')}</ul>` : '';
-  // What a helper sent the planner (send_step_idea), as the step's Add idea box would.
-  const helperIdeasHtml = (h) => h.ideas?.length ? `<ul class="job-helper-ideas">${h.ideas.map((m) => `<li><span class="job-helper-from">${ICONS.robot}From the helper · sent to the wrangler ${esc(when(m.at))}</span><q>${esc(m.text)}</q></li>`).join('')}</ul>` : '';
   const approvalNoteFor = (sub) => sub.approvalNote ? `<h3>Context for later steps</h3><p class="job-approval-note">${esc(sub.approvalNote)}</p>` : '';
   // What a whole-job cancel did and what it left: the sub-job nodes say Dropped
   // one by one, this is the sentence that says why all of them do.
@@ -1004,6 +996,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       : typeof (now[k] ?? was[k]) === 'string' || (now[k] ?? was[k]) == null ? wordsDiffHtml(was[k] ?? '', now[k] ?? '') : `<del>${esc(JSON.stringify(was[k] ?? null))}</del> <ins>${esc(JSON.stringify(now[k] ?? null))}</ins>`;
     return `<dl class="job-edit-diff">${fields.map((k) => `<dt>${esc(fieldName(k))}</dt><dd>${row(k)}</dd>`).join('')}</dl>`;
   }
+  // Hovering it lists what waits, oldest first.
+  const queuedTag = (job) => queuedLabel(job) ? `<span class="job-talk-tag tone-working job-replan-queued" title="${esc(replanQueued(job).map((q, i) => `${i + 1}. ${q.feedback}`).join('\n'))}">${esc(queuedLabel(job))}</span>` : '';
   const ACT_KIND = { 'accept-red': 'Accept red', recover: 'Recover', 'mark-merged': 'Mark merged', 'mark-done': 'Mark done', forward: 'Forward', rework: 'Rework', retry: 'Retry' };
   // The proposal laid over the live job (server/job-replan.js): every node in its
   // current state, labelled with what approving does to it, and the same in words.
@@ -1038,7 +1032,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const asked = `<p class="job-replan-ask"><span class="job-ask-text ${askOpen ? '' : 'job-ask-clamp'}">${words}</span><button type="button" class="job-ask-more" data-ask-more hidden>${askOpen ? 'Show less' : 'Show more'}</button></p>`;
     // The decision, and the two buttons that make it, head the proposal: nothing else on the dialog looks like this.
     const blocked = planningRun(job);
-    const bar = `<section class="job-proposal-bar" aria-label="Plan change waiting for you"><div class="job-proposal-head"><span class="job-proposal-title">${ICONS.eye}<b>Plan change waiting for your decision</b></span><span class="job-proposal-hint">${blocked ? 'Wrangler is still planning; approve once it stops.' : 'Only the steps it changes wait until you approve or discard it. The rest of the job carries on.'}</span></div>
+    const bar = `<section class="job-proposal-bar" aria-label="Plan change waiting for you"><div class="job-proposal-head"><span class="job-proposal-title">${ICONS.eye}<b>Plan change waiting for your decision</b>${queuedTag(job)}</span><span class="job-proposal-hint">${blocked ? 'Wrangler is still planning; approve once it stops.' : 'Only the steps it changes wait until you approve or discard it. The rest of the job carries on.'}</span></div>
       <div class="job-actions job-proposal-cta tone-warn"><button class="primary" data-action="approve-replan" ${blocked ? 'disabled' : ''}>${ICONS.check}Approve change</button><button data-action="discard-replan">${ICONS.x}Discard</button></div>${asked}</section>`;
     const count = (n, cls, label) => n ? `<span class="job-diff-key job-mark-${cls}"><b>${n}</b> ${label}</span>` : '';
     const kept = merged.subJobs.filter((s) => ['kept', 'frozen'].includes(markOf(s))).length;
@@ -1198,7 +1192,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const authority = authorityText(job, planDraft);
       fab = `<button class="primary" data-action="approve-plan" title="${esc(bad.length ? `Finish ${bad.length === 1 ? 'the write' : `${bad.length} writes`} first: ${writeProblem(bad[0])}` : authority)}" ${running || bad.length ? 'disabled' : ''}>${ICONS.check}Approve ${planDraft.subJobs.filter((s) => !isWriteSub(s)).length}</button>`;
     } else if (replanProposed(job)) body = proposalHtml(job);
-    else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b> ${esc(job.replan.feedback)}</p>` : ''}${supersededHtml(job)}${planGraphHtml({ ...job.plan, subJobs: job.subJobs }, { stateOf: (s) => subState(job, s), lineOf: (s) => subLine(job, s), openTickets, reviewWrites: job.reviewWrites, base: job.base })}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
+    else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b>${queuedTag(job)} ${esc(job.replan.feedback)}</p>` : replanQueued(job).length ? `<p class="job-replan-ask"><b>Re-planning</b>${queuedTag(job)} Starts once the last change's wrangler has stopped</p>` : ''}${supersededHtml(job)}${planGraphHtml({ ...job.plan, subJobs: job.subJobs }, { stateOf: (s) => subState(job, s), lineOf: (s) => subLine(job, s), openTickets, reviewWrites: job.reviewWrites, base: job.base })}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
     else body = `<p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}`;
     if (job.error) fab = `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>`;
     else if (job.stage === 'backlog' && !job.cancelledAt) fab = `<button class="primary" data-action="start" title="${esc(hints[0])}">${ICONS.play}Start planning</button>`;
@@ -1376,11 +1370,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       ${workflows.length ? `<h4>What runs on merge <small>${workflows.filter((w) => w.triggers).length} of ${workflows.length}</small></h4><ul class="job-checks">${workflows.map((w) => `<li class="${w.triggers ? 'passed' : ''}">${w.triggers ? '✓' : '○'} ${esc(w.name)} <small>${esc(w.reason)}</small></li>`).join('')}</ul>` : ''}
       ${sub.repairs.length ? `<h4>Changes after failed checks</h4>${sub.repairs.map((r, i) => `<div class="job-repair"><b>Repair ${i + 1}</b>${receiptHtml(r.changes)}<details><summary>Re-verified</summary>${receiptHtml(r.checks)}</details></div>`).join('')}` : ''}`;
     const detailsOpen = openMore.has('details');
-    actions += askHelperHtml(sub);
     if (!isWriteSub(sub)) actions += `<button type="button" class="job-details-toggle" data-details-toggle aria-expanded="${detailsOpen}">${ICONS.doc}Details</button>`;
     return `${appbar(sub.title, chips, kicker, line)}${depsHtml(job, sub)}
       ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub)}
-      ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}${helpersHtml(sub)}
+      ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}
       ${reviewing ? changeBoxHtml(job, sub) : ''}${actions.trim() ? `<div class="job-actions tone-${STATES[state].tone}">${actions}</div>` : ''}${reviewing ? '' : changeBoxHtml(job, sub)}
       ${isWriteSub(sub) ? '' : `<div class="job-details-body" ${detailsOpen ? '' : 'hidden'}>${details}</div>`}`;
   }
@@ -1472,7 +1465,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   function openShot(b) {
     const slots = [...b.closest('.job-msg-att').querySelectorAll('[data-shot-at] [data-ev-file]')];
-    shotBox = { jobId: selected.jobId, subId: selected.subId, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
+    shotBox = { jobId: slots[0].dataset.evJob, subId: slots[0].dataset.evSub, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
     shotZoom = document.createElement('dialog');
     shotZoom.className = 'job-shotbox';
     applyTheme(shotZoom);
@@ -1635,8 +1628,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
     bind('#job-session', () => { dialog.close(); onSession(sub.sessions.at(-1)); });
     dialog.querySelectorAll('[data-step-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.stepSession); });
-    bind('[data-ask-helper]', (e) => { if (pressBusy(e.currentTarget)) action('ask-helper', {}, sub.id); });
-    dialog.querySelectorAll('[data-helper-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.helperSession); });
     // Reviewing the code is a round trip out to the board's diff panel, so hand over
     // where the reader came FROM as well as what to show — index.js re-opens this
     // same detail via openDetail once the panel closes. Every run of a sub-job
@@ -1875,8 +1866,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }
       return;
     }
-    // A Retry's, a fix's or a helper's outcome lands on a later tick, in the dialog it was pressed in.
-    if (['retry-main', 'dismiss-main', 'resolve-main', 'ask-helper', 'dismiss-convo'].includes(msg?.action)) return;
+    // A Retry's, a fix's or a dismissal's outcome lands on a later tick, in the dialog it was pressed in.
+    if (['retry-main', 'dismiss-main', 'resolve-main', 'dismiss-convo'].includes(msg?.action)) return;
     // A New idea that is planning opens on its conversation once the snapshot has it.
     if (msg?.event === 'job-created' && msg.idea && msg.started) { openOnCreate = msg.jobId; if (data.jobs.some((j) => j.id === msg.jobId)) { openOnCreate = null; openDetail(msg.jobId); } return; }
     // A reply stays in its conversation for the next tick. A created job closes the dialog it was pressed in,

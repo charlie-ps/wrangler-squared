@@ -1,12 +1,15 @@
 import { esc } from './util.js';
 import { ICONS } from './icons.js';
-import { convoGroups, askPending, replanPending, convoNumber, convoRunning } from './jobs.js';
+import { convoGroups, askPending, replanPending, convoNumber, convoRunning, replanQueued, queuedLabel } from './jobs.js';
 import { proseHtml, imageStripHtml } from './job-idea.js';
+import { shotButtonHtml } from './job-proof.js';
 
 // A running job's conversations with the wrangler (server/job-talk.js), drawn above
 // the Add idea box, one section each: what the human asked, what the wrangler
 // answered, and each plan change it proposed as a card that says what became of
-// it. Several can be answering at once, each with its own box under it; the box
+// it. A forward is no plan change: it is one line saying where the words went,
+// followed by what that step's session answered, read from its thread. Several
+// can be answering at once, each with its own box under it; the box
 // below them all starts a new one. The job dialog shows all of them, a step's
 // dialog only what was said on that step: a conversation started there shows on
 // the job too only once its wrangler escalated it. Pure markup; jobs-view.js draws and
@@ -45,19 +48,57 @@ const countsOf = (changes) => {
 function proposalHtml(job, m, onJob, kept) {
   const [tone, label] = cardState(job, m);
   const live = tone === 'needs';
-  const rows = (m.changes || []).map((c) => `<li class="job-talk-change job-mark-${esc(c.mark)}"><span class="job-mark">${esc(MARK[c.mark] || c.mark)}</span><span class="job-talk-change-title">${esc(c.title)}${c.detail ? ` <small>${esc(c.detail)}</small>` : ''}${c.then ? `<span class="job-talk-then">${esc(c.then)}</span>` : ''}</span></li>`).join('');
+  const rows = (m.changes || []).map((c) => `<li class="job-talk-change job-mark-${esc(c.mark)}"><span class="job-mark">${esc(MARK[c.mark] || c.mark)}</span><span class="job-talk-change-title">${esc(c.mark === 'forward' ? `To ${c.title}'s session` : c.title)}${c.detail ? ` <small>${esc(c.detail)}</small>` : ''}${c.then ? `<span class="job-talk-then">${esc(c.then)}</span>` : ''}</span></li>`).join('');
   const button = live ? onJob ? `<button type="button" data-talk-review title="The proposal is drawn at the top of this dialog">${ICONS.eye}Review proposal</button>` : `<button type="button" data-open-job title="Opens the job dialog on the proposal">${ICONS.eye}Review proposal</button>` : '';
   const options = m.options > 1 ? `<small class="job-talk-options">${m.options} options</small>` : '';
-  const title = `<b>${m.red ? 'Proposed a fix' : 'Proposed a change'}</b><span class="job-talk-tag">${esc(label)}</span>${options}`;
+  const queued = live && queuedLabel(job) ? `<span class="job-talk-tag tone-working">${esc(queuedLabel(job))}</span>` : '';
+  const title = `<b>${isForward(m) ? 'Forward your words' : m.red ? 'Proposed a fix' : 'Proposed a change'}</b><span class="job-talk-tag">${esc(label)}</span>${queued}${options}`;
   const body = `${m.text ? `<div class="job-idea-body">${proseHtml(m.text)}</div>` : ''}${rows ? `<ul class="job-talk-changes">${rows}</ul>` : '<p class="job-talk-none">No sub-job changes</p>'}`;
   if (live) return `<div class="job-talk-card tone-${tone}"><header>${title}</header>${body}${button ? `<footer>${button}</footer>` : ''}</div>`;
   const key = `talk-card:${m.id}`;
   return `<details class="job-talk-card tone-${tone}" data-keep="${esc(key)}" ${kept?.has(key) ? 'open' : ''}><summary>${title}<span class="job-talk-counts">${esc(countsOf(m.changes || []))}</span>${ICONS.caret}</summary>${body}</details>`;
 }
 
+// A proposal that only forwarded the human's words (server/job-talk.js
+// noteProposal), or an older card that did no more than that.
+export const isForward = (m) => m.kind === 'proposal' && (m.forward || (!m.red && (m.options || 1) === 1 && m.changes?.length > 0 && m.changes.every((c) => c.mark === 'forward')));
+const stepTitle = (job, id) => job.subJobs.find((s) => s.id === id)?.title || id;
+const sessionsOf = (titles) => titles.length === 1 ? `${titles[0]}'s session` : `${titles.slice(0, -1).join(', ')} and ${titles.at(-1)}'s sessions`;
+function forwardLine(job, m) {
+  const titles = [...new Set((m.forwarded?.length ? m.forwarded.map((f) => stepTitle(job, f.sub)) : m.changes.map((c) => c.title)))];
+  return `${WRANGLER_NAME} forwarded this to ${sessionsOf(titles)}`;
+}
+
+// What the session said back to a forwarded message, read from the step's thread
+// (the source of truth): everything after it up to the next message sent to it.
+export function repliesTo(sub, messageId) {
+  const thread = sub?.thread || [];
+  const at = thread.findIndex((t) => t.id === messageId);
+  if (at < 0) return [];
+  const next = thread.findIndex((t, k) => k > at && t.to === 'agent');
+  return thread.slice(at + 1, next < 0 ? undefined : next).filter((t) => t.from === 'agent' || t.from === 'system');
+}
+function sessionHtml(job, sub, t) {
+  const files = [...(t.shots || []), ...(t.images || [])].map((x) => x.file);
+  const attach = files.length ? `<div class="job-msg-att">${files.map((f, k) => shotButtonHtml(job, sub, t.round, f, k)).join('')}</div>` : '';
+  const run = t.run ? `<pre class="job-msg-run"><i>$</i> ${esc(t.run.cmd)}\n${esc(t.run.out)}\n<b class="${t.run.exit === 0 ? 'ok' : 'bad'}">exit ${esc(t.run.exit)}</b></pre>` : '';
+  const text = t.from === 'system' ? `Reported ready again: round ${t.round}` : t.text;
+  return `<div class="job-talk-session" data-talk-thread="${esc(t.id)}"><span class="job-talk-session-mark" aria-hidden="true">${ICONS.terminal}</span><div><div class="job-idea-who">Session · ${esc(sub.title)}<time>${esc(time(t.at))}</time></div><div class="job-idea-body">${proseHtml(text)}</div>${run}${attach}</div></div>`;
+}
+// Each approved forward's answers, or that its session is still at it.
+const answersHtml = (job, m) => (m.forwarded || []).map(({ sub: id, message }) => {
+  const sub = job.subJobs.find((s) => s.id === id);
+  if (!sub) return '';
+  const got = repliesTo(sub, message);
+  const working = !got.length && sub.answering?.id === message ? `<div class="job-idea-thinking job-talk-working"><span class="job-talk-session-mark" aria-hidden="true">${ICONS.terminal}</span><span class="job-idea-shine">${esc(sub.title)}'s session is working on it…</span></div>` : '';
+  return got.map((t) => sessionHtml(job, sub, t)).join('') + working;
+}).join('');
+const forwardHtml = (job, m) => `<div class="job-talk-forward" data-talk="${esc(m.id)}"><span class="job-idea-orb small" aria-hidden="true"></span><span>${esc(forwardLine(job, m))}</span><time>${esc(time(m.outcomeAt || m.at))}</time></div>`;
+
 function messageHtml(job, m, onJob, kept) {
   if (m.from === 'human') return humanHtml(job, m, onJob);
-  if (m.kind === 'proposal') return wranglerHtml(m, proposalHtml(job, m, onJob, kept), 'proposal');
+  if (isForward(m) && m.outcome === 'approved') return forwardHtml(job, m) + answersHtml(job, m);
+  if (m.kind === 'proposal') return wranglerHtml(m, proposalHtml(job, m, onJob, kept), 'proposal') + answersHtml(job, m);
   return wranglerHtml(m, `<div class="job-idea-body">${proseHtml(m.text)}</div>`, m.kind === 'error' ? 'error' : '');
 }
 
@@ -66,6 +107,7 @@ function messageHtml(job, m, onJob, kept) {
 function workingHtml(job, convo) {
   const text = convo && askPending(job, convo) ? `${WRANGLER_NAME} ${convoRunning(job, convo) ? 'is looking into it' : 'will look into it'}…`
     : replanPending(job) && !job.replan.proposal && !(job.replan.red && !job.replan.red.human) && (job.replan.convo || null) === (convo?.id || null) ? `${WRANGLER_NAME} is drawing a proposal…` : '';
+  if (!text && convo && replanQueued(job).some((q) => q.convo === convo.id)) return '<div class="job-idea-thinking job-talk-working job-talk-queued"><span class="job-idea-orb small" aria-hidden="true"></span><span>Queued behind the plan change being drawn</span></div>';
   return text ? `<div class="job-idea-thinking job-talk-working"><span class="job-idea-orb small" aria-hidden="true"></span><span class="job-idea-shine">${text}</span></div>` : '';
 }
 
@@ -87,6 +129,7 @@ export function convoOpen(job, group, groups, fold = null) {
 function stripHtml(job, messages) {
   const asked = messages.find((m) => m.from === 'human');
   const said = messages.findLast((m) => m.from !== 'human');
+  if (said && isForward(said) && said.outcome === 'approved') return `<div class="job-talk-strip" data-convo-fold>${asked ? humanHtml(job, asked, false) : ''}${forwardHtml(job, said)}</div>`;
   const words = said && (said.kind === 'proposal' ? said.text || (said.red ? 'Proposed a fix' : 'Proposed a change') : said.text);
   return `<div class="job-talk-strip" data-convo-fold>${asked ? humanHtml(job, asked, false) : ''}${said ? wranglerHtml(said, `<div class="job-idea-body job-talk-clip">${proseHtml(words || '')}</div>`, said.kind === 'error' ? 'error' : '') : ''}</div>`;
 }

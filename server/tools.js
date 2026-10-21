@@ -85,22 +85,6 @@ export const getJobContextTool = {
   },
 };
 
-// Ask an agent's way back (job-helper.js): the helper sends what it found exactly
-// as the step's Add idea box would, so the planner proposes and the human approves.
-// Only the session a step's helper entry names may call it, about that step.
-export const sendStepIdeaTool = {
-  name: 'send_step_idea',
-  description: 'For a helper session the human opened from one step of a Wrangler² job (Ask an agent): send an idea about that step to the job\'s planner, exactly as the step\'s Add idea box does. The planner proposes a change (feedback to the step\'s own agent, a rework, or a plan edit) and the human approves it; this never changes the plan or the step itself. Call it only when the human asks you to send something; text is the idea in plain words, written so the planner can act on it without this conversation. Refused for any session that is not a helper of a step.',
-  inputSchema: { text: z.string().min(1) },
-  async handler({ host, caller }, { text }) {
-    try {
-      const job = host.stores.jobs.helperIdea(caller, text);
-      await host.rebuild();
-      return result({ accepted: true, jobId: job.id, next: 'Sent to the job\'s planner. Its proposal waits for the human\'s approval on the board; tell the human it was sent.' });
-    } catch (e) { return errorResult(e.message); }
-  },
-};
-
 // The New job form as a tool, so an ordinary agent session can hand work to
 // Wrangler². Unlike the form it broadcasts nothing: `job-created` would close a
 // human's open New job dialog. The rebuild is what shows the job on the board.
@@ -124,7 +108,7 @@ export function makeCreateJobTool(deps) {
 }
 export const createJobTool = makeCreateJobTool();
 
-export const TOOLS = [jobReportTool, getJobContextTool, createJobTool, sendStepIdeaTool];
+export const TOOLS = [jobReportTool, getJobContextTool, createJobTool];
 
 // Per-caller veto (manifest `hideTool`): a job step must not see the spawning and
 // scheduling tools — core's mcp/server.js skipped them for an `automationRun`

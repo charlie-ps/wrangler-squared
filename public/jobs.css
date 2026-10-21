@@ -791,6 +791,7 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 /* A proposed plan change: what approving does to each sub-job, as a tag under its node and a line below. */
 .job-replan-ask { white-space:pre-wrap; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
 .job-replan-ask b { margin-right:6px; }
+.job-replan-ask .job-replan-queued { margin-right:8px; }
 .job-main-notice { margin:12px 0; padding:12px 14px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius:10px; background:color-mix(in srgb, var(--warn) 9%, var(--surface)); }
 .job-main-notice h3 { display:flex; align-items:baseline; gap:8px; white-space:nowrap; margin:0 0 6px; font-size:14px; color:var(--warn-fg); }
 .job-main-notice h3 small { min-width:0; margin-left:auto; white-space:normal; overflow-wrap:anywhere; text-align:right; font-weight:normal; color:var(--fg-muted); }
@@ -800,16 +801,6 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-main-agent { display:flex; align-items:center; gap:6px; }
 .job-main-agent svg { flex:none; width:15px; height:15px; }
 .job-main-error { color:var(--red-fg); }
-[data-ask-helper] { user-select:none; -webkit-user-select:none; }
-.job-helpers { list-style:none; margin:6px 0; padding:0; display:grid; gap:4px; font-size:12px; }
-.job-helpers li { display:flex; flex-wrap:wrap; align-items:center; gap:6px; color:var(--fg-muted); }
-.job-helpers li > svg { flex:none; width:14px; height:14px; }
-.job-helpers li > span { flex:1; min-width:0; }
-.job-helper-ideas { flex-basis:100%; list-style:none; margin:2px 0 4px 20px; padding:0; display:grid; gap:6px; }
-.job-helper-ideas li { display:grid; gap:3px; padding:6px 8px; border-left:2px solid var(--purple); background:var(--surface); border-radius:4px; }
-.job-helper-from { display:flex; align-items:center; gap:4px; font-size:11px; color:var(--fg-muted); }
-.job-helper-from svg { width:12px; height:12px; }
-.job-helper-ideas q { color:var(--fg); white-space:pre-wrap; quotes:none; }
 .job-mark { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; padding:1px 8px; border-radius:8px; color:var(--fg-muted); background:var(--surface-2); }
 .job-mark-added .job-mark,li.job-mark-added { color:var(--st-ok-fg); }
 .job-mark-added .job-mark { background:color-mix(in srgb, var(--st-ok) 15%, var(--surface)); }
@@ -1889,6 +1880,16 @@ details.job-talk-card[open] > summary svg { transform:none; }
 .job-talk-card footer { display:flex; gap:8px; }
 .job-talk-card footer button { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; font-size:12.5px; }
 .job-talk-working { padding-left:0; }
+/* A forwarded idea is no plan change: one quiet line, then the step's session answering it, marked
+   as the session (a terminal chip, not the wrangler's orb). Its words live in the step's thread. */
+.job-talk-forward { display:flex; align-items:center; gap:10px; font-size:12.5px; color:var(--fg-muted); }
+.job-talk-forward time { color:var(--fg-subtle); font-size:11.5px; }
+.job-talk-session { display:grid; grid-template-columns:18px minmax(0,1fr); gap:10px; max-width:720px; }
+.job-talk-session-mark { display:inline-grid; place-items:center; width:18px; height:18px; margin-top:2px; border-radius:5px; color:var(--fg-muted); background:var(--surface-2); box-shadow:inset 0 0 0 1px var(--border); }
+.job-talk-session-mark .icon { width:11px; height:11px; }
+.job-talk-session .job-idea-body { max-width:640px; border-radius:4px 14px 14px 14px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); }
+.job-talk-session .job-msg-run { max-width:640px; }
+.job-talk-working .job-talk-session-mark { margin-top:0; }
 /* Several conversations at once (job-talk.js): one section each, ending in its own box. */
 .job-talk-convo { display:grid; gap:12px; padding:10px 12px; border-radius:10px; box-shadow:inset 0 0 0 1px var(--border-muted); }
 .job-talk-convo-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; }
