@@ -76,7 +76,8 @@ test('a second idea adds to the waiting proposal: earlier words, plan and action
   j.replan.proposal = { id: 'run_p', plan: j.plan, actions: [{ type: 'rework', sub: 'web', note: 'Return 204', pin: { at: 'stage', ref: 'implementation' } }] };
   ask(j, 'api', 'And make it smaller');
   assert.equal(j.replan.proposal, null);
-  assert.match(j.replan.feedback, /^Earlier: Add CSV export\n\nNow: About “Deliver api”.*And make it smaller$/s);
+  assert.deepEqual(j.replan.earlier, ['Add CSV export']);
+  assert.match(j.replan.feedback, /^About “Deliver api”.*And make it smaller$/s);
   assert.deepEqual(j.replan.previous, j.plan);
   assert.deepEqual(j.replan.previousActions, [{ type: 'rework', sub: 'web', note: 'Return 204' }], 'pins are stamped afresh on the new proposal');
   assert.equal(j.replan.source.sub, 'api');

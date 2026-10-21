@@ -3,6 +3,7 @@ import { dropSub, reworkSub, validatePlan, notStarted } from './job-sub-ops.js';
 import { milestoneReached } from './job-writes.js';
 import { stampActions, checkActions, applyActions, movedActions, landedAs, changeView } from './job-actions.js';
 import { parkedReadyRun } from './job-parked.js';
+import { replanAsks, replanAsked } from '../public/replan-asks.js';
 
 // Changing the plan of a job that is already running. The human asks with
 // feedback, a planning session proposes a whole plan, and nothing changes until
@@ -116,7 +117,9 @@ export function mergeReplan(job, proposal) {
 
 // A request replaces any proposal still waiting: the planner reads that one (its
 // plan and its actions) as what the human just asked it to change, and the ideas
-// add up, so a later one never drops an earlier one. `source` is the step and view
+// add up, so a later one never drops an earlier one: kept as a flat list (latest as
+// `feedback`, the rest in `earlier`; public/replan-asks.js), never wrapped in the
+// last, and the oldest dropped past the cap. `source` is the step and view
 // the latest idea was typed on (job-actions.js holds the step's actions to it);
 // `images` are every idea's pictures, for a forward to carry into a thread.
 export const REPLAN_FEEDBACK_MAX = 16000;
@@ -127,9 +130,10 @@ export function requestReplan(job, feedback, now, red = null, { source = null, i
   if (!text) throw new Error('Explain the change you want');
   clearPlanningError(job);
   const prev = job.replan;
-  const asked = prev?.feedback ? `Earlier: ${prev.feedback}\n\nNow: ${text}`.slice(-REPLAN_FEEDBACK_MAX) : text;
+  const asks = [...replanAsks(prev), text];
+  while (asks.length > 1 && asks.join('').length > REPLAN_FEEDBACK_MAX) asks.shift();
   const actions = (prev?.proposal?.actions || []).map(({ pin: _pin, ...a }) => a);
-  job.replan = { feedback: asked, at: now, proposal: null, previous: prev?.proposal?.plan || prev?.previous || null,
+  job.replan = { feedback: text, earlier: asks.slice(0, -1), at: now, proposal: null, previous: prev?.proposal?.plan || prev?.previous || null,
     ...(actions.length ? { previousActions: actions } : prev?.proposal ? {} : prev?.previousActions ? { previousActions: prev.previousActions } : {}),
     ...(source || prev?.source ? { source: source || prev.source } : {}),
     ...(images.length || prev?.images?.length ? { images: [...(prev?.images || []), ...images] } : {}),
@@ -212,7 +216,7 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
     lines.push({ sub, detail: `Plan change edited ${quoted(spec.title)} (${fields.join(', ')})` });
     // The rework launches once the new prerequisites have landed (job-runner.js).
     if (hasCode(sub) && fields.some((k) => REWORKS.includes(k))) {
-      lines.push({ sub, detail: reworkSub(job, sub, `${job.replan.feedback}\n\nNew brief: ${spec.brief}`, now) });
+      lines.push({ sub, detail: reworkSub(job, sub, `${replanAsked(job.replan)}\n\nNew brief: ${spec.brief}`, now) });
     }
   }
   // Installed first: a story's create dropped here unlinks the story on it.
