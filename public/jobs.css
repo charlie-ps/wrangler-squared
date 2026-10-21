@@ -1387,7 +1387,15 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .wn-ideas-chat { display:flex; flex-direction:column; justify-content:flex-end; height:360px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 56px); mask-image:linear-gradient(180deg, transparent, #000 56px); }
 .wn-ideas-chat .job-idea-thread { flex:none; gap:12px; padding:0; }
 .wn-ideas-chat :is(.job-launch-steps,.job-launch-fine) { display:none; }
-@media(prefers-reduced-motion:reduce) { .wn-fade { animation:none; } .wn-edge,.wn-art,.wn-note,.wn-ask .job-option,.wn-btn { transition:none; } }
+/* The wrangler conversation splash: a window that holds its tallest frame, newest at the foot. */
+.wn-edge.ghost { opacity:0; }
+.wn-edge.added { background:repeating-linear-gradient(90deg, var(--st-ok) 0 6px, transparent 6px 10px); }
+.wn-talk { display:flex; flex-direction:column; justify-content:flex-end; gap:8px; height:400px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 48px); mask-image:linear-gradient(180deg, transparent, #000 48px); }
+.wn-talk .job-talk { flex:none; margin:0; }
+.wn-talk .job-change { flex:none; margin:0; }
+.wn-talk :is(button,summary,.job-talk-strip,.job-talk-convo-head) { cursor:default; }
+.wn-talk :is(.job-sent,.job-talk-msg,.job-talk-working,.job-talk-convo) { animation:wn-fade .35s ease-out; }
+@media(prefers-reduced-motion:reduce) { .wn-fade,.wn-talk * { animation:none; } .wn-edge,.wn-art,.wn-note,.wn-ask .job-option,.wn-btn { transition:none; } }
 @media(max-width:700px) {
   .jobs-update { padding:22px 20px; border-radius:20px; }
   .jobs-update h2 { font-size:24px; }
@@ -1395,6 +1403,7 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
   .wn-row3 { grid-template-columns:minmax(0,1fr) 14px minmax(0,1fr) 14px minmax(0,1fr); }
   .wn-row2 { grid-template-columns:minmax(0,1fr) 14px minmax(0,1.4fr); }
   .wn-row2s { grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr); }
+  .wn-talk { height:440px; }
   .wn-under,.wn-writes { grid-template-columns:1fr; }
 }
 
