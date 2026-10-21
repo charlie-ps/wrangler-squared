@@ -1275,6 +1275,12 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 @media(prefers-reduced-motion:reduce) { .plate-spin,.plate-twinkle,.pick-cabinet { animation:none; } .pick-ticket,.pick-bar { transition:none; } .pick-ticket:hover { transform:none; } }
 /* What's new (updates.js): one release per page in the intro's type, its figure
    on top, and the Automation settings list that reopens any of them. */
+/* The hidden early-adopter switch (public/early-adopter.js). */
+.ea-dialog { width:min(420px,calc(100vw - 32px)); }
+.ea-dialog .ea-toggle { margin:18px 0 6px; font-size:14px; }
+.ea-dialog .ea-state { margin:0; }
+.ea-branch { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg); background:var(--surface-2); border-radius:4px; padding:1px 5px; }
+.ea-dialog .ea-error { color:var(--red-fg); }
 .jobs-update { width:min(780px,calc(100vw - 32px)); padding:28px 32px; }
 .jobs-update sup { font-size:.7em; line-height:0; vertical-align:super; }
 .update-appbar { display:flex; align-items:center; gap:12px; margin-bottom:18px; padding-right:44px; }
