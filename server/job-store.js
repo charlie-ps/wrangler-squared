@@ -290,6 +290,17 @@ export class JobStore {
       return swap;
     });
   }
+  // A plate's place on the board (public/job-state.js placeJob) is not a revision either:
+  // approval compares revisions, and moving a plate changes nothing it approved.
+  reorder(id, rank) {
+    if (!Number.isFinite(rank)) throw new Error('A board position must be a number');
+    return this.change((d) => {
+      const job = d.jobs.find((j) => j.id === id);
+      if (!job) throw new Error('Job not found');
+      job.rank = rank;
+      return job;
+    });
+  }
   // Approval authorises every write in the plan and the implementation. A
   // keyless story is created by its own write, which the stories session makes
   // at once; a sub-job naming it waits for the key, since its card eyebrow and
@@ -308,6 +319,7 @@ export class JobStore {
     const { subJobId, revision, plan, head, sessionReceiptId, readyReceiptId } = payload;
     const note = String(payload.note || '').trim().slice(0, 180) || null;
     if (action === 'approve-plan') return this.approvePlan(id, revision, plan);
+    if (action === 'reorder') return this.reorder(id, payload.rank);
     return this.update(id, (j) => {
       const s = subJobId ? j.subJobs.find((s) => s.id === subJobId) : null;
       if (subJobId && !s) throw new Error('Sub-job not found');

@@ -118,8 +118,9 @@ export default {
         view?.created(msg);
         // A checkpoint switch says what it did in the footer it was made from, an idea in its own bubble.
         if (msg.action === 'accept-idea') toast('Job created from the idea');
-        else if (!['set-review', 'request-change', 'idea-reply'].includes(msg.action)) toast('Job updated');
+        else if (!['set-review', 'request-change', 'idea-reply', 'reorder'].includes(msg.action)) toast('Job updated');
       } else if (msg.event === 'job-action-failed') {
+        if (msg.action === 'reorder') view?.reorderFailed(msg);
         if (msg.action === 'set-review') view?.reviewFailed(msg);
         else if (!(msg.action === 'request-change' && view?.changeFailed(msg))) { view?.ideaFailed(msg); toastError(msg.error); }
       } else if (msg.event === 'job-images') {

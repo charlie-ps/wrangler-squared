@@ -116,4 +116,18 @@ export function jobLabel(job) {
   if (!peers.length) return jobStatus(job, null).text;
   return `${subLabel(job, peers[0])}${peers.length > 1 ? ` +${peers.length - 1}` : ''}`;
 }
-export const sortJobs = (jobs) => jobs.map((job, i) => [job, job.createdAt ?? 0, i]).sort((a, b) => b[1] - a[1] || b[2] - a[2]).map(([job]) => job);
+// A plate the human moved keeps a `rank` on createdAt's scale, so a job made since still lands first.
+export const jobRank = (job) => job.rank ?? job.createdAt ?? 0;
+export const sortJobs = (jobs) => jobs.map((job, i) => [job, jobRank(job), i]).sort((a, b) => b[1] - a[1] || b[2] - a[2]).map(([job]) => job);
+// The rank that puts `id` just before (or `after`) `targetId` among the plates shown, between its
+// new neighbours there; null when that is where it already is.
+export function placeJob(shown, id, targetId, after = false) {
+  const rest = shown.filter((j) => j.id !== id);
+  let at = rest.findIndex((j) => j.id === targetId);
+  if (at < 0 || targetId === id) return null;
+  if (after) at++;
+  if (shown.findIndex((j) => j.id === id) === at) return null;
+  const above = rest[at - 1], below = rest[at];
+  if (above && below) return (jobRank(above) + jobRank(below)) / 2;
+  return above ? jobRank(above) - 1 : jobRank(below) + 1;
+}

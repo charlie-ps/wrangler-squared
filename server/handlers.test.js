@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeOpenIdeHandler, jobImagesHandler, jobSettingsHandler, makeFeatureRequestHandlers } from './handlers.js';
+import { makeOpenIdeHandler, jobImagesHandler, jobSettingsHandler, jobActionHandler, makeFeatureRequestHandlers } from './handlers.js';
 import { fakeHost } from './test-helpers.js';
 
 // The launcher is `open -na <app> --args <worktree>`: an app NAME and a path,
@@ -63,6 +63,23 @@ test('job-settings stores the usual pick the New job picker sends, and refuses o
   assert.deepEqual(host.stores.jobs.snapshot().settings.usualPick, { agent: 'codex', model: 'gpt-6-sol', effort: 'high' });
   await assert.rejects(jobSettingsHandler.handler({ patch: { usualPick: { agent: 'nope', model: 'x', effort: '' } } }, host));
   assert.equal(host.stores.jobs.snapshot().settings.usualPick.agent, 'codex');
+});
+
+test('reorder stores a dropped plate’s rank without a revision, and refuses a bad one as a frame', async () => {
+  const { host, broadcasts } = fakeHost();
+  const job = host.stores.jobs.create({ title: 'Move me', intent: 'Reorder the board' });
+  await jobActionHandler.handler({ type: 'job-action', id: job.id, action: 'reorder', rank: 1234.5 }, host);
+  const after = host.stores.jobs.get(job.id);
+  assert.equal(after.rank, 1234.5);
+  assert.equal(after.revision, job.revision, 'a plan approval is not refused over a move');
+  assert.deepEqual(broadcasts.at(-1), { event: 'job-action-complete', jobId: job.id, action: 'reorder' });
+  for (const rank of [undefined, 'top', Infinity, NaN]) {
+    await jobActionHandler.handler({ type: 'job-action', id: job.id, action: 'reorder', rank }, host);
+    assert.equal(broadcasts.at(-1).event, 'job-action-failed'); assert.match(broadcasts.at(-1).error, /must be a number/);
+  }
+  await jobActionHandler.handler({ type: 'job-action', id: 'nope', action: 'reorder', rank: 1 }, host);
+  assert.match(broadcasts.at(-1).error, /Job not found/);
+  assert.equal(host.stores.jobs.get(job.id).rank, 1234.5);
 });
 
 // A fake `gh`: each call is recorded as argv, and answered by the first reply
