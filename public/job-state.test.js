@@ -199,7 +199,7 @@ test('a job held by a replan labels itself whatever the replan is', () => {
   const red = { sub: 'a', auto: true, n: 1 };
   const proposal = { plan: { subJobs: [] } };
   for (const [replan, state, label] of [
-    [{}, 'running', 'Re-planning'],
+    [{}, 'running', 'Wrangling'],
     [{ proposal }, 'change', 'Plan change ready'],
     [{ red }, 'running', 'Fixing'],
     [{ red, proposal }, 'change', 'Fix proposed'],

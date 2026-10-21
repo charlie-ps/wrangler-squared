@@ -1735,7 +1735,7 @@ test('Add idea on a running job asks the planner for a proposal; the sent idea s
   job.runs = [{ id: 'plan2', subJobId: null, phase: 'planning', stopped: false }];
   f.view.created({ event: 'job-action-complete', jobId: 'job1', action: 'request-change' }); f.view.update(f.data);
   assert.equal(f.q('#job-dialog').open, true);
-  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Re-planning');
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Wrangling');
   assert.notEqual(jobStatus(job, job.subJobs[1]).text, 'Held for the plan change', 'a change being drawn pauses nothing');
   assert.match(f.q('.job-replan-ask').textContent, /Split web in two/);
   assert.ok(f.q('.job-change textarea'), 'a question can still be asked while the change is drawn');
@@ -2091,7 +2091,7 @@ test('a plan change about a sub-job awaiting review freezes it: held, not needs-
   assert.equal(jobNeedsReview(job, job.subJobs[0]), true, 'an idea typed on the job holds no step');
   job.replan = { feedback: 'Rethink api', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'r1' } };
   f.view.update(f.data);
-  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Re-planning');
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Wrangling');
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false); assert.equal(f.q('#jobs-review-count').textContent, '');
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   assert.equal(f.q('[data-action="approve-code"]'), null);

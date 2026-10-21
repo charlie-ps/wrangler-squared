@@ -57,7 +57,7 @@ export function jobState(job) {
     return job.stage === 'backlog' ? 'planned' : 'queued';
   }
   // Sub-jobs frozen by a pending plan change roll up to the change itself:
-  // re-planning, then a proposal that needs the human.
+  // wrangling, then a proposal that needs the human.
   const halted = job.paused || budgetHeld(job);
   const states = job.subJobs.filter((s) => halted || !heldByReplan(job, s)).map((s) => subState(job, s)).filter((s) => s !== 'dropped');
   if (replanProposed(job) && !halted) states.push('change');
@@ -124,7 +124,7 @@ export function jobLabel(job) {
   if (state === 'paused') return 'Paused';
   if (state === 'change') return job.replan.proposal.escalation ? 'Options ready' : job.replan.red ? 'Fix proposed' : 'Plan change ready';
   if (state === 'read' && wranglerUnread(job).length) return 'Wrangler replied';
-  if (state === 'running' && replanPending(job) && !replanProposed(job)) return job.replan.red ? 'Fixing' : 'Re-planning';
+  if (state === 'running' && replanPending(job) && !replanProposed(job)) return job.replan.red ? 'Fixing' : 'Wrangling';
   const peers = job.subJobs.filter((s) => subState(job, s) === state);
   if (!peers.length) return jobStatus(job, null).text;
   return `${subLabel(job, peers[0])}${peers.length > 1 ? ` +${peers.length - 1}` : ''}`;

@@ -1233,7 +1233,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const hints = [job.cancelledAt ? cancelledText(job) : '',
       job.stage === 'backlog' && !job.cancelledAt ? 'Planning proposes Jira story titles without touching Jira. You review the plan before tickets are created or work begins.' : '',
       job.stage === 'planning' && !job.plan && !job.cancelledAt ? 'Wrangler will bring the plan here for review.' : '',
-      replanPending(job) ? replanProposed(job) ? 'Approving applies the change: new sub-jobs are added, edited ones take their new brief, removed ones are cancelled with any PR left open on GitHub. Locked sub-jobs have already landed and stay as they are. No new step starts until you approve or discard.' : 'Wrangler is re-planning and will bring the proposal here. No new step starts meanwhile; running steps carry on.' : ''].filter(Boolean);
+      replanPending(job) ? replanProposed(job) ? 'Approving applies the change: new sub-jobs are added, edited ones take their new brief, removed ones are cancelled with any PR left open on GitHub. Locked sub-jobs have already landed and stay as they are. Only the steps it changes wait until you approve or discard it; the rest of the job carries on.' : 'Wrangler is working on it and will bring any proposal here. Only held steps wait meanwhile; the rest of the job carries on.' : ''].filter(Boolean);
     const chips = stateChip(state, jobLabel(job), hints) + (plan ? storyChips(plan.stories || []) : repoChips(job.repos))
       + (job.base ? chip(ICONS.branch, `→ ${job.base}`, { title: `Every PR lands on ${job.base} unless it names another branch` }) : '') + costChip(job.usd, job.usdEstimated, `${JOB_COST_TITLE}${job.usdEstimated ? ' · includes an estimate for Codex sessions' : ''}`);
     let body = '', fab = '', extra = '';
@@ -1247,7 +1247,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const authority = authorityText(job, planDraft);
       fab = `<button class="primary" data-action="approve-plan" title="${esc(bad.length ? `Finish ${bad.length === 1 ? 'the write' : `${bad.length} writes`} first: ${writeProblem(bad[0])}` : authority)}" ${running || bad.length ? 'disabled' : ''}>${ICONS.check}Approve ${planDraft.subJobs.filter((s) => !isWriteSub(s)).length}</button>`;
     } else if (replanProposed(job)) body = proposalHtml(job);
-    else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b>${queuedTag(job)} ${esc(latestAsk(job.replan))}</p>` : replanQueued(job).length ? `<p class="job-replan-ask"><b>Re-planning</b>${queuedTag(job)} Starts once the last change's wrangler has stopped</p>` : ''}${supersededHtml(job)}${liveGraphHtml(job)}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
+    else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Wrangling</b>${queuedTag(job)} ${esc(latestAsk(job.replan))}</p>` : replanQueued(job).length ? `<p class="job-replan-ask"><b>Wrangling</b>${queuedTag(job)} Starts once the last change's wrangler has stopped</p>` : ''}${supersededHtml(job)}${liveGraphHtml(job)}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
     else if (ideaEditable(job) && ideaEdit === job.id) body = ideaEditHtml(job, stripHtml(job));
     else body = `<p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}`;
     if (job.error) fab = `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>`;
@@ -1257,7 +1257,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     else if (job.stage === 'active') fab = leadFab(job);
     else if (!fab) fab = promptFab(job);
     if (job.stage === 'active' && !job.cancelledAt) extra = replanProposed(job) ? ''
-      : replanPending(job) ? `<button data-action="discard-replan" title="Stop re-planning and keep the plan as it is">${ICONS.x}Discard change</button>` : '';
+      : replanPending(job) ? `<button data-action="discard-replan" title="Stop wrangling and keep the plan as it is">${ICONS.x}Discard change</button>` : '';
     const tail = job.cancelledAt || job.stage === 'done' ? '' : `<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel job</button>`;
     const ask = changeBoxHtml(job, null);
     // The job's buttons and its checkpoints share one row; a delivered job has no checkpoints left to switch.
