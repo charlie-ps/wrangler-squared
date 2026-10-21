@@ -381,6 +381,11 @@ export class JobRuntime {
     return sessionId;
   }
 
+  async archiveSession(sessionId) {
+    const s = sessionId && this.host.sessions.get(sessionId);
+    if (s && !s.archived) await this.host.sessions.archive(sessionId, { cascade: false });
+  }
+
   async mainCaughtUp(notice) {
     return caughtUp(this.run, notice.path, notice.base);
   }

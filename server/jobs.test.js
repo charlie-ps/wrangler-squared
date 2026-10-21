@@ -67,7 +67,7 @@ function fixture(t, jobInput = input) {
   // Red handling (job-red.js) is off by default here, so a red step waits for the
   // human as these suites assume; its own tests turn it on.
   store.settings({ maxReplans: 0 });
-  const launched = [], stopped = [], merged = [], cleaned = [], mailed = [], alive = new Set();
+  const launched = [], stopped = [], merged = [], cleaned = [], mailed = [], archivedSessions = [], alive = new Set();
   let clock = Date.now();
   const runtime = {
     async launch(j, s, r, prepared) {
@@ -79,6 +79,7 @@ function fixture(t, jobInput = input) {
     async exists(r) { return alive.has(r.sessionId); },
     async resumeWithMail(r, text) { mailed.push({ sid: r.sessionId, text }); },
     async cleanup(j, s) { cleaned.push(s.id); }, async cleanupPlanning() {}, releaseImages() {},
+    async archiveSession(sid) { archivedSessions.push(sid); },
     attributeSpend(s, live) { attributed.push(live); },
   };
   let pr = { state: 'OPEN', checkStatus: 'pending', head: 'head1', mergeCommit: null, checks: [], base: 'main' };
@@ -105,7 +106,7 @@ function fixture(t, jobInput = input) {
     store.action(job.id, 'start'); await tick(); report({ kind: 'plan', plan: p }); await tick();
     const current = store.get(job.id); store.approvePlan(job.id, current.revision); await tick();
   }
-  return { store, job, runner, runtime, github, alive, launched, stopped, merged, cleaned, mailed, tick, last, workerFor, report, approve, sub,
+  return { store, job, runner, runtime, github, alive, launched, stopped, merged, cleaned, mailed, archivedSessions, setStatus: (fn) => { status = fn; }, tick, last, workerFor, report, approve, sub,
     attributed, triaged, deployCalls, clockNow: () => clock,
     setPr: (value) => { pr = { ...pr, ...value }; }, setDeployment: (value) => { deployment = value; },
     setDeploys: (value) => { deploys = { ...deploys, ...value }; }, setStatus: (fn) => { status = fn; },
@@ -3085,6 +3086,54 @@ test('a resolution session that cannot start says why and offers the buttons aga
   assert.equal(n.resolving, null);
   assert.equal(n.resolveError, 'no such directory');
   assert.match(f.store.get(f.job.id).moves.at(-1).detail, /Asked an agent to stash & update in \/home\/me\/repo/);
+});
+
+test('a resolution session is archived once local main is level and it has stopped working, then the notice clears', async (t) => {
+  const f = fixture(t);
+  const notice = { path: '/home/me/repo', base: 'main', reason: 'dirty', dirty: [{ path: 'a.js', change: 'modified' }], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 1, subs: ['api'], at: 1, retrying: false, resolutions: [{ id: 'stash' }], resolving: { id: 'stash', at: 1, sessionId: 's_fix' } };
+  f.store.update(f.job.id, (j) => { j.mainNotices = [notice]; });
+  f.runtime.mainCaughtUp = async () => true;
+  f.setStatus(() => 'working');
+  await f.tick();
+  assert.equal(f.store.get(f.job.id).mainNotices.length, 1, 'level with origin, but the stash may not be popped yet');
+  assert.deepEqual(f.archivedSessions, []);
+  f.setStatus(() => 'idle');
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+  assert.deepEqual(f.archivedSessions, ['s_fix']);
+});
+
+test('a resolution session that cannot be archived does not keep the notice', async (t) => {
+  const f = fixture(t);
+  f.store.update(f.job.id, (j) => { j.mainNotices = [{ path: '/home/me/repo', base: 'main', reason: 'dirty', dirty: [], dirtyCount: 1, localOnly: [], localCount: 0, incoming: [], incomingCount: 1, subs: [], at: 1, retrying: false, resolving: { id: 'stash', at: 1, sessionId: 's_fix' } }]; });
+  f.runtime.mainCaughtUp = async () => true;
+  f.runtime.archiveSession = async () => { throw new Error('host down'); };
+  await f.tick();
+  assert.deepEqual(f.store.get(f.job.id).mainNotices, []);
+});
+
+test('helpers asked before the job was delivered or cancelled are archived once idle; ones asked after stay', async (t) => {
+  for (const how of ['cancel', 'deliver']) {
+    const f = fixture(t);
+    await f.approve(plan([spec('api', [])]));
+    await f.tick();
+    f.store.update(f.job.id, (j) => { j.subJobs[0].helpers = [{ id: 'hp_1', at: 1, sessionId: 's_h1' }, { id: 'hp_2', at: 2, sessionId: 's_h2' }, { id: 'hp_3', at: 3, sessionId: null, error: 'no such agent' }]; });
+    f.setStatus((sid) => sid === 's_h2' ? 'working' : 'idle');
+    if (how === 'cancel') { f.store.action(f.job.id, 'cancel-job'); await f.tick(); await f.tick(); }
+    else f.store.update(f.job.id, (j) => { j.stage = 'done'; j.completedAt = Date.now(); });
+    const closed = f.store.get(f.job.id).completedAt;
+    assert.ok(closed, how);
+    await f.tick();
+    assert.deepEqual(f.archivedSessions, ['s_h1'], `${how}: the one mid-answer waits`);
+    f.setStatus(() => 'idle');
+    await f.tick(); await f.tick();
+    assert.deepEqual(f.archivedSessions, ['s_h1', 's_h2'], `${how}: once, and never the failed entry`);
+    const [h1, h2] = f.store.get(f.job.id).subJobs[0].helpers;
+    assert.ok(h1.archivedAt && h2.archivedAt);
+    f.store.update(f.job.id, (j) => { j.subJobs[0].helpers.push({ id: 'hp_late', at: closed + 1, sessionId: 's_late' }); });
+    await f.tick();
+    assert.deepEqual(f.archivedSessions, ['s_h1', 's_h2'], `${how}: a helper asked afterwards is the human's own`);
+  }
 });
 
 test('Dismiss forgets a checkout notice and records it; a failed Retry keeps it with the new state', async (t) => {

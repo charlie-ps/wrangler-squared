@@ -67,6 +67,7 @@ export class JobRunner {
           await this.sweepRunning(job.id);
           await this.tendMain(job.id);
           await this.tendHelpers(job.id);
+          await this.reapHelpers(job.id);
           await this.settle(job.id);
           await this.advance(job.id);
         } catch (e) { this.store.update(job.id, (j) => { j.error = shortError(e); }); }
@@ -94,6 +95,9 @@ export class JobRunner {
           if (n && error) n.resolveError = error;
         });
       } else if (notice.resolving && await this.runtime.mainCaughtUp(notice)) {
+        // Level with origin does not mean finished: a stash is popped after the merge.
+        if (!this.settled(notice.resolving.sessionId)) continue;
+        await this.archiveQuietly(notice.resolving.sessionId);
         this.store.update(id, (j) => { if (same(j, notice.path)?.resolving) noteMain(j, notice.path, null, { ok: true }, this.now()); });
       }
     }
@@ -113,6 +117,25 @@ export class JobRunner {
         if (h && !h.sessionId) Object.assign(h, error ? { error } : { sessionId });
       });
     }
+  }
+  // A helper outlives its step on purpose (the human may keep talking to it), but
+  // not its job: once the job is delivered or cancelled each one asked before that
+  // is archived as soon as it is not mid-answer. One asked afterwards is the
+  // human's own and stays.
+  async reapHelpers(id) {
+    const job = this.store.get(id);
+    if (job.stage !== 'done' || !job.completedAt) return;
+    for (const sub of job.subJobs) {
+      for (const h of sub.helpers || []) {
+        if (!h.sessionId || h.archivedAt || h.at > job.completedAt || !this.settled(h.sessionId)) continue;
+        if (!(await this.archiveQuietly(h.sessionId))) continue;
+        this.patchSub(id, sub.id, (s) => { const x = s.helpers.find((y) => y.id === h.id); if (x) x.archivedAt = this.now(); });
+      }
+    }
+  }
+  settled(sessionId) { return !['working', 'needs-you', 'unknown'].includes(this.statusOf(sessionId)); }
+  async archiveQuietly(sessionId) {
+    try { await this.runtime.archiveSession(sessionId); return true; } catch (e) { logWarn('[jobs] archive', sessionId, shortError(e)); return false; }
   }
   // What an agent left running for the human to try (job-running.js). A preview
   // is probed while its review is open, written only when up/down flips (the
