@@ -275,15 +275,21 @@ text as public as the rest of this repo.
   shows it. `job-prompts.js approvalNotesBlock` hands every note upstream of a sub-job (transitive
   `after`, `upstreamOf`) to each of its prompts as quoted JSON, capped at 8,000 characters like
   `humanOutputBlock`. A bulk release (a checkpoint switched to Auto) carries none and clears it.
-  On the board Approve stays one click that sends no note; its caret (`approveSplitHtml`) opens a
-  popup whose `[data-with-note]` button sends `[data-approve-note]`, and typed text holds back a tick's redraw.
+  On the board Approve works like Retry: its caret (`approveSplitHtml`) opens a popup holding only
+  `[data-approve-note]`, which Approve itself sends when non-empty, and typed text holds back a tick's redraw.
 - **New idea is a job that may start as a conversation** (`server/job-idea.js`, `public/job-idea.js`).
   Only the board's form sets `idea` (`job-create` `idea:true` → `job.idea.thread`); `create_job` never does.
-  Its planning run either reports `plan` as any job's does, or `reply {text, suggest?:{title, plan}}`,
+  Its planning run either reports `plan` as any job's does, or `reply {text, suggest?}`, one `{title, plan}`
+  or a list of 2–4 when the idea is several jobs (`job-prompts.js SPLIT_PRINCIPLE`, the approved wording),
   which parks the run (`parkedFor: 'idea'`, no slot, like a ready park) until the human's `idea-reply`
-  is mailed by the runner (`deliverIdea`, `ideaMail`). `accept-idea {messageId}` is pinned to the newest
-  message: it applies the suggestion exactly as a plan receipt (Plan review still applies), and settle()
-  then ends the parked run quietly because the job is no longer `inConversation`. A fresh planning run
+  is mailed by the runner (`deliverIdea`, `ideaMail`). A message's `suggest` is stored as a list
+  (`suggestionsOf` reads an old object as a list of one). `accept-idea {messageId, index | all}` is pinned
+  to the newest message and to suggestions not yet created: each is applied exactly as a plan receipt
+  (Plan review still applies). Every one but the last uncreated becomes a NEW job beside the idea
+  (`JobStore.acceptIdea`, the idea's settings, `fromIdea`, stamped `createdAt`/`jobId`, sharing its
+  images, which `JobRunner.finish` releases only once no unfinished job holds them); the last turns the
+  idea itself into its job, and settle() then ends the parked run quietly because the job is no longer
+  `inConversation`. `leave-idea` cancels an idea once one job was created from it. A fresh planning run
   (a retry) reads the whole thread from its prompt, so `claim` marks unsent messages sent. The chat
   dialog redraws on ticks even with the cursor in its empty reply box; only new messages fade in.
   Before planning starts a Backlog idea's title and words are the human's: `edit-idea {title?, text}` (`editIdea`,

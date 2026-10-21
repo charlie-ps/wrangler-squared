@@ -21,7 +21,10 @@ export const branchName = z.string().trim().min(1).max(200).refine(
   'Use a plausible git branch name such as next or release/2.x',
 );
 export const checksSchema = z.array(line).min(1).max(8);
-export const briefSchema = z.string().trim().min(1).max(500);
+// A human step's brief is the numbered steps the human follows, so it gets room
+// an agent's dispatch intent does not (planSchema holds every other brief to 500).
+export const MAX_BRIEF = 500, MAX_HUMAN_BRIEF = 1000;
+export const briefSchema = z.string().trim().min(1).max(MAX_HUMAN_BRIEF);
 // "Show me before review": things the agent must show working at the Code
 // checkpoint, written as things to see. Only a PR has a review step to show at.
 export const MAX_SHOW = 8;
@@ -246,6 +249,7 @@ export const planSchema = z.object({
     if (isPrSub(s) && !s.repo) issue(`${s.id}: a PR sub-job needs repo`);
     if (s.base && !isPrSub(s)) issue(`${s.id}: only a PR lands on a branch (base)`);
     if (!isWriteSub(s) && !s.brief) issue(`${s.id}: brief is required`);
+    if (!isHumanSub(s) && s.brief?.length > MAX_BRIEF) issue(`${s.id}: brief is over ${MAX_BRIEF} characters (only a human step's may run to ${MAX_HUMAN_BRIEF})`);
     if (!isWriteSub(s) && (s.action || s.by || s.place)) issue(`${s.id}: only a write has a place, an action or a session that makes it (by)`);
     if (s.on && isWriteSub(s)) issue(`${s.id}: a write is made by its session (by); put the milestone (on) on that session`);
     else if (s.on && !isSessionSub(s)) issue(`${s.id}: only a session sub-job waits for a milestone (on)`);
@@ -499,18 +503,21 @@ const optionShape = { label: line, why: z.string().trim().max(400).optional(), a
 export const alternativeSchema = z.object({ ...optionShape, plan: planSchema }).strict();
 // A job the idea's planner offers: what the human creates with one press, and
 // exactly the plan receipt it would otherwise have sent (job-idea.js acceptIdea).
+// One, or a list of up to MAX_SUGGESTIONS when the idea holds separate outcomes.
+export const MAX_SUGGESTIONS = 4;
 export const suggestionSchema = z.object({ title: line, plan: planSchema }).strict();
+export const suggestionsSchema = z.union([suggestionSchema, z.array(suggestionSchema).min(1).max(MAX_SUGGESTIONS)]);
 export const reportSchema = z.discriminatedUnion('kind', [
   receipt({ kind: z.literal('plan'), plan: planSchema, ...optionShape, label: line.optional(), diagnosis: diagnosisSchema.optional(),
     alternatives: z.array(alternativeSchema).max(MAX_OPTIONS - 1).optional() }),
   receipt({ kind: z.literal('ready'), checks: readyChecksSchema, running: runningSchema.optional() }),
   // Answers a human who wrote to a session parked on its ready receipt (job-store.js):
   // the run stays parked, the tree and the round unchanged. From a new idea's planner
-  // it is a turn in the conversation instead (job-idea.js), and may suggest a job.
+  // it is a turn in the conversation instead (job-idea.js), and may suggest jobs.
   // From the wrangler answering a step's conversation, `escalate` also shows it on
   // the job (job-talk.js).
   receipt({ kind: z.literal('reply'), text: z.string().trim().min(1).max(4000), shots: z.array(shotSchema).min(1).max(4).optional(), run: runProofSchema.optional(), running: runningSchema.optional(),
-    suggest: suggestionSchema.optional(), escalate: z.boolean().optional() }),
+    suggest: suggestionsSchema.optional(), escalate: z.boolean().optional() }),
   receipt({ kind: z.literal('published'), url: prUrlSchema }),
   receipt({ kind: z.literal('repaired'), changes: checksSchema, checks: checksSchema }),
   receipt({ kind: z.literal('deployed'), checks: checksSchema }),

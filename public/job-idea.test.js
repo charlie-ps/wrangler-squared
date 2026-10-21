@@ -165,7 +165,7 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   assert.ok(f.q('.job-launch').classList.contains('firing'), 'the hole flares first');
   assert.equal(f.sent.filter((m) => m.action === 'accept-idea').length, 0);
   t.mock.timers.tick(900);
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3' });
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3', index: 0 });
   assert.ok(f.q('.job-launch').classList.contains('done'));
   f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
   assert.equal(f.q('#job-dialog').open, false, 'the dialog closes onto the board, where the job forms');
@@ -201,6 +201,65 @@ test('a Create job confirmed after the human opened another job leaves that job 
   f.view.openDetail('idea2');
   f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
   assert.ok(f.q('#job-dialog').open);
+});
+
+const theme = { title: 'Add a dark theme to settings', plan: { context: '', stories: [], subJobs: [{ id: 'theme', title: 'Dark theme tokens', repo: '/Users/me/wrangler-squared', after: [], brief: 'b' }] } };
+
+test('two suggested jobs are two launch strips; pressing one creates it beside the idea and the other stays pressable', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Two separate jobs.', suggest: [suggest, theme] }])]);
+  assert.match(f.q('[data-board="idea1"]').textContent, /Jobs suggested · 2/);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const strips = () => [...f.q('#job-dialog').querySelectorAll('.job-launch')];
+  assert.deepEqual(strips().map((p) => [p.className.split(' ').at(-1), p.querySelector('.job-launch-kicker').textContent, p.querySelector('.job-launch-title').textContent]),
+    [['live', 'Suggested job · 1 of 2', suggest.title], ['live', 'Suggested job · 2 of 2', theme.title]]);
+  assert.ok(f.q('[data-accept-all="m3"]'), 'Create all with two live');
+  assert.equal(f.q('[data-leave-idea]'), null, 'nothing created yet: Cancel, not Leave the rest');
+  strips()[1].querySelector('[data-accept-idea]').click();
+  assert.deepEqual(strips().map((p) => p.className.split(' ').at(-1)), ['live', 'firing'], 'only the pressed one flares');
+  t.mock.timers.tick(900);
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3', index: 1 });
+  assert.match(strips()[1].querySelector('.job-launch-fine').textContent, /beside this idea/);
+  f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
+  assert.ok(f.q('#job-dialog').open, 'the idea stays open for the rest');
+  f.data.jobs[0].idea.thread[0].suggest[1] = { ...theme, createdAt: 5, jobId: 'job2' };
+  f.data.jobs.push({ ...ideaJob(), id: 'job2', title: theme.title, idea: undefined, stage: 'active', plan: theme.plan, subJobs: [], runs: [] });
+  f.view.update(f.data);
+  assert.deepEqual(strips().map((p) => p.className.split(' ').at(-1)), ['live', 'created']);
+  assert.equal(strips()[1].querySelector('.job-launch-label b').textContent, 'Job created');
+  assert.ok(f.q('[data-leave-idea]'), 'Leave the rest once one is created');
+  assert.equal(f.q('[data-accept-all]'), null, 'one left: no Create all');
+  assert.match(f.q('[data-board="idea1"]').textContent, /Jobs suggested · 1 left/);
+  strips()[0].querySelector('[data-accept-idea]').click();
+  t.mock.timers.tick(900);
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3', index: 0 });
+  assert.match(strips()[0].querySelector('.job-launch-fine').textContent, /takes this idea's place/);
+  f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
+  assert.equal(f.q('#job-dialog').open, false, 'the last one turns the idea into its job');
+});
+
+test('Create all sends every uncreated suggestion at once; Leave the rest closes the idea', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Two.', suggest: [suggest, theme] }])]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  f.q('[data-accept-all="m3"]').click();
+  assert.equal(f.q('#job-dialog').querySelectorAll('.job-launch.firing').length, 2);
+  t.mock.timers.tick(900);
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3', all: true });
+  const g = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Two.', suggest: [{ ...suggest, createdAt: 5, jobId: 'job2' }, theme] }])]);
+  g.q('[data-board="idea1"] .job-plate-open').click();
+  g.q('[data-leave-idea]').click();
+  assert.equal(g.sent.at(-1).action, 'leave-idea');
+});
+
+test('a newer reply marks every uncreated suggestion replaced; a created one stays created', (t) => {
+  const f = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Three.', suggest: [suggest, { ...theme, createdAt: 5, jobId: 'job2' }, { ...theme, title: 'Third' }] }, { id: 'm4', at: 6, from: 'human', text: 'Fold the third into the first', sentAt: null }])]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  const strips = [...f.q('#job-dialog').querySelectorAll('.job-launch')];
+  assert.deepEqual(strips.map((p) => p.className.split(' ').at(-1)), ['stale', 'created', 'stale']);
+  assert.ok(strips.filter((p) => p.classList.contains('stale')).every((p) => /Replaced by a newer reply/.test(p.textContent)));
+  assert.equal(f.q('[data-accept-all]'), null);
+  assert.equal(f.q('[data-leave-idea]'), null);
 });
 
 test('a suggestion something newer was said after is stale and cannot be pressed', (t) => {

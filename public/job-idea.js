@@ -1,10 +1,10 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, placeOf, placeShort, PLACES, kindChipHtml, ideaThread, ideaStage, liveSuggestion } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, placeOf, placeShort, PLACES, kindChipHtml, ideaThread, ideaStage, liveSuggestion, suggestionsOf } from './jobs.js';
 import { inflowHtml, arcHtml } from './job-skylines.js';
 
 // New idea's conversation (server/job-idea.js): the idea's formation sky across the
-// top, a thread with its planner, and the job the planner suggests as a launch strip
+// top, a thread with its planner, and each job the planner suggests as a launch strip
 // under its message. Pure markup; jobs-view.js wires it. Everything the planner or
 // the human wrote is escaped here.
 
@@ -56,28 +56,51 @@ const stepNote = (plan, s) => {
 
 // The launch strip (the mock-up's "Horizon strip"): what the job is, then the event
 // horizon that IS the button. `state` is live, stale (a newer message replaced it),
-// firing (pressed, the hole flaring) or done.
-export function suggestionHtml(job, msg, state = 'live') {
-  const { title, plan } = msg.suggest;
+// firing (pressed, the hole flaring), done (the idea becoming it) or created (a job
+// made beside the idea). With several, `index` and `of` place it among them, and
+// `last` says whether pressing it turns the idea itself into the job.
+export function suggestionHtml(job, msg, state = 'live', { index = 0, of = 1, last = true } = {}) {
+  const x = suggestionsOf(msg)[index];
+  const { title, plan } = x;
   const { work, repos, places, kinds, line } = suggestionSummary(plan);
   const meta = [`<span class="job-launch-chip"><b>${work.length}</b>&nbsp;sub-job${work.length === 1 ? '' : 's'}</span>`,
     `<span class="job-launch-chip">${kinds.map(([list, one, many]) => `${kindChipHtml(list[0])}${list.length} ${list.length === 1 ? one : many || one}`).join(' ')}</span>`,
     ...repos.map((r) => `<span class="job-launch-chip" title="${esc(tildify(r))}">${ICONS.folder}${esc(base(r))}</span>`),
     ...places.map((w) => `<span class="job-launch-chip ghost">${PLACES[placeOf(w)].icon}${esc(placeShort(w))}</span>`)].join('');
   const steps = work.map((s) => `<li>${kindChipHtml(s)}<span>${esc(s.title)}</span><small>${esc(stepNote(plan, s))}</small></li>`).join('');
-  const done = state === 'done', stale = state === 'stale';
-  const label = done ? 'Creating the job' : 'Create job';
+  const done = state === 'done', stale = state === 'stale', created = state === 'created';
+  const label = created ? 'Job created' : done ? 'Creating the job' : 'Create job';
   // The press is the plan approval, whatever Plan review says (job-store.js accept-idea).
   const fine = stale ? '<b>Replaced by a newer reply</b> · the wrangler suggests again once it answers.'
-    : done ? '<b>Job starting</b> · it takes this idea\'s place on the board.'
-      : '<b>Creating it approves this plan</b> · the job starts as soon as you press; your other checkpoints still apply.';
-  return `<div class="job-launch tone-warn ${state}" data-board="${esc(msg.id)}" data-launch="${esc(msg.id)}">
-    <div class="job-launch-text"><span class="job-launch-kicker"><i></i>Suggested job</span><h3 class="job-launch-title">${esc(title)}</h3><div class="job-launch-meta">${meta}</div><ol class="job-launch-steps">${steps}</ol></div>
-    <button type="button" class="job-launch-go" data-accept-idea="${esc(msg.id)}" data-spin="14" aria-label="${esc(`Create job: ${title}`)}" ${state === 'live' ? '' : 'aria-disabled="true"'}>
-      <span class="job-launch-sky">${arcHtml(msg.id, done ? 'ok' : 'warn')}</span>
-      <span class="job-launch-face"><span class="job-launch-dot">${done ? ICONS.check : ICONS.send}</span><span class="job-launch-label"><b>${label}</b><small>${esc(line)}</small></span></span>
+    : created ? '<b>Created</b> · it runs as its own job on the board.'
+      : done ? `<b>Job starting</b> · ${last ? 'it takes this idea\'s place on the board.' : 'it joins the board beside this idea.'}`
+        : '<b>Creating it approves this plan</b> · the job starts as soon as you press; your other checkpoints still apply.';
+  const key = index ? `${msg.id}:${index}` : msg.id;
+  const side = state === 'live' ? '<button type="button" class="job-launch-refine" data-idea-refine>Keep refining</button>'
+    : created && x.jobId ? `<button type="button" class="job-launch-refine" data-open-idea-job="${esc(x.jobId)}">${ICONS.eye}Open job</button>` : '';
+  return `<div class="job-launch tone-warn ${state}" data-board="${esc(key)}" data-launch="${esc(key)}">
+    <div class="job-launch-text"><span class="job-launch-kicker"><i></i>Suggested job${of > 1 ? ` · ${index + 1} of ${of}` : ''}</span><h3 class="job-launch-title">${esc(title)}</h3><div class="job-launch-meta">${meta}</div><ol class="job-launch-steps">${steps}</ol></div>
+    <button type="button" class="job-launch-go" data-accept-idea="${esc(msg.id)}" data-index="${index}" data-spin="14" aria-label="${esc(`Create job: ${title}`)}" ${state === 'live' ? '' : 'aria-disabled="true"'}>
+      <span class="job-launch-sky">${arcHtml(key, done || created ? 'ok' : 'warn')}</span>
+      <span class="job-launch-face"><span class="job-launch-dot">${done || created ? ICONS.check : ICONS.send}</span><span class="job-launch-label"><b>${label}</b><small>${esc(line)}</small></span></span>
     </button>
-    <div class="job-launch-fine"><span>${fine}</span>${state === 'live' ? '<button type="button" class="job-launch-refine" data-idea-refine>Keep refining</button>' : ''}</div></div>`;
+    <div class="job-launch-fine"><span>${fine}</span>${side}</div></div>`;
+}
+
+// Every strip under one planner message, then, while they are live, Create all (two or
+// more left) and Leave the rest (once one was created, from this message or an earlier one).
+function suggestionsHtml(job, m, live, firing) {
+  const all = suggestionsOf(m), open = all.flatMap((x, i) => (x.createdAt ? [] : [i]));
+  const pressed = (i) => firing?.id === m.id && (firing.all ? open.includes(i) : (firing.index ?? 0) === i);
+  const strips = all.map((x, i) => {
+    const state = x.createdAt ? (x.jobId && x.jobId !== job.id ? 'created' : 'done') : pressed(i) ? (firing.state === 'sent' ? 'done' : 'firing') : m === live ? 'live' : 'stale';
+    const last = firing?.all ? i === open.at(-1) : open.length === 1;
+    return suggestionHtml(job, m, state, { index: i, of: all.length, last });
+  });
+  const anyCreated = ideaThread(job).some((t) => t.from === 'planner' && suggestionsOf(t).some((x) => x.createdAt));
+  const calm = m === live && !(firing?.id === m.id);
+  const bar = calm && (open.length > 1 || anyCreated) ? `<div class="job-launch-all">${anyCreated ? '<button type="button" class="job-launch-refine" data-leave-idea>Leave the rest</button>' : ''}${open.length > 1 ? `<button type="button" class="primary" data-accept-all="${esc(m.id)}">${ICONS.send}Create all ${open.length}</button>` : ''}</div>` : '';
+  return strips.join('') + bar;
 }
 
 const humanHtml = (text, at, extra = '', pics = '') => `<div class="job-sent ${extra}"><div class="job-sent-bubble">${pics}<span>${esc(text)}</span></div><span class="job-sent-meta">You${at ? ` · ${esc(time(at))}` : ''}</span></div>`;
@@ -89,15 +112,14 @@ const pendingPics = (urls = []) => urls.length ? `<span class="job-sent-imgs">${
 const plannerHtml = (job, m, launch, fresh) => `<div class="job-idea-msg${fresh ? ' fresh' : ''}" data-msg="${esc(m.id)}"><span class="job-idea-orb" aria-hidden="true"></span><div><div class="job-idea-who">The wrangler<time>${esc(time(m.at))}</time></div><div class="job-idea-body">${proseHtml(m.text)}</div>${launch}</div></div>`;
 
 // `pending` is the reply this tab just sent, drawn until the thread holds it; `firing`
-// the suggestion pressed here, whose hole flares before the job replaces the idea;
+// the suggestion pressed here ({id, index} or {id, all}), whose hole flares before the job is made;
 // `fresh(id)` says whether a message is new to this dialog, so only it fades in.
 export function ideaThreadHtml(job, { pending = null, firing = null, fresh = () => false } = {}) {
   const thread = ideaThread(job), live = liveSuggestion(job);
   const rows = [humanHtml(job.intent, job.createdAt, '', keptPics(job, job.images))];
   for (const m of thread) {
     if (m.from === 'human') { rows.push(humanHtml(m.text, m.at, '', keptPics(job, (m.images || []).map((i) => `idea:${i.file}`)))); continue; }
-    const state = !m.suggest ? null : m.acceptedAt || firing?.state === 'sent' && firing.id === m.id ? 'done' : firing?.id === m.id ? 'firing' : m === live ? 'live' : 'stale';
-    rows.push(plannerHtml(job, m, state ? suggestionHtml(job, m, state) : '', fresh(m.id)));
+    rows.push(plannerHtml(job, m, suggestionsOf(m).length ? suggestionsHtml(job, m, live, firing) : '', fresh(m.id)));
   }
   const held = pending && !thread.some((m) => m.from === 'human' && m.text === pending.text && m.at >= pending.at - 60000);
   if (held) rows.push(humanHtml(pending.text, pending.at, `fresh ${pending.state === 'failed' ? 'failed' : 'sending'}`, pendingPics(pending.images)));

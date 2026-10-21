@@ -249,12 +249,20 @@ test('a legacy publish run can still land its receipt on the migrated job', asyn
 
 // --- Plan schema ---
 
+test('a human step\'s brief may run to 1000 characters and keeps its line breaks', async (t) => {
+  const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
+  const brief = '1. Open https://vendor.example.com/apps\n2. Click Approve\n'.padEnd(1000, 'x');
+  f.report({ kind: 'plan', plan: plan([spec('api'), { ...humanSpec('h'), brief }]) });
+  assert.equal(f.store.get(f.job.id).plan.subJobs.find((s) => s.id === 'h').brief, brief);
+});
+
 test('a new plan needs context, briefs stay short, and checks belong to PRs only', async (t) => {
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
   const before = f.store.snapshot();
   const { context, ...contextless } = plan();
   assert.throws(() => f.report({ kind: 'plan', plan: contextless }), /context/i);
-  assert.throws(() => f.report({ kind: 'plan', plan: plan([spec('a', [], { brief: 'x'.repeat(501) })]) }));
+  assert.throws(() => f.report({ kind: 'plan', plan: plan([spec('a', [], { brief: 'x'.repeat(501) })]) }), /a: brief is over 500 characters/);
+  assert.throws(() => f.report({ kind: 'plan', plan: plan([{ ...humanSpec('h'), brief: 'x'.repeat(1001) }]) }));
   assert.throws(() => f.report({ kind: 'plan', plan: plan([sessionSpec('a')].map((s) => ({ ...s, check: 'curl it' }))) }), /own check/);
   assert.throws(() => f.report({ kind: 'plan', plan: plan([spec('a', ['b']), spec('b', ['a'])]) }), /cycles/);
   assert.throws(() => f.report({ kind: 'plan', plan: plan([spec('a', ['ghost'])]) }), /Unknown dependency/);
