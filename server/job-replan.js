@@ -379,7 +379,7 @@ export function replanStatus(job, sub) {
     : sub.on ? ` · on ${sub.on.sub}/${sub.on.at}` : '';
   const red = sub.pr?.checkStatus === 'failing' && sub.stage === 'pr' ? ` · checks FAILING at head ${sub.pr.head}${sub.pr.dirty ? ' (merge conflicts)' : ''}`
     : sub.stage === 'deployment' && sub.deploymentResult?.status === 'failing' ? ` · post-merge run FAILING at merge ${sub.pr?.mergeCommit}${sub.recoveredBy ? ` (recovering via ${sub.recoveredBy})` : ''}` : '';
-  const run = liveRun(job, sub.id) ? ' · a step is running' : parkedReadyRun(job, sub) && sub.ready ? ` · its session is OPEN on review round ${sub.ready.round || 1}${sub.answering ? ' (answering the last message)' : ' (forward feedback to it)'}` : '';
+  const run = liveRun(job, sub.id) ? ' · a step is running' : parkedReadyRun(job, sub) && sub.ready ? ` · its session is OPEN on review round ${sub.ready.round || 1}${sub.answering ? ' (answering the last message; forward feedback to it, it is read next)' : ' (forward feedback to it)'}` : '';
   const state = sub.cancelledAt ? 'cancelled' : `${sub.stage}${sub.state ? `/${sub.state}` : ''}`;
   return `- ${sub.id} (${sub.kind || 'pr'}) ${JSON.stringify(sub.title)}: ${state}${pr}${red}${write}${run}${isFrozen(sub) ? ' · FROZEN' : ''}`;
 }

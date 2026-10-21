@@ -11,13 +11,16 @@ import { JobRuntime, CleanupRefused } from './job-runtime.js';
 import { jobPrompt } from './job-prompts.js';
 import { JobGithub, prSummary } from './job-github.js';
 import { normaliseComments, commentsBlockMerge } from './job-comments.js';
-import { jobCreateHandler, makeJobCreateHandler, jobActionHandler, jobSettingsHandler } from './handlers.js';
+import { jobCreateHandler, makeJobCreateHandler, makeJobActionHandler, jobSettingsHandler } from './handlers.js';
 import { _resetForTests, runnerFor } from './jobs.js';
 import { jobReportTool, getJobContextTool } from './tools.js';
 import { changeView } from './job-change.js';
 import { say } from './job-talk.js';
 import { settingsSchema } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
+
+// Never a real Haiku run: a conversation an idea opens is named after the action.
+const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
 
 const execFileP = promisify(execFile);
 const execGit = (cwd, args) => execFileP('git', ['-C', cwd, ...args]).then((r) => r.stdout.trim());
@@ -2194,6 +2197,40 @@ test('a request-change arrives as a job-action with its own fields and reaches t
   assert.deepEqual(host.broadcasts, [{ event: 'job-action-complete', jobId: f.job.id, action: 'request-change', subJobId: 'api' }]);
   assert.match(f.store.get(f.job.id).replan.feedback, /Use the retry helper$/);
   assert.equal(f.sub().stage, 'review', 'the planner has it; the step waits for the proposal');
+});
+
+test('an idea that opens a conversation has Haiku name it from its first message, after the send', async (t) => {
+  const f = fixture(t); await f.approve(); f.report({ kind: 'ready', checks: ['Tests pass'] }); f.alive.delete(f.last().sid); await f.tick();
+  const host = fakeHost(f); const billed = [];
+  host.sessions.bill = (sid, live) => billed.push([sid, live]);
+  stubRunner(t, host);
+  const asked = []; let answer;
+  const handler = makeJobActionHandler({ run: (prompt, stdin) => { asked.push(stdin); return new Promise((resolve) => { answer = resolve; }); } });
+  await handler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: 'code', ref: f.sub().ready.receiptId, text: 'Use the retry helper' }, host);
+  assert.equal(host.broadcasts[0].event, 'job-action-complete', 'the send does not wait for a title');
+  const convo = () => f.store.get(f.job.id).convos[0];
+  assert.equal(convo().titlePending, true, 'the board draws a loader until Haiku answers');
+  assert.deepEqual(asked, ['<first_message>\nUse the retry helper\n</first_message>']);
+  const { revision } = f.store.get(f.job.id); const rebuilds = host.rebuilds;
+  answer({ text: 'Retry helper for the API', liveSessionId: 'live-1', error: null });
+  await new Promise(setImmediate);
+  assert.deepEqual([convo().title, convo().titlePending], ['Retry helper for the API', undefined]);
+  assert.equal(f.store.get(f.job.id).revision, revision, 'a title is not a revision');
+  assert.equal(host.rebuilds, rebuilds + 1);
+  assert.equal(billed.length, 1, 'billed to the job\'s card');
+  await handler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: 'code', ref: f.sub().ready.receiptId, text: 'And log it', convo: convo().id }, host);
+  await new Promise(setImmediate);
+  assert.equal(asked.length, 1, 'a reply in a named conversation names nothing');
+});
+
+test('a failed conversation title ends the wait, and a restart drops one still pending', (t) => {
+  const f = fixture(t);
+  const job = f.store.create({ intent: 'Make sign-in reliable' });
+  f.store.change((d) => { d.jobs.find((j) => j.id === job.id).convos = [{ id: 'c1', at: 1, pending: null, seenAt: 0, titlePending: true }, { id: 'c2', at: 1, pending: null, seenAt: 0, titlePending: true }]; });
+  assert.equal(f.store.titleConvo(job.id, 'c1', null), false);
+  assert.deepEqual(f.store.get(job.id).convos[0], { id: 'c1', at: 1, pending: null, seenAt: 0 }, 'no title: the board falls back to Conversation N');
+  assert.equal(f.store.titleConvo(job.id, 'c1', 'Late answer'), false, 'only a pending title is replaced');
+  assert.equal(new JobStore(f.store.file).get(job.id).convos[1].titlePending, undefined);
 });
 
 test('a refused job-action is broadcast with its reason instead of thrown, so the footer can snap back', async (t) => {

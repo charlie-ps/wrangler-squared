@@ -5,7 +5,7 @@ import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
 import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode, checkText, unansweredShow } from './jobs-schema.js';
 import { migrateTheme } from '../public/theme-ids.js';
 import { adoptEvidence } from './job-evidence.js';
-import { parkedReadyRun, askAgent } from './job-parked.js';
+import { parkedReadyRun, askAgent, answered, sayInThread } from './job-parked.js';
 import { setRunning, owe, runningOf } from './job-running.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
@@ -245,6 +245,9 @@ export function migrateJobs(raw) {
   return data;
 }
 
+// A generated conversation title is a list label: Haiku is asked for five words.
+const CONVO_TITLE_MAX = 60;
+
 // Only this store writes jobs. Mutations validate a copy and persist it BEFORE
 // replacing memory, so failed validation/disk writes cannot half-approve a job.
 export class JobStore {
@@ -293,6 +296,17 @@ export class JobStore {
       delete job.titlePending;
       if (swap) { job.title = to; job.updatedAt = Date.now(); }
       return swap;
+    });
+  }
+  // Haiku's name for a conversation (handlers.js nameConvos), not a revision either.
+  // Any answer, a null one included, ends the wait.
+  titleConvo(id, convoId, title) {
+    return this.change((d) => {
+      const convo = d.jobs.find((j) => j.id === id)?.convos?.find((c) => c.id === convoId);
+      if (!convo?.titlePending) return false;
+      delete convo.titlePending;
+      if (title) convo.title = title.slice(0, CONVO_TITLE_MAX);
+      return !!title;
     });
   }
   // The board drew these conversations' answers in an open dialog: they are read.
@@ -702,8 +716,8 @@ export class JobStore {
     const id = `msg_${now.toString(36)}${(s.thread?.length || 0).toString(36)}`;
     const round = s.ready.round;
     const [kept] = report.shots || report.run ? adoptEvidence({ jobId: j.id, subId: s.id, round, prefix: `${id}-`, proof: [{ text: report.text, shots: report.shots, run: report.run }] }) : [null];
-    (s.thread ||= []).push({ id, at: now, from: 'agent', text: report.text, round, ...(kept?.shots ? { shots: kept.shots } : {}), ...(report.run ? { run: report.run } : {}) });
-    s.answering = null;
+    sayInThread(s, { id, at: now, from: 'agent', text: report.text, round, ...(kept?.shots ? { shots: kept.shots } : {}), ...(report.run ? { run: report.run } : {}) });
+    answered(s);
     if (report.running) setRunning(s, report.running, { round, keep: true, now });
     Object.assign(r, { lastReply: report, parkedAt: now, mailedAt: null, idleSince: null });
   }
@@ -784,11 +798,11 @@ export class JobStore {
       if (s.ready?.round && proof && r.parkedFor === 'ready') (s.earlier ||= []).push({ round: s.ready.round, checks: s.ready.checks, ...(s.ready.proof ? { proof: s.ready.proof } : {}), at: s.ready.at });
       s.ready = { checks: report.checks.map(checkText), ...(proof?.proof.length ? { proof: proof.proof } : {}), ...(proof ? { round: proof.round } : {}), ...(meta.treeHash ? { treeHash: meta.treeHash } : {}), receiptId, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
       if (proof) s.rounds = proof.round;
-      s.answering = null;
+      answered(s);
       // What it left running is kept only for a human to try: Code on Auto, or a
       // receipt that did not park, owes it all straight to teardown.
       if (report.running || runningOf(s).length) setRunning(s, report.running || [], { round: s.ready.round || 1, keep: reviewCode(j) && r.parkedFor === 'ready', now: Date.now() });
-      if (r.parkedFor === 'ready' && proof?.round > 1) (s.thread ||= []).push({ id: `msg_${Date.now().toString(36)}r`, at: Date.now(), from: 'system', text: `Ready again with new proof.`, round: proof.round });
+      if (r.parkedFor === 'ready' && proof?.round > 1) sayInThread(s, { id: `msg_${Date.now().toString(36)}r`, at: Date.now(), from: 'system', text: `Ready again with new proof.`, round: proof.round });
       if (!reviewCode(j)) { s.ready.approvedAt = s.ready.at; s.state = 'approved'; }
     }
     if (report.kind === 'published') { s.pr = { url: report.url, checkStatus: 'pending' }; s.stage = 'pr'; s.state = 'watching'; s.mergeApprovedHead = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
