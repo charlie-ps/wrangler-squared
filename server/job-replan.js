@@ -4,6 +4,7 @@ import { milestoneReached } from './job-writes.js';
 import { stampActions, checkActions, applyActions, movedActions, landedAs, changeView } from './job-actions.js';
 import { parkedReadyRun } from './job-parked.js';
 import { noteProposal, closeProposal, noteQueued, noteDequeued } from './job-talk.js';
+import { replanAsks, replanAsked } from '../public/replan-asks.js';
 
 // Changing the plan of a job that is already running. The human asks with
 // feedback, a planning session proposes a whole plan, and nothing changes until
@@ -149,7 +150,9 @@ export function mergeReplan(job, proposal) {
 
 // A request replaces any proposal still waiting: the planner reads that one (its
 // plan and its actions) as what the human just asked it to change, and the ideas
-// add up, so a later one never drops an earlier one. `source` is the step and view
+// add up, so a later one never drops an earlier one: kept as a flat list (latest as
+// `feedback`, the rest in `earlier`; public/replan-asks.js), never wrapped in the
+// last, and the oldest dropped past the cap. `source` is the step and view
 // the latest idea was typed on (job-actions.js holds the step's actions to it);
 // `images` are every idea's pictures, for a forward to carry into a thread.
 // `running` is the ask run handing its question over as a change, and `convo` the
@@ -177,9 +180,10 @@ function startReplan(job, text, now, red, { source, images, convo }) {
   clearPlanningError(job);
   const prev = job.replan;
   if (prev?.proposal) closeProposal(job, prev.proposal.id, 'revised', now);
-  const asked = prev?.feedback ? `Earlier: ${prev.feedback}\n\nNow: ${text}`.slice(-REPLAN_FEEDBACK_MAX) : text;
+  const asks = [...replanAsks(prev), text];
+  while (asks.length > 1 && asks.join('').length > REPLAN_FEEDBACK_MAX) asks.shift();
   const actions = (prev?.proposal?.actions || []).map(({ pin: _pin, ...a }) => a);
-  job.replan = { feedback: asked, at: now, proposal: null, previous: prev?.proposal?.plan || prev?.previous || null,
+  job.replan = { feedback: text, earlier: asks.slice(0, -1), at: now, proposal: null, previous: prev?.proposal?.plan || prev?.previous || null,
     ...(actions.length ? { previousActions: actions } : prev?.proposal ? {} : prev?.previousActions ? { previousActions: prev.previousActions } : {}),
     ...(source || prev?.source ? { source: source || prev.source } : {}),
     ...(convo || prev?.convo ? { convo: convo || prev.convo } : {}),
@@ -283,7 +287,7 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
     if (catchesUp(sub, fields)) { lines.push({ sub, detail: catchUp(sub, now) }); continue; }
     // The rework launches once the new prerequisites have landed (job-runner.js).
     if (hasCode(sub) && fields.some((k) => REWORKS.includes(k))) {
-      lines.push({ sub, detail: reworkSub(job, sub, `${job.replan.feedback}\n\nNew brief: ${spec.brief}`, now) });
+      lines.push({ sub, detail: reworkSub(job, sub, `${replanAsked(job.replan)}\n\nNew brief: ${spec.brief}`, now) });
     } else if (sub.error && !isWriteSub(sub) && fields.some((k) => REWORKS.includes(k))) {
       // A step that went red before writing any code starts over on its new
       // brief, once its new prerequisites land, as Retry would send it.

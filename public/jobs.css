@@ -861,6 +861,9 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
    through it; the ask is clamped to one line with its toggle beside it. */
 .job-proposal-bar .job-replan-ask { grid-column:1/-1; display:flex; align-items:baseline; gap:12px; margin:0; background:var(--surface); }
 .job-ask-text { flex:1; min-width:0; }
+.job-proposal-bar .job-ask-earlier { grid-column:1/-1; margin:0; }
+.job-ask-earlier ol { margin:0; padding-left:20px; max-height:30vh; overflow:auto; white-space:pre-wrap; color:var(--fg); }
+.job-ask-earlier li+li { margin-top:6px; }
 .job-ask-text.job-ask-clamp { display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
 .job-ask-more { all:unset; cursor:pointer; flex:none; font-size:12px; font-weight:500; color:var(--blue-fg); white-space:nowrap; }
 .job-ask-more[hidden] { display:none; }

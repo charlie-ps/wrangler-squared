@@ -2800,6 +2800,23 @@ test('the proposal bar clamps a long ask to a few lines: Show more only when the
   assert.equal(f.q('.job-proposal-bar [data-ask-more]').textContent, 'Show more');
 });
 
+test('the proposal bar says the latest ask, with the earlier ones listed once each behind a toggle, also for a nested ask saved before', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued' }];
+  const proposal = { id: 'run_p', plan: job.plan, merged: job.plan, changes: { frozen: [], kept: ['api'], edited: [], added: [], removed: [] } };
+  job.replan = { feedback: 'Rename the button', earlier: ['Add CSV export', 'Make it smaller'], at: 1, previous: null, proposal };
+  f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
+  assert.equal(f.q('.job-proposal-bar .job-ask-text').textContent, 'You asked Rename the button');
+  assert.equal(f.q('.job-proposal-bar .job-ask-earlier summary').textContent, 'Earlier asks (2)');
+  assert.deepEqual([...f.window.document.querySelectorAll('.job-ask-earlier li')].map((l) => l.textContent), ['Add CSV export', 'Make it smaller']);
+  job.replan = { feedback: 'Earlier: Earlier: Add CSV export\n\nNow: Make it smaller\n\nNow: Rename the button', at: 1, previous: null, proposal };
+  f.view.update(f.data);
+  assert.equal(f.q('.job-proposal-bar .job-ask-text').textContent, 'You asked Rename the button');
+  assert.deepEqual([...f.window.document.querySelectorAll('.job-ask-earlier li')].map((l) => l.textContent), ['Add CSV export', 'Make it smaller']);
+  job.replan = { feedback: 'Just this', earlier: [], at: 1, previous: null, proposal }; f.view.update(f.data);
+  assert.equal(f.q('.job-proposal-bar .job-ask-earlier'), null, 'one ask has no list');
+});
+
 test('a proposal with a diagnosis, ranked options and actions: options switch the graph, actions are marks on the node, approve names the option', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   const pr = { url: 'https://github.com/org/repo/pull/7', head: 'h1', checkStatus: 'failing' };

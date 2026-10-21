@@ -6,6 +6,7 @@ import { isFrozen, replanStatus } from './job-replan.js';
 import { writeBrief, openWrites, draftingFor, WRITE_RESULT_SHAPE } from './job-writes.js';
 import { inConversation, ideaThread } from './job-idea.js';
 import { talkOf, convosOf, convoById, convoRun } from './job-talk.js';
+import { replanAsked } from '../public/replan-asks.js';
 
 // The worktree starts on a placeholder branch (job-runtime.js). The session
 // working inside the repository is the one that can read its convention, so
@@ -343,7 +344,7 @@ const replanBlock = (job, run) => lines(
   otherWranglers(job, job.replan.convo),
   sourceLine(job, job.replan),
   job.replan.red ? '' : stepConvoLine(job, convoById(job, job.replan.convo)),
-  `Requested change: ${job.replan.feedback}`,
+  `Requested change: ${replanAsked(job.replan)}`,
   mayAnswer(job) ? `If those words are only a question and nothing should change, answer it instead of proposing: ${reportCall(run, `kind:"reply", text:"your answer, plain words, at most 4000 characters"${convoById(job, job.replan.convo)?.sub ? ', escalate?:true' : ''}`)} The board shows it in the job's conversation and no plan change is made.` : '',
 );
 // A question in one of the job's conversations (job-talk.js): answered, not

@@ -986,7 +986,7 @@ test('every idea has one way in: the planner, which takes a step\'s idea into th
   change(f, 'api', 'Rename it');
   const replan = f.store.get(f.job.id).replan;
   assert.equal(replan.previous.subJobs.length, 3, 'the planner reads the proposal it is asked to change');
-  assert.match(replan.feedback, /^Earlier: Also cover SSO\n\nNow: About “Deliver api” \(api, review\/verified\): Rename it$/);
+  assert.deepEqual([replan.earlier, replan.feedback], [['Also cover SSO'], 'About “Deliver api” (api, review/verified): Rename it']);
   assert.equal(replan.source.at, 'code');
 });
 
@@ -3288,7 +3288,7 @@ test('a question that asks for a change is proposed by its ask run, folding into
   const job = f.store.get(f.job.id);
   assert.equal(job.convos.at(-1).pending, null);
   assert.equal(job.replan.proposal.id, asker.run.id);
-  assert.match(job.replan.feedback, /^Earlier: Add a CLI after web\n\nNow: Can you also add docs\?$/);
+  assert.deepEqual([job.replan.earlier, job.replan.feedback], [['Add a CLI after web'], 'Can you also add docs?']);
   assert.deepEqual(job.talk.filter((m) => m.kind === 'proposal').map((m) => m.outcome || null), ['revised', null]);
 });
 
