@@ -3,7 +3,7 @@ import { dropSub, reworkSub, validatePlan, notStarted } from './job-sub-ops.js';
 import { milestoneReached } from './job-writes.js';
 import { stampActions, checkActions, applyActions, movedActions, landedAs, changeView } from './job-actions.js';
 import { parkedReadyRun } from './job-parked.js';
-import { noteProposal, closeProposal } from './job-talk.js';
+import { noteProposal, closeProposal, noteQueued, noteDequeued } from './job-talk.js';
 
 // Changing the plan of a job that is already running. The human asks with
 // feedback, a planning session proposes a whole plan, and nothing changes until
@@ -154,12 +154,26 @@ export function mergeReplan(job, proposal) {
 // `images` are every idea's pictures, for a forward to carry into a thread.
 // `running` is the ask run handing its question over as a change, and `convo` the
 // conversation its card is drawn in (job-talk.js). Ask runs answer alongside it.
+// One sent while the wrangler is drafting (or behind others already waiting) joins
+// the FIFO `job.replanQueue` instead, and is planned on its own once the change
+// ahead is approved or discarded (startQueued). Returns `{ queued: n }`, its place.
 export const REPLAN_FEEDBACK_MAX = 16000;
+export const replanQueue = (job) => job.replanQueue || [];
+// A planner still writing the proposal for `job.replan`; one that has reported is done.
+const drafting = (job, except = null) => job.runs.some((r) => !r.stopped && !r.report && !r.subJobId && !r.ask && r.id !== except);
 export function requestReplan(job, feedback, now, red = null, { source = null, images = [], running = null, convo = null } = {}) {
   if (job.stage !== 'active') throw new Error('Only a running job has a plan to change');
-  if (job.runs.some((r) => !r.stopped && !r.subJobId && !r.ask && r.id !== running)) throw new Error('Wait for the wrangler to finish the plan change it is drawing');
   const text = String(feedback || '').trim().slice(0, 8000);
   if (!text) throw new Error('Explain the change you want');
+  if (!job.replan?.proposal && (drafting(job, running) || (!job.replan && replanQueue(job).length))) {
+    (job.replanQueue ||= []).push({ feedback: text, at: now, ...(source ? { source } : {}), ...(images.length ? { images } : {}), ...(convo ? { convo } : {}), ...(red ? { red } : {}) });
+    noteQueued(job, convo, job.replanQueue.length, now);
+    return { queued: job.replanQueue.length };
+  }
+  startReplan(job, text, now, red, { source, images, convo });
+  return {};
+}
+function startReplan(job, text, now, red, { source, images, convo }) {
   clearPlanningError(job);
   const prev = job.replan;
   if (prev?.proposal) closeProposal(job, prev.proposal.id, 'revised', now);
@@ -171,6 +185,22 @@ export function requestReplan(job, feedback, now, red = null, { source = null, i
     ...(convo || prev?.convo ? { convo: convo || prev.convo } : {}),
     ...(images.length || prev?.images?.length ? { images: [...(prev?.images || []), ...images] } : {}),
     ...(red ? { red } : prev?.red ? { red: { ...prev.red, auto: false, human: true } } : {}) };
+}
+
+// The next queued change becomes the plan change, drawn against the plan as it
+// stands now, so its source is re-pinned to its step as it is now (as sendBack
+// does). Waits while a planner is still drafting (a discarded one stopping): the
+// runner tries again each tick.
+export const queuedReady = (job) => !job.replan && job.stage === 'active' && !job.cancelledAt && !!replanQueue(job).length && !drafting(job);
+export function startQueued(job, now) {
+  if (!queuedReady(job)) return false;
+  const [next, ...rest] = job.replanQueue;
+  if (rest.length) job.replanQueue = rest; else delete job.replanQueue;
+  const step = next.source && job.subJobs.find((s) => s.id === next.source.sub);
+  const view = step && changeView(job, step);
+  startReplan(job, next.feedback, now, next.red || null, { source: view ? { sub: step.id, ...view } : next.source || null, images: next.images || [], convo: next.convo || null });
+  noteDequeued(job, next.convo, now);
+  return true;
 }
 
 // A planning session that died or blocked set the job's error, which holds the
@@ -185,6 +215,7 @@ export function discardReplan(job) {
   clearPlanningError(job);
   if (job.replan.proposal) closeProposal(job, job.replan.proposal.id, 'discarded', Date.now());
   job.replan = null;
+  startQueued(job, Date.now());
 }
 
 // The receipt of a re-planning run is a proposal, never the plan. Merged here so
@@ -291,6 +322,7 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
   clearPlanningError(job);
   closeProposal(job, proposal.id, 'approved', now);
   job.replan = null;
+  startQueued(job, now);
   return { lines, detail: `Changed the plan: ${summary}`, feedback };
 }
 

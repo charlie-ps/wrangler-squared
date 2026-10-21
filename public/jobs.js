@@ -515,6 +515,10 @@ export function redScope(job, id) {
 // proposal the human approves or discards. Mirrors the server's isFrozen.
 export const replanPending = (job) => !!job.replan && !job.cancelledAt;
 export const replanProposed = (job) => replanPending(job) && !!job.replan.proposal;
+// Changes sent while the wrangler was drafting, each planned in its own round once
+// the one ahead is approved or discarded (server/job-replan.js requestReplan).
+export const replanQueued = (job) => job.cancelledAt ? [] : job.replanQueue || [];
+export const queuedLabel = (job) => { const n = replanQueued(job).length; return n ? `${n} change${n === 1 ? '' : 's'} queued` : ''; };
 export const isFrozen = (sub) => !!sub.cancelledAt || ['deployment', 'cleanup', 'done'].includes(sub.stage) || !!sub.mergedAt || !!sub.deployed;
 // Mirrors server/job-red.js touchedBy: what a waiting proposal edits, cancels or
 // acts on, in any of its options.

@@ -790,6 +790,7 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 /* A proposed plan change: what approving does to each sub-job, as a tag under its node and a line below. */
 .job-replan-ask { white-space:pre-wrap; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
 .job-replan-ask b { margin-right:6px; }
+.job-replan-ask .job-replan-queued { margin-right:8px; }
 .job-main-notice { margin:12px 0; padding:12px 14px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius:10px; background:color-mix(in srgb, var(--warn) 9%, var(--surface)); }
 .job-main-notice h3 { display:flex; align-items:baseline; gap:8px; white-space:nowrap; margin:0 0 6px; font-size:14px; color:var(--warn-fg); }
 .job-main-notice h3 small { min-width:0; margin-left:auto; white-space:normal; overflow-wrap:anywhere; text-align:right; font-weight:normal; color:var(--fg-muted); }

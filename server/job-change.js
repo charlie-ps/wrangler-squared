@@ -67,7 +67,9 @@ export function requestChange(job, sub, { at, ref, text, attachments, from, conv
     if (sent === 'follow-up') return { detail: 'Sent to the wrangler that is answering', route: 'planner' };
     return { detail: sub ? `${from === 'helper' ? 'A helper session asked' : 'Asked'} the wrangler about ${quoted(sub.title)}` : 'Asked the wrangler', route: 'planner' };
   }
-  requestReplan(job, feedback, now, null, { source, images, convo: convo.id });
   say(job, { ...said, convo: convo.id }, now);
+  if (requestReplan(job, feedback, now, null, { source, images, convo: convo.id }).queued) {
+    return { detail: `Queued ${sub ? `an idea about ${quoted(sub.title)}` : 'a plan change'} behind the one the wrangler is drawing`, route: 'planner' };
+  }
   return { detail: sub ? `${from === 'helper' ? 'A helper session sent' : 'Sent'} the wrangler an idea about ${quoted(sub.title)}` : 'Asked the wrangler to change the plan', route: 'planner' };
 }

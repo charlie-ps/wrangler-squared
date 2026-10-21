@@ -1,6 +1,6 @@
 import { esc } from './util.js';
 import { ICONS } from './icons.js';
-import { convoGroups, askPending, replanPending, convoNumber, convoRunning } from './jobs.js';
+import { convoGroups, askPending, replanPending, convoNumber, convoRunning, replanQueued, queuedLabel } from './jobs.js';
 import { proseHtml } from './job-idea.js';
 
 // A running job's conversations with the wrangler (server/job-talk.js), drawn above
@@ -36,7 +36,8 @@ function proposalHtml(job, m, onJob) {
   const rows = (m.changes || []).map((c) => `<li class="job-talk-change job-mark-${esc(c.mark)}"><span class="job-mark">${esc(MARK[c.mark] || c.mark)}</span><span class="job-talk-change-title">${esc(c.title)}${c.detail ? ` <small>${esc(c.detail)}</small>` : ''}${c.then ? `<span class="job-talk-then">${esc(c.then)}</span>` : ''}</span></li>`).join('');
   const button = live ? onJob ? `<button type="button" data-talk-review title="The proposal is drawn at the top of this dialog">${ICONS.eye}Review proposal</button>` : `<button type="button" data-open-job title="Opens the job dialog on the proposal">${ICONS.eye}Review proposal</button>` : '';
   const options = m.options > 1 ? `<small class="job-talk-options">${m.options} options</small>` : '';
-  return `<div class="job-talk-card tone-${tone}"><header><b>${m.red ? 'Proposed a fix' : 'Proposed a change'}</b><span class="job-talk-tag">${esc(label)}</span>${options}</header>${m.text ? `<div class="job-idea-body">${proseHtml(m.text)}</div>` : ''}${rows ? `<ul class="job-talk-changes">${rows}</ul>` : '<p class="job-talk-none">No sub-job changes</p>'}${button ? `<footer>${button}</footer>` : ''}</div>`;
+  const queued = live && queuedLabel(job) ? `<span class="job-talk-tag tone-working">${esc(queuedLabel(job))}</span>` : '';
+  return `<div class="job-talk-card tone-${tone}"><header><b>${m.red ? 'Proposed a fix' : 'Proposed a change'}</b><span class="job-talk-tag">${esc(label)}</span>${queued}${options}</header>${m.text ? `<div class="job-idea-body">${proseHtml(m.text)}</div>` : ''}${rows ? `<ul class="job-talk-changes">${rows}</ul>` : '<p class="job-talk-none">No sub-job changes</p>'}${button ? `<footer>${button}</footer>` : ''}</div>`;
 }
 
 function messageHtml(job, m, onJob) {
@@ -50,6 +51,7 @@ function messageHtml(job, m, onJob) {
 function workingHtml(job, convo) {
   const text = convo && askPending(job, convo) ? `${WRANGLER_NAME} ${convoRunning(job, convo) ? 'is looking into it' : 'will look into it'}…`
     : replanPending(job) && !job.replan.proposal && !(job.replan.red && !job.replan.red.human) && (job.replan.convo || null) === (convo?.id || null) ? `${WRANGLER_NAME} is drawing a proposal…` : '';
+  if (!text && convo && replanQueued(job).some((q) => q.convo === convo.id)) return '<div class="job-idea-thinking job-talk-working job-talk-queued"><span class="job-idea-orb small" aria-hidden="true"></span><span>Queued behind the plan change being drawn</span></div>';
   return text ? `<div class="job-idea-thinking job-talk-working"><span class="job-idea-orb small" aria-hidden="true"></span><span class="job-idea-shine">${text}</span></div>` : '';
 }
 

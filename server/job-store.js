@@ -702,7 +702,8 @@ export class JobStore {
   _applyReceipt(j, r, s, report, proof = null, meta = {}) {
     if (report.kind === 'plan' && j.stage === 'active') {
       // A question that turned out to ask for a change is proposed as one.
-      if (r.ask) askToReplan(j, r, requestReplan, Date.now());
+      // Queued behind a change still being drawn, it is planned afresh in its turn.
+      if (r.ask && askToReplan(j, r, requestReplan, Date.now()).queued) return;
       // Discarded while the planner worked: kept on the run, applied nowhere.
       if (j.replan) {
         proposeReplan(j, r, report, Date.now());
