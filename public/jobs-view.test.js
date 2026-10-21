@@ -2002,10 +2002,12 @@ test('a forwarded idea is one line in the conversation, and the session\'s reply
   f.q('[data-board="job1"] .job-plate-open').click();
   const talk = f.q('#job-dialog .job-talk');
   assert.equal(talk.querySelector('.job-talk-card'), null, 'no Proposed a change card, no Approved tag');
-  assert.equal(talk.querySelector('.job-talk-forward').textContent.replace(/\d.*$/, '').trim(), 'The wrangler forwarded this to Deliver api\'s session');
+  assert.equal(talk.querySelector('.job-talk-forward').textContent.replace(/\d.*$/, '').trim(), 'Forwarded toDeliver api');
+  assert.equal(talk.querySelector('.job-talk-forward .job-talk-step').textContent, 'Deliver api', 'the step is its own muted span');
   const said = [...talk.querySelectorAll('.job-talk-session')];
   assert.equal(said.length, 1, 'only what answered this message, not what came after the next one');
-  assert.match(said[0].querySelector('.job-idea-who').textContent, /^Session · Deliver api/);
+  assert.match(said[0].querySelector('.job-idea-who').textContent, /^SessionDeliver api/);
+  assert.equal(said[0].querySelector('.job-idea-who .job-talk-step').textContent, 'Deliver api');
   assert.equal(said[0].querySelector('.job-idea-body').textContent, 'Checked at 375px: it <wraps> fine.');
   assert.equal(said[0].querySelector('.job-idea-orb'), null, 'not the wrangler\'s orb');
   assert.deepEqual([...said[0].querySelectorAll('[data-shot-at] [data-ev-file]')].map((e) => [e.dataset.evSub, e.dataset.evFile]), [['api', 'narrow.png']]);
@@ -2038,7 +2040,7 @@ test('a forward the human discarded never claims it went, and a forward inside a
   job.talk[1].forwarded = [{ sub: 'api', message: 'm1' }];
   f.view.update(f.data);
   const after = f.q('#job-dialog .job-talk-card.tone-ok').closest('.job-talk-msg').nextElementSibling;
-  assert.match(after.textContent, /^Session · Deliver api.*Done\./, 'what the session said follows the change that forwarded to it');
+  assert.match(after.textContent, /^SessionDeliver api.*Done\./, 'what the session said follows the change that forwarded to it');
 });
 
 test('a decided proposal card folds to one line of counts by kind, opens on a click and stays as the human left it', (t) => {
