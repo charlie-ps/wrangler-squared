@@ -1992,6 +1992,72 @@ test('a change idea goes straight to a proposal card in the same thread, with it
   assert.equal(f.q('#job-dialog .job-talk-card [data-talk-review]'), null);
 });
 
+test('on the job the waiting card goes to the plan: the decision card scrolls into view and flashes, the card stays as it was; the step keeps Review proposal', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued' }];
+  const plan = { ...job.plan, subJobs: [...job.plan.subJobs, { id: 'cli', title: 'Deliver <cli>', after: ['web'] }] };
+  job.convos = [{ id: 'c1', at: 1, pending: null, sub: 'api', escalatedAt: 2 }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'Add a CLI', convo: 'c1', sub: 'api' },
+    { id: 't2', at: 2, from: 'wrangler', kind: 'proposal', proposalId: 'plan2', text: 'Adds the CLI.', options: 1, convo: 'c1', sub: 'api', changes: [{ mark: 'added', title: 'Deliver <cli>' }] }];
+  job.replan = { feedback: 'Add a CLI', at: 1, convo: 'c1', proposal: { id: 'plan2', plan, merged: plan, changes: { frozen: [], kept: [], edited: [], added: ['cli'], removed: [] }, actions: [], alternatives: [] }, previous: null };
+  job.runs = [];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const card = f.q('#job-dialog .job-talk-card');
+  const go = card.querySelector('summary [data-goto-plan]');
+  assert.equal(go.textContent, 'Go to plan');
+  assert.equal(go.type, 'button');
+  const decision = f.q('#job-dialog section.job-decision');
+  const scrolled = [];
+  decision.scrollIntoView = (o) => scrolled.push(o);
+  go.click();
+  assert.equal(scrolled.length, 1, 'the decision card is scrolled to');
+  assert.equal(scrolled[0].block, 'start');
+  assert.ok(decision.classList.contains('is-flash'), 'and flashes');
+  assert.equal(card.open, false, 'the click does not open the card it sits on');
+  assert.equal(f.sent.filter((m) => m.type === 'job-action').length, 0, 'nothing is sent');
+  f.view.openDetail('job1', 'api');
+  const here = f.q('#job-dialog .job-talk-card');
+  assert.equal(here.querySelector('[data-goto-plan]'), null, 'the step has no decision card to go to');
+  assert.match(here.querySelector('[data-open-job]').textContent, /Review proposal/);
+  f.view.openDetail('job1');
+  job.replan = null; job.talk[1].outcome = 'approved';
+  f.view.update(f.data);
+  assert.equal(f.q('#job-dialog [data-goto-plan]'), null, 'a decided card has nothing to go to');
+});
+
+test('an open conversation folds from its foot, beside the box, exactly as from its header, and brings the header into view', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Only web.', convo: 'c1' },
+    { id: 't3', at: 3, from: 'human', text: 'Is <api> deployed?', convo: 'c2' }, { id: 't4', at: 4, from: 'wrangler', kind: 'answer', text: 'Not yet.', convo: 'c2' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }, { id: 'c2', at: 3, pending: null, title: 'Is <api> up' }];
+  job.runs = [];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const convo = (id) => f.q(`#job-dialog [data-convo="${id}"]`);
+  const folded = () => ['c1', 'c2'].filter((id) => convo(id).classList.contains('is-folded'));
+  assert.deepEqual(folded(), ['c1']);
+  assert.equal(convo('c1').querySelector('[data-convo-collapse]'), null, 'folded, no foot');
+  const foot = convo('c2').querySelector('.job-talk-convo-foot');
+  assert.equal(convo('c2').lastElementChild, foot, 'last in the conversation');
+  assert.ok(foot.previousElementSibling.matches('.job-change'), 'right after the box');
+  const collapse = foot.querySelector('[data-convo-collapse]');
+  assert.equal(collapse.getAttribute('aria-label'), 'Collapse Is <api> up', 'escaped, named by its title');
+  const text = convo('c2').querySelector('.job-change textarea'); text.value = 'Still typing'; text.dispatchEvent(f.event('input'));
+  const scrolled = [];
+  f.window.HTMLElement.prototype.scrollIntoView = function (o) { scrolled.push([this.closest('[data-convo]')?.dataset.convo, this.className, o]); };
+  collapse.click();
+  assert.deepEqual(folded(), ['c1', 'c2'], 'folded like the header caret');
+  assert.deepEqual([...convo('c2').children].map((c) => c.tagName), ['HEADER'], 'its title row alone');
+  assert.equal(f.q('#job-dialog .job-change').closest('.job-talk'), null, 'the box goes below them all');
+  assert.deepEqual(scrolled.at(-1), ['c2', 'job-talk-convo-head', { block: 'nearest' }], 'its header kept in view');
+  convo('c2').querySelector('.job-talk-convo-head').click();
+  assert.equal(convo('c2').querySelector('.job-change textarea').value, 'Still typing', 'its draft kept, as the header keeps it');
+  f.view.update(f.data);
+  assert.deepEqual(folded(), ['c1'], 'reopened, the choice survives a tick');
+});
+
 test('a forwarded idea is one line in the conversation, and the session\'s reply to it follows, marked as the session, with its shots', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'review', state: 'verified', ready: { checks: ['ok'], receiptId: 'run_i#1', round: 1 },
