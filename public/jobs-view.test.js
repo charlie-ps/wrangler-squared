@@ -1867,6 +1867,10 @@ test('a change idea goes straight to a proposal card in the same thread, with it
   assert.deepEqual([...card.querySelectorAll('.job-talk-change')].map((li) => [li.querySelector('.job-mark').textContent, li.querySelector('.job-talk-change-title').textContent]),
     [['New', 'Deliver cli'], ['Edited', 'Deliver web brief, show']]);
   assert.ok(card.querySelector('[data-talk-review]'), 'Review proposal, which is drawn at the top of this dialog');
+  const dialog = f.q('#job-dialog'), scrolls = [];
+  dialog.scrollTo = (o) => scrolls.push(o);
+  card.querySelector('[data-talk-review]').click();
+  assert.deepEqual(scrolls, [{ top: 0, behavior: 'smooth' }], 'scrolls the dialog up to the proposal, not the sticky bar into a view it never leaves');
   assert.ok(f.q('[data-action="approve-replan"]'), 'the proposal is approved where it always was');
   f.view.openDetail('job1', 'web');
   assert.equal(f.q('#job-dialog .job-talk'), null, 'a job-level idea stays on the job');

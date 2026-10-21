@@ -1574,7 +1574,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       renderDetail();
     });
     dialog.querySelectorAll('[data-convo-dismiss]').forEach((b) => b.onclick = () => { if (pressBusy(b)) action('dismiss-convo', { convo: b.closest('[data-convo]').dataset.convo }, null); });
-    dialog.querySelectorAll('[data-talk-review]').forEach((b) => b.onclick = () => dialog.querySelector('.job-replan-ask')?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+    // The proposal bar is sticky, so it is always "in view": scroll the dialog itself up to the proposal and its graph.
+    dialog.querySelectorAll('[data-talk-review]').forEach((b) => b.onclick = () => dialog.scrollTo({ top: 0, behavior: 'smooth' }));
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });
     wireGraph();
     fitAsk();
