@@ -102,3 +102,26 @@ export function leaveIdea(job, now) {
   job.idea.leftAt = now;
   return made;
 }
+
+// An idea waiting in the backlog is still only the human's words: until planning
+// starts (or anything has been said to a planner) they may rewrite its title and
+// text. The pictures it was added with stay. Returns the move's detail, or null
+// when nothing changed.
+export const TITLE_MAX = 180;
+export const ideaEditable = (job) => isIdea(job) && job.stage === 'backlog' && !job.plan && !job.replan && !job.cancelledAt && !ideaThread(job).length && !(job.runs || []).length;
+export function editIdea(job, { title, text } = {}) {
+  if (!ideaEditable(job)) throw new Error('Planning has started on this idea: add an idea to the job instead');
+  const typed = String(text ?? job.intent).trim();
+  if (!typed) throw new Error('Write the idea first');
+  if (typed.length > IDEA_TEXT_MAX) throw new Error(`Keep the idea under ${IDEA_TEXT_MAX} characters`);
+  const named = title == null ? job.title : String(title).trim();
+  if (!named) throw new Error('Give the idea a title');
+  if (named.length > TITLE_MAX || /[\r\n]/.test(named)) throw new Error(`Keep the title to one line under ${TITLE_MAX} characters`);
+  const changed = [named !== job.title && 'title', typed !== job.intent && 'text'].filter(Boolean);
+  if (!changed.length) return null;
+  job.title = named;
+  job.intent = typed;
+  // A title the human wrote is never replaced by the generated one still on its way.
+  if (changed.includes('title')) delete job.titlePending;
+  return `Edited the idea's ${changed.join(' and ')}`;
+}

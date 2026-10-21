@@ -221,6 +221,10 @@ text as public as the rest of this repo.
   `inConversation`. `leave-idea` cancels an idea once one job was created from it. A fresh planning run
   (a retry) reads the whole thread from its prompt, so `claim` marks unsent messages sent. The chat
   dialog redraws on ticks even with the cursor in its empty reply box; only new messages fade in.
+  Before planning starts a Backlog idea's title and words are the human's: `edit-idea {title?, text}` (`editIdea`,
+  mirrored as `ideaEditable` in `public/jobs.js`) is refused once it leaves the backlog, has a plan or
+  thread or runs, or is cancelled, caps text at `IDEA_TEXT_MAX`, keeps `images`, records a move and drops
+  `titlePending` when the title changed; the board sends `title` only if the human changed it.
 - **What the agent leaves running is the agent's; tearing it down is ours** (`server/job-running.js`).
   `ready` (and a restarting `reply`) may carry `running: [{name, url?, pid?, stop?, log?}]`, the
   agent's own detached (`setsid`) dev server, database, worker; the extension never starts one. It is kept

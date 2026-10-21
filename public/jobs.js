@@ -36,6 +36,8 @@ export function suggestionsOf(msg) {
   return msg?.suggest ? [{ ...msg.suggest, ...(msg.acceptedAt ? { createdAt: msg.acceptedAt } : {}) }] : [];
 }
 export const uncreatedSuggestions = (msg) => suggestionsOf(msg).filter((x) => !x.createdAt);
+// A backlog idea no planner has read yet: its title and words are still the human's to change.
+export const ideaEditable = (job) => !!job?.idea && job.stage === 'backlog' && !job.plan && !job.replan && !job.cancelledAt && !ideaThread(job).length && !job.runs?.length;
 export function liveSuggestion(job) {
   const last = ideaThread(job).at(-1);
   return last?.from === 'planner' && uncreatedSuggestions(last).length ? last : null;
