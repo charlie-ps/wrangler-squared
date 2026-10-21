@@ -1817,6 +1817,60 @@ test('a change idea goes straight to a proposal card in the same thread, with it
   assert.equal(f.q('#job-dialog .job-talk-card [data-talk-review]'), null);
 });
 
+test('a forwarded idea is one line in the conversation, and the session\'s reply to it follows, marked as the session, with its shots', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'review', state: 'verified', ready: { checks: ['ok'], receiptId: 'run_i#1', round: 1 },
+    thread: [{ id: 'm1', at: 3, from: 'human', via: 'planner', to: 'agent', text: 'try it narrow', round: 1, sentAt: 4 },
+      { id: 'm2', at: 5, from: 'agent', text: 'Checked at 375px: it <wraps> fine.', round: 1, shots: [{ file: 'narrow.png' }] },
+      { id: 'm3', at: 6, from: 'human', via: 'planner', to: 'agent', text: 'later ask', round: 1, sentAt: null }] }];
+  job.runs = [{ id: 'run_i', subJobId: 'api', stopped: false, parkedFor: 'ready' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'try it narrow', sub: 'api', convo: 'c1' },
+    { id: 't2', at: 2, from: 'wrangler', kind: 'proposal', proposalId: 'p1', forward: true, text: '', options: 1, convo: 'c1', sub: 'api',
+      changes: [{ mark: 'forward', title: 'Deliver api', sub: 'api' }], outcome: 'approved', outcomeAt: 3, forwarded: [{ sub: 'api', message: 'm1' }] }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const talk = f.q('#job-dialog .job-talk');
+  assert.equal(talk.querySelector('.job-talk-card'), null, 'no Proposed a change card, no Approved tag');
+  assert.equal(talk.querySelector('.job-talk-forward').textContent.replace(/\d.*$/, '').trim(), 'The wrangler forwarded this to Deliver api\'s session');
+  const said = [...talk.querySelectorAll('.job-talk-session')];
+  assert.equal(said.length, 1, 'only what answered this message, not what came after the next one');
+  assert.match(said[0].querySelector('.job-idea-who').textContent, /^Session · Deliver api/);
+  assert.equal(said[0].querySelector('.job-idea-body').textContent, 'Checked at 375px: it <wraps> fine.');
+  assert.equal(said[0].querySelector('.job-idea-orb'), null, 'not the wrangler\'s orb');
+  assert.deepEqual([...said[0].querySelectorAll('[data-shot-at] [data-ev-file]')].map((e) => [e.dataset.evSub, e.dataset.evFile]), [['api', 'narrow.png']]);
+  assert.ok(f.sent.some((m) => m.type === 'job-evidence' && m.subJobId === 'api' && m.round === 1), 'its shot is fetched');
+
+  job.subJobs[0].thread.splice(1, 1);
+  job.subJobs[0].answering = { id: 'm1', at: 3, kind: 'change', round: 1 };
+  f.view.update(f.data);
+  assert.match(f.q('#job-dialog .job-talk-working').textContent, /Deliver api's session is working on it…/);
+});
+
+test('a forward the human discarded never claims it went, and a forward inside a real plan change reads as a forward, not a change', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'x', convo: 'c1' },
+    { id: 't2', at: 2, from: 'wrangler', kind: 'proposal', proposalId: 'p1', text: 'Adds a CLI.', options: 1, convo: 'c1', outcome: 'approved',
+      changes: [{ mark: 'added', title: 'Deliver cli' }, { mark: 'forward', title: 'Deliver api', sub: 'api' }] },
+    { id: 't3', at: 3, from: 'human', text: 'y', convo: 'c1' },
+    { id: 't4', at: 4, from: 'wrangler', kind: 'proposal', proposalId: 'p2', forward: true, text: '', options: 1, convo: 'c1', outcome: 'discarded',
+      changes: [{ mark: 'forward', title: 'Deliver api', sub: 'api' }] }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const [real, gone] = f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-card');
+  assert.match(real.querySelector('header').textContent, /^Proposed a change.*Approved/);
+  assert.match(real.querySelector('.job-idea-body').textContent, /Adds a CLI\./);
+  assert.deepEqual([...real.querySelectorAll('.job-talk-change')].map((li) => li.textContent), ['NewDeliver cli', 'ForwardTo Deliver api\'s session']);
+  assert.match(gone.querySelector('header').textContent, /^Forward your words.*Discarded/, 'never claims it was forwarded');
+  job.subJobs[0].thread = [{ id: 'm1', at: 5, from: 'human', via: 'planner', to: 'agent', text: 'x', round: 1 }, { id: 'm2', at: 6, from: 'agent', text: 'Done.', round: 1 }];
+  job.talk[1].forwarded = [{ sub: 'api', message: 'm1' }];
+  f.view.update(f.data);
+  const after = f.q('#job-dialog .job-talk-card.tone-ok').closest('.job-talk-msg').nextElementSibling;
+  assert.match(after.textContent, /^Session · Deliver api.*Done\./, 'what the session said follows the change that forwarded to it');
+});
+
 test('a plan change about a sub-job awaiting review freezes it: held, not needs-you, and nothing to approve or move; one about the job holds nothing', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'review', state: 'verified', ready: { checks: ['Tests pass'], receiptId: 'r1' }, worktree: { path: '/wt/api' } }];

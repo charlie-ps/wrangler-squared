@@ -1,3 +1,5 @@
+import { forwardsOnly } from './job-actions.js';
+
 // A running job's conversations with the wrangler (the board's name for the
 // planner): every idea the human types in an Add idea box, every answer, and
 // every plan change proposed, kept on `job.talk` so they outlive a plan change and
@@ -126,19 +128,24 @@ function changesOf(job, proposal) {
   return [...added.map((id) => ({ mark: 'added', title: title(id), ...then(id) })),
     ...edited.map((e) => ({ mark: 'edited', title: title(e.id), detail: e.fields.join(', '), ...then(e.id) })),
     ...removed.map((id) => ({ mark: 'removed', title: title(id) })),
-    ...(proposal.actions || []).map((a) => ({ mark: a.type, title: title(a.sub) }))];
+    ...(proposal.actions || []).map((a) => ({ mark: a.type, title: title(a.sub), sub: a.sub }))];
 }
+// A proposal that only forwards the human's words is no plan change: its card is
+// one line saying where the words went, so the planner's prose is not kept.
 export function noteProposal(job, proposal, now) {
   const red = job.replan?.red && !job.replan.red.human ? job.replan.red.sub : null;
-  say(job, { from: 'wrangler', kind: 'proposal', proposalId: proposal.id, text: proposal.diagnosis?.summary || proposal.why || proposal.label || '',
+  const forward = forwardsOnly(proposal);
+  say(job, { from: 'wrangler', kind: 'proposal', proposalId: proposal.id, ...(forward ? { forward: true, text: '' } : { text: proposal.diagnosis?.summary || proposal.why || proposal.label || '' }),
     changes: changesOf(job, proposal), options: 1 + (proposal.alternatives?.length || 0), ...(red ? { red } : {}), ...(job.replan?.convo ? { convo: job.replan.convo } : {}),
     ...(job.replan?.source?.sub ? { sub: job.replan.source.sub } : red ? { sub: red } : {}) }, now);
   escalate(convoById(job, job.replan?.convo), now);
 }
-// approved, discarded, or revised (a newer idea went into it).
-export function closeProposal(job, proposalId, outcome, now) {
+// approved, discarded, or revised (a newer idea went into it). `forwarded` names
+// the thread message each approved forward became, so the conversation can draw
+// the session's answer beside it; the step's thread stays where it lives.
+export function closeProposal(job, proposalId, outcome, now, forwarded = []) {
   const card = talkOf(job).findLast((m) => m.kind === 'proposal' && m.proposalId === proposalId);
-  if (card && !card.outcome) Object.assign(card, { outcome, outcomeAt: now });
+  if (card && !card.outcome) Object.assign(card, { outcome, outcomeAt: now }, forwarded.length ? { forwarded } : {});
 }
 
 // A plan change's wrangler died or blocked before it proposed anything: said in

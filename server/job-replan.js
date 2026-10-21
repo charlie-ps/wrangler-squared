@@ -289,7 +289,7 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
     changes.removed.length && `${changes.removed.length} cancelled`, chosen.actions?.length && `${chosen.actions.length} ${chosen.actions.length === 1 ? 'action' : 'actions'}`].filter(Boolean).join(', ') || 'no sub-job changed';
   const feedback = job.replan.feedback;
   clearPlanningError(job);
-  closeProposal(job, proposal.id, 'approved', now);
+  closeProposal(job, proposal.id, 'approved', now, lines.filter((l) => l.forwarded).map((l) => ({ sub: l.sub.id, message: l.forwarded })));
   job.replan = null;
   return { lines, detail: `Changed the plan: ${summary}`, feedback };
 }
