@@ -931,7 +931,8 @@ test('retry targets the job when a sub-job displays an inherited coordinator err
   assert.equal(f.q('.job-retry-split details').open, true, 'the popup survives a tick');
   assert.equal(f.q('[data-retry-note]').value, 'Access restored,\n go again', 'and so do the words typed in it');
   const sent = f.sent.length;
-  f.q('[data-retry-with-note]').click(); f.q('[data-retry-with-note]').click();
+  assert.equal(f.q('[data-retry-with-note]'), null, 'the caret holds only the note: Retry itself sends it');
+  f.q('#job-retry').click(); f.q('#job-retry').click();
   assert.equal(f.sent.length, sent + 1, 'a double press retries once');
   assert.equal(f.sent.at(-1).subJobId, 'api');
   assert.equal(f.sent.at(-1).note, 'Access restored, go again');
@@ -943,11 +944,21 @@ test('a red step retries at once from its split button, the caret holding the no
   f.view.update(f.data); f.view.openDetail('job1', 'api');
   assert.ok(f.q('.job-retry-split > #job-retry.primary'), 'Retry leads, with its caret beside it');
   assert.equal(f.q('.job-retry-split details').open, false, 'the note waits behind the caret');
-  f.q('[data-retry-note]').value = 'not this';
+  f.q('[data-retry-note]').value = '  \n ';
   f.q('#job-retry').click();
   assert.equal(f.q('#job-retry-form'), null, 'no dialog in between');
   assert.equal(f.sent.at(-1).action, 'retry'); assert.equal(f.sent.at(-1).subJobId, 'api');
-  assert.equal('note' in f.sent.at(-1), false, 'plain Retry sends no words, even with some typed');
+  assert.equal('note' in f.sent.at(-1), false, 'a blank note sends no words');
+});
+
+test('a red step\'s Retry carries the note typed behind its caret', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', error: 'Worker blocked' }];
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  f.q('[data-retry-note]').value = ' Token renewed,\n\ttry   again ';
+  f.q('#job-retry').click();
+  assert.equal(f.sent.at(-1).action, 'retry'); assert.equal(f.sent.at(-1).subJobId, 'api');
+  assert.equal(f.sent.at(-1).note, 'Token renewed, try again', 'whitespace collapsed and trimmed');
 });
 
 const sessionSub = (id, after = []) => ({ id, kind: 'session', title: `Run ${id}`, storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Do it here', sessions: ['s1'], repairs: [] });
@@ -1986,7 +1997,7 @@ test('a refused write shows its place\'s error with Retry and Pick another statu
   f.q('[data-board="job1"] .job-plate-open').click(); f.q('[data-open-sub="w-fail"]').click();
   assert.match(f.q('.job-event').textContent, /Jira refused the write.*Field Reviewer is required/);
   assert.match(hint(f), /Retry once it allows it, pick another status \(either runs Run n again for it\)/);
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Retry with note', 'Pick another status', 'Ask an agent']);
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Pick another status', 'Ask an agent']);
   assert.equal(document.querySelector('.job-moves'), null, 'no Moves menu on a refused write');
   f.q('#job-write-edit').click();
   assert.equal(f.q('#job-dialog h2').textContent, 'Pick another status');
@@ -1998,7 +2009,7 @@ test('a refused write shows its place\'s error with Retry and Pick another statu
   assert.match(f.q('.job-write-spec').textContent, /In Review → In Progress/);
   at('n').stage = 'done'; f.view.update(f.data);
   f.q('[data-open-job]').click(); f.q('[data-open-sub="w-fail"]').click();
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Retry with note', 'Pick another status', 'Ask an agent'], 'a finished session still runs again for its writes alone');
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Pick another status', 'Ask an agent'], 'a finished session still runs again for its writes alone');
   at('n').cancelledAt = 2; f.view.update(f.data);
   f.q('[data-open-job]').click(); f.q('[data-open-sub="w-fail"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Ask an agent'], 'its session was dropped: nothing runs it again');
@@ -2045,7 +2056,7 @@ test('the stepper folds a session\'s writes into one pill per place: dots per wr
   assert.match(pill('post').querySelector('summary').textContent, /^#web-platform$/); assert.ok(pill('post').querySelector('.job-write-review'), 'the eye says it is reviewed first');
   f.q('[data-open-sub="k6"]').click();
   assert.equal(f.q('.job-event b').textContent, 'Not made');
-  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Retry with note', 'Edit', 'Ask an agent'], 'Retry runs its session again for it');
+  assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Retry', 'Edit', 'Ask an agent'], 'Retry runs its session again for it');
 });
 
 test('a place that exists opens from its pill; a local file shows its path to copy', async (t) => {
