@@ -505,7 +505,9 @@ export class JobRunner {
     for (const run of job.runs.filter((r) => draftsDecided(job, r))) await this.resumeDrafted(id, run);
     for (const run of job.runs.filter((r) => runnable(r) && r.parkedFor === 'ready')) {
       const sub = job.subJobs.find((s) => s.id === run.subJobId);
-      if (unsentFor(sub).length) await this.deliverThread(id, run);
+      // One message at a time, and only to a session waiting: one queued while it
+      // answers goes once that reply is in, so each reply answers one message.
+      if (!run.mailedAt && unsentFor(sub).length) await this.deliverThread(id, run);
     }
     job = this.store.get(id);
     if (job.subJobs.length && job.subJobs.every((s) => s.stage === 'done')) await this.finish(id);
@@ -547,7 +549,7 @@ export class JobRunner {
   async deliverThread(id, run) {
     const job = this.store.get(id);
     const sub = job.subJobs.find((s) => s.id === run.subJobId);
-    const batch = unsentFor(sub);
+    const batch = unsentFor(sub).slice(0, 1);
     try {
       await this.runtime.resumeWithMail(run, threadMail(job, run, sub, batch));
       const now = this.now();
@@ -591,7 +593,9 @@ export class JobRunner {
     try {
       const job = this.store.get(id);
       await this.runtime.cleanupPlanning(job);
-      this.runtime.releaseImages(job);
+      // A job made from an idea's suggestion shares the idea's pictures (JobStore.acceptIdea).
+      const held = new Set(this.store.snapshot().jobs.filter((o) => o.id !== id && o.stage !== 'done').flatMap((o) => o.images || []));
+      this.runtime.releaseImages({ ...job, images: (job.images || []).filter((n) => !held.has(n)) });
       this.store.update(id, (j) => { j.stage = 'done'; j.completedAt = this.now(); });
     } catch (e) { this.store.update(id, (j) => { j.error = shortError(e); }); }
   }

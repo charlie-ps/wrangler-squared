@@ -158,14 +158,14 @@ const parkedJob = (patches = {}) => {
   return j;
 };
 
-test('forward pins to the open review round; a step with no open session, or one still answering, is refused', () => {
+test('forward pins to the open review round; a step with no open session is refused, one still answering is not', () => {
   const j = parkedJob();
   assert.deepEqual(gateAction(j, { type: 'forward', sub: 'api', note: 'Tighten it' }).pin, { at: 'round', ref: 'run_i#2', round: 2 });
   assert.throws(() => gateAction(j, { type: 'forward', sub: 'api' }), /human's words for it in `note`/);
   assert.throws(() => gateAction(j, { type: 'rework', sub: 'api', note: 'x' }), /session is still open: forward the feedback to it instead/, 'nothing ends a session that could answer');
   assert.throws(() => gateAction(j, { type: 'forward', sub: 'web', note: 'x' }), /no session open on its review to forward to: use rework instead/);
   subOf(j, 'api').answering = { id: 'msg_1', kind: 'ask', round: 2 };
-  assert.throws(() => gateAction(j, { type: 'forward', sub: 'api', note: 'x' }), /still answering/);
+  assert.deepEqual(gateAction(j, { type: 'forward', sub: 'api', note: 'x' }).pin, { at: 'round', ref: 'run_i#2', round: 2 }, 'it queues behind the answer in flight');
   j.runs[0].stopped = true; subOf(j, 'api').answering = null;
   assert.throws(() => gateAction(j, { type: 'forward', sub: 'api', note: 'x' }), /use rework instead/);
   assert.deepEqual(gateAction(j, { type: 'rework', sub: 'api', note: 'x' }).pin, { at: 'stage', ref: 'review' });
@@ -186,6 +186,32 @@ test('approving a forward posts the human\'s words into the open session\'s thre
   assert.deepEqual(subOf(j, 'api').answering, { id: m.id, at: 3, kind: 'change', round: 2 });
   assert.deepEqual([subOf(j, 'api').stage, subOf(j, 'api').state, j.runs[0].stopped], ['review', 'verified', false], 'the session stays open and answers');
   assert.match(lines.at(-1).detail, /Forwarded your words to “Deliver api”'s open session/);
+});
+
+test('a forward approved while the session is still answering is accepted and queued behind the message in flight', () => {
+  const j = parkedJob();
+  subOf(j, 'api').thread = [{ id: 'msg_1', at: 1, from: 'human', via: 'planner', to: 'agent', text: 'Tighten it', round: 2, sentAt: 2 }];
+  subOf(j, 'api').answering = { id: 'msg_1', at: 1, kind: 'change', round: 2 };
+  j.replan = { feedback: 'About api: Does it work narrow?', at: 3, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#2' } };
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'Does it work narrow?' }] }, 4);
+  assert.deepEqual(j.replan.proposal.actions[0].pin, { at: 'round', ref: 'run_i#2', round: 2 });
+  approveReplan(j, 'run_p', { now: 5, buildSubJob });
+  const [, m] = subOf(j, 'api').thread;
+  assert.deepEqual([m.text, m.sentAt], ['Does it work narrow?', null], 'queued, not yet sent');
+  assert.deepEqual(subOf(j, 'api').answering, { id: 'msg_1', at: 1, kind: 'change', round: 2 }, 'still answering the first');
+});
+
+test('a forward on a moved review round, or a finished review, is still refused', () => {
+  const j = parkedJob();
+  j.replan = { feedback: 'About api: Tighten it', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#2' } };
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'Tighten it' }] }, 2);
+  Object.assign(subOf(j, 'api'), parkedOf(3));
+  assert.throws(() => checkActions(j, j.replan.proposal.actions, j.plan), /has moved since .*run_i#2 is now .*run_i#3/);
+  const out = approveReplan(j, 'run_p', { now: 3, buildSubJob });
+  assert.equal(out.sentBack, true, 'a new round sends it back to the wrangler');
+  assert.equal(subOf(j, 'api').thread, undefined, 'nothing reaches the session');
+  const k = parkedJob({ api: { ...parkedOf(), state: 'approved' } });
+  assert.throws(() => gateAction(k, { type: 'forward', sub: 'api', note: 'x' }), /no session open on its review/);
 });
 
 test('a forwards-only proposal is noted as a forward with no prose, and its approval names the thread message it became; a plan change keeps its words', () => {

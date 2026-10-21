@@ -115,7 +115,7 @@ test('the Jobs step plays a mini board whose rail badge counts the amber rows', 
   const idea = frames(1).map((el) => el.querySelector('.intro-mini-job'));
   assert.deepEqual(idea.map((r) => r.querySelector('.gx.nb[data-inflow]')?.dataset.stage ?? null), ['0', '0', '1', '0', '2', null, null], 'an idea under its forming sky, brighter as the planner asks and suggests, then the job it became');
   assert.deepEqual(idea.slice(0, 5).map((r) => r.querySelector('small').textContent), ['Idea · The wrangler is reading it', 'Idea · The wrangler is reading it', 'Idea · The wrangler asked you', 'Idea · The wrangler is reading it', 'Idea · Job suggested · review']);
-  assert.ok(idea[2].classList.contains('tone-read'), 'a question waiting on you counts, in the to-read tone');
+  assert.ok(idea[2].classList.contains('tone-warn'), 'a question waiting on you counts, in amber');
   assert.equal(idea[5].querySelector('small').textContent, 'Starting its sub-jobs', 'creating the suggested job approved its plan');
   const before = fig().querySelector('.intro-figure').innerHTML;
   await new Promise((r) => p.window.setTimeout(r, 1650));

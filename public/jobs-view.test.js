@@ -37,7 +37,7 @@ test('every job is one tonal card in its state, and only jobs with attention ite
   const boards = () => [...document.querySelectorAll('.job-plate')].map((b) => b.dataset.board);
   assert.deepEqual(boards(), ['idea', 'job1'], 'newest first, and a backlog idea is not in flight until planning starts');
   assert.equal(f.q('[data-filter="all"] .jobs-rail-n').textContent, '2', 'nor counted in flight');
-  assert.ok(f.q('[data-board="job1"]').classList.contains('tone-read'), 'a plan to review is the to-read teal');
+  assert.ok(f.q('[data-board="job1"]').classList.contains('tone-warn'), 'a plan to review is amber');
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Plan ready');
   f.q('[data-filter="backlog"]').click();
   assert.deepEqual(boards(), ['backlog'], 'Backlog lists it');
@@ -48,6 +48,19 @@ test('every job is one tonal card in its state, and only jobs with attention ite
   assert.equal(document.querySelectorAll('[data-board="job1"] .job-plate-graph .node').length, 2, 'one segment per planned sub-job');
   f.q('[data-filter="needs"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-plate')].map((b) => b.dataset.board), ['job1']);
+});
+
+test('the Needs you count is teal only while every job waiting is a wrangler reply to read', (t) => {
+  const f = fixture(t);
+  const count = () => f.q('[data-filter="needs"] .jobs-rail-n');
+  f.view.update(f.data);
+  assert.deepEqual([count().textContent, count().classList.contains('ask'), count().classList.contains('read')], ['1', true, false], 'a plan ready is amber');
+  const replied = { ...f.data.jobs[0], id: 'replied', stage: 'active', plan: null, subJobs: [{ ...sub('a'), stage: 'done' }, { ...sub('b'), stage: 'implementation' }], convos: [{ id: 'c1', at: 1, pending: null, seenAt: 1 }], talk: [{ id: 't1', at: 2, from: 'wrangler', kind: 'answer', text: 'Yes.', convo: 'c1' }] };
+  f.data.jobs.push(replied); f.view.update(f.data);
+  assert.ok(f.q('[data-board="replied"]').classList.contains('tone-read'), 'a wrangler reply stays teal');
+  assert.deepEqual([count().textContent, count().classList.contains('read')], ['2', false], 'amber while a plan waits beside it');
+  f.data.jobs.shift(); f.view.update(f.data);
+  assert.deepEqual([count().textContent, count().classList.contains('read')], ['1', true]);
 });
 
 test('the board orders segments by dependency wave, so a sub-job moved after another reads after it', (t) => {
@@ -135,6 +148,25 @@ test('each job is its own card, and a delivered job only returns with Finished',
   b.paused = true; f.view.update(f.data);
   assert.equal(f.q('#job-dialog [data-action="resume"]').textContent, 'Resume'); f.q('#job-dialog [data-action="resume"]').click(); assert.equal(f.sent.at(-1).action, 'resume');
   assert.ok(f.q('[data-board="job2"]').classList.contains('tone-pause'), 'a paused job is purple');
+});
+
+test('a double-click that opens a job lands nothing in the new dialog; a press after half a second does', (t) => {
+  const clock = { t: 1000 };
+  const f = fixture(t, undefined, { now: () => clock.t }); const [job] = f.data.jobs; job.stage = 'active'; job.plan = null; f.view.update(f.data);
+  const press = (el, type = 'click') => el.dispatchEvent(new f.window.MouseEvent(type, { bubbles: true, cancelable: true, detail: type === 'dblclick' ? 2 : 1, button: 0 }));
+  press(f.q('.job-plate-open')); assert.equal(f.q('#job-dialog').open, true);
+  clock.t += 120;
+  for (const type of ['mousedown', 'click', 'dblclick']) press(f.q('#job-dialog [data-action="pause"]'), type);
+  assert.equal(f.sent.length, 0, 'the second press of the double-click is swallowed');
+  press(f.q('#job-dialog .job-dialog-close')); assert.equal(f.q('#job-dialog').open, true, 'nor does it close the dialog');
+  f.q('#job-dialog [data-action="pause"]').click(); assert.equal(f.sent.at(-1)?.action, 'pause', 'a keyboard press (detail 0) is never held');
+  f.sent.length = 0; release(f.q('#job-dialog [data-action="pause"]')); f.view.update(f.data); clock.t += 300;
+  press(f.q('#job-dialog [data-action="pause"]')); assert.equal(f.sent.length, 0, 'a redraw of the open dialog does not restart the guard, nor end it early');
+  clock.t += 100;
+  press(f.q('#job-dialog [data-action="pause"]')); assert.equal(f.sent.at(-1)?.action, 'pause', 'past 500ms a single press works');
+  f.q('#job-dialog').close(); press(f.q('.job-plate-open')); clock.t += 499;
+  press(f.q('#job-dialog .job-dialog-close')); assert.equal(f.q('#job-dialog').open, true, 'opening it again starts a new guard');
+  clock.t += 1; press(f.q('#job-dialog .job-dialog-close')); assert.equal(f.q('#job-dialog').open, false);
 });
 
 test('a sub-job carries what the merge will do and the note left for the next session, and goes red when something happened', (t) => {
@@ -1002,7 +1034,7 @@ test('a reported session needs you, a running one spins, and approval is pinned 
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'request-change', at: 'session', ref: 'receipt9', text: 'Check staging too' });
 });
 
-test('Approve keeps one click, and its caret opens a popup whose words go to later steps, on a session result and on code', (t) => {
+test('Approve sends whatever its caret\'s popup holds, as Retry does, on a session result and on code', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sessionSub('spike'), stage: 'review', result: { checks: ['Schema documented'], receiptId: 'receipt9' } },
     { ...sub('api', ['spike']), stage: 'review', state: 'verified', worktree: { path: '/wt', branch: 'fix/AUTH-1' }, sessions: ['s1'], ready: { checks: ['Tests pass'], receiptId: 'run_1' } }];
@@ -1015,6 +1047,7 @@ test('Approve keeps one click, and its caret opens a popup whose words go to lat
   assert.equal(more.querySelector('summary').getAttribute('aria-label'), 'Approve with context for later steps');
   more.open = true; more.dispatchEvent(f.event('toggle'));
   assert.match(more.querySelector('label').textContent, /Add context for later steps/);
+  assert.equal(more.querySelector('button'), null, 'the popup holds only the note: Approve itself sends it');
   more.querySelector('textarea').value = '  Use the <v2> table  ';
   f.view.update(f.data);
   assert.equal(f.q('.job-approve-more').open, true, 'the popup survives a tick');
@@ -1028,10 +1061,8 @@ test('Approve keeps one click, and its caret opens a popup whose words go to lat
   assert.equal(f.q('.job-approve-more').open, false, 'and the next tick does not reopen it');
   f.q('.job-approve-more').open = true; f.q('.job-approve-more').dispatchEvent(f.event('toggle'));
   f.q('[data-approve-note]').value = '  Use the <v2> table  ';
-  f.q('[data-action="approve-session"][data-with-note]').click();
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'approve-session', head: undefined, sessionReceiptId: 'receipt9', note: 'Use the <v2> table' });
   f.q('.job-approve-split > button.primary').click();
-  assert.equal('note' in f.sent.at(-1), false, 'plain Approve never sends the popup\'s words');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'approve-session', head: undefined, sessionReceiptId: 'receipt9', note: 'Use the <v2> table' });
   Object.assign(job.subJobs[0], { stage: 'cleanup', approvalNote: 'Use the <v2> table' });
   job.moves = [{ id: 'mv_1', at: 1757400000000, subJobId: 'spike', move: 'approve-session', note: 'Use the <v2> table', detail: 'Approved the result of “Run spike”' }];
   f.q('[data-approve-note]').value = ''; f.view.update(f.data);
@@ -1039,12 +1070,22 @@ test('Approve keeps one click, and its caret opens a popup whose words go to lat
   assert.equal(f.q('.job-approval-note').textContent, 'Use the <v2> table', 'escaped, and kept on the step');
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   assert.equal(f.q('.job-approve-split > button.primary').textContent, 'Approve & open PR');
-  assert.equal(f.q('[data-with-note]').textContent, 'Approve & open PR with note');
+  assert.equal(f.q('.job-approve-pop button'), null);
   f.q('[data-approve-note]').value = 'Keep the flag off';
-  f.q('[data-action="approve-code"][data-with-note]').click();
+  f.q('.job-approve-split > button.primary').click();
   assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).readyReceiptId, f.sent.at(-1).note], ['approve-code', 'run_1', 'Keep the flag off']);
   f.q('[data-open-job]').click();
   assert.equal(f.q('.job-move-log q').textContent, 'Use the <v2> table', 'the job history shows the words with the approval');
+});
+
+test('Approve with a blank note behind its caret sends no note', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sessionSub('spike'), stage: 'review', result: { checks: ['Schema documented'], receiptId: 'receipt9' } }, { ...sub('api', ['spike']), stage: 'pending' }];
+  f.view.update(f.data); f.view.openDetail('job1', 'spike');
+  f.q('[data-approve-note]').value = '  \n ';
+  f.q('.job-approve-split > button.primary').click();
+  assert.equal(f.sent.at(-1).action, 'approve-session');
+  assert.equal('note' in f.sent.at(-1), false, 'a blank note sends no words');
 });
 
 test('Approve has no note caret on a session nothing later reads, and says a PR\'s note reaches its own publish too', (t) => {

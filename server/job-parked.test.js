@@ -133,6 +133,36 @@ test('a question is mailed to the parked session, answered by a reply, and the r
   assert.equal(f.sub().state, 'approved', 'a reply leaves the approval it did not touch standing');
 });
 
+test('two ideas in a row both reach the session: the second queues behind the planner, then behind the answer, and each reply pairs with its message', async (t) => {
+  const f = fixture(t); await f.start(); await f.ready();
+  const say = (text) => { const j = f.store.get(f.job.id); const v = changeView(j, j.subJobs[0]); return f.store.action(f.job.id, 'request-change', { subJobId: 'api', at: v.at, ref: v.ref, text }); };
+  say('Make the filter a dropdown');
+  await f.tick();
+  const first = f.launched.at(-1);
+  say('And sort it by date');
+  assert.equal(f.store.get(f.job.id).replanQueue.length, 1, 'queued behind the plan change being drawn');
+  f.store.report(first.sid, first.run.id, { kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'Make the filter a dropdown' }] });
+  await f.tick();
+  assert.equal(f.mailed.length, 1, 'the first is mailed');
+  const second = f.launched.at(-1);
+  assert.notEqual(second.run.id, first.run.id, 'the queued idea gets its own planner');
+  assert.ok(f.sub().answering, 'while the session is still answering the first');
+  f.store.report(second.sid, second.run.id, { kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'And sort it by date' }] });
+  const job = f.store.get(f.job.id);
+  assert.deepEqual([job.error ?? null, job.replan, job.talk.filter((m) => m.kind === 'error' || /could not/i.test(m.text || '')).length], [null, null, 0], 'accepted, not an error');
+  assert.deepEqual(f.sub().thread.map((m) => [m.text, !!m.sentAt]), [['Make the filter a dropdown', true], ['And sort it by date', false]]);
+  await f.tick();
+  assert.equal(f.mailed.length, 1, 'held until the answer in flight is in');
+  f.report({ kind: 'reply', text: 'Done: a dropdown.' });
+  assert.equal(f.sub().answering.id, f.sub().thread.at(-1).id, 'answering moves on to the queued message');
+  await f.tick();
+  assert.equal(f.mailed.length, 2);
+  assert.match(f.mailed[1].text, /"And sort it by date"/); assert.doesNotMatch(f.mailed[1].text, /dropdown/);
+  f.report({ kind: 'reply', text: 'Sorted newest first.' });
+  assert.equal(f.sub().answering, null);
+  assert.deepEqual(f.sub().thread.map((m) => [m.from, m.text]), [['human', 'Make the filter a dropdown'], ['agent', 'Done: a dropdown.'], ['human', 'And sort it by date'], ['agent', 'Sorted newest first.']]);
+});
+
 test('a forward-only idea lands in the step\'s thread with no plan-change prompt, recorded as Wrangler\'s', async (t) => {
   const f = fixture(t); await f.start(); await f.ready();
   await f.ask('Make the filter a dropdown');

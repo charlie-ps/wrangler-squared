@@ -6,8 +6,8 @@ import path from 'node:path';
 import { JobStore, holdsSlot } from './job-store.js';
 import { JobRunner } from './job-runner.js';
 import { reportSchema } from './jobs-schema.js';
-import { jobPrompt, ideaMail } from './job-prompts.js';
-import { liveSuggestion, inConversation, ideaEditable, IDEA_TEXT_MAX } from './job-idea.js';
+import { jobPrompt, ideaMail, SPLIT_PRINCIPLE } from './job-prompts.js';
+import { liveSuggestion, inConversation, suggestionsOf, ideaEditable, IDEA_TEXT_MAX } from './job-idea.js';
 import { makeJobCreateHandler, makeJobActionHandler, jobImagesHandler } from './handlers.js';
 import { ideasDir } from './job-evidence.js';
 import { _resetForTests, runnerFor } from './jobs.js';
@@ -22,7 +22,7 @@ function fixture(t, input = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-idea-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const store = new JobStore(path.join(dir, 'jobs.json'));
-  const launched = [], mailed = [], stopped = [], alive = new Set();
+  const launched = [], mailed = [], stopped = [], released = [], alive = new Set();
   let clock = Date.now();
   const runtime = {
     async launch(j, s, r, prepared) { const sid = `session-${r.id}`; alive.add(sid); launched.push({ job: j, sub: s, run: r, sid }); prepared(sid, s ? { path: '/worktree/nudge', repoRoot: '/repo', branch: 'b' } : undefined); },
@@ -30,7 +30,7 @@ function fixture(t, input = {}) {
     async isAlive(r) { return alive.has(r.sessionId); },
     async exists(r) { return alive.has(r.sessionId); },
     async resumeWithMail(r, text) { mailed.push({ sid: r.sessionId, text }); },
-    async cleanup() {}, async cleanupPlanning() {}, releaseImages() {}, attributeSpend() {},
+    async cleanup() {}, async cleanupPlanning() {}, releaseImages(j) { released.push(...(j.images || [])); }, attributeSpend() {},
   };
   const runner = new JobRunner({ store, runtime, github: {}, now: () => clock });
   const job = store.create({ title: 'Nudge me', intent: 'PRs sit green for ages. Can the board nag me?', ...input }, { idea: { thread: [] } });
@@ -40,7 +40,7 @@ function fixture(t, input = {}) {
   const get = () => store.get(job.id);
   const run = (w = last()) => get().runs.find((r) => r.id === w.run.id);
   const start = async () => { store.action(job.id, 'start'); await tick(); };
-  return { store, job, runner, launched, mailed, stopped, alive, tick, last, report, get, run, start };
+  return { store, job, runner, launched, mailed, stopped, released, alive, tick, last, report, get, run, start };
 }
 
 test('reply is a receipt kind; suggest carries a whole plan, checked like a plan receipt', () => {
@@ -79,7 +79,7 @@ test('a vague idea: the planner replies, parks without a slot, and the human ans
 
   f.report({ kind: 'reply', text: 'That is enough to plan.', suggest: suggest() });
   assert.equal(f.run(planner).parkedAt > 0 && !f.run(planner).mailedAt, true, 'parked again');
-  assert.equal(liveSuggestion(f.get()).suggest.title, 'Nudge when a green PR waits');
+  assert.equal(liveSuggestion(f.get()).suggest[0].title, 'Nudge when a green PR waits');
 });
 
 test('accepting the suggestion is the plan receipt and its approval, even with Plan on You review; the parked planner ends quietly', async (t) => {
@@ -121,6 +121,104 @@ test('a reply after a suggestion replaces it: the old one can no longer be accep
   assert.equal(liveSuggestion(f.get()), null);
   assert.throws(() => f.store.action(f.job.id, 'accept-idea', { messageId: old.id }), /changed since you looked/);
   assert.throws(() => f.store.action(f.job.id, 'idea-reply', { text: '  ' }), /Write a reply first/);
+});
+
+const two = () => [suggest('Sort the job list by last activity'), suggest('Add a dark theme to settings')];
+
+test('a reply may suggest 2–4 jobs; one stored before lists reads as a list of one', () => {
+  assert.equal(reportSchema.parse({ kind: 'reply', text: 'Two jobs', suggest: two() }).suggest.length, 2);
+  assert.throws(() => reportSchema.parse({ kind: 'reply', text: 'x', suggest: [] }));
+  assert.throws(() => reportSchema.parse({ kind: 'reply', text: 'x', suggest: Array.from({ length: 5 }, () => suggest()) }));
+  const old = { id: 'm', from: 'planner', text: 't', suggest: suggest(), acceptedAt: 5 };
+  assert.deepEqual(suggestionsOf(old).map((x) => [x.title, x.createdAt]), [['Nudge when a green PR waits', 5]]);
+  assert.equal(liveSuggestion({ idea: { thread: [{ ...old, acceptedAt: undefined }] } }).id, 'm', 'an old single suggestion is still live');
+});
+
+test('several suggestions: each press creates its own job beside the idea, the last turns the idea into its job', async (t) => {
+  const f = fixture(t, { images: [], base: 'next', model: 'opus', reviewMerge: false }); await f.start();
+  const planner = f.last();
+  f.report({ kind: 'reply', text: 'These are two separate jobs.', suggest: [...two(), suggest('Rename the backlog tab')] });
+  const msg = f.get().idea.thread.at(-1);
+  assert.equal(msg.suggest.length, 3);
+  f.store.action(f.job.id, 'accept-idea', { messageId: msg.id, index: 1 });
+  let idea = f.get();
+  assert.equal(inConversation(idea), true, 'the idea stays open for the rest');
+  const made = idea.idea.thread.at(-1).suggest[1];
+  assert.ok(made.createdAt && made.jobId && made.jobId !== f.job.id);
+  const sib = f.store.get(made.jobId);
+  assert.deepEqual([sib.stage, sib.title, sib.base, sib.model, sib.reviewMerge, sib.plan.subJobs[0].id, !!sib.approvedAt, sib.fromIdea.jobId],
+    ['active', 'Add a dark theme to settings', 'next', 'opus', false, 'nudge', true, f.job.id]);
+  assert.match(sib.moves[0].detail, /Created from the idea/);
+  assert.match(idea.moves.at(-1).detail, /beside this idea/);
+  assert.throws(() => f.store.action(f.job.id, 'accept-idea', { messageId: msg.id, index: 1 }), /already created/);
+  assert.equal(liveSuggestion(idea).id, msg.id, 'the other two are still live');
+
+  f.store.action(f.job.id, 'accept-idea', { messageId: msg.id, index: 0 });
+  assert.equal(inConversation(f.get()), true);
+  f.store.action(f.job.id, 'accept-idea', { messageId: msg.id, index: 2 });
+  idea = f.get();
+  assert.deepEqual([idea.stage, idea.title, inConversation(idea), idea.idea.thread.at(-1).suggest[2].jobId], ['active', 'Rename the backlog tab', false, f.job.id], 'the last one is the idea itself');
+  assert.equal(f.store.snapshot().jobs.length, 3);
+  await f.tick();
+  assert.equal(f.run(planner).stopped, true);
+  assert.equal(f.run(planner).error, undefined);
+});
+
+test('Create all makes the others beside the idea and the idea the last; a newer reply replaces every uncreated one', async (t) => {
+  const f = fixture(t); await f.start();
+  const planner = f.last();
+  f.report({ kind: 'reply', text: 'Three jobs.', suggest: [...two(), suggest('Third')] });
+  const first = f.get().idea.thread.at(-1);
+  f.store.action(f.job.id, 'accept-idea', { messageId: first.id, index: 0 });
+  f.store.action(f.job.id, 'idea-reply', { text: 'Make the dark theme follow the OS' });
+  assert.equal(liveSuggestion(f.get()), null, 'the human\'s message replaces both uncreated suggestions');
+  assert.throws(() => f.store.action(f.job.id, 'accept-idea', { messageId: first.id, index: 1 }), /changed since you looked/);
+  await f.tick();
+  assert.match(f.mailed.at(-1).text, /Already created from your suggestions, never suggest again: "Sort the job list by last activity"/);
+  f.report({ kind: 'reply', text: 'Refined.', suggest: [suggest('Dark theme that follows the OS'), suggest('Third')] }, planner);
+  const next = f.get().idea.thread.at(-1);
+  assert.match(jobPrompt(f.get(), null, planner.run), /you suggested the jobs "Sort the job list by last activity", "Add a dark theme to settings" and "Third"; the human created "Sort the job list by last activity"/);
+  f.store.action(f.job.id, 'accept-idea', { messageId: next.id, all: true });
+  const idea = f.get();
+  assert.deepEqual([idea.title, idea.stage], ['Third', 'active']);
+  assert.deepEqual(f.store.snapshot().jobs.map((j) => j.title).sort(), ['Dark theme that follows the OS', 'Sort the job list by last activity', 'Third']);
+});
+
+test('Leave the rest closes an idea that already gave a job; before any, it is Cancel', async (t) => {
+  const f = fixture(t); await f.start();
+  const planner = f.last();
+  f.report({ kind: 'reply', text: 'Two jobs.', suggest: two() });
+  assert.throws(() => f.store.action(f.job.id, 'leave-idea'), /cancel it instead/);
+  f.store.action(f.job.id, 'accept-idea', { messageId: f.get().idea.thread.at(-1).id, index: 0 });
+  f.store.action(f.job.id, 'leave-idea');
+  const idea = f.get();
+  assert.ok(idea.cancelledAt && idea.idea.leftAt);
+  assert.match(idea.moves.at(-1).detail, /this idea became “Sort the job list by last activity”/);
+  await f.tick();
+  assert.equal(f.run(planner).stopped, true);
+});
+
+test('a job made beside the idea shares its pictures: the idea finishing first keeps them for it', async (t) => {
+  const f = fixture(t, { images: ['paste-1-abcd.png'] }); await f.start();
+  f.report({ kind: 'reply', text: 'Two jobs.', suggest: two() });
+  f.store.action(f.job.id, 'accept-idea', { messageId: f.get().idea.thread.at(-1).id, index: 0 });
+  const sib = f.get().idea.thread.at(-1).suggest[0].jobId;
+  assert.deepEqual(f.store.get(sib).images, ['paste-1-abcd.png']);
+  f.store.action(f.job.id, 'leave-idea');
+  for (let i = 0; i < 3; i++) await f.tick();
+  assert.equal(f.get().stage, 'done');
+  assert.deepEqual(f.released, [], 'still held by the job made from it');
+  f.store.action(sib, 'cancel-job');
+  for (let i = 0; i < 3; i++) await f.tick();
+  assert.deepEqual(f.released, ['paste-1-abcd.png']);
+});
+
+test('the idea prompt carries the approved split principle', async (t) => {
+  const f = fixture(t); await f.start();
+  const text = jobPrompt(f.get(), null, f.last().run);
+  for (const p of SPLIT_PRINCIPLE) assert.ok(text.includes(p));
+  assert.match(text, /suggest\?:\[\{title:/);
+  assert.match(text, /replaces every suggestion they have not created yet/);
 });
 
 test('a well-defined idea goes straight to a plan, exactly as a job always did: Plan review still waits for Approve', async (t) => {

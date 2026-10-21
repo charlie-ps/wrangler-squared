@@ -719,7 +719,7 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-checks .failed { color:var(--red-fg); }
 .job-note { display:flex; align-items:center; gap:8px; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
 .job-context,.job-intent { white-space:pre-wrap; color:var(--fg) !important; }
-.job-brief { color:var(--fg) !important; }
+.job-brief { white-space:pre-line; color:var(--fg) !important; }
 .job-approve-split { order:-1; margin-right:6px; }
 .job-approve-split>button.primary,.job-retry-split>button { margin-right:2px; }
 .job-approve-pop { width:min(340px, 75vw); gap:8px; padding:10px; backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); }
@@ -1051,12 +1051,12 @@ li.job-mark-rework { color:var(--wf); }
 /* An idea on the mini board: a card drawn on its forming sky (job-skylines.js), like its
    plate, edged in amber while it waits on you. Its text sits on the art, so its ink is fixed. */
 .intro-mini-idea { position:relative; isolation:isolate; overflow:hidden; min-height:54px; box-sizing:border-box; background:var(--jt-night); transition:box-shadow .3s; }
-.intro-mini-idea.tone-read { box-shadow:inset 0 0 0 1.5px var(--c); }
+.intro-mini-idea.tone-warn { box-shadow:inset 0 0 0 1.5px var(--c); }
 .intro-mini-sky { position:absolute; inset:0; z-index:-1; }
 .intro-mini-sky::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg, color-mix(in srgb, var(--jt-night) 55%, transparent), transparent 65%); }
 .intro-mini-idea b { color:var(--jt-ivory); }
 .intro-mini-idea small { color:color-mix(in srgb, var(--jt-ivory) 78%, transparent); }
-.intro-mini-idea.tone-read small { color:var(--jt-ink-read); }
+.intro-mini-idea.tone-warn small { color:var(--jt-ink-needs); }
 .intro-mini-idea .job-idea-mark { color:var(--jt-ivory); }
 /* New idea's chat: a fixed window, newest at the foot, the planner's own thread markup inside. */
 .intro-chat { height:330px; display:flex; flex-direction:column; justify-content:flex-end; gap:12px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 36px); mask-image:linear-gradient(180deg, transparent, #000 36px); }
@@ -1836,6 +1836,14 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .job-launch.firing::before { animation-duration:1.4s; }
 .job-launch.done { border-color:color-mix(in srgb, var(--st-ok) 50%, var(--border-muted)); }
 .job-launch.done .job-launch-dot { background:var(--jt-ink-ok); box-shadow:0 0 20px color-mix(in srgb, var(--jt-ink-ok) 50%, transparent); }
+.job-launch.created { border-color:color-mix(in srgb, var(--st-ok) 50%, var(--border-muted)); }
+.job-launch.created .job-launch-go { height:64px; }
+.job-launch.created :is(.job-launch-steps,.job-launch-meta) { display:none; }
+.job-launch.created .job-launch-dot { background:var(--jt-ink-ok); box-shadow:0 0 20px color-mix(in srgb, var(--jt-ink-ok) 50%, transparent); }
+.job-launch-refine .icon { width:13px; height:13px; margin-right:6px; vertical-align:-2px; }
+.job-launch-all { display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:8px; margin-top:12px; }
+.job-launch-all .primary .icon { width:14px; height:14px; margin-right:6px; vertical-align:-2px; }
+.job-idea-past :is(.job-launch-all,[data-leave-idea]) { display:none; }
 .job-idea-past .job-idea-thread { padding:4px 0 0; }
 .job-idea-past .job-launch-refine { display:none; }
 /* An idea on the board (job-plates.js ideaPlateHtml): a job's plate under a sky still

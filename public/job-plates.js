@@ -2,7 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml, inflowHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, wranglerUnread, redFixReady, budgetHeld, ideaStage, liveSuggestion, ideaOpen } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, wranglerUnread, redFixReady, budgetHeld, ideaStage, liveSuggestion, ideaOpen, uncreatedSuggestions, suggestedLabel } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, mainWaiting } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 import { runningDotHtml } from './job-running.js';
@@ -201,7 +201,11 @@ export function plateAsk(job) {
   }
   // An idea waiting on you: the planner's question, or the job it suggests.
   const idea = ideaStage(job);
-  if (idea === 'suggested') { const { plan } = liveSuggestion(job).suggest; return whole('Job suggested', 'Review', [kindCountLabel(plan.subJobs), repoLine({ plan })].filter(Boolean).join(' · ')); }
+  if (idea === 'suggested') {
+    const msg = liveSuggestion(job), left = uncreatedSuggestions(msg);
+    const detail = left.length === 1 ? [kindCountLabel(left[0].plan.subJobs), repoLine({ plan: left[0].plan })].filter(Boolean).join(' · ') : left.map((x) => x.title).join(' · ');
+    return whole(suggestedLabel(msg), 'Review', detail);
+  }
   if (idea === 'reply') return whole('Wrangler asked', 'Reply', 'The wrangler asked you');
   if (!live(job)) return job.plan ? whole('Plan ready', 'Review plan', kindCountLabel(job.plan.subJobs)) : whole(jobLabel(job), 'Open');
   // A plan change opens on the job; a reply where its conversation is drawn (a step's,
