@@ -3,7 +3,7 @@ import { runnable, dependencySatisfied, dependenciesSatisfied, MERGE_IS_DELIVERY
 import { summariseComments, commentsBlockMerge } from './job-comments.js';
 import { awaitsTicket, settingsSchema } from './jobs-schema.js';
 import { logWarn } from './log.js';
-import { isFrozen } from './job-replan.js';
+import { isFrozen, startQueued, queuedReady } from './job-replan.js';
 import { heldBy, needsTriage, triesOn, triesAllowed, startRed, failRedReplan } from './job-red.js';
 import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from './job-writes.js';
 import { dropSub } from './job-sub-ops.js';
@@ -325,6 +325,9 @@ export class JobRunner {
       return;
     }
     if (job.stage !== 'active') return;
+    // A change queued behind one that ended some other way (answered, declared red,
+    // failed), or behind a discarded planner that has now stopped, takes its turn.
+    if (queuedReady(job)) { this.store.update(id, (j) => startQueued(j, this.now())); job = this.store.get(id); }
     if (!job.replan) await this.triageRed(id);
     job = this.store.get(id);
     if (job.replan && !job.replan.proposal && !activeFor(job)) {

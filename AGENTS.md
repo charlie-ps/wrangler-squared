@@ -151,7 +151,10 @@ text as public as the rest of this repo.
   applied at once, `forwardsOnly`): an action on the source step
   is refused at stamp and approval once its view has moved (`job-actions.js
   sourceHolds`). A second idea while a proposal waits adds to it (`Earlier: … /
-  Now: …`, `previousActions`); while the planner is drawing one, another change is refused (a question still goes to its own conversation).
+  Now: …`, `previousActions`); while the planner is drawing one, another change (or an ask run's hand-over) joins the FIFO
+  `job.replanQueue` with its convo, source and images (`requestReplan` returns `{queued}`, its
+  conversation says so), and `startQueued` makes the next one its own replan once the current one is
+  approved or discarded and no planner is still drafting (the runner retries it each tick).
   The box is not a `<form>`, so
   a tick's redraw is held back only while text is typed in it. Its pictures are
   kept (`handlers.js prepare`: the round's folder, else `ideasDir`) and reach the

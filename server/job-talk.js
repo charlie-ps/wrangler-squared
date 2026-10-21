@@ -100,8 +100,9 @@ export function answerAsk(job, run, report, now) {
 export function askToReplan(job, run, requestReplan, now) {
   const convo = ownConvo(job, run);
   const { asks, source, images } = convo.pending;
-  requestReplan(job, asks.map((a) => a.feedback).join('\n\n'), now, null, { source, images, running: run.id, convo: convo.id });
+  const sent = requestReplan(job, asks.map((a) => a.feedback).join('\n\n'), now, null, { source, images, running: run.id, convo: convo.id });
   convo.pending = null;
+  return sent;
 }
 
 // A plan-change run whose idea was only a question: answered, and the change it
@@ -140,6 +141,20 @@ export function noteProposal(job, proposal, now) {
     ...(job.replan?.source?.sub ? { sub: job.replan.source.sub } : red ? { sub: red } : {}) }, now);
   escalate(convoById(job, job.replan?.convo), now);
 }
+// A change sent while another is being drawn waits its turn (job-replan.js
+// requestReplan), and says so where it was sent rather than being refused.
+const ordinal = (n) => n === 1 ? 'next' : `number ${n}`;
+export function noteQueued(job, convoId, n, now) {
+  const convo = convoById(job, convoId);
+  if (!convo) return;
+  say(job, { from: 'wrangler', kind: 'queued', text: `Queued behind the plan change I am drawing now (${ordinal(n)} in line). I will start on this one once that change is approved or discarded.`, convo: convo.id, ...(where(convo) ? { sub: where(convo) } : {}) }, now);
+}
+export function noteDequeued(job, convoId, now) {
+  const convo = convoById(job, convoId);
+  if (!convo) return;
+  say(job, { from: 'wrangler', kind: 'dequeued', text: 'The change ahead is settled: drawing this one now, against the plan as it stands.', convo: convo.id, ...(where(convo) ? { sub: where(convo) } : {}) }, now);
+}
+
 // approved, discarded, or revised (a newer idea went into it). `forwarded` names
 // the thread message each approved forward became, so the conversation can draw
 // the session's answer beside it; the step's thread stays where it lives.

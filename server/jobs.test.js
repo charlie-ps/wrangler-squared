@@ -976,7 +976,9 @@ test('every idea has one way in: the planner, which takes a step\'s idea into th
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api')); await f.tick();
   change(f, null, 'Also cover SSO'); await f.tick();
   assert.equal(f.store.get(f.job.id).replan.feedback, 'Also cover SSO');
-  assert.throws(() => change(f, 'api', 'Rename it'), /Wait for the wrangler to finish/, 'one planner at a time');
+  change(f, 'api', 'Rename it');
+  assert.equal(f.store.get(f.job.id).replan.feedback, 'Also cover SSO', 'one planner at a time: the second idea queues');
+  assert.equal(f.store.get(f.job.id).replanQueue.length, 1);
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, f.launched.findLast((w) => w.run.phase === 'planning' && !w.sub)); await f.tick();
   const proposal = f.store.get(f.job.id).replan.proposal;
   assert.deepEqual(changeView(f.store.get(f.job.id), null), { at: 'proposal', ref: proposal.id });
@@ -2531,7 +2533,6 @@ test('a running job takes a plan change as a proposal: frozen work is locked, re
   assert.match(prompt, /A label says what happens if they pick it.*its why says what they get and what they give up/);
   assert.match(prompt, /for the human, who has not read the code, the plan or this prompt.*never file or function names, sub-job ids, or the plan's own words: brief, show, check, context, round, forward, rework, frozen, pinned/);
   assert.match(prompt, /call it that \(the agent that built it\), never a reviewer\. Paths, ids, commands, plan lines and runs go in evidence/);
-  assert.throws(() => change(f, null, 'again'), /Wait for the wrangler/);
 
   const proposal = (subs) => plan(subs);
   assert.throws(() => f.report({ kind: 'plan', plan: proposal([{ ...spec('api'), brief: 'Redo api' }, spec('web')]) }, planner), /api has already landed/);
@@ -3289,6 +3290,37 @@ test('a question that asks for a change is proposed by its ask run, folding into
   assert.equal(job.replan.proposal.id, asker.run.id);
   assert.match(job.replan.feedback, /^Earlier: Add a CLI after web\n\nNow: Can you also add docs\?$/);
   assert.deepEqual(job.talk.filter((m) => m.kind === 'proposal').map((m) => m.outcome || null), ['revised', null]);
+});
+
+test('a question handed over as a change while another is drafted queues behind it, and runs once that one is approved', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'Add a CLI after web'); await f.tick();
+  const first = plannerOf(f);
+  change(f, null, 'Can you also add docs?'); await f.tick();
+  const asker = plannerOf(f);
+  assert.ok(asker.run.ask);
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('docs')]) }, asker);
+  let job = f.store.get(f.job.id);
+  assert.equal(job.replan.feedback, 'Add a CLI after web', 'the change being drawn is not the hand-over\'s');
+  assert.equal(job.replan.proposal, null);
+  assert.deepEqual(job.replanQueue.map((q) => [q.feedback, q.convo]), [['Can you also add docs?', job.convos[1].id]]);
+  assert.equal(job.talk.at(-1).kind, 'queued'); assert.doesNotMatch(job.talk.at(-1).text, /Could not/);
+  change(f, null, 'And a changelog'); await f.tick();
+  assert.equal(f.store.get(f.job.id).replanQueue.length, 2, 'a change idea queues too');
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli', ['web'])]) }, first); await f.tick();
+  f.store.action(f.job.id, 'approve-replan', { proposalId: first.run.id });
+  job = f.store.get(f.job.id);
+  assert.deepEqual(job.plan.subJobs.map((s) => s.id), ['api', 'web', 'cli']);
+  assert.equal(job.replan.feedback, 'Can you also add docs?');
+  await f.tick(); await f.tick();
+  const second = plannerOf(f);
+  assert.notEqual(second.run.id, first.run.id); assert.ok(!second.run.ask, 'its own planning round');
+  assert.match(jobPrompt(f.store.get(f.job.id), null, second.run), /- cli \(pr\) "Deliver cli"/, 'drawn against the plan as it stands now');
+  f.store.action(f.job.id, 'discard-replan', {});
+  await f.tick(); await f.tick();
+  job = f.store.get(f.job.id);
+  assert.equal(job.replan.feedback, 'And a changelog', 'discard starts the last one once its planner stopped');
+  assert.equal(job.replanQueue, undefined);
 });
 
 test('a plan change whose idea was only a question answers it and drops the change', async (t) => {
