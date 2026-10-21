@@ -3300,6 +3300,27 @@ test('the sent moment: the idea lifts into a bubble that says sending, ticks to 
   assert.equal(sent(), null, 'a fresh look starts clean');
 });
 
+test('a follow-up the thread holds before its ack shows once: the conversation\'s row, never a second Sending bubble', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Only api.', convo: 'c1' }];
+  job.convos = [{ id: 'c1', at: 1 }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const box = () => f.q('#job-dialog .job-change[data-change-convo="c1"]');
+  const text = box().querySelector('textarea'); text.value = 'What other options do I have?'; text.dispatchEvent(f.event('input'));
+  box().querySelector('[data-change-send]').click();
+  const copies = () => [...f.q('#job-dialog').querySelectorAll('.job-sent-bubble')].filter((b) => b.textContent === 'What other options do I have?').length;
+  assert.equal(f.q('#job-dialog [data-sent-state]').dataset.sentState, 'sending');
+  assert.equal(copies(), 1, 'only the bubble while nothing holds it');
+  job.talk.push({ id: 't3', at: Date.now(), from: 'human', text: 'What other options do I have?', convo: 'c1' });
+  f.view.update(f.data);
+  assert.equal(copies(), 1, 'the thread has it before the ack: its row is the one copy');
+  assert.doesNotMatch(f.q('#job-dialog').textContent, /Sending to the wrangler…/);
+  f.view.created({ event: 'job-action-complete', jobId: 'job1', subJobId: null, action: 'request-change' });
+  assert.equal(copies(), 1, 'and still one once the ack lands');
+});
+
 // ---- Red steps (server/job-red.js): Fixing is Wrangler's, Declared red is yours ----
 const fixtureWithRed = (t) => fixture(t);
 const redRef = (job, s) => `${s.error || ''}|${s.pr?.head || ''}|${s.pr?.mergeCommit || ''}|${job.runs.filter((r) => r.subJobId === s.id).length}`;

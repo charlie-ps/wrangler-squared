@@ -872,11 +872,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   // What was sent, above the box it came from: the words and pictures lift into a
   // bubble, and the line under it says who has it once the server took it. Once the
-  // conversation shows the message itself, its row there is the receipt instead.
+  // conversation shows the message itself, even before the ack, its row there is the receipt instead.
   function askSentHtml(job, sub, key = '') {
     if (!askSent || askSent.subId !== (sub?.id ?? null) || (askSent.convo || '') !== key) return '';
     const held = (m) => m.from === 'human' && m.text === askSent.text && m.at >= askSent.at - 60000;
-    if (askSent.state === 'sent' && (sub?.thread?.some(held) || talkFor(job, sub).some(held))) return '';
+    if (askSent.state !== 'failed' && (sub?.thread?.some(held) || talkFor(job, sub).some(held))) return '';
     const s = askSent, fresh = s.drawn !== s.state; s.drawn = s.state;
     const pics = s.images.length ? `<span class="job-sent-imgs">${s.images.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
     const n = s.images.length ? ` with ${s.images.length} image${s.images.length > 1 ? 's' : ''}` : '';
