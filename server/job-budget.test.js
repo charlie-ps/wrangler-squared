@@ -9,9 +9,12 @@ import { limitOf, isOver, budgetOf, withSpendLimit, BudgetEnforcer, INTERRUPT_CO
 import { withLiveUsd } from './job-spend.js';
 import { JobSpendRefresh } from './job-spend-refresh.js';
 import { settingsSchema } from './jobs-schema.js';
-import { jobSettingsHandler, jobActionHandler } from './handlers.js';
+import { jobSettingsHandler, makeJobActionHandler } from './handlers.js';
 import { _resetForTests, runnerFor, noteGraph } from './jobs.js';
 import { fakeHost } from './test-helpers.js';
+
+// Never a real Haiku run: a conversation an idea opens is named after the action.
+const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
 
 const input = { title: 'Reliable sign-in', intent: 'Customers can sign in reliably', repos: ['/repo'] };
 const plan = { context: '', stories: [], subJobs: [{ id: 'api', title: 'Deliver api', repo: '/repo', after: [], brief: 'Implement api' }] };

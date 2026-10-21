@@ -186,16 +186,23 @@ text as public as the rest of this repo.
   `reply` when the idea was only a question (`answerReplan`, refused once a red or
   earlier proposal rides on it). An ask run that dies or blocks says so in its
   conversation (`askFailed`), never `job.error`. `planningRun` (client) ignores ask
-  runs, so Approve change stays live while one answers. Every conversation ends in
-  its own box (`boxHtml`, `data-change-convo`), and the box below them all starts a
-  new one; pasted pictures and the sent bubble belong to the box they were used in
-  (`askImages[].box`, `askSent.convo`). A conversation opened from a step
+  runs, so Approve change stays live while one answers. ONE box, and ONE
+  conversation open at a time, with the box at its foot (`boxHtml`, `data-change-convo`):
+  `replyTarget` is the human's pick (a title row opens that one and folds the other, the
+  open one's header or the chip's × folds it), else `defaultTarget`, the one at work or
+  spoken in last; '' (none open, always on a failing step) puts the box below them all
+  for a new one. Drafts are kept per target (`boxDrafts`), pasted pictures by
+  `askImages[].box`, and the sent bubble lands at the end of its conversation
+  (`askSent.convo`) or above the box. Haiku names each new conversation from its
+  first message after the send (`handlers.js nameConvo`, `convo.titlePending` drawn
+  as a loader, `titleConvo`); without a title it is "Conversation N". Folded, a
+  conversation is its title row alone. A conversation opened from a step
   (`convo.sub`) is that step's: its wrangler's prompt names the step
   (`stepConvoLine`), and it shows ONLY on that step's dialog until the wrangler
   escalates it (`reply {escalate:true}`, or any proposal it draws, `escalate` →
   `convo.escalatedAt`); then the job's list shows it too (`talkFor`, client-side
-  only). A step's dialog shows only what was said on it. A conversation not at work and not the one
-  the human spoke in last folds to a strip (`convoOpen`; clicks are client-side, per id), and its ×
+  only). A step's dialog shows only what was said on it. Where the view takes no reply, a conversation not at work
+  and not the one the human spoke in last folds to its title row (`convoOpen`; clicks are client-side, per id). Its ×
   (`dismiss-convo`, refused while it answers or holds a plan change) stamps `convo.dismissedAt`,
   which hides it everywhere until anything new is said in it (`say` clears it, so a reply
   from a stale box or a wrangler's message brings it back). A job

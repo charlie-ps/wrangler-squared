@@ -10,9 +10,12 @@ import { changeView } from './job-change.js';
 import { ensureInbox, roundDir, ideasDir } from './job-evidence.js';
 import { workingTreeHash } from './git.js';
 import { threadMail, jobPrompt } from './job-prompts.js';
-import { jobActionHandler } from './handlers.js';
+import { makeJobActionHandler } from './handlers.js';
 import { _resetForTests, runnerFor } from './jobs.js';
 import { looksLikeQuestion } from './job-parked.js';
+
+// Never a real Haiku run: a conversation an idea opens is named after the action.
+const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png body')]);
 // As the real façade: read() sees only the kept store, keep() copies a staged paste into it.

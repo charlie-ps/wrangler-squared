@@ -241,6 +241,9 @@ export function migrateJobs(raw) {
   return data;
 }
 
+// A generated conversation title is a list label: Haiku is asked for five words.
+const CONVO_TITLE_MAX = 60;
+
 // Only this store writes jobs. Mutations validate a copy and persist it BEFORE
 // replacing memory, so failed validation/disk writes cannot half-approve a job.
 export class JobStore {
@@ -289,6 +292,17 @@ export class JobStore {
       delete job.titlePending;
       if (swap) { job.title = to; job.updatedAt = Date.now(); }
       return swap;
+    });
+  }
+  // Haiku's name for a conversation (handlers.js nameConvos), not a revision either.
+  // Any answer, a null one included, ends the wait.
+  titleConvo(id, convoId, title) {
+    return this.change((d) => {
+      const convo = d.jobs.find((j) => j.id === id)?.convos?.find((c) => c.id === convoId);
+      if (!convo?.titlePending) return false;
+      delete convo.titlePending;
+      if (title) convo.title = title.slice(0, CONVO_TITLE_MAX);
+      return !!title;
     });
   }
   // The board drew these conversations' answers in an open dialog: they are read.
