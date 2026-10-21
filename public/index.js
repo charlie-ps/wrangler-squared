@@ -5,6 +5,7 @@ import { createIntro } from './intro.js';
 import { createUpdates } from './updates.js';
 import { ICONS } from './icons.js';
 import { closeOnBackdrop } from './dialog-backdrop.js';
+import { createEarlyAdopterGesture } from './early-adopter.js';
 
 // The client half: one `view` slot contribution (agent-wrangler public/slots.js),
 // which the board draws a rail button, a `#view=ext:jobs:board` route and a
@@ -168,6 +169,9 @@ export default {
     win?.addEventListener('hashchange', showUpdates);
     showUpdates();
 
+    // Kept across mounts, so a chain of swaps survives a view switch.
+    const earlyAdopter = createEarlyAdopterGesture(slots.api);
+
     slots.register('view', {
       id: 'board',
       label: 'Jobs',
@@ -199,6 +203,7 @@ export default {
           onOpenFile: (path) => api.openFile(path),
           onDiff: (sid, from) => reviewDiff(api, sid, from),
           onIntro: () => intro.open(0),
+          onThemeChoice: (choice) => earlyAdopter.note(choice),
           updates,
           storage: api.storage,
           toast,

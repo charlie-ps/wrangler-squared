@@ -354,7 +354,7 @@ export function primaryAction(dialog) {
 }
 
 const MAX_ASK_IMAGES = 4;
-export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
+export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, onThemeChoice = () => {}, files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
   setFileOpener(files ? (path) => files.canOpen(path) : null);
   const root = document.getElementById('jobs');
   const dialog = document.getElementById('job-dialog');
@@ -1783,7 +1783,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     themePicker = mountThemePicker(dialog.querySelector('#job-theme-pick'), {
       themes: THEMES, value: themeOf(data.settings).id,
       optionsOf: (t) => optionsOf(data.settings, t),
-      onChange: (id) => saveSettings({ theme: id }),
+      onChange: (id) => { const from = themeOf(data.settings).id; saveSettings({ theme: id }); onThemeChoice({ id, from }); },
       // Sent whole: settings(patch) merges shallowly, and each theme keeps its own.
       onOption: (t, key, v) => saveSettings({ themeOptions: { ...data.settings.themeOptions, [t.id]: { ...optionsOf(data.settings, t), [key]: v } } }),
     });

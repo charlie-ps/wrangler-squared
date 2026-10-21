@@ -4,7 +4,7 @@ Developer notes for Wrangler² — a new way of working with AI (work broken int
 AI sessions and PRs, with proof that changes work) as an installable Agent
 Wrangler extension. Only the non-obvious, durable things; point at code rather
 than re-deriving it. **Read `docs/PORTING.md` first**: the port is functionally
-complete on host API 1.38.0, and that file is the map (what came from where, what
+complete on host API 1.39.0, and that file is the map (what came from where, what
 stands in for what, and which of the eight open host-API gaps block which
 feature).
 
@@ -33,7 +33,7 @@ text as public as the rest of this repo.
 ## What this is
 
 - An **external extension** for agent-wrangler's extensions API, which is on
-  agent-wrangler `main` (host API 1.38.0). Spec:
+  agent-wrangler `main` (host API 1.39.0). Spec:
   `docs/superpowers/specs/2026-09-11-extensions-api-design.md` in that repo.
 - The wrangler clones this repo into `<DATA_DIR>/extensions/jobs/`, runs
   `npm ci --ignore-scripts`, and imports `index.js`. **The manifest `id` (`jobs`)
@@ -49,7 +49,7 @@ text as public as the rest of this repo.
   resume a session parked on its drafts once the human has decided them:
   mail carries the final writes, and a card gone dormant meanwhile is woken
   first. `engines.wranglerApi` is
-  `^1.38.0`: 1.4 added the worktree/`addDirs`/`taskId`/PR-automation spawn
+  `^1.39.0`: 1.4 added the worktree/`addDirs`/`taskId`/PR-automation spawn
   options this repo depends on, 1.6 the `usage:read`/`sessions:bill` pair the
   Jobs board's prices and triage billing depend on, 1.8 the client
   `api.openSession(sid)` behind the sub-job dialog's Open/Restore session button
@@ -59,7 +59,7 @@ text as public as the rest of this repo.
   client `api.agents()` the New job form reads its models and efforts from,
   1.27 the client `api.openDiff` behind Review code in Wrangler, and 1.31 the
   `images:keep` capability plus the `images` spawn option behind a job's attached
-  images (client `api.images.stage` stages them; the job keeps its own copies; the New job tray is `public/job-images.js`, built on a vendored `public/clipboard-images.js`), and 1.38 the `files:view` capability plus client `api.openFile`/`api.files` behind Open on a file place (`server/job-files.js` registers each reported path; `public/job-graph.js filePathHtml` shows Open only when `api.files?.canOpen(path)`).
+  images (client `api.images.stage` stages them; the job keeps its own copies; the New job tray is `public/job-images.js`, built on a vendored `public/clipboard-images.js`), and 1.38 the `files:view` capability plus client `api.openFile`/`api.files` behind Open on a file place (`server/job-files.js` registers each reported path; `public/job-graph.js filePathHtml` shows Open only when `api.files?.canOpen(path)`), and 1.39 the manifest's `earlyAdopter: {branch: 'next'}` (mirrored in the `wranglerExtension` block, which is what is consented to) plus client `api.earlyAdopter` behind the hidden early-adopter switch (`public/early-adopter.js`: Wrangler²'s own theme swapped back and forth between the same two themes within 10s (off yours, on, off, on) opens a small dialog; the host draws no UI for it and follows the branch only from the next update).
 - **`package-lock.json` is mandatory** — the wrangler refuses to install without
   one. Regenerate it after any dependency change.
 

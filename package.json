@@ -18,7 +18,8 @@
       "sessions:read", "sessions:spawn", "sessions:archive", "sessions:bill", "sessions:wake", "sessions:interrupt",
       "mail:send", "tasks:read", "tasks:write",
       "usage:read", "board:rebuild", "board:broadcast", "images:keep", "files:view"
-    ]
+    ],
+    "earlyAdopter": { "branch": "next" }
   },
   "dependencies": {
     "yaml": "^2.9.0",
