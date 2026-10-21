@@ -15,7 +15,7 @@ import { STATES, stateIconHtml, subState, subLabel, subLine, jobState, jobLabel,
 
 // The board's filter rail: what each shows, and the one an empty view explains.
 const FILTERS = [
-  ['all', 'In flight', (job) => job.stage !== 'done'],
+  ['all', 'In flight', (job) => job.stage !== 'done' && job.stage !== 'backlog'],
   ['needs', 'Needs you', jobNeedsYou],
   ['ideas', 'Ideas', (job) => ideaOpen(job)],
   ['running', 'Running', (job) => jobState(job) === 'running'],
