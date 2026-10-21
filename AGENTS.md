@@ -247,7 +247,7 @@ text as public as the rest of this repo.
   branch, stash & update). `retry-main` and `resolve-main` only flag it; the runner's `tendMain`
   acts on the next tick, finished or paused jobs included: it spawns the fix's session (a plain
   one in the checkout, briefed by `resolvePrompt` with only that fix) inside the tick so no
-  `pendingLaunch` is in flight, then clears the notice once local `<base>` equals origin's.
+  `pendingLaunch` is in flight, then clears the notice once local `<base>` equals origin's and that session has stopped working (a stash is popped after the merge), archiving it as it goes.
   A notice nothing is retrying or resolving (`job-state.js mainWaiting`) is a Needs you ask
   beside the stage roll-up, never part of it: `jobNeedsYou`, `jobLabel` ("Local main behind",
   even on a Delivered job) and `plateAsk` all read it, below any step's own ask.
@@ -266,7 +266,7 @@ text as public as the rest of this repo.
   the step's own `requestChange`, pinned to `changeView` as it stands at the call, with `from: 'helper'`,
   which marks the planner's words and the move (`helper-idea`). Only the server sets `from`: the board's
   `request-change` overwrites it. The idea is kept on its entry (`helper.ideas`), drawn under that helper
-  in the step's dialog. It never edits the plan.
+  in the step's dialog. It never edits the plan. Once the job is delivered or cancelled the runner's `reapHelpers` archives each helper asked before it finished (stamping `helper.archivedAt`), waiting while it is mid-answer; one asked afterwards is left to the human.
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one
