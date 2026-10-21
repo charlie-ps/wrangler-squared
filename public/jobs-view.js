@@ -79,6 +79,7 @@ function commentsHtml(sub, shown) {
 }
 
 const minutesSince = (at) => Math.max(1, Math.round((Date.now() - at) / 60000));
+const PHASE_LABEL = { implementation: 'Implementation', repair: 'Repair', publish: 'Publish', verify: 'Verify', session: 'Session', write: 'Write', planning: 'Planning' };
 const when = (at) => at ? new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
 const staleHint = (sub) => {
   if (!deploymentStalled(sub)) return '';
@@ -783,6 +784,13 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const askHelperHtml = (sub) => helperQueued(sub)
     ? `<button type="button" data-ask-helper disabled title="An agent session is starting for this step">${ICONS.spin}Starting an agent</button>`
     : `<button type="button" data-ask-helper title="Start your own agent session, briefed with this step and the job, to investigate or help. It never changes the step or the plan: when you ask, it sends what it finds to the wrangler, as Add idea does.">${ICONS.robot}Ask an agent</button>`;
+  // Every run's session, newest first: a repair or publish run hides the implementation one behind it.
+  const sessionSplitHtml = (job, sub, primary) => {
+    const button = `<button id="job-session" ${primary ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>`;
+    if (sub.sessions.length < 2) return button;
+    const items = sub.sessions.map((sid, i) => { const run = job.runs?.find((r) => r.sessionId === sid); return `<button type="button" data-step-session="${esc(sid)}">${ICONS.terminal}<span>${esc(PHASE_LABEL[run?.phase] || `Session ${i + 1}`)}${run?.startedAt ? ` · ${esc(when(run.startedAt))}` : ''}</span><span class="job-split-hint">${onBoard(sid) ? 'Open' : 'Restore'}</span></button>`; }).reverse().join('');
+    return `<span class="job-split job-session-split">${button}<details class="job-split-more" data-keep="session-menu" ${openMore.has('session-menu') ? 'open' : ''}><summary aria-label="Open an earlier session of this step" title="Open an earlier session of this step">${ICONS.caret}</summary><div class="job-split-menu">${items}</div></details></span>`;
+  };
   const helpersHtml = (sub) => sub.helpers?.length ? `<h3>Helper sessions</h3><ul class="job-helpers">${sub.helpers.map((h, i) => `<li>${h.sessionId ? ICONS.robot : h.error ? ICONS.x : ICONS.spin}<span>Helper ${i + 1} · ${h.sessionId ? `started ${esc(when(h.at))}` : h.error ? `could not start: ${esc(h.error)}` : 'starting'}</span>${h.sessionId ? `<button type="button" data-helper-session="${esc(h.sessionId)}">${ICONS.terminal}${onBoard(h.sessionId) ? 'Open' : 'Restore'}</button>` : ''}${helperIdeasHtml(h)}</li>`).join('')}</ul>` : '';
   // What a helper sent the planner (send_step_idea), as the step's Add idea box would.
   const helperIdeasHtml = (h) => h.ideas?.length ? `<ul class="job-helper-ideas">${h.ideas.map((m) => `<li><span class="job-helper-from">${ICONS.robot}From the helper · sent to the wrangler ${esc(when(m.at))}</span><q>${esc(m.text)}</q></li>`).join('')}</ul>` : '';
@@ -1309,7 +1317,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       + (deploys ? chip(ICONS.rocket, sub.deploys.expected === false ? 'No deploy' : 'Deploys', { cls: 'job-deploys', title: deploys }) : '')
       + (sub.stage === 'review' ? runningChipHtml(job, sub, { open: openMore.has('running'), logs: runLogs.get(sub.id) }) : '');
     const kicker = `<button class="job-back" data-open-job title="Back to the job">${ICONS.back}<span>${esc(job.title)}</span></button>`;
-    const session = sub.sessions.length ? `<button id="job-session" ${runStatus(job, sub) === 'needs-you' ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>` : '';
+    const session = sub.sessions.length ? sessionSplitHtml(job, sub, runStatus(job, sub) === 'needs-you') : '';
     // Wrangler's own turn (Fixing) or a fix for you (Fix ready, a declared red's options)
     // outranks Retry as the primary action; Retry stays for a transient failure.
     const redAsk = sub.error && !job.error && (redFixReady(job, sub) || (redDeclared(job, sub) && job.replan?.proposal)) ? `<button class="primary" data-open-job title="Opens the job dialog on the proposal">${ICONS.eye}${redFixReady(job, sub) ? 'Review fix' : 'Decide'}</button>` : '';
@@ -1626,6 +1634,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       };
     });
     bind('#job-session', () => { dialog.close(); onSession(sub.sessions.at(-1)); });
+    dialog.querySelectorAll('[data-step-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.stepSession); });
     bind('[data-ask-helper]', (e) => { if (pressBusy(e.currentTarget)) action('ask-helper', {}, sub.id); });
     dialog.querySelectorAll('[data-helper-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.helperSession); });
     // Reviewing the code is a round trip out to the board's diff panel, so hand over
@@ -1668,7 +1677,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         if (!images) return;
         const busy = images.busy();
         form.querySelector('#job-share-images').hidden = !images.names().length && !busy;
-        form.querySelectorAll('.job-create-foot button').forEach((b) => { b.disabled = busy; b.title = busy ? 'Waiting for images to finish uploading' : ''; });
+        // A pressed Start planning holds both buttons until the job lands; an upload must not free them.
+        const foot = form.querySelectorAll('.job-create-foot button');
+        if (![...foot].some(isBusy)) foot.forEach((b) => { b.disabled = busy; b.title = busy ? 'Waiting for images to finish uploading' : ''; });
       },
     });
     dialog.addEventListener('close', () => images.dispose(), { once: true });
@@ -1687,7 +1698,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     };
     bindReviewPoints(form);
     form.onsubmit = (e) => {
-      e.preventDefault(); if (images.busy()) return; const values = new FormData(form);
+      e.preventDefault(); if (images.busy()) return;
+      if (!pressBusy(submitterOf(e), { also: form.querySelectorAll('.job-create-foot button') })) return;
+      const values = new FormData(form);
       const taskId = values.get('taskId');
       // Enter and the primary button both start planning; only the grey button parks it.
       send({ type: 'job-create', idea: true, start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', ...reviewFlagsOf(values), ...sandbox.value(), images: images.names(), shareImages: values.has('shareImages'), taskId: taskId && taskId !== '__new__' ? taskId : null } });

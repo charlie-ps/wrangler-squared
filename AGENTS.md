@@ -320,7 +320,7 @@ text as public as the rest of this repo.
   worktree, no PR automation; the job's agent/model/effort and task) in `helperCwd` (the step's checkout,
   else a prerequisite PR's, else `''`, a scratch workspace; never a worktree), briefed by
   `job-prompts.js helperPrompt`. A failed spawn is `error` on that entry, which frees the button. Its id is
-  kept OUT of `sub.sessions` (cleanup archives those; Open session and Review code read the last) and
+  kept OUT of `sub.sessions` (cleanup archives those; Open session's caret lists them by run phase, its button and Review code read the last) and
   `job.runs` (`runForSession` would hand it job_report, the worker skill and the job's sandbox). What it
   finds comes back only through `send_step_idea` (`server/tools.js`), when the human asks: the store's
   `helperIdea` resolves the caller against `sub.helpers[].sessionId` (anything else is refused) and runs
