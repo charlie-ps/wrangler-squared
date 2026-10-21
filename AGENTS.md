@@ -248,7 +248,10 @@ text as public as the rest of this repo.
   action (pinned to `{at:'round', ref: ready.receiptId}`, refused while `answering`; a `rework`
   of a parked step is refused in its favour) writes a `sub.thread` message (`askAgent`,
   `via: 'planner'`, `sentAt: null`) and the runner mails
-  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again). The
+  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again). In the
+  wrangler conversation a forwards-only card (`forward: true`, no prose) is one line, and its
+  approval stamps `forwarded: [{sub, message}]`, so `public/job-talk.js` draws the session's
+  answers from `sub.thread` right after it. The
   agent answers with `reply {text, shots?, run?}` (parks again; tree and round unchanged) or
   a fresh `ready`: round n+1, `receiptId` `<run>#n`, the old round kept in `sub.earlier`.
   Pasted images are copied into the round's folder and mailed as paths

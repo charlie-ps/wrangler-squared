@@ -1463,7 +1463,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   function openShot(b) {
     const slots = [...b.closest('.job-msg-att').querySelectorAll('[data-shot-at] [data-ev-file]')];
-    shotBox = { jobId: selected.jobId, subId: selected.subId, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
+    shotBox = { jobId: slots[0].dataset.evJob, subId: slots[0].dataset.evSub, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
     shotZoom = document.createElement('dialog');
     shotZoom.className = 'job-shotbox';
     applyTheme(shotZoom);
