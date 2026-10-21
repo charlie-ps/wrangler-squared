@@ -619,6 +619,7 @@ button.job-write:focus-visible { outline:2px solid var(--c); outline-offset:1px;
 .job-split>button.primary~.job-split-more>summary:focus-visible { outline-color:var(--c, var(--blue)); }
 .job-split-menu { position:absolute; z-index:5; bottom:calc(100% + 4px); left:0; display:grid; min-width:180px; padding:4px; border:1px solid var(--border); border-radius:12px; background:var(--surface); box-shadow:0 8px 24px var(--shadow); }
 .job-split-menu button { justify-content:flex-start; border-radius:8px; white-space:nowrap; }
+.job-split-hint { margin-left:auto; padding-left:16px; font-size:12px; color:var(--fg-muted); }
 .job-actions .job-details-toggle { margin-left:auto; color:var(--fg-muted); }
 .job-actions .job-details-toggle[aria-expanded="true"] { color:var(--fg); background:var(--surface-2); }
 .job-details-body { margin:4px 0 8px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, var(--surface-2) 50%, transparent); font-size:12px; color:var(--fg-muted); }
