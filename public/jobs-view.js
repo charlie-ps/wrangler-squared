@@ -777,7 +777,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // A failing step's Retry goes at once; its caret holds the one line the retried
   // session reads last (server/job-prompts.js). A coordinator error has no session
   // to read it, so the job's own Retry stays plain.
-  const retrySplitHtml = (primary) => `<span class="job-split job-retry-split"><button id="job-retry" ${primary ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button><details class="job-split-more" data-keep="retry-note" ${openMore.has('retry-note') ? 'open' : ''}><summary aria-label="Retry with a note for the retried session" title="Retry with a note for the retried session">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>Note for the retried session<textarea data-retry-note maxlength="180" rows="2" placeholder="Read last by the retried session, and shown on the card until it reports"></textarea></label><button type="button" data-retry-with-note>${ICONS.wrench}Retry with note</button></div></details></span>`;
+  const retrySplitHtml = (primary) => `<span class="job-split job-retry-split"><button id="job-retry" ${primary ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button><details class="job-split-more" data-keep="retry-note" ${openMore.has('retry-note') ? 'open' : ''}><summary aria-label="Add a note for Retry to send" title="Add a note for Retry to send">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>Note sent with Retry<textarea data-retry-note maxlength="180" rows="2" placeholder="Optional. Shown on the card until the retried session reports"></textarea></label></div></details></span>`;
   // newest last. A queued one is the only state that holds the button.
   // Every run's session, newest first: a repair or publish run hides the implementation one behind it.
   const sessionSplitHtml = (job, sub, primary) => {
@@ -1597,8 +1597,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     dialog.querySelectorAll('input[name="opt"]').forEach((r) => r.onchange = () => { optionPick = { id: job.replan.proposal.id, i: +r.value }; renderDetail(); });
     // Only the popup's own button sends its words: plain Retry sends none.
     const retry = (b, note) => { if (pressBusy(b)) action('retry', { subJobId: sub?.error ? sub.id : undefined, ...only({ note }) }); };
-    bind('#job-retry', (e) => retry(e.currentTarget));
-    bind('[data-retry-with-note]', (e) => retry(e.currentTarget, dialog.querySelector('[data-retry-note]').value.replace(/\s+/g, ' ').trim()));
+    bind('#job-retry', (e) => retry(e.currentTarget, dialog.querySelector('[data-retry-note]')?.value.replace(/\s+/g, ' ').trim()));
     // Echoes the head and fingerprint of the list being read, so a refusal the
     // runner has replaced since is refused by the server instead of discarded unseen.
     bind('#job-discard', () => {

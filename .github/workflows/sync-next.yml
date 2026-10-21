@@ -1,0 +1,53 @@
+name: Sync next
+
+# Merges each push to main into the long-lived next branch. A GITHUB_TOKEN push
+# starts no other workflow, and this repo may not open PRs from Actions, so a
+# conflict fails the run and names the files for a hand merge instead.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-next
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: next
+          fetch-depth: 0
+
+      - name: Merge main into next
+        run: |
+          set -euo pipefail
+          summary="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "next already contains main ($(git rev-parse --short origin/main)); nothing to do."
+            exit 0
+          fi
+          if git merge --no-ff --no-edit -m 'Merge main into next' origin/main; then
+            git push origin HEAD:next
+            echo "Merged main ($(git rev-parse --short origin/main)) into next as $(git rev-parse --short HEAD)." >> "$summary"
+            exit 0
+          fi
+          conflicts=$(git diff --name-only --diff-filter=U)
+          git merge --abort
+          {
+            echo '## Merge main into next by hand'
+            echo
+            echo "Merging \`main\` ($(git rev-parse --short origin/main)) into \`next\` conflicts in:"
+            echo
+            while IFS= read -r f; do [ -n "$f" ] && echo "- \`$f\`"; done <<< "$conflicts"
+          } >> "$summary"
+          while IFS= read -r f; do [ -n "$f" ] && echo "::error file=$f::Conflicts merging main into next"; done <<< "$conflicts"
+          exit 1

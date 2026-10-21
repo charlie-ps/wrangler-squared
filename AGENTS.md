@@ -372,3 +372,10 @@ text as public as the rest of this repo.
   on a fresh data dir and free port with this checkout copied in as
   `extensions/jobs`, then runs `scripts/dev-smoke.mjs`, which exits 1 on any
   failed expectation (quarantine, missing frame or tool). CI runs it last.
+- `.github/workflows/sync-next.yml` merges every push to `main` into the
+  long-lived `next` branch as a bot merge commit. On a conflict it fails and its
+  job summary lists the files: merge `main` into `next` by hand (a "Merge main
+  into next" PR), after which the next run, or a manual `workflow_dispatch`,
+  finds nothing to do. Land that PR with **Create a merge commit**, never
+  squash: a squash keeps `main` out of `next`'s ancestry, so every later run
+  conflicts again on files the PR already resolved.
