@@ -2,7 +2,10 @@ name: Sync next
 
 # Merges each push to main into the long-lived next branch. A GITHUB_TOKEN push
 # starts no other workflow, and this repo may not open PRs from Actions, so a
-# conflict fails the run and names the files for a hand merge instead.
+# conflict fails the run and names the files for a hand merge instead. That
+# merge is pushed straight to next, never landed through a PR: GitHub's merge
+# button remembers squash from feature PRs, and a squash leaves main out of
+# next's ancestry, so every later run conflicts on the same files again.
 on:
   push:
     branches: [main]
@@ -42,12 +45,27 @@ jobs:
           fi
           conflicts=$(git diff --name-only --diff-filter=U)
           git merge --abort
+          squashed=$(git log --no-merges --format='%h %s' "$(git merge-base HEAD origin/main)..HEAD" | grep -i 'merge main into next' || true)
           {
             echo '## Merge main into next by hand'
             echo
             echo "Merging \`main\` ($(git rev-parse --short origin/main)) into \`next\` conflicts in:"
             echo
             while IFS= read -r f; do [ -n "$f" ] && echo "- \`$f\`"; done <<< "$conflicts"
+            echo
+            echo 'Merge it locally and push the merge commit straight to `next`, never through a PR:'
+            echo
+            echo '```sh'
+            echo 'git fetch origin && git switch -C next origin/next'
+            echo 'git merge --no-ff -m "Merge main into next" origin/main   # resolve, npm test, commit'
+            echo 'git push origin next'
+            echo '```'
+            if [ -n "$squashed" ]; then
+              echo
+              echo 'These single-parent commits on `next` look like a squash-landed merge, which is why the same files conflict again; keep their resolution:'
+              echo
+              while IFS= read -r c; do echo "- $c"; done <<< "$squashed"
+            fi
           } >> "$summary"
           while IFS= read -r f; do [ -n "$f" ] && echo "::error file=$f::Conflicts merging main into next"; done <<< "$conflicts"
           exit 1

@@ -374,8 +374,10 @@ text as public as the rest of this repo.
   failed expectation (quarantine, missing frame or tool). CI runs it last.
 - `.github/workflows/sync-next.yml` merges every push to `main` into the
   long-lived `next` branch as a bot merge commit. On a conflict it fails and its
-  job summary lists the files: merge `main` into `next` by hand (a "Merge main
-  into next" PR), after which the next run, or a manual `workflow_dispatch`,
-  finds nothing to do. Land that PR with **Create a merge commit**, never
-  squash: a squash keeps `main` out of `next`'s ancestry, so every later run
-  conflicts again on files the PR already resolved.
+  job summary lists the files: merge `main` into `next` locally (`--no-ff` on
+  `next`, resolve, `npm test`) and push the merge commit straight to `next`,
+  after which the next run, or a manual `workflow_dispatch`, finds nothing to
+  do. **Never land it through a PR**: the merge button remembers squash from
+  feature PRs, and a squash keeps `main` out of `next`'s ancestry, so every
+  later run conflicts again on files already resolved (the run's summary names
+  any such squashed commit).
