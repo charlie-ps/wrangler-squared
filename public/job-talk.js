@@ -1,7 +1,7 @@
 import { esc } from './util.js';
 import { ICONS } from './icons.js';
 import { convoGroups, askPending, replanPending, convoNumber, convoRunning, replanQueued, queuedLabel } from './jobs.js';
-import { proseHtml } from './job-idea.js';
+import { proseHtml, imageStripHtml } from './job-idea.js';
 import { shotButtonHtml } from './job-proof.js';
 
 // A running job's conversations with the wrangler (server/job-talk.js), drawn above
@@ -22,8 +22,13 @@ const OUTCOME = { approved: ['ok', 'Approved'], discarded: ['muted', 'Discarded'
 
 function humanHtml(job, m, onJob) {
   const step = onJob && m.sub ? job.subJobs.find((s) => s.id === m.sub)?.title || m.sub : null;
-  const meta = ['You', step ? `on ${step}` : '', m.images ? `${m.images} image${m.images === 1 ? '' : 's'}` : '', time(m.at)].filter(Boolean).join(' · ');
-  return `<div class="job-sent" data-talk="${esc(m.id)}"><div class="job-sent-bubble"><span>${esc(m.text)}</span></div><span class="job-sent-meta">${esc(meta)}</span></div>`;
+  // Kept pictures are a strip the dialog fills from a job-images frame (`talk:<file>`);
+  // a message saved before they were kept holds only how many there were.
+  const kept = Array.isArray(m.images) ? m.images : [];
+  const count = typeof m.images === 'number' && m.images ? `${m.images} image${m.images === 1 ? '' : 's'}` : '';
+  const meta = ['You', step ? `on ${step}` : '', count, time(m.at)].filter(Boolean).join(' · ');
+  const pics = imageStripHtml(job, kept.map((i) => `talk:${i.file}`), 'job-sent-strip');
+  return `<div class="job-sent" data-talk="${esc(m.id)}"><div class="job-sent-bubble">${pics}<span>${esc(m.text)}</span></div><span class="job-sent-meta">${esc(meta)}</span></div>`;
 }
 const wranglerHtml = (m, body, cls = '') => `<div class="job-idea-msg job-talk-msg ${cls}" data-talk="${esc(m.id)}"><span class="job-idea-orb small" aria-hidden="true"></span><div><div class="job-idea-who">${WRANGLER_NAME}<time>${esc(time(m.at))}</time></div>${body}</div></div>`;
 

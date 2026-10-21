@@ -47,7 +47,9 @@ export function requestChange(job, sub, { at, ref, text, attachments, convo: con
   // go on into its session's thread when the planner forwards the idea there.
   const source = sub ? { sub: sub.id, at: view.at, ref: view.ref } : null;
   const images = files.map(({ file, mime, path }) => ({ sub: sub?.id || null, round: view.at === 'code' ? sub.ready.round || 1 : null, file, mime, path }));
-  const said = { from: 'human', text: typed, ...(sub ? { sub: sub.id } : {}), ...(files.length ? { images: files.length } : {}) };
+  // The message keeps where each picture was kept, so the thread can draw it (handlers.js jobImagesHandler).
+  const kept = files.map(({ file, mime, round }) => ({ file, mime, ...(sub ? { sub: sub.id } : {}), ...(sub && Number.isInteger(round) ? { round } : {}) }));
+  const said = { from: 'human', text: typed, ...(sub ? { sub: sub.id } : {}), ...(files.length ? { images: kept } : {}) };
   // A declared red is the planner's: it has already tried, so the idea goes to it
   // with everything it found, and still holds only that step.
   if (sub && isDeclared(job, sub)) {
