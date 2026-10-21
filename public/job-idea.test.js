@@ -215,11 +215,12 @@ test('a suggestion something newer was said after is stale and cannot be pressed
   assert.equal(ideaStage(f.data.jobs[0]), 'thinking', 'an unsent reply is the planner\'s turn');
 });
 
-test('on the board an idea waiting on you is a needs-you stub; one the planner is on is working', () => {
+test('on the board an idea waiting on you is a to-read stub; one the planner is on is working', () => {
   const reply = ideaJob([asked]), suggested = ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]), thinking = ideaJob([], [parked({ parkedAt: null })]);
   assert.deepEqual([ideaStage(reply), ideaStage(suggested), ideaStage(thinking)], ['reply', 'suggested', 'thinking']);
   assert.deepEqual([jobNeedsReview(reply, null), jobNeedsReview(suggested, null), jobNeedsReview(thinking, null)], [true, true, false]);
-  assert.deepEqual([plateAsk(reply).label, plateAsk(reply).button], ['Your reply', 'Reply']);
+  assert.deepEqual([plateAsk(reply).label, plateAsk(reply).button, plateAsk(reply).tone], ['Wrangler asked', 'Reply', 'read']);
+  assert.equal(plateAsk(suggested).tone, 'read');
   assert.deepEqual([plateAsk(suggested).label, plateAsk(suggested).detail], ['Job suggested', '2 PRs · 1 session · 1 write · wrangler-squared']);
   assert.equal(plateAsk(thinking), null);
   assert.deepEqual(jobStatus(thinking, null), { tone: 'working', text: 'The wrangler is reading the idea' });
@@ -236,7 +237,7 @@ test('the planner\'s prose is escaped before it is marked up, and a summary coun
   assert.deepEqual([s.work.length, s.repos.length, s.line], [3, 1, '3 sub-jobs · wrangler-squared · Slack']);
 });
 
-test('an idea is a plate under a forming sky, tagged IDEA, idle while the planner thinks and amber when it waits on you', (t) => {
+test('an idea is a plate under a forming sky, tagged IDEA, idle while the planner thinks and teal when it waits on you', (t) => {
   const thinking = { ...ideaJob([], [parked({ parkedAt: null })]), id: 'think' }, reply = { ...ideaJob([asked]), id: 'reply' };
   const suggested = { ...ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]), id: 'sugg' }, backlog = { ...ideaJob([], []), id: 'later', stage: 'backlog' };
   const job = { id: 'job', title: 'A job', intent: 'x', repos: ['/r'], stage: 'active', plan: suggest.plan, subJobs: [{ id: 'a', title: 'A', repo: '/r', after: [], stage: 'pr', sessions: [], repairs: [] }], runs: [], moves: [], createdAt: 0 };
@@ -244,7 +245,7 @@ test('an idea is a plate under a forming sky, tagged IDEA, idle while the planne
   assert.deepEqual([thinking, reply, suggested, backlog].map((j) => sky(plateHtml(j, 'opus'))), ['0', '1', '2', '0'], 'the point brightens as the planner asks, then suggests');
   assert.equal(plateHtml(job, 'opus').includes('gx nb'), false, 'a job keeps its black hole');
   assert.match(plateHtml(thinking, 'opus'), /class="job-plate idea tone-idle /);
-  assert.match(plateHtml(reply, 'opus'), /class="job-plate idea tone-warn /);
+  assert.match(plateHtml(reply, 'opus'), /class="job-plate idea tone-read /);
   assert.match(plateHtml(thinking, 'opus', 'full'), /class="gx nb"/, 'with launch-page scenes too: an idea has no scene yet');
   const f = fixture(t, [job, thinking, reply, suggested, backlog]);
   const ideaPlate = f.q('[data-board="reply"]');

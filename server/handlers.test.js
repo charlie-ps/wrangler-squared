@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeOpenIdeHandler, jobImagesHandler, jobSettingsHandler, makeFeatureRequestHandlers } from './handlers.js';
+import { makeOpenIdeHandler, jobTalkSeenHandler, jobImagesHandler, jobSettingsHandler, makeFeatureRequestHandlers } from './handlers.js';
 import { fakeHost } from './test-helpers.js';
 import { ideasDir, roundDir } from './job-evidence.js';
 
@@ -163,4 +163,17 @@ test('whoami answers the gh login the panel will post as, or why there is none',
   const out = ghFixture([[(a) => a[0] === 'api', ghError({ code: 4, stderr: 'gh auth login' })]]);
   await out.whoami.handler({ rid: 'w' }, out.host);
   assert.equal(out.broadcasts[0].reason, 'auth');
+});
+
+test('the board having shown a wrangler answer marks only its conversations seen, quietly and without a revision', async () => {
+  const { host, broadcasts } = fakeHost();
+  const job = host.stores.jobs.create({ title: 'Sign-in', intent: 'Reliable sign-in' });
+  host.stores.jobs.update(job.id, (j) => { j.convos = [{ id: 'c1', at: 1, pending: null, seenAt: 0 }, { id: 'c2', at: 1, pending: null, seenAt: 0 }]; });
+  const { revision } = host.stores.jobs.get(job.id);
+  await jobTalkSeenHandler.handler({ id: job.id, convos: ['c1', 7] }, host);
+  const after = host.stores.jobs.get(job.id);
+  assert.ok(after.convos[0].seenAt > 0); assert.equal(after.convos[1].seenAt, 0);
+  assert.equal(after.revision, revision, 'a plan under review is not refused for it');
+  assert.equal(broadcasts.length, 0, 'no toast and no closed dialog');
+  await jobTalkSeenHandler.handler({ id: 'nope', convos: ['c1'] }, host);
 });

@@ -88,6 +88,16 @@ export const jobActionHandler = {
   },
 };
 
+// The wrangler's answers the human now has in front of them: the job leaves the
+// to-read state. Silent, so neither a toast nor a closed dialog follows it.
+export const jobTalkSeenHandler = {
+  type: 'job-talk-seen',
+  async handler(msg, host) {
+    const convos = Array.isArray(msg.convos) ? msg.convos.filter((c) => typeof c === 'string').slice(0, 50) : [];
+    if (convos.length && host.stores.jobs.seenTalk(msg.id, convos)) await host.rebuild();
+  },
+};
+
 export const jobSettingsHandler = {
   type: 'job-settings',
   async handler(msg, host) {
@@ -251,4 +261,4 @@ export function makeFeatureRequestHandlers({ run = runFile } = {}) {
   }];
 }
 
-export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler, jobEvidenceHandler, jobRunningLogsHandler, ...makeFeatureRequestHandlers()];
+export const HANDLERS = [jobCreateHandler, jobActionHandler, jobTalkSeenHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler, jobEvidenceHandler, jobRunningLogsHandler, ...makeFeatureRequestHandlers()];

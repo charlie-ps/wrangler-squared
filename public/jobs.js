@@ -419,6 +419,11 @@ export function talkFor(job, sub) {
   const convo = (m) => m.convo ? convosOf(job).find((c) => c.id === m.convo) : null;
   return talkOf(job).filter((m) => !convo(m)?.dismissedAt).filter(sub ? (m) => m.sub === sub.id || convo(m)?.sub === sub.id : (m) => !convo(m)?.sub || convo(m).escalatedAt);
 }
+// A wrangler's answer the human has not had in front of them yet: newer than its
+// conversation's `seenAt` (stamped by `seen-talk` while a dialog shows it). With
+// `sub`, only the answers that step's dialog draws.
+export const wranglerUnread = (job, sub = null) => job?.cancelledAt ? [] : talkFor(job, sub).filter((m) => m.from === 'wrangler' && m.kind === 'answer' && m.convo
+  && m.at > (convosOf(job).find((c) => c.id === m.convo)?.seenAt || 0));
 // The conversations a view shows, in the order they started, each with its
 // messages; a message from no conversation (a red step's card) is grouped apart.
 export function convoGroups(job, sub) {

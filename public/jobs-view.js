@@ -1,10 +1,10 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel } from './jobs.js';
+import { wranglerUnread, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel } from './jobs.js';
 import { talkHtml } from './job-talk.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener, fieldName } from './job-graph.js';
-import { assignScenes, plateHtml, placePopHtml, askActs } from './job-plates.js';
+import { assignScenes, plateHtml, placePopHtml, askActs, plateAsk } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, releaseSkies, spinTo } from './job-skylines.js';
 import { wireDeps, relight } from './job-deps.js';
@@ -496,6 +496,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       b.setAttribute('aria-pressed', String(key === filter));
       b.querySelector('.jobs-rail-n').textContent = n || '';
       b.querySelector('.jobs-rail-n').classList.toggle('ask', key === 'needs' && n > 0);
+      // Amber while anything needs acting on; the read tone once all that waits is the wrangler's to read.
+      b.querySelector('.jobs-rail-n').classList.toggle('read', key === 'needs' && n > 0 && data.jobs.filter((j) => test(j)).every((j) => plateAsk(j)?.tone === 'read'));
     }
     assignScenes(data.jobs, scenes);
     const test = FILTERS.find(([key]) => key === filter)[2];
@@ -1483,6 +1485,15 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     shotZoom.showModal();
     paintShotBox();
   }
+  // The wrangler's answers this dialog draws are read once it is open on them: tell the
+  // server once per answer, so the job leaves the to-read state on its next tick.
+  const seenSent = new Set();
+  function markSeen(job, sub) {
+    const convos = [...new Set(wranglerUnread(job, sub || null).filter((m) => !seenSent.has(m.id)).map((m) => m.convo))];
+    if (!convos.length) return;
+    for (const m of wranglerUnread(job, sub || null)) seenSent.add(m.id);
+    send({ type: 'job-talk-seen', id: job.id, convos });
+  }
   function renderDetail() {
     const job = data.jobs.find((j) => j.id === selected?.jobId);
     if (!job) return;
@@ -1494,6 +1505,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const viewing = sub && proofView && proofItems(sub).length > proofView.i && !isWriteSub(sub);
     if (!viewing) proofView = null;
     flags.painting = true;
+    if (!viewing) markSeen(job, sub);
     const html = viewing ? proofViewerHtml(job, sub, proofView, evidence, { branch: sub.worktree?.branch, ask: sub.stage === 'review' }) : sub ? subDetail(job, sub) : jobDetail(job);
     // Its handlers close over `job`, so the same markup is kept only for the same job.
     const drawn = { html, job: JSON.stringify(job) };

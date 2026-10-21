@@ -291,6 +291,16 @@ export class JobStore {
       return swap;
     });
   }
+  // The board drew these conversations' answers in an open dialog: they are read.
+  // Not a revision, like a title: nothing a human approves was written against it.
+  seenTalk(id, convos, now = Date.now()) {
+    return this.change((d) => {
+      const job = d.jobs.find((j) => j.id === id);
+      const seen = (job?.convos || []).filter((c) => convos.includes(c.id) && (c.seenAt || 0) < now);
+      for (const c of seen) c.seenAt = now;
+      return seen.length > 0;
+    });
+  }
   // Approval authorises every write in the plan and the implementation. A
   // keyless story is created by its own write, which the stories session makes
   // at once; a sub-job naming it waits for the key, since its card eyebrow and
