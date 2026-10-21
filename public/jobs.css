@@ -1935,3 +1935,5 @@ details.job-talk-card[open] > summary svg { transform:none; }
 .job-talk-strip .job-idea-body.job-talk-clip { max-height:4.5em; overflow:hidden; -webkit-mask-image:linear-gradient(to bottom, #000 45%, transparent); mask-image:linear-gradient(to bottom, #000 45%, transparent); }
 .job-talk-strip .job-talk-clip > :first-child { margin-top:0; }
 .job-change-to small { margin-left:6px; color:var(--fg-muted); font-weight:400; }
+.job-idea-edit textarea { min-height:140px; resize:vertical; font:13.5px/1.5 var(--font); }
+.job-idea-edit-note { color:var(--fg-muted); }

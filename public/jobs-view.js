@@ -1,8 +1,8 @@
 import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
-import { wranglerUnread, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel } from './jobs.js';
+import { wranglerUnread, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, ideaEditable, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel } from './jobs.js';
 import { talkHtml } from './job-talk.js';
-import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml } from './job-idea.js';
+import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml, ideaEditHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener, fieldName } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, askActs, plateAsk } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
@@ -398,6 +398,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // suggestion pressed here while its hole flares, how many messages were last drawn
   // (a new one scrolls the thread to it), and the idea a fresh New idea opens on.
   let ideaSent = null, ideaFiring = null, ideaSeen = null, openOnCreate = null;
+  // The backlog idea whose words are open to edit in its dialog.
+  let ideaEdit = null;
   const ideaDrawn = new Set();
   const freshMessage = (id) => !ideaDrawn.has(id) && !!ideaDrawn.add(id);
   // Ideas drawn with the title loader, then when their title landed: a tick redraws the
@@ -579,7 +581,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     send({ type: 'job-action', id: selected.jobId, subJobId: subId || undefined, action: name, ...extra });
   }
   function openDetail(jobId, subId) {
-    selected = { jobId, subId }; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); ideaSent = null; ideaFiring = null; ideaSeen = null; revision = null; writeEdit = null; storyDraft = null; commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(jobId);
+    selected = { jobId, subId }; ideaEdit = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); ideaSent = null; ideaFiring = null; ideaSeen = null; revision = null; writeEdit = null; storyDraft = null; commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(jobId);
     const job = data.jobs.find((j) => j.id === jobId);
     if (!subId && job?.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
     const sub = job?.subJobs.find((s) => s.id === subId);
@@ -1198,9 +1200,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       fab = `<button class="primary" data-action="approve-plan" title="${esc(bad.length ? `Finish ${bad.length === 1 ? 'the write' : `${bad.length} writes`} first: ${writeProblem(bad[0])}` : authority)}" ${running || bad.length ? 'disabled' : ''}>${ICONS.check}Approve ${planDraft.subJobs.filter((s) => !isWriteSub(s)).length}</button>`;
     } else if (replanProposed(job)) body = proposalHtml(job);
     else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b>${queuedTag(job)} ${esc(latestAsk(job.replan))}</p>` : replanQueued(job).length ? `<p class="job-replan-ask"><b>Re-planning</b>${queuedTag(job)} Starts once the last change's wrangler has stopped</p>` : ''}${supersededHtml(job)}${planGraphHtml({ ...job.plan, subJobs: job.subJobs }, { stateOf: (s) => subState(job, s), lineOf: (s) => subLine(job, s), openTickets, reviewWrites: job.reviewWrites, base: job.base })}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
+    else if (ideaEditable(job) && ideaEdit === job.id) body = ideaEditHtml(job, stripHtml(job));
     else body = `<p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}`;
     if (job.error) fab = `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>`;
-    else if (job.stage === 'backlog' && !job.cancelledAt) fab = `<button class="primary" data-action="start" title="${esc(hints[0])}">${ICONS.play}Start planning</button>`;
+    else if (ideaEditable(job) && ideaEdit === job.id) fab = '';
+    else if (job.stage === 'backlog' && !job.cancelledAt) fab = `<button class="primary" data-action="start" title="${esc(hints[0])}">${ICONS.play}Start planning</button>${ideaEditable(job) ? `<button data-idea-edit title="Change the title and words before a planner reads them">${ICONS.edit}Edit idea</button>` : ''}`;
     else if (replanProposed(job)) fab = '';
     else if (job.stage === 'active') fab = leadFab(job);
     else if (!fab) fab = promptFab(job);
@@ -1543,6 +1547,22 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       action(name, name === 'approve-plan' ? { plan: cleanedPlan(planDraft), revision } : name === 'approve-replan' ? { proposalId: job.replan.proposal.id, ...(job.replan.proposal.alternatives?.length ? { option: pickedOption(job) } : {}) }
         : { head: target?.pr?.head, sessionReceiptId: target?.result?.receiptId, ...(target?.ready ? { readyReceiptId: target.ready.receiptId } : {}), ...approvalNoteOf(b) }, target?.id);
     });
+    dialog.querySelector('[data-idea-edit]')?.addEventListener('click', () => {
+      ideaEdit = job.id; renderDetail();
+      const box = dialog.querySelector('#job-idea-edit textarea');
+      box?.focus(); box?.setSelectionRange(box.value.length, box.value.length);
+    });
+    const ideaForm = dialog.querySelector('#job-idea-edit');
+    if (ideaForm) {
+      ideaForm.querySelector('[data-idea-edit-cancel]').onclick = () => { ideaEdit = null; renderDetail(); };
+      ideaForm.onsubmit = (e) => {
+        e.preventDefault();
+        if (!pressBusy(submitterOf(e))) return;
+        const title = ideaForm.elements.title.value.trim();
+        // Only a title the human changed is sent, so one Haiku named meanwhile is not undone.
+        action('edit-idea', { text: ideaForm.elements.text.value, ...(title !== job.title ? { title } : {}) }, null);
+      };
+    }
     const humanForm = dialog.querySelector('#job-human-form');
     if (humanForm) humanForm.onsubmit = (e) => {
       e.preventDefault();
@@ -1840,7 +1860,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     e.preventDefault();
     run();
   });
-  dialog.addEventListener('close', () => { shotZoom?.close(); releaseSkies(dialog); ideaSent = null; ideaFiring = null; ideaSeen = null; selected = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
+  dialog.addEventListener('close', () => { shotZoom?.close(); releaseSkies(dialog); ideaEdit = null; ideaSent = null; ideaFiring = null; ideaSeen = null; selected = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
   // the same dialog a board card's click does, from a job/sub id pair index.js kept.
@@ -1881,6 +1901,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if (msg.jobId === flags.jobId) { flags.pending = null; paintFooter(); }
       return;
     }
+    // A saved idea stays open, back on its words: the rebuild before this frame already carries them.
+    if (msg?.action === 'edit-idea') { if (msg.jobId === selected?.jobId) { ideaEdit = null; if (dialog.open) renderDetail(); } return; }
     // A Retry's, a fix's or a dismissal's outcome lands on a later tick, in the dialog it was pressed in.
     if (['retry-main', 'dismiss-main', 'resolve-main', 'dismiss-convo'].includes(msg?.action)) return;
     // A New idea that is planning opens on its conversation once the snapshot has it.

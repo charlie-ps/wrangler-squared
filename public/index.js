@@ -120,6 +120,7 @@ export default {
         // A checkpoint switch says what it did in the footer it was made from, an idea in its own bubble.
         if (msg.action === 'accept-idea') toast('Job created from the idea');
         else if (msg.action === 'dismiss-convo') toast('Conversation dismissed');
+        else if (msg.action === 'edit-idea') toast('Idea saved');
         else if (!['set-review', 'request-change', 'idea-reply'].includes(msg.action)) toast('Job updated');
       } else if (msg.event === 'job-action-failed') {
         if (msg.action === 'set-review') view?.reviewFailed(msg);

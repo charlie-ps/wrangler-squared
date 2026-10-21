@@ -115,6 +115,15 @@ export function ideaComposerHtml(draft = '', tray = '') {
     <div class="job-change-foot"><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 }
 
+// A backlog idea's own words, open to change until planning starts (server/job-idea.js
+// editIdea). A form, so a tick leaves what is being typed alone; `strip` is its kept pictures.
+export const IDEA_TITLE_MAX = 180;
+export const ideaEditHtml = (job, strip = '') => `<form id="job-idea-edit" class="job-write-editor job-idea-edit">
+    <label>Title<input name="title" required maxlength="${IDEA_TITLE_MAX}" value="${esc(job.title)}" autocomplete="off"></label>
+    <label>Idea<textarea name="text" required maxlength="8000" rows="8">${esc(job.intent)}</textarea></label>
+    ${strip ? `<div>${strip}<small class="job-idea-edit-note">Attached pictures stay with the idea.</small></div>` : ''}
+    <div class="job-actions"><button class="primary">${ICONS.check}Save</button><button type="button" data-idea-edit-cancel>Cancel</button></div></form>`;
+
 // Haiku is still naming the job (server `titlePending`): two faint bars stand where
 // the title will land, so the clipped description never shows as a title first.
 export const titleLoaderHtml = (cls = '') => `<span class="job-title-loader ${cls}" role="status" aria-label="Naming this idea…"><i></i><i></i></span>`;

@@ -7,7 +7,7 @@ import { JobStore, holdsSlot } from './job-store.js';
 import { JobRunner } from './job-runner.js';
 import { reportSchema } from './jobs-schema.js';
 import { jobPrompt, ideaMail } from './job-prompts.js';
-import { liveSuggestion, inConversation } from './job-idea.js';
+import { liveSuggestion, inConversation, ideaEditable, IDEA_TEXT_MAX } from './job-idea.js';
 import { makeJobCreateHandler, jobActionHandler, jobImagesHandler } from './handlers.js';
 import { ideasDir } from './job-evidence.js';
 import { _resetForTests, runnerFor } from './jobs.js';
@@ -264,4 +264,53 @@ test('New idea\'s form creates an idea job; create_job and a plain form do not',
   assert.deepEqual([idea.event, idea.idea, plain.idea], ['job-created', true, undefined]);
   assert.deepEqual(f.store.get(idea.jobId).idea, { thread: [] });
   assert.equal(f.store.get(plain.jobId).idea, undefined);
+});
+
+test('a backlog idea is edited before planning, and the planner reads the edited words', async (t) => {
+  const f = fixture(t, { images: ['paste-1-abcd.png'] });
+  assert.equal(ideaEditable(f.get()), true);
+  const before = f.get().revision;
+  f.store.action(f.job.id, 'edit-idea', { title: '  Nag me about green PRs ', text: 'Nag me when a green PR waits over a day.' });
+  const edited = f.get();
+  assert.deepEqual([edited.title, edited.intent, edited.images, edited.stage], ['Nag me about green PRs', 'Nag me when a green PR waits over a day.', ['paste-1-abcd.png'], 'backlog']);
+  assert.ok(edited.revision > before);
+  assert.deepEqual(edited.moves.map((m) => [m.move, m.detail]), [['edit-idea', 'Edited the idea\'s title and text']]);
+  f.store.action(f.job.id, 'edit-idea', { text: 'Nag me when a green PR waits over a day.' });
+  assert.equal(f.get().moves.length, 1, 'an unchanged save records nothing');
+  f.store.action(f.job.id, 'edit-idea', { text: 'Only the words change' });
+  assert.deepEqual([f.get().title, f.get().moves.at(-1).detail], ['Nag me about green PRs', 'Edited the idea\'s text']);
+  await f.start();
+  const prompt = jobPrompt(f.get(), null, f.last().run);
+  assert.match(prompt, /Goal: Only the words change/);
+  assert.doesNotMatch(prompt, /Can the board nag me/);
+});
+
+test('editing an idea is refused once planning starts, when cancelled, for a plain job, and when malformed', async (t) => {
+  const f = fixture(t);
+  const edit = (payload, id = f.job.id) => f.store.action(id, 'edit-idea', payload);
+  assert.throws(() => edit({ text: '   ' }), /Write the idea first/);
+  assert.throws(() => edit({ text: 'x'.repeat(IDEA_TEXT_MAX + 1) }), /under 8000 characters/);
+  assert.throws(() => edit({ title: '' }), /Give the idea a title/);
+  assert.throws(() => edit({ title: 'two\nlines' }), /one line/);
+  assert.throws(() => edit({ title: 'x'.repeat(181) }), /one line under 180/);
+  edit({ text: 'x'.repeat(IDEA_TEXT_MAX) });
+  const plain = f.store.create({ title: 'Plain', intent: 'A job, not an idea' });
+  assert.throws(() => edit({ text: 'new' }, plain.id), /Planning has started/);
+  await f.start();
+  assert.equal(f.get().stage, 'planning');
+  assert.throws(() => edit({ text: 'Too late' }), /Planning has started on this idea/);
+  assert.equal(f.get().intent, 'x'.repeat(IDEA_TEXT_MAX));
+  const g = fixture(t);
+  g.store.action(g.job.id, 'cancel-job');
+  assert.throws(() => g.store.action(g.job.id, 'edit-idea', { text: 'new' }), /cancelled/);
+});
+
+test('a typed title wins over the generated one still on its way', (t) => {
+  const f = fixture(t);
+  const fallback = f.get().title;
+  f.store.change((d) => { d.jobs[0].titlePending = true; });
+  f.store.action(f.job.id, 'edit-idea', { title: 'Mine' });
+  assert.equal(f.get().titlePending, undefined);
+  assert.equal(f.store.retitle(f.job.id, fallback, 'Generated'), false);
+  assert.equal(f.get().title, 'Mine');
 });
