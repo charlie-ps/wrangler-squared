@@ -983,7 +983,7 @@ test('every idea has one way in: the planner, which takes a step\'s idea into th
   change(f, 'api', 'Rename it');
   const replan = f.store.get(f.job.id).replan;
   assert.equal(replan.previous.subJobs.length, 3, 'the planner reads the proposal it is asked to change');
-  assert.match(replan.feedback, /^Earlier: Also cover SSO\n\nNow: About “Deliver api” \(api, review\/verified\): Rename it$/);
+  assert.deepEqual([replan.earlier, replan.feedback], [['Also cover SSO'], 'About “Deliver api” (api, review/verified): Rename it']);
   assert.equal(replan.source.at, 'code');
 });
 

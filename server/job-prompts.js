@@ -5,6 +5,7 @@ import { checkoutsDir, displayPath } from './data-dir.js';
 import { isFrozen, replanStatus } from './job-replan.js';
 import { writeBrief, openWrites, draftingFor, WRITE_RESULT_SHAPE } from './job-writes.js';
 import { inConversation, ideaThread } from './job-idea.js';
+import { replanAsked } from '../public/replan-asks.js';
 
 // The worktree starts on a placeholder branch (job-runtime.js). The session
 // working inside the repository is the one that can read its convention, so
@@ -303,7 +304,7 @@ const replanBlock = (job) => lines(
   job.replan.previous ? `Your previous proposal, which the human asked to change: ${JSON.stringify(job.replan.previous)}` : '',
   job.replan.previousActions?.length ? `Its actions, which still stand unless the human's words change them (carry each you keep into your actions): ${JSON.stringify(job.replan.previousActions)}` : '',
   sourceLine(job),
-  `Requested change: ${job.replan.feedback}`,
+  `Requested change: ${replanAsked(job.replan)}`,
 );
 
 // No checkouts folder on this machine (see data-dir.js): clone beside the

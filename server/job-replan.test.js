@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isFrozen, mergeReplan, approveReplan, replanStatus } from './job-replan.js';
+import { isFrozen, mergeReplan, approveReplan, replanStatus, requestReplan } from './job-replan.js';
+import { jobPrompt } from './job-prompts.js';
+import { replanAsked } from '../public/replan-asks.js';
 
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, kind: 'pr', repo: '/repo', after, brief: `Implement ${id}`, ...extra });
 const live = (s, extra = {}) => ({ ...s, stage: 'implementation', state: 'queued', ...extra });
@@ -206,4 +208,28 @@ test('a landed step whose stored spec moved after the proposal goes back to the 
   const { j: still } = build({ stage: 'done', state: 'done' });
   assert.equal(approveReplan(still, 'p1', { now: 9, buildSubJob: (_, s) => s }).sentBack, undefined);
   assert.equal(still.subJobs.find((s) => s.id === 'a').brief, 'Redo a');
+});
+
+test('asks stay a flat list: three in a row never nest, the planner reads each earlier one once, then Now', () => {
+  const j = { ...job([spec('a')], [live(spec('a'))]), stage: 'active' };
+  for (const [i, text] of ['Add CSV export', 'Make it smaller', 'Rename the button'].entries()) {
+    requestReplan(j, text, i);
+    if (i < 2) j.replan.proposal = { id: `run_${i}`, plan: j.plan };
+  }
+  assert.deepEqual([j.replan.earlier, j.replan.feedback], [['Add CSV export', 'Make it smaller'], 'Rename the button']);
+  assert.equal(replanAsked(j.replan), 'Earlier:\n1. Add CSV export\n2. Make it smaller\n\nNow: Rename the button');
+  assert.match(jobPrompt(j, null, { id: 'run_p', phase: 'planning' }), /Requested change: Earlier:\n1\. Add CSV export\n2\. Make it smaller\n\nNow: Rename the button/);
+  assert.equal(replanAsked({ feedback: 'Just one', earlier: [] }), 'Just one');
+
+  requestReplan(j, 'x'.repeat(8000), 3); requestReplan(j, 'y'.repeat(8000), 4);
+  assert.deepEqual([j.replan.earlier.map((a) => a[0]), j.replan.feedback[0]], [['x'], 'y'], 'past the cap the oldest asks go first, whole');
+});
+
+test('a replan saved with nested feedback reads as its flat asks, and the next ask flattens it', () => {
+  const j = { ...job([spec('a')], [live(spec('a'))]), stage: 'active',
+    replan: { feedback: 'Earlier: Earlier: Add CSV export\n\nNow: Make it smaller\n\nNow: Rename the button', at: 1, proposal: null, previous: null } };
+  assert.equal(replanAsked(j.replan), 'Earlier:\n1. Add CSV export\n2. Make it smaller\n\nNow: Rename the button');
+  requestReplan(j, 'Use blue', 2);
+  assert.deepEqual([j.replan.earlier, j.replan.feedback], [['Add CSV export', 'Make it smaller', 'Rename the button'], 'Use blue']);
+  assert.equal(replanAsked({ feedback: 'Plain words' }), 'Plain words');
 });

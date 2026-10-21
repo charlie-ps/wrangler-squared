@@ -30,6 +30,7 @@ import { tabsHtml, panelHtml, bindTabs } from './settings-tabs.js';
 import { createIdeaCorner } from './idea-corner.js';
 import { createRedrawHold, keepScrollX } from './redraw-hold.js';
 import { historyHtml } from './job-thread.js';
+import { replanAsks, latestAsk } from './replan-asks.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
 import { pressBusy, isBusy, submitterOf } from './busy-button.js';
 import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, shotBoxHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
@@ -1012,14 +1013,17 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // A red step's replan was Wrangler's own (job-red.js): say which step, not what a human typed.
     const red = job.replan.red && !job.replan.red.human ? job.replan.red : null;
     const redSub = red && liveSub(red.sub);
-    const words = red ? `<b>${proposal.escalation ? 'Declared red' : 'Red step'}</b> ${esc(redSub?.title || red.sub)}${redSub?.error ? ` · ${esc(redSub.error)}` : ''}${proposal.escalation?.ask ? `<br><b>Needs you</b> ${esc(proposal.escalation.ask)}` : ''}` : `<b>You asked</b> ${esc(job.replan.feedback)}`;
+    const words = red ? `<b>${proposal.escalation ? 'Declared red' : 'Red step'}</b> ${esc(redSub?.title || red.sub)}${redSub?.error ? ` · ${esc(redSub.error)}` : ''}${proposal.escalation?.ask ? `<br><b>Needs you</b> ${esc(proposal.escalation.ask)}` : ''}` : `<b>You asked</b> ${esc(latestAsk(job.replan))}`;
     // The bar stays pinned while the graph scrolls under it, so a long ask shows one line until asked for more (fitAsk).
     const askOpen = openMore.has('proposal-ask');
     const asked = `<p class="job-replan-ask"><span class="job-ask-text ${askOpen ? '' : 'job-ask-clamp'}">${words}</span><button type="button" class="job-ask-more" data-ask-more hidden>${askOpen ? 'Show less' : 'Show more'}</button></p>`;
+    // The latest ask leads; the ones before it stay one click away, oldest first.
+    const earlier = red ? [] : replanAsks(job.replan).slice(0, -1);
+    const before = earlier.length ? more('proposal-earlier', `Earlier asks (${earlier.length})`, `<ol>${earlier.map((a) => `<li>${esc(a)}</li>`).join('')}</ol>`, 'job-ask-earlier') : '';
     // The decision, and the two buttons that make it, head the proposal: nothing else on the dialog looks like this.
     const blocked = job.runs.some((r) => !r.stopped && !r.subJobId);
     const bar = `<section class="job-proposal-bar" aria-label="Plan change waiting for you"><div class="job-proposal-head"><span class="job-proposal-title">${ICONS.eye}<b>Plan change waiting for your decision</b></span><span class="job-proposal-hint">${blocked ? 'Wrangler is still planning; approve once it stops.' : 'Nothing new starts until you approve or discard it. Running steps carry on.'}</span></div>
-      <div class="job-actions job-proposal-cta tone-warn"><button class="primary" data-action="approve-replan" ${blocked ? 'disabled' : ''}>${ICONS.check}Approve change</button><button data-action="discard-replan">${ICONS.x}Discard</button></div>${asked}</section>`;
+      <div class="job-actions job-proposal-cta tone-warn"><button class="primary" data-action="approve-replan" ${blocked ? 'disabled' : ''}>${ICONS.check}Approve change</button><button data-action="discard-replan">${ICONS.x}Discard</button></div>${asked}${before}</section>`;
     const count = (n, cls, label) => n ? `<span class="job-diff-key job-mark-${cls}"><b>${n}</b> ${label}</span>` : '';
     const kept = merged.subJobs.filter((s) => ['kept', 'frozen'].includes(markOf(s))).length;
     const legend = `<p class="job-diff-legend">${count(changes.added.length, 'added', 'new')}${count(changes.edited.length, 'edited', 'edited')}${count(changes.removed.length, 'removed', 'cancelled')}${count(actions.length, 'rework', actions.length === 1 ? 'action' : 'actions')}${count(kept, 'kept', 'unchanged')}<span class="job-diff-edges"><i class="added"></i>new link<i class="gone"></i>dropped link</span></p>`;
@@ -1178,7 +1182,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const authority = authorityText(job, planDraft);
       fab = `<button class="primary" data-action="approve-plan" title="${esc(bad.length ? `Finish ${bad.length === 1 ? 'the write' : `${bad.length} writes`} first: ${writeProblem(bad[0])}` : authority)}" ${running || bad.length ? 'disabled' : ''}>${ICONS.check}Approve ${planDraft.subJobs.filter((s) => !isWriteSub(s)).length}</button>`;
     } else if (replanProposed(job)) body = proposalHtml(job);
-    else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b> ${esc(job.replan.feedback)}</p>` : ''}${supersededHtml(job)}${planGraphHtml({ ...job.plan, subJobs: job.subJobs }, { stateOf: (s) => subState(job, s), lineOf: (s) => subLine(job, s), openTickets, reviewWrites: job.reviewWrites, base: job.base })}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
+    else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b> ${esc(latestAsk(job.replan))}</p>` : ''}${supersededHtml(job)}${planGraphHtml({ ...job.plan, subJobs: job.subJobs }, { stateOf: (s) => subState(job, s), lineOf: (s) => subLine(job, s), openTickets, reviewWrites: job.reviewWrites, base: job.base })}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
     else body = `<p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}`;
     if (job.error) fab = `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>`;
     else if (job.stage === 'backlog' && !job.cancelledAt) fab = `<button class="primary" data-action="start" title="${esc(hints[0])}">${ICONS.play}Start planning</button>`;

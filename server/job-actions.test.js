@@ -236,7 +236,8 @@ test('Unit test: brief edit on a PR that merges before approval goes back to the
   assert.equal(back.detail, 'Sent the plan change back to the planner: “Deliver api” has merged since it was proposed');
   assert.equal(subOf(j, 'api').brief, 'Implement api', 'nothing of the stale proposal is applied');
   assert.equal(j.replan.proposal, null, 'the planner runs again');
-  assert.match(j.replan.feedback, /^Earlier: About “Deliver api” \(api, pr\/watching\): Rename the flag\n\nNow: Wrangler, not the human: .*“Deliver api” \(api\) has merged\./s);
+  assert.deepEqual(j.replan.earlier, ['About “Deliver api” (api, pr/watching): Rename the flag'], 'the human\'s idea stays, once');
+  assert.match(j.replan.feedback, /^Wrangler, not the human: .*“Deliver api” \(api\) has merged\./s);
   assert.equal(j.replan.previous.subJobs[0].brief, 'Implement api with the renamed flag', 'the planner reads what it proposed');
   assert.deepEqual(j.replan.source, { sub: 'api', at: 'step', ref: 'deployment/watching' });
 
