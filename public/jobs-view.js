@@ -600,6 +600,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const job = data.jobs.find((j) => j.id === jobId);
     if (!subId && job?.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
     const sub = job?.subJobs.find((s) => s.id === subId);
+    if (sub && subState(job, sub) === 'failing') replyTo.set(sub.id, '');
     renderDetail();
   }
   const reviewDefault = () => !!data.jobs.find((j) => j.id === selected?.jobId)?.reviewWrites;
@@ -896,13 +897,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     return `<div class="job-sent ${s.state}${fresh ? ' fresh' : ''}" data-sent-state="${s.state}"><div class="job-sent-bubble">${pics}<span>${esc(s.text)}</span></div>${meta}</div>`;
   }
   // The conversation the box writes to: the human's pick while it is still in
-  // view, else the one spoken in last (job-talk.js defaultTarget). A failing step's
-  // box starts a new one, since what to do about it is a new decision.
+  // view, else the one spoken in last (job-talk.js defaultTarget). A failing step
+  // opens on a new one, since what to do about it is a new decision (openDetail);
+  // once that is sent, its follow-ups go to the conversation it started.
   function replyTarget(job, sub, view) {
     if (view.at === 'plan') return '';
     const picked = replyTo.get(sub?.id || '');
     if (picked === '' || picked && convoGroups(job, sub).some((g) => g.convo?.id === picked)) return picked;
-    return sub && subState(job, sub) === 'failing' ? '' : defaultTarget(job, sub);
+    return defaultTarget(job, sub);
   }
   // The one box an idea goes in through, on every step, review and proposal: at the
   // foot of the conversation it replies to, the only one open (job-talk.js), else
@@ -1548,13 +1550,15 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     paintShotBox();
   }
   // The wrangler's answers this dialog draws are read once it is open on them: tell the
-  // server once per answer, so the job leaves the to-read state on its next tick.
+  // server once per answer, so the job leaves the to-read state on its next tick. A
+  // folded conversation draws none of its answers, so it is read only once unfolded.
   const seenSent = new Set();
   function markSeen(job, sub) {
-    const convos = [...new Set(wranglerUnread(job, sub || null).filter((m) => !seenSent.has(m.id)).map((m) => m.convo))];
-    if (!convos.length) return;
-    for (const m of wranglerUnread(job, sub || null)) seenSent.add(m.id);
-    send({ type: 'job-talk-seen', id: job.id, convos });
+    const drawn = new Set([...dialog.querySelectorAll('.job-talk-convo[data-convo]:not(.is-folded)')].map((e) => e.dataset.convo));
+    const unread = wranglerUnread(job, sub || null).filter((m) => !seenSent.has(m.id) && drawn.has(m.convo));
+    if (!unread.length) return;
+    for (const m of unread) seenSent.add(m.id);
+    send({ type: 'job-talk-seen', id: job.id, convos: [...new Set(unread.map((m) => m.convo))] });
   }
   function renderDetail() {
     const job = data.jobs.find((j) => j.id === selected?.jobId);
@@ -1567,7 +1571,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const viewing = sub && proofView && proofItems(sub).length > proofView.i && !isWriteSub(sub);
     if (!viewing) proofView = null;
     flags.painting = true;
-    if (!viewing) markSeen(job, sub);
     const html = viewing ? proofViewerHtml(job, sub, proofView, evidence, { branch: sub.worktree?.branch, ask: sub.stage === 'review' }) : sub ? subDetail(job, sub) : jobDetail(job);
     // Its handlers close over `job`, so the same markup is kept only for the same job.
     const drawn = { html, job: JSON.stringify(job) };
@@ -1581,6 +1584,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     scrolls();
     flags.painting = false;
     if (viewing) { wireProofViewer(job, sub); return; }
+    markSeen(job, sub);
     if (!sub && inConversation(job)) wireIdea(job);
     wireFooter();
     if (focus) dialog.querySelector(`.job-detail-footer [data-review="${focus}"]`)?.focus();
@@ -1951,7 +1955,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   function changeFailed(msg) {
     if (askSent?.state !== 'sending' || msg.jobId !== askSent.jobId || (msg.subJobId ?? null) !== askSent.subId) return false;
     // The pictures go back in the tray with the words: the bubble lets go of them.
-    const items = askSent.items || [];
+    // A conversation gone meanwhile (dismissed, or pruned) cannot take them: a new one does.
+    const job = data.jobs.find((j) => j.id === askSent.jobId);
+    if (askSent.convo && !(job && convoGroups(job, job.subJobs.find((s) => s.id === askSent.subId) || null).some((g) => g.convo?.id === askSent.convo))) askSent.convo = '';
+    const items = (askSent.items || []).map((i) => ({ ...i, box: askSent.convo || '' }));
     askImages = [...items, ...askImages];
     Object.assign(askSent, { state: 'failed', error: msg.error, hadImages: items.length > 0, items: [], images: [] }); askDraft = { subId: askSent.subId ?? undefined, convo: askSent.convo, text: askSent.text };
     replyTo.set(askSent.subId || '', askSent.convo || '');

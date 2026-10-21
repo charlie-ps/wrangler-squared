@@ -3,7 +3,7 @@ import { runnable, dependencySatisfied, dependenciesSatisfied, MERGE_IS_DELIVERY
 import { summariseComments, commentsBlockMerge } from './job-comments.js';
 import { awaitsTicket, settingsSchema } from './jobs-schema.js';
 import { logWarn } from './log.js';
-import { isFrozen, startQueued, queuedReady } from './job-replan.js';
+import { isFrozen, startQueued, queuedReady, replanQueue } from './job-replan.js';
 import { heldBy, needsTriage, triesOn, triesAllowed, startRed, failRedReplan } from './job-red.js';
 import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from './job-writes.js';
 import { dropSub } from './job-sub-ops.js';
@@ -45,6 +45,12 @@ const activeFor = (j, s) => j.runs.some((r) => runnable(r) && r.subJobId === (s?
 // session looks like between a tool call and its answer, and a false error here
 // costs a human a retry; a real one only ever delays the same error.
 export const IDLE_RECEIPT_GRACE_MS = 10 * 60 * 1000;
+
+// A delivered job does not finish under a conversation: finishing stops every
+// planning session, so an answer being written, a question waiting for a slot or a
+// plan change being drawn (which may add steps) would be cut off.
+const talking = (job) => convosOf(job).some((c) => c.pending) || !!replanQueue(job).length || (!!job.replan && !job.replan.proposal)
+  || job.runs.some((r) => !r.stopped && !r.report && r.phase === 'planning' && !r.subJobId);
 
 // One process owns the store (the existing DATA_DIR instance lock). Claims are
 // durable before launch; an uncertain launch is blocked on restart, never replayed.
@@ -311,7 +317,9 @@ export class JobRunner {
   }
   async advance(id) {
     let job = this.store.get(id);
-    if (!this.allowed(id) || job.error || job.stage === 'done') return;
+    if (!this.allowed(id) || job.stage === 'done') return;
+    // A question holds nothing, not even a job an error has stopped.
+    if (job.error) { if (job.stage === 'active' && !job.cancelledAt) await this.converse(id); return; }
     // Cancelled before it had sub-jobs: nothing to clean up per sub-job, so the
     // job finishes as soon as settle() has stopped its planning run. An active
     // one takes the ordinary road below — every sub-job is already in cleanup.
@@ -334,15 +342,7 @@ export class JobRunner {
       await this.launch(job, null, 'planning', redStamp(job));
       job = this.store.get(id);
     }
-    // A question for the wrangler (job-talk.js): one planning run per conversation,
-    // holding nothing, and what the human says before it replies is mailed to it.
-    for (const convo of convosOf(job)) {
-      if (!convo.pending) continue;
-      const run = convoRun(job, convo);
-      if (!run) await this.launch(job, null, 'planning', { convo: convo.id, ask: convo.pending.asks[0].messageId });
-      else if (run.sessionId && !run.report && unsentAsks(convo).length) await this.deliverAsks(id, run);
-      job = this.store.get(id);
-    }
+    await this.converse(id);
     for (const initial of job.subJobs) {
       job = this.store.get(id);
       if (!this.allowed(id) || job.error) return;
@@ -510,7 +510,19 @@ export class JobRunner {
       if (!run.mailedAt && unsentFor(sub).length) await this.deliverThread(id, run);
     }
     job = this.store.get(id);
-    if (job.subJobs.length && job.subJobs.every((s) => s.stage === 'done')) await this.finish(id);
+    if (job.subJobs.length && job.subJobs.every((s) => s.stage === 'done') && (job.cancelledAt || !talking(job))) await this.finish(id);
+  }
+  // A question for the wrangler (job-talk.js): one planning run per conversation,
+  // holding nothing, and what the human says before it replies is mailed to it.
+  async converse(id) {
+    let job = this.store.get(id);
+    for (const convo of convosOf(job)) {
+      if (!convo.pending) continue;
+      const run = convoRun(job, convo);
+      if (!run) await this.launch(job, null, 'planning', { convo: convo.id, ask: convo.pending.asks[0].messageId });
+      else if (run.sessionId && !run.report && unsentAsks(convo).length) await this.deliverAsks(id, run);
+      job = this.store.get(id);
+    }
   }
   // A red step goes up one level before it goes to the human: the planner looks
   // at it (job-red.js), holding only that step and what follows it. One replan at

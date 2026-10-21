@@ -77,7 +77,7 @@ async function nameConvo(host, jobId, convoId, run) {
   const { title, liveSessionId } = await generateConvoTitle(first?.text || '', { run });
   host.stores.jobs.titleConvo(jobId, convoId, title);
   await host.rebuild();
-  const sid = host.stores.jobs.get(jobId)?.runs.findLast((r) => r.sessionId)?.sessionId;
+  const sid = host.stores.jobs.get(jobId)?.runs.findLast((r) => r.convo === convoId && r.sessionId)?.sessionId;
   if (sid && liveSessionId) host.sessions.bill(sid, liveSessionId);
 }
 

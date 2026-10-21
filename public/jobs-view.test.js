@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isChatSendKey, isPrimaryActionKey, primaryAction } from './jobs-view.js';
-import { CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
+import { wranglerUnread, CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml, plateAsk } from './job-plates.js';
@@ -3868,4 +3868,65 @@ test('the red job with a plan change waiting is an amber plate saying so, and op
   assert.deepEqual(f.sent.filter((m) => m.type === 'job-talk-seen'), [{ type: 'job-talk-seen', id: 'job1', convos: ['c1'] }]);
   f.view.update(f.data); f.view.openDetail('job1', 'api');
   assert.equal(f.sent.filter((m) => m.type === 'job-talk-seen').length, 1, 'once per answer');
+});
+
+// ---- Bug sweep of next: each test fails without its fix ----
+test('opening a dialog marks read only the answers it draws, and a folded conversation once it is unfolded', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't3', at: 2, from: 'human', text: 'Is api deployed?', convo: 'c2' },
+    { id: 't2', at: 3, from: 'wrangler', kind: 'answer', text: 'Only web.', convo: 'c1' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null, seenAt: 0 }, { id: 'c2', at: 2, pending: { at: 2, asks: [{ messageId: 't3', feedback: 'x', sentAt: 2 }] }, seenAt: 2 }];
+  job.runs = [{ id: 'a2', subJobId: null, phase: 'planning', stopped: false, ask: 't3', convo: 'c2' }];
+  f.view.update(f.data); f.view.openDetail('job1');
+  const seen = () => f.sent.filter((m) => m.type === 'job-talk-seen');
+  assert.ok(f.q('#job-dialog [data-convo="c1"]').classList.contains('is-folded'), 'the answered one is folded under the one answering');
+  assert.deepEqual(seen(), [], 'an answer never drawn is not read');
+  f.q('#job-dialog [data-convo="c1"] .job-talk-convo-head').click();
+  assert.ok(!f.q('#job-dialog [data-convo="c1"]').classList.contains('is-folded'));
+  assert.deepEqual(seen(), [{ type: 'job-talk-seen', id: 'job1', convos: ['c1'] }], 'read once unfolded');
+});
+
+test('on a failing step the first message starts a conversation and the next one follows up in it', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued', error: 'Tests failed' }];
+  job.runs = [];
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  const box = () => f.q('#job-dialog .job-change');
+  const send = (words) => { const text = box().querySelector('textarea'); text.value = words; text.dispatchEvent(f.event('input')); box().querySelector('[data-change-send]').click(); };
+  assert.equal(box().dataset.changeConvo, '', 'what to do about it is a new decision');
+  send('Why red?');
+  assert.equal(f.sent.at(-1).convo, undefined);
+  f.view.created({ event: 'job-action-complete', jobId: 'job1', subJobId: 'api', action: 'request-change' });
+  job.talk = [{ id: 't1', at: Date.now(), from: 'human', text: 'Why red?', sub: 'api', convo: 'c1' }];
+  job.convos = [{ id: 'c1', at: 1, sub: 'api', pending: { at: 1, asks: [{ messageId: 't1', feedback: 'x', sentAt: 1 }] }, seenAt: 1 }];
+  job.runs = [{ id: 'a1', subJobId: null, phase: 'planning', stopped: false, ask: 't1', convo: 'c1' }];
+  f.view.update(f.data);
+  assert.equal(box().dataset.changeConvo, 'c1', 'the box follows the conversation it started');
+  send('And the lint failure?');
+  assert.equal(f.sent.at(-1).convo, 'c1', 'a follow-up, not a second conversation');
+});
+
+test('a reply refused because its conversation has gone puts the words back in a box that is drawn', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Only web.', convo: 'c1' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null, seenAt: 2 }];
+  job.runs = [];
+  f.view.update(f.data); f.view.openDetail('job1');
+  const box = () => f.q('#job-dialog .job-change');
+  assert.equal(box().dataset.changeConvo, 'c1');
+  const text = box().querySelector('textarea'); text.value = 'And docs?'; text.dispatchEvent(f.event('input')); box().querySelector('[data-change-send]').click();
+  assert.equal(f.sent.at(-1).convo, 'c1');
+  job.convos[0].dismissedAt = 3; f.view.update(f.data);
+  assert.equal(f.view.changeFailed({ event: 'job-action-failed', jobId: 'job1', action: 'request-change', error: 'That conversation is already gone' }), true);
+  assert.equal(box().dataset.changeConvo, '', 'a new conversation takes them');
+  assert.equal(box().querySelector('textarea').value, 'And docs?', 'nothing typed is lost');
+  assert.match(f.q('#job-dialog .job-sent').textContent, /Not sent: That conversation is already gone/);
+});
+
+test('an answer whose conversation is gone is never unread', () => {
+  const job = { id: 'j', subJobs: [], convos: [{ id: 'c2', at: 1, pending: null, seenAt: 0 }],
+    talk: [{ id: 't1', at: 2, from: 'wrangler', kind: 'answer', text: 'Old', convo: 'c1' }, { id: 't2', at: 3, from: 'wrangler', kind: 'answer', text: 'New', convo: 'c2' }] };
+  assert.deepEqual(wranglerUnread(job).map((m) => m.id), ['t2']);
 });

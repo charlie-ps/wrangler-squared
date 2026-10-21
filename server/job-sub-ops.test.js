@@ -19,8 +19,10 @@ const ask = (j, subId, text = 'Rename it') => {
   const sub = subId ? j.subJobs.find((s) => s.id === subId) : null;
   return requestChange(j, sub, { ...changeView(j, sub), text }, { now: 1000 });
 };
-// The ask run that read the idea proposes a change (job-talk.js askToReplan).
-const handOver = (j) => askToReplan(j, { id: 'run_a', convo: j.talk.at(-1).convo }, requestReplan, 1001);
+// The ask run that read the idea (its launch marks the asks read, job-store.js claim)
+// proposes a change (job-talk.js askToReplan).
+const readBy = (j, convo) => { for (const a of j.convos.find((c) => c.id === convo).pending.asks) a.sentAt ??= 1000; return { id: 'run_a', convo }; };
+const handOver = (j) => askToReplan(j, readBy(j, j.talk.at(-1).convo), requestReplan, 1001);
 
 test('a plan edit is judged by the plan schema it was approved under, without punishing a migrated brief', () => {
   const j = job({ subs: [planSub('api'), planSub('web', { brief: 'x'.repeat(900) })] });

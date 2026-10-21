@@ -215,8 +215,22 @@ test('a change sent while the wrangler drafts queues FIFO with its convo, source
   assert.match(j.talk[1].text, /\(number 2 in line\)/);
   // The ask run handing over its own question is not the planner it waits behind.
   const ask = drafting(); ask.runs[0].stopped = true; ask.runs.push({ id: 'run_ask', subJobId: null, ask: 'm1', stopped: false });
-  assert.deepEqual(requestReplan(ask, 'more', 2, null, { running: 'run_ask', convo: 'c2' }), {}, 'no planner drafting: it folds in as before');
-  assert.equal(replanAsked(ask.replan), 'Earlier:\n1. first\n\nNow: more');
+  ask.replan = null;
+  assert.deepEqual(requestReplan(ask, 'more', 2, null, { running: 'run_ask', convo: 'c2' }), {}, 'no change drawn or waiting: it starts its own');
+  assert.equal(replanAsked(ask.replan), 'more');
+});
+
+test('an ask run\'s hand-over queues behind a change no planner has claimed yet, never becoming its proposal', () => {
+  const j = drafting(); j.runs[0].stopped = true;
+  j.replan.red = { sub: 'a', auto: true, n: 1 };
+  j.runs.push({ id: 'run_ask', subJobId: null, ask: 'm1', convo: 'c2', stopped: false });
+  assert.deepEqual(requestReplan(j, 'unrelated docs step', 2, null, { running: 'run_ask', convo: 'c2' }), { queued: 1 });
+  assert.deepEqual([j.replan.feedback, j.replan.convo, j.replan.red.human, j.replan.earlier], ['first', 'c1', undefined, []], 'the change waiting is untouched');
+  assert.deepEqual(j.replanQueue.map((q) => [q.feedback, q.convo]), [['unrelated docs step', 'c2']]);
+  // One whose planner died stopped the job: the next idea is its way back, as before.
+  j.error = 'Planner stopped'; delete j.replanQueue;
+  assert.deepEqual(requestReplan(j, 'try again', 3, null, { running: 'run_ask', convo: 'c2' }), {});
+  assert.equal(j.replan.feedback, 'try again');
 });
 
 test('approving the current change starts a planning round for the next queued one against the plan as it stands', () => {

@@ -50,12 +50,15 @@ const requeues = (sub, fields) => !!sub.error && !isWriteSub(sub) && fields.some
 const landed = (dep) => !!dep && (isPrSub(dep) ? !!dep.deployed : dep.stage === 'done' && !dep.cancelledAt);
 // What approval does to each step the proposal adds or sends back, in the words
 // its card shows: when it starts, and what it waits for.
+const MILESTONE = { started: () => 'starts', pr: () => 'opens its PR', merged: () => 'merges', deployed: (t) => (t && !isPrSub(t) ? 'is done' : 'deploys'), dropped: () => 'is dropped' };
 function thenOf(job, merged, changes) {
   const live = new Map(job.subJobs.map((s) => [s.id, s]));
   const specOf = (id) => merged.subJobs.find((s) => s.id === id);
   const after = (id) => {
     const waits = (specOf(id).after || []).filter((d) => !landed(live.get(d))).map((d) => quoted(specOf(d)?.title || d));
-    return waits.length ? `after ${waits.join(', ')}` : 'now';
+    const on = specOf(id).on;
+    const when = on && !milestoneReached(live.get(on.sub), on.at) ? `once ${quoted(specOf(on.sub)?.title || on.sub)} ${MILESTONE[on.at](specOf(on.sub))}` : '';
+    return [waits.length ? `after ${waits.join(', ')}` : '', when].filter(Boolean).join(', ') || 'now';
   };
   const then = {};
   for (const id of changes.added) if (!isWriteSub(specOf(id))) then[id] = `Starts ${after(id)}`;
@@ -166,11 +169,15 @@ export const REPLAN_FEEDBACK_MAX = 16000;
 export const replanQueue = (job) => job.replanQueue || [];
 // A planner still writing the proposal for `job.replan`; one that has reported is done.
 const drafting = (job, except = null) => job.runs.some((r) => !r.stopped && !r.report && !r.subJobId && !r.ask && r.id !== except);
+// A change set but not yet claimed by a planner (a red triage, a dequeued idea,
+// slots full) is being drawn all the same: an ask run's hand-over must not become
+// its proposal. One whose planner died (`job.error`) takes the next idea as its own.
+const undrawn = (job) => !!job.replan && !job.replan.proposal && !job.error;
 export function requestReplan(job, feedback, now, red = null, { source = null, images = [], running = null, convo = null } = {}) {
   if (job.stage !== 'active') throw new Error('Only a running job has a plan to change');
   const text = String(feedback || '').trim().slice(0, 8000);
   if (!text) throw new Error('Explain the change you want');
-  if (!job.replan?.proposal && (drafting(job, running) || (!job.replan && replanQueue(job).length))) {
+  if (!job.replan?.proposal && (drafting(job, running) || (running && undrawn(job)) || (!job.replan && replanQueue(job).length))) {
     (job.replanQueue ||= []).push({ feedback: text, at: now, ...(source ? { source } : {}), ...(images.length ? { images } : {}), ...(convo ? { convo } : {}), ...(red ? { red } : {}) });
     noteQueued(job, convo, job.replanQueue.length, now);
     return { queued: job.replanQueue.length };
