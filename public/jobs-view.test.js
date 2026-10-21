@@ -1813,8 +1813,42 @@ test('a change idea goes straight to a proposal card in the same thread, with it
   f.view.openDetail('job1');
   job.replan = null; job.talk[1].outcome = 'approved';
   f.view.update(f.data);
-  assert.match(f.q('#job-dialog .job-talk-card header').textContent, /Approved/);
+  assert.match(f.q('#job-dialog .job-talk-card summary').textContent, /Approved/);
   assert.equal(f.q('#job-dialog .job-talk-card [data-talk-review]'), null);
+});
+
+test('a decided proposal card folds to one line of counts by kind, opens on a click and stays as the human left it', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'Bring <b>it</b> back', convo: 'c1' },
+    { id: 't2', at: 2, from: 'wrangler', kind: 'proposal', proposalId: 'p1', convo: 'c1', outcome: 'approved', text: 'Sends your words to the agent.',
+      changes: [{ mark: 'rework', title: 'Deliver api' }, { mark: 'edited', title: 'Deliver api', detail: 'brief' }] }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }];
+  job.runs = [];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const card = () => f.q('#job-dialog details.job-talk-card');
+  assert.equal(card().open, false, 'decided: folded');
+  assert.equal(card().querySelector('summary').textContent, 'Proposed a changeApproved1 edited, 1 rework', 'counts in the order of the marks');
+  assert.equal(card().querySelectorAll('.job-talk-change').length, 2, 'the rows are kept inside, for opening');
+  card().open = true; card().dispatchEvent(f.event('toggle'));
+  f.view.update(f.data);
+  assert.equal(card().open, true, 'a redraw keeps it open');
+  card().open = false; card().dispatchEvent(f.event('toggle'));
+  f.view.update(f.data);
+  assert.equal(card().open, false, 'and closed again');
+
+  job.talk[1].changes = [];
+  job.talk[1].outcome = null; job.talk[1].red = true;
+  f.view.update(f.data);
+  assert.equal(card().querySelector('summary').textContent, 'Proposed a fixNo longer waitingno sub-job changes');
+
+  job.replan = { feedback: 'x', at: 2, convo: 'c1', proposal: { id: 'p1', plan: job.plan, merged: job.plan, changes: { frozen: [], kept: [], edited: [], added: [], removed: [] }, actions: [], alternatives: [] }, previous: null };
+  f.view.update(f.data);
+  assert.equal(card(), null, 'waiting: not a fold');
+  const live = f.q('#job-dialog .job-talk-card');
+  assert.match(live.querySelector('header').textContent, /Waiting for you/);
+  assert.ok(live.querySelector('[data-talk-review]'));
 });
 
 test('a plan change about a sub-job awaiting review freezes it: held, not needs-you, and nothing to approve or move; one about the job holds nothing', (t) => {

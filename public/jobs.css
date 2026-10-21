@@ -1859,8 +1859,19 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .job-talk-msg.error .job-idea-body { color:var(--red-fg); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--red) 35%, transparent); }
 .job-talk-card { display:grid; gap:10px; max-width:640px; padding:12px 14px; border-radius:4px 16px 16px 16px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); }
 .job-talk-card.tone-needs { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 60%, transparent); }
-.job-talk-card header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; }
-.job-talk-card header b { font-weight:600; }
+.job-talk-card header, .job-talk-card > summary { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; }
+.job-talk-card header b, .job-talk-card > summary b { font-weight:600; }
+/* A decided card folds to one line (job-talk.js); its counts give way to the rows once open. */
+details.job-talk-card:not([open]) { gap:0; width:fit-content; padding:8px 12px; }
+.job-talk-card > summary { list-style:none; cursor:pointer; user-select:none; }
+.job-talk-card > summary::-webkit-details-marker { display:none; }
+.job-talk-card > summary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }
+.job-talk-counts { color:var(--fg-muted); font-size:12.5px; }
+.job-talk-counts::before { content:"· "; }
+details.job-talk-card[open] .job-talk-counts { display:none; }
+details.job-talk-card[open] > * + * { margin-top:10px; }
+.job-talk-card > summary svg { width:14px; height:14px; margin-left:auto; color:var(--fg-muted); transform:rotate(-90deg); transition:transform .15s ease; }
+details.job-talk-card[open] > summary svg { transform:none; }
 .job-talk-tag { padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; color:var(--fg-muted); background:var(--surface-2); }
 .job-talk-card.tone-needs .job-talk-tag { color:var(--st-warn-fg); background:color-mix(in srgb, var(--st-warn) 18%, transparent); }
 .job-talk-card.tone-ok .job-talk-tag { color:var(--st-ok-fg); background:color-mix(in srgb, var(--st-ok) 15%, transparent); }
