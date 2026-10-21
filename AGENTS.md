@@ -118,7 +118,7 @@ text as public as the rest of this repo.
   (`pendingLaunch.adopt`) so the store's copy keeps its `cleanupHead` and rename.
 - **A job's spend limit is `settings.spendLimit` × (1 + `job.topUps`), never stored**
   (`server/job-budget.js`). The runner's `enforceBudget` runs first each tick: over, it sets
-  `job.budgetPaused` (claim and `allowed()` refuse it, as do `tendHelpers` and a main
+  `job.budgetPaused` (claim and `allowed()` refuse it, as does a main
   resolution) and interrupts each `working` run card through `sessions:interrupt`, one per card
   per `INTERRUPT_COOLDOWN_MS`, stamping `run.budgetHaltedAt`; under again it releases the job and
   mails each halted run to carry on. `settle()` never idle-reaps a budget-paused job's runs. The
@@ -309,22 +309,6 @@ text as public as the rest of this repo.
   A notice nothing is retrying or resolving (`job-state.js mainWaiting`) is a Needs you ask
   beside the stage roll-up, never part of it: `jobNeedsYou`, `jobLabel` ("Local main behind",
   even on a Delivered job) and `plateAsk` all read it, below any step's own ask.
-- **Ask an agent opens the human's own session about a step, never a step** (`server/job-helper.js`).
-  Every step's dialog has the button, at any stage and on a cancelled job. `ask-helper` queues
-  `{id, at, sessionId: null}` on `sub.helpers` (refused while one is queued: that is the double-click
-  guard) and marks a waiting human task `doing` unless a replan holds it; the runner's `tendHelpers`
-  spawns it inside the tick, like `tendMain`, so no `pendingLaunch` is in flight: a plain session (no
-  worktree, no PR automation; the job's agent/model/effort and task) in `helperCwd` (the step's checkout,
-  else a prerequisite PR's, else `''`, a scratch workspace; never a worktree), briefed by
-  `job-prompts.js helperPrompt`. A failed spawn is `error` on that entry, which frees the button. Its id is
-  kept OUT of `sub.sessions` (cleanup archives those; Open session's caret lists them by run phase, its button and Review code read the last) and
-  `job.runs` (`runForSession` would hand it job_report, the worker skill and the job's sandbox). What it
-  finds comes back only through `send_step_idea` (`server/tools.js`), when the human asks: the store's
-  `helperIdea` resolves the caller against `sub.helpers[].sessionId` (anything else is refused) and runs
-  the step's own `requestChange`, pinned to `changeView` as it stands at the call, with `from: 'helper'`,
-  which marks the planner's words and the move (`helper-idea`). Only the server sets `from`: the board's
-  `request-change` overwrites it. The idea is kept on its entry (`helper.ideas`), drawn under that helper
-  in the step's dialog. It never edits the plan.
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one
