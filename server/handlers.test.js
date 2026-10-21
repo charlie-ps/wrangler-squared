@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeOpenIdeHandler, jobImagesHandler, jobSettingsHandler, makeFeatureRequestHandlers } from './handlers.js';
+import { makeOpenIdeHandler, jobTalkSeenHandler, jobImagesHandler, jobSettingsHandler, makeFeatureRequestHandlers } from './handlers.js';
 import { fakeHost } from './test-helpers.js';
+import { ideasDir, roundDir } from './job-evidence.js';
 
 // The launcher is `open -na <app> --args <worktree>`: an app NAME and a path,
 // never a shell, so the setting cannot smuggle flags or a command in.
@@ -55,6 +56,24 @@ test('job-images sends the job’s kept pictures back as base64 for the dialog s
   assert.deepEqual(broadcasts.at(-1), { event: 'job-images', jobId: job.id, images: [{ name: A, mime: 'image/png', dataBase64: Buffer.from(A).toString('base64') }] });
   jobImagesHandler.handler({ id: 'nope' }, host);
   assert.deepEqual(broadcasts.at(-1), { event: 'job-images', jobId: 'nope', images: [] });
+});
+
+test('job-images also serves the pictures kept on a wrangler conversation, from where each was kept, as talk:<file>', (t) => {
+  const { host, broadcasts } = fakeHost();
+  const job = host.stores.jobs.create({ intent: 'Fix the layout' });
+  t.after(() => fs.rmSync(path.dirname(ideasDir(job.id)), { recursive: true, force: true }));
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+  const put = (dir, file) => { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, file), PNG); };
+  put(ideasDir(job.id), 'ask-a-1.png'); put(ideasDir(job.id, 'api'), 'ask-b-1.png'); put(roundDir(job.id, 'api', 2), 'ask-c-1.png');
+  host.stores.jobs.update(job.id, (j) => { j.talk = [
+    { id: 't1', from: 'human', text: 'old', images: 2 },
+    { id: 't2', from: 'human', text: 'job', images: [{ file: 'ask-a-1.png', mime: 'image/png' }, { file: 'gone.png', mime: 'image/png' }] },
+    { id: 't3', from: 'human', text: 'step', images: [{ file: 'ask-b-1.png', mime: 'image/png', sub: 'api' }, { file: 'ask-c-1.png', mime: 'image/png', sub: 'api', round: 2 }] },
+    { id: 't4', from: 'human', text: 'escape', images: [{ file: '../../x.png', mime: 'image/png' }] },
+  ]; });
+  jobImagesHandler.handler({ id: job.id }, host);
+  const data = PNG.toString('base64');
+  assert.deepEqual(broadcasts.at(-1).images, ['ask-a-1.png', 'ask-b-1.png', 'ask-c-1.png'].map((f) => ({ name: `talk:${f}`, mime: 'image/png', dataBase64: data })));
 });
 
 test('job-settings stores the usual pick the New job picker sends, and refuses one the job fields would', async () => {
@@ -144,4 +163,17 @@ test('whoami answers the gh login the panel will post as, or why there is none',
   const out = ghFixture([[(a) => a[0] === 'api', ghError({ code: 4, stderr: 'gh auth login' })]]);
   await out.whoami.handler({ rid: 'w' }, out.host);
   assert.equal(out.broadcasts[0].reason, 'auth');
+});
+
+test('the board having shown a wrangler answer marks only its conversations seen, quietly and without a revision', async () => {
+  const { host, broadcasts } = fakeHost();
+  const job = host.stores.jobs.create({ title: 'Sign-in', intent: 'Reliable sign-in' });
+  host.stores.jobs.update(job.id, (j) => { j.convos = [{ id: 'c1', at: 1, pending: null, seenAt: 0 }, { id: 'c2', at: 1, pending: null, seenAt: 0 }]; });
+  const { revision } = host.stores.jobs.get(job.id);
+  await jobTalkSeenHandler.handler({ id: job.id, convos: ['c1', 7] }, host);
+  const after = host.stores.jobs.get(job.id);
+  assert.ok(after.convos[0].seenAt > 0); assert.equal(after.convos[1].seenAt, 0);
+  assert.equal(after.revision, revision, 'a plan under review is not refused for it');
+  assert.equal(broadcasts.length, 0, 'no toast and no closed dialog');
+  await jobTalkSeenHandler.handler({ id: 'nope', convos: ['c1'] }, host);
 });

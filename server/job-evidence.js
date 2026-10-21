@@ -121,6 +121,19 @@ export function readIdeaImage({ jobId, file }) {
   } catch { return null; }
 }
 
+// A picture pasted into a conversation with the wrangler, where handlers.js prepare
+// kept it: beside the step's review round, else in the step's or the job's ideas folder.
+export function readTalkImage({ jobId, subId, round, file }) {
+  if (!evidenceName(file)) return null;
+  const dir = round != null ? (subId && Number.isInteger(round) && round > 0 ? roundDir(jobId, subId, round) : null) : ideasDir(jobId, subId);
+  if (!dir) return null;
+  try {
+    const bytes = fs.readFileSync(path.join(dir, file));
+    const kind = sniffKind(bytes);
+    return kind ? { mime: kind.mime, bytes } : null;
+  } catch { return null; }
+}
+
 export function readEvidence({ jobId, subId, round, file }) {
   if (!evidenceName(file) || !Number.isInteger(round) || round < 1) return null;
   try {

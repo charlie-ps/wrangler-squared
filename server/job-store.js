@@ -5,18 +5,17 @@ import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
 import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode, checkText, unansweredShow } from './jobs-schema.js';
 import { migrateTheme } from '../public/theme-ids.js';
 import { adoptEvidence } from './job-evidence.js';
-import { parkedReadyRun, askAgent } from './job-parked.js';
+import { parkedReadyRun, askAgent, answered, sayInThread } from './job-parked.js';
 import { setRunning, owe, runningOf } from './job-running.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
-import { dropSub } from './job-sub-ops.js';
-import { requestChange, CHANGE_TEXT_MAX } from './job-change.js';
+import { dropSub, retrySub } from './job-sub-ops.js';
+import { requestChange } from './job-change.js';
 import { resolutionsFor, resolutionLabel } from './job-main.js';
-import { queueHelper, helperFor } from './job-helper.js';
 import { limitStep, limitOf } from './job-budget.js';
-import { changeView } from './job-actions.js';
 import { plannerReply, humanReply, acceptIdea, leaveIdea, editIdea, unsentIdea, inConversation, UNSENT_IDEA } from './job-idea.js';
-import { discardReplan, proposeReplan, proposeOptions, approveReplan } from './job-replan.js';
+import { discardReplan, proposeReplan, proposeOptions, approveReplan, requestReplan } from './job-replan.js';
+import { answerAsk, answerReplan, askToReplan, askFailed, replanFailed, convoById, migrateTalk, dismissConvo } from './job-talk.js';
 import { forwardsOnly } from './job-actions.js';
 import { heldBy, holdRed, declareRed, declareOutOfTries, escalate, settleProposal, failRedReplan } from './job-red.js';
 import { applyWrites, applyDrafts, toDraft, approveWrite, skipWrite, editWrite, reopenWrite, isLegacyWrite, LEGACY_WRITE } from './job-writes.js';
@@ -100,6 +99,7 @@ function cancelJob(j, now) {
   if (j.stage === 'done') throw new Error('Job has already finished');
   if (j.cancelledAt) throw new Error('Job is already cancelled');
   j.cancelledAt = now; j.paused = false; j.budgetPaused = null; j.error = null; j.blocked = null; j.replan = null;
+  for (const c of j.convos || []) c.pending = null;
   for (const s of j.subJobs) if (!['cleanup', 'done'].includes(s.stage)) dropSub(s, now);
 }
 // A running job's review checkpoints, switched from the detail footer. Every gate
@@ -240,9 +240,13 @@ export function migrateJobs(raw) {
     if (raw.version < 3) migrateTicketing(job);
     if (raw.version < 4) migratePlaces(job);
     if (raw.version < 5) migrateSessionWrites(job);
+    migrateTalk(job);
   }
   return data;
 }
+
+// A generated conversation title is a list label: Haiku is asked for five words.
+const CONVO_TITLE_MAX = 60;
 
 // Only this store writes jobs. Mutations validate a copy and persist it BEFORE
 // replacing memory, so failed validation/disk writes cannot half-approve a job.
@@ -294,6 +298,27 @@ export class JobStore {
       return swap;
     });
   }
+  // Haiku's name for a conversation (handlers.js nameConvos), not a revision either.
+  // Any answer, a null one included, ends the wait.
+  titleConvo(id, convoId, title) {
+    return this.change((d) => {
+      const convo = d.jobs.find((j) => j.id === id)?.convos?.find((c) => c.id === convoId);
+      if (!convo?.titlePending) return false;
+      delete convo.titlePending;
+      if (title) convo.title = title.slice(0, CONVO_TITLE_MAX);
+      return !!title;
+    });
+  }
+  // The board drew these conversations' answers in an open dialog: they are read.
+  // Not a revision, like a title: nothing a human approves was written against it.
+  seenTalk(id, convos, now = Date.now()) {
+    return this.change((d) => {
+      const job = d.jobs.find((j) => j.id === id);
+      const seen = (job?.convos || []).filter((c) => convos.includes(c.id) && (c.seenAt || 0) < now);
+      for (const c of seen) c.seenAt = now;
+      return seen.length > 0;
+    });
+  }
   // Approval authorises every write in the plan and the implementation. A
   // keyless story is created by its own write, which the stories session makes
   // at once; a sub-job naming it waits for the key, since its card eyebrow and
@@ -328,7 +353,7 @@ export class JobStore {
         d.jobs.push(sib);
       }
       if (own) approve(j, own.plan);
-      for (const x of [...siblings, ...(own ? [own] : [])]) record(j, null, 'accept-idea', null, own === x ? `Created the job from the planner's suggestion: ${quoted(x.title)}` : `Created a job beside this idea from the planner's suggestion: ${quoted(x.title)}`);
+      for (const x of [...siblings, ...(own ? [own] : [])]) record(j, null, 'accept-idea', null, own === x ? `Created the job from Wrangler's suggestion: ${quoted(x.title)}` : `Created a job beside this idea from Wrangler's suggestion: ${quoted(x.title)}`);
       j.updatedAt = now; j.revision++;
       return j;
     });
@@ -346,17 +371,22 @@ export class JobStore {
       if (action === 'cancel-job') { cancelJob(j, Date.now()); return; }
       // Retry and Discard are what is left to do on a cancelled job: a refused
       // cleanup (a worktree with work not on GitHub) is still the human's to clear.
-      if (j.cancelledAt && !['retry', 'discard-worktree', 'retry-main', 'dismiss-main', 'resolve-main', 'ask-helper'].includes(action)) throw new Error('Job was cancelled');
-      // A pending plan change freezes the job where it stands: a sub-job that
-      // moves on under the planner (approved, merged, marked done) is no longer
-      // the job the proposal was written against.
+      if (j.cancelledAt && !['retry', 'discard-worktree', 'retry-main', 'dismiss-main', 'resolve-main'].includes(action)) throw new Error('Job was cancelled');
+      // A waiting proposal freezes the sub-jobs it touches where they stand: one
+      // that moves on under it (approved, merged, marked done) is no longer what
+      // the proposal was written against. The rest of the job carries on.
       if (j.replan && HELD_BY_REPLAN.has(action) && (!s || heldBy(j, s))) throw new Error('A plan change is pending. Approve or discard it first.');
       if (action === 'set-review') { setReview(j, payload, Date.now()); return; }
       // The one way an idea comes in (job-change.js): to the step's own agent
       // when it has one, else the planner.
       if (action === 'request-change') {
-        const { detail } = requestChange(j, s, { ...payload, from: null }, { now: Date.now() });
+        const { detail } = requestChange(j, s, payload, { now: Date.now() });
         record(j, s, 'request-change', payload.text, detail);
+        return;
+      }
+      if (action === 'dismiss-convo') {
+        dismissConvo(j, payload.convo, Date.now());
+        record(j, s, 'dismiss-convo', null, 'Dismissed a conversation with Wrangler');
         return;
       }
       // The preview the agent left running (job-running.js): Stop owes its teardown
@@ -387,7 +417,7 @@ export class JobStore {
       if (action === 'leave-idea') {
         const made = leaveIdea(j, Date.now());
         cancelJob(j, Date.now());
-        record(j, null, 'leave-idea', null, `Left the rest of the planner's suggestions; this idea became ${made.map((x) => quoted(x.title)).join(', ')}`);
+        record(j, null, 'leave-idea', null, `Left the rest of Wrangler's suggestions; this idea became ${made.map((x) => quoted(x.title)).join(', ')}`);
         return;
       }
       if (['retry-main', 'dismiss-main', 'resolve-main'].includes(action)) {
@@ -403,14 +433,6 @@ export class JobStore {
           notice.resolveError = null;
           record(j, null, 'resolve-main', null, `Asked an agent to ${resolutionLabel(payload.resolution).toLowerCase()} in ${notice.path}`);
         }
-        return;
-      }
-      // Ask an agent (job-helper.js): any step, any stage, a cancelled job too;
-      // the runner's tick starts the session.
-      if (action === 'ask-helper') {
-        if (!s) throw new Error('Sub-job not found');
-        const { started } = queueHelper(j, s, Date.now());
-        record(j, s, 'ask-helper', null, `Asked an agent to help with ${quoted(s.title)}${started ? ', and started it' : ''}`);
         return;
       }
       if (action === 'pause') { j.paused = true; return; }
@@ -444,27 +466,13 @@ export class JobStore {
         return;
       }
       if (action === 'retry') {
-        const target = s || j;
-        if (!target.error) throw new Error('Nothing is blocked');
-        if (j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null))) throw new Error('The previous session is still stopping');
+        if (!(s || j).error) throw new Error('Nothing is blocked');
+        if (j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null) && !r.convo)) throw new Error('The previous session is still stopping');
         // A write is only ever made by its session: retrying one runs that
         // session again for it (job-writes.js).
         if (isWriteSub(s)) { reopenWrite(j, s); record(j, s, 'retry', note, `Retried ${quoted(s.title)}`); return; }
-        target.error = null; target.blocked = null;
-        if (s) { s.cleanupRefusal = null; s.discard = null; }
-        // Under review the only run that can have failed is publish, and the tree
-        // the human approved is unchanged: keep the approval so publish runs
-        // again. `queued` here would strand the card — the runner launches only
-        // on `approved`, and approve-code refuses anything but `verified`.
-        if (s) {
-          s.state = s.cancelledAt ? 'cancelled' : s.stage === 'review' ? (s.ready?.approvedAt ? 'approved' : 'verified') : 'queued';
-          s.repairAllowance = (s.repairAllowance || 0) + 1;
-          // A retry is one more automatic try for a red step, and wipes the human's
-          // "leave it" on that failure.
-          s.replanAllowance = (s.replanAllowance || 0) + 1;
-          if (s.red) s.red = { ...s.red, held: null, declared: null };
-          if (note) s.note = note;
-        }
+        if (s) retrySub(s, note);
+        else { j.error = null; j.blocked = null; }
         record(j, s, 'retry', note, s ? `Retried ${quoted(s.title)}` : 'Retried the job');
         return;
       }
@@ -568,21 +576,25 @@ export class JobStore {
     });
   }
   claim(jobId, subJobId, phase, extra = {}) {
+    // One run per sub-job, one plan run, and one per conversation (job-talk.js):
+    // conversations answer alongside each other and alongside a plan change.
+    const clash = (r) => runnable(r) && r.subJobId === subJobId && (r.convo || null) === (extra.convo || null);
     const job = this.data.jobs.find((j) => j.id === jobId);
     if (!job || job.paused || job.budgetPaused || job.cancelledAt || this.data.settings.paused
-      || job.runs.some((r) => runnable(r) && r.subJobId === subJobId)
+      || job.runs.some(clash)
       || this.data.jobs.flatMap((j) => j.runs).filter(holdsSlot).length >= this.data.settings.concurrency) return null;
     return this.change((d) => {
       const j = d.jobs.find((j) => j.id === jobId);
       const active = d.jobs.flatMap((j) => j.runs).filter(holdsSlot);
       if (!j || j.paused || j.budgetPaused || j.cancelledAt || d.settings.paused || active.length >= d.settings.concurrency) return null;
-      if (j.runs.some((r) => runnable(r) && r.subJobId === subJobId)) return null;
+      if (j.runs.some(clash)) return null;
       const run = { id: uid('run'), subJobId, phase, model: launchModel(j), effort: launchEffort(j), startedAt: Date.now(), sessionId: null, stopped: false, report: null, ...extra };
       // What its prompt tells it to draft, kept so a Writes switch mid-run
       // reaches the next launch rather than refusing this one's receipt.
       if (phase === 'session') run.drafting = toDraft(j, j.subJobs.find((s) => s.id === subJobId)).map((w) => w.id);
       // A new planner reads the whole conversation from its prompt, so nothing is left to mail it.
       if (phase === 'planning') for (const m of unsentIdea(j)) m.sentAt = run.startedAt;
+      for (const a of convoById(j, extra.convo)?.pending?.asks || []) a.sentAt ??= run.startedAt;
       j.runs.push(run); j.revision++;
       return run;
     });
@@ -611,21 +623,6 @@ export class JobStore {
     this.update(job.id, (j) => { const s = j.subJobs.find((x) => x.id === sub.id); s.worktree = { ...s.worktree, branch }; });
     return true;
   }
-  // A helper session's idea about the step it was opened from (send_step_idea in
-  // tools.js): the step's own Add idea box, pinned to the step as it stands now,
-  // marked as the helper's, and kept on its helper entry for the dialog to show.
-  helperIdea(sessionId, text) {
-    const hit = helperFor(this, sessionId);
-    if (!hit) throw new Error('Only a helper session opened from a step with Ask an agent can send an idea about it');
-    return this.update(hit.job.id, (j) => {
-      const s = j.subJobs.find((x) => x.id === hit.sub.id);
-      const view = changeView(j, s) || {};
-      const { detail } = requestChange(j, s, { at: view.at, ref: view.ref, text, from: 'helper' }, { now: Date.now() });
-      const said = String(text).trim().slice(0, CHANGE_TEXT_MAX);
-      (s.helpers.find((h) => h.sessionId === sessionId).ideas ||= []).push({ at: Date.now(), text: said });
-      record(j, s, 'helper-idea', said, detail);
-    });
-  }
   // `meta.treeHash` is the working tree as the tool handler read it when a ready
   // receipt arrived (tools.js): the store is synchronous and takes no git.
   report(caller, runId, input, meta = {}) {
@@ -652,6 +649,8 @@ export class JobStore {
       // from every step but the planner's own (which has no one above it but you).
       const up = report.kind === 'blocked' || report.kind === 'escalate' || (report.kind === 'replan' && r.phase !== 'planning');
       if (!expected.includes(report.kind) && !up) throw new Error(`This run must submit ${expected.join(' or ')}`);
+      // A conversation's wrangler answers or proposes; declaring a step red is the red planner's.
+      if (r.ask && report.kind === 'escalate') throw new Error('Answer in this conversation with kind:"reply", or propose with kind:"plan"; only the planner sent after a red step declares it red');
       const s = j.subJobs.find((s) => s.id === r.subJobId);
       // Drafts park the run rather than end it: the session waits for mail with
       // the human's decision (job-runner.js), then completes. Its receipt is the
@@ -669,7 +668,15 @@ export class JobStore {
       // A session parked on its ready receipt is answering the human. A reply
       // keeps it parked; a fresh ready is a new round of the same run.
       if (report.kind === 'reply') {
-        if (r.phase === 'planning') { if (!j.cancelledAt) plannerReply(j, r, report, Date.now()); return; }
+        // A planner's reply is a turn in a New idea's conversation, or an answer in a
+        // running job's (job-talk.js): to a question, or to an idea that was only one.
+        if (r.phase === 'planning') {
+          if (j.cancelledAt) return;
+          if (r.ask) answerAsk(j, r, report, Date.now());
+          else if (j.stage === 'active') answerReplan(j, r, report, Date.now());
+          else plannerReply(j, r, report, Date.now());
+          return;
+        }
         return this._reply(j, r, s, report);
       }
       if (report.kind === 'plan' && r.phase === 'planning' && inConversation(j) && unsentIdea(j).length) throw new Error(UNSENT_IDEA);
@@ -702,6 +709,7 @@ export class JobStore {
   _reply(j, r, s, report) {
     if (r.parkedFor !== 'ready' || !s?.ready) throw new Error('A reply answers the human after you reported ready; there is nothing to answer');
     if (report.suggest) throw new Error('Only a new idea\'s planner suggests a job');
+    if (report.escalate) throw new Error('Only Wrangler answering a step\'s conversation escalates it');
     if (r.parkedAt && !r.mailedAt) {
       if (JSON.stringify(r.lastReply) === JSON.stringify(report)) return;
       throw new Error('You already answered; wait for mail from the human');
@@ -710,8 +718,8 @@ export class JobStore {
     const id = `msg_${now.toString(36)}${(s.thread?.length || 0).toString(36)}`;
     const round = s.ready.round;
     const [kept] = report.shots || report.run ? adoptEvidence({ jobId: j.id, subId: s.id, round, prefix: `${id}-`, proof: [{ text: report.text, shots: report.shots, run: report.run }] }) : [null];
-    (s.thread ||= []).push({ id, at: now, from: 'agent', text: report.text, round, ...(kept?.shots ? { shots: kept.shots } : {}), ...(report.run ? { run: report.run } : {}) });
-    s.answering = null;
+    sayInThread(s, { id, at: now, from: 'agent', text: report.text, round, ...(kept?.shots ? { shots: kept.shots } : {}), ...(report.run ? { run: report.run } : {}) });
+    answered(s);
     if (report.running) setRunning(s, report.running, { round, keep: true, now });
     Object.assign(r, { lastReply: report, parkedAt: now, mailedAt: null, idleSince: null });
   }
@@ -737,6 +745,9 @@ export class JobStore {
   }
   _applyReceipt(j, r, s, report, proof = null, meta = {}) {
     if (report.kind === 'plan' && j.stage === 'active') {
+      // A question that turned out to ask for a change is proposed as one.
+      // Queued behind a change still being drawn, it is planned afresh in its turn.
+      if (r.ask && askToReplan(j, r, requestReplan, Date.now()).queued) return;
       // Discarded while the planner worked: kept on the run, applied nowhere.
       if (j.replan) {
         proposeReplan(j, r, report, Date.now());
@@ -752,6 +763,9 @@ export class JobStore {
       }
       return;
     }
+    // A plan change discarded or approved while its planner worked: what that planner
+    // says now is about nothing, kept on the run like a stale plan.
+    if ((report.kind === 'blocked' || report.kind === 'escalate') && !s && r.phase === 'planning' && !r.ask && j.stage === 'active' && !j.replan) return;
     // The planner says a red step is beyond a fix: declared to the human, its
     // options (when it gave any) waiting in the proposal view.
     if (report.kind === 'escalate' && !s) {
@@ -761,10 +775,12 @@ export class JobStore {
       record(j, sub, 'declare-red', null, `Declared ${quoted(sub.title)} red to you`);
       return;
     }
+    if (report.kind === 'blocked' && !s && r.ask) { askFailed(j, r, report.summary, Date.now()); return; }
     if (report.kind === 'blocked' && !s && j.replan?.red) {
       failRedReplan(j, r, report.summary, Date.now());
       return;
     }
+    if (report.kind === 'blocked' && !s && replanFailed(j, r, report.summary, Date.now())) return;
     // With plan review off the planner's own receipt is the approval: the
     // planning run is still live here, which approvePlan would refuse. Under
     // review the human sees the create writes with the rest: a keyless story's
@@ -787,11 +803,11 @@ export class JobStore {
       if (s.ready?.round && proof && r.parkedFor === 'ready') (s.earlier ||= []).push({ round: s.ready.round, checks: s.ready.checks, ...(s.ready.proof ? { proof: s.ready.proof } : {}), at: s.ready.at });
       s.ready = { checks: report.checks.map(checkText), ...(proof?.proof.length ? { proof: proof.proof } : {}), ...(proof ? { round: proof.round } : {}), ...(meta.treeHash ? { treeHash: meta.treeHash } : {}), receiptId, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
       if (proof) s.rounds = proof.round;
-      s.answering = null;
+      answered(s);
       // What it left running is kept only for a human to try: Code on Auto, or a
       // receipt that did not park, owes it all straight to teardown.
       if (report.running || runningOf(s).length) setRunning(s, report.running || [], { round: s.ready.round || 1, keep: reviewCode(j) && r.parkedFor === 'ready', now: Date.now() });
-      if (r.parkedFor === 'ready' && proof?.round > 1) (s.thread ||= []).push({ id: `msg_${Date.now().toString(36)}r`, at: Date.now(), from: 'system', text: `Ready again with new proof.`, round: proof.round });
+      if (r.parkedFor === 'ready' && proof?.round > 1) sayInThread(s, { id: `msg_${Date.now().toString(36)}r`, at: Date.now(), from: 'system', text: `Ready again with new proof.`, round: proof.round });
       if (!reviewCode(j)) { s.ready.approvedAt = s.ready.at; s.state = 'approved'; }
     }
     if (report.kind === 'published') { s.pr = { url: report.url, checkStatus: 'pending' }; s.stage = 'pr'; s.state = 'watching'; s.mergeApprovedHead = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }

@@ -78,7 +78,7 @@ test('a job runs from the create frame to a launched PR step through the manifes
   const [sub] = host.stores.jobs.get(jobId).subJobs;
   assert.equal(sub.jiraKey, 'AUTH-1');
   assert.deepEqual(sub.worktree, { branch, path: `/repo-worktree-${branch}`, repoRoot: '/repo', cleanupHead: 'basehead' },
-    'the record the wrangler settled on, through onBeforeDispatch, plus the base commit only this extension knows');
+    'the record Wrangler settled on, through onBeforeDispatch, plus the base commit only this extension knows');
 
   // The board's own two per-caller questions, on the step that is actually
   // running: the answers are what stop a job worker spawning more work.

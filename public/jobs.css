@@ -3,14 +3,15 @@
 /* The state tones, derived from the board's semantic colours so dark and light
    both follow the theme: --c is the solid state colour, --c-fg its readable text
    on a tonal surface, --cb that tonal surface, --c-on text on a solid fill. */
-#jobs,.job-dialog { --st-idle:var(--fg-subtle); --st-idle-fg:var(--fg-muted); --st-run:var(--blue); --st-run-fg:var(--blue-fg); --st-warn:var(--snooze); --st-warn-fg:var(--snooze-fg); --st-bad:var(--red); --st-bad-fg:var(--red-fg); --st-ok:var(--green); --st-ok-fg:var(--green-fg); --st-pause:var(--purple); --st-pause-fg:var(--purple); }
+#jobs,.job-dialog { --st-idle:var(--fg-subtle); --st-idle-fg:var(--fg-muted); --st-run:var(--blue); --st-run-fg:var(--blue-fg); --st-warn:var(--snooze); --st-warn-fg:var(--snooze-fg); --st-bad:var(--red); --st-bad-fg:var(--red-fg); --st-ok:var(--green); --st-ok-fg:var(--green-fg); --st-pause:var(--purple); --st-pause-fg:var(--purple); --st-read:var(--rt); --st-read-fg:var(--rt-fg); }
 .tone-idle { --c:var(--st-idle); --c-fg:var(--st-idle-fg); }
 .tone-run { --c:var(--st-run); --c-fg:var(--st-run-fg); }
 .tone-warn { --c:var(--st-warn); --c-fg:var(--st-warn-fg); }
 .tone-bad { --c:var(--st-bad); --c-fg:var(--st-bad-fg); }
 .tone-ok { --c:var(--st-ok); --c-fg:var(--st-ok-fg); }
 .tone-pause { --c:var(--st-pause); --c-fg:var(--st-pause-fg); }
-:is(.tone-idle,.tone-run,.tone-warn,.tone-bad,.tone-ok,.tone-pause) { --cb:color-mix(in srgb, var(--c) 15%, var(--surface)); --c-on:var(--surface); }
+.tone-read { --c:var(--st-read); --c-fg:var(--st-read-fg); }
+:is(.tone-idle,.tone-run,.tone-warn,.tone-bad,.tone-ok,.tone-pause,.tone-read) { --cb:color-mix(in srgb, var(--c) 15%, var(--surface)); --c-on:var(--surface); }
 #jobs .icon,.job-dialog .icon,.jobs-idea .icon,.theme-mini .icon { width:1em; height:1em; flex:none; vertical-align:-.14em; }
 @keyframes job-spin { to { transform:rotate(360deg); } }
 .job-spin { animation:job-spin 1.1s linear infinite; }
@@ -60,11 +61,11 @@
   --jt-title-shadow:0 2px 18px rgba(0,0,0,.6); --jt-ink-shadow:0 1px 10px #000; --jt-loader-glow:rgba(255,214,226,.15);
   --jt-mast-min:176px; --jt-mast-pad:24px 22px 20px; --jt-mast-pad-narrow:96px 16px 16px; --jt-mast-rule:0;
   --jt-pause-bg:rgba(60,20,119,.45); --jt-run-glow:0 0 6px #6f7cff;
-  --jt-cta-bg:#f4ede2; --jt-cta-fg:#05070c; --jt-cta-hover:#fff;
+  --jt-cta-bg:#f4ede2; --jt-cta-fg:#05070c; --jt-cta-hover:#fff; --jt-mark-rope:#ffba50;
   --jt-hover-mix:45%; --jt-hover-lift:none;
   --jt-radius-mast:20px; --jt-radius-plate:18px; --jt-radius-dialog:28px; --jt-radius-pill:999px; --jt-dialog-line:0;
   --jt-art-bg:#05070c; --jt-art-rule:0;
-  --jt-ink:#f4ede2; --jt-ink-run:#a9b8ff; --jt-ink-needs:#f7cd5f; --jt-ink-bad:#ff7b4f; --jt-ink-ok:#7fe0b0; --jt-ink-pause:#d0b0f5; --jt-ink-hollow:rgba(6,8,14,.4);
+  --jt-ink:#f4ede2; --jt-ink-run:#a9b8ff; --jt-ink-needs:#f7cd5f; --jt-ink-bad:#ff7b4f; --jt-ink-ok:#7fe0b0; --jt-ink-pause:#d0b0f5; --jt-ink-read:#7fe3e6; --jt-ink-hollow:rgba(6,8,14,.4);
   --jt-flourish:block; --jt-sky:block; --jt-halo:inline; --jt-motion:running;
 }
 /* Agent Wrangler's own look: the board's wallpaper, surfaces, system type and radii, in its light or dark
@@ -76,11 +77,11 @@
   --jt-title-shadow:none; --jt-ink-shadow:none; --jt-loader-glow:color-mix(in srgb, var(--fg) 15%, transparent);
   --jt-mast-min:0; --jt-mast-pad:18px 18px 16px; --jt-mast-pad-narrow:18px 16px 16px; --jt-mast-rule:1px solid var(--border-muted);
   --jt-pause-bg:color-mix(in srgb, var(--purple) 14%, transparent); --jt-run-glow:none;
-  --jt-cta-bg:var(--accent); --jt-cta-fg:var(--accent-fg); --jt-cta-hover:color-mix(in srgb, var(--accent) 85%, #fff);
+  --jt-cta-bg:var(--accent); --jt-cta-fg:var(--accent-fg); --jt-cta-hover:color-mix(in srgb, var(--accent) 85%, #fff); --jt-mark-rope:var(--accent);
   --jt-hover-mix:85%; --jt-hover-lift:0 2px 4px color-mix(in srgb, var(--fg) 10%, transparent), 0 16px 32px -14px color-mix(in srgb, var(--fg) 40%, transparent);
   --jt-radius-mast:10px; --jt-radius-plate:8px; --jt-radius-dialog:10px; --jt-radius-pill:6px; --jt-dialog-line:1px solid var(--border);
   --jt-art-bg:radial-gradient(circle, var(--border-muted) 1px, transparent 1.3px) 0 0 / 14px 14px, color-mix(in srgb, var(--surface-2) 55%, var(--surface)); --jt-art-rule:1px solid var(--border-muted);
-  --jt-ink:var(--fg-muted); --jt-ink-run:var(--blue-fg); --jt-ink-needs:var(--snooze-fg); --jt-ink-bad:var(--red-fg); --jt-ink-ok:var(--green-fg); --jt-ink-pause:var(--purple); --jt-ink-hollow:var(--surface);
+  --jt-ink:var(--fg-muted); --jt-ink-run:var(--blue-fg); --jt-ink-needs:var(--snooze-fg); --jt-ink-bad:var(--red-fg); --jt-ink-ok:var(--green-fg); --jt-ink-pause:var(--purple); --jt-ink-read:var(--rt-fg); --jt-ink-hollow:var(--surface);
   --jt-flourish:none; --jt-sky:none; --jt-halo:none; --jt-motion:paused;
 }
 /* The only text drawn straight on the view's ground. */
@@ -152,12 +153,14 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .jobs-rail-n { font:400 11px var(--jobs-mono); opacity:.7; font-variant-numeric:tabular-nums; }
 .jobs-rail-n.ask { opacity:1; min-width:20px; padding:2px 6px; border-radius:999px; text-align:center; background:color-mix(in srgb, var(--st-warn) 24%, transparent); color:var(--st-warn-fg); font-weight:600; }
 .jobs-rail button[aria-pressed="true"] .jobs-rail-n.ask { background:var(--st-warn); color:var(--bar-on); }
+.jobs-rail-n.ask.read { background:color-mix(in srgb, var(--st-read) 24%, transparent); color:var(--st-read-fg); }
+.jobs-rail button[aria-pressed="true"] .jobs-rail-n.ask.read { background:var(--st-read); color:var(--bar-on); }
 
 .jobs-plates { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr)); gap:22px; }
 .job-plate { --t:var(--c-fg); position:relative; cursor:pointer; display:flex; flex-direction:column; min-width:0; border-radius:var(--jt-radius-plate); overflow:hidden; background:var(--card-bg); border:1px solid var(--border-muted); backdrop-filter:blur(14px) saturate(1.2); -webkit-backdrop-filter:blur(14px) saturate(1.2); transition:border-color .25s; }
 .job-plate:is(:hover,.hot) { border-color:color-mix(in srgb, var(--c) var(--jt-hover-mix), var(--border-muted)); box-shadow:var(--jt-hover-lift); }
-.job-plate:is(.tone-warn,.tone-bad) { border-color:color-mix(in srgb, var(--c) 50%, var(--border-muted)); }
-.job-plate:is(.tone-warn,.tone-bad):is(:hover,.hot) { border-color:color-mix(in srgb, var(--c) max(50%, var(--jt-hover-mix)), var(--border-muted)); }
+.job-plate:is(.tone-warn,.tone-bad,.tone-read) { border-color:color-mix(in srgb, var(--c) 50%, var(--border-muted)); }
+.job-plate:is(.tone-warn,.tone-bad,.tone-read):is(:hover,.hot) { border-color:color-mix(in srgb, var(--c) max(50%, var(--jt-hover-mix)), var(--border-muted)); }
 /* The quiet sky (job-skylines.js): canvases painted once, only transforms and opacity animate. */
 .gx { --k:1; position:absolute; inset:0; display:var(--jt-sky); overflow:hidden; background:#020306; isolation:isolate; }
 .gx canvas { position:absolute; display:block; }
@@ -206,10 +209,10 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 :is(.job-plate-tag,.job-plate-unplanned).pl { color:var(--jt-ink); }
 /* The plan drawn into the sky. Ink follows the art behind it: light over the dark
    parts of a scene, dark over the light ones (job-plates.js inkFor). */
-.job-plate-graph .lt { --ink:#f4ede2; --ink-run:#a9b8ff; --ink-needs:#f7cd5f; --ink-bad:#ff7b4f; --ink-ok:#7fe0b0; --ink-pause:#d0b0f5; --ink-hollow:rgba(6,8,14,.4); }
+.job-plate-graph .lt { --ink:#f4ede2; --ink-run:#a9b8ff; --ink-needs:#f7cd5f; --ink-bad:#ff7b4f; --ink-ok:#7fe0b0; --ink-pause:#d0b0f5; --ink-read:#7fe3e6; --ink-hollow:rgba(6,8,14,.4); }
 /* Plain art (a theme with none of its own): the theme's ink on the theme's ground. */
-.job-plate-graph .pl { --ink:var(--jt-ink); --ink-run:var(--jt-ink-run); --ink-needs:var(--jt-ink-needs); --ink-bad:var(--jt-ink-bad); --ink-ok:var(--jt-ink-ok); --ink-pause:var(--jt-ink-pause); --ink-hollow:var(--jt-ink-hollow); }
-.job-plate-graph .dk { --ink:#1b1a17; --ink-run:#3f55c4; --ink-needs:#9a6400; --ink-bad:#c23c18; --ink-ok:#2a734b; --ink-pause:#74499f; --ink-hollow:rgba(250,249,245,.55); }
+.job-plate-graph .pl { --ink:var(--jt-ink); --ink-run:var(--jt-ink-run); --ink-needs:var(--jt-ink-needs); --ink-bad:var(--jt-ink-bad); --ink-ok:var(--jt-ink-ok); --ink-pause:var(--jt-ink-pause); --ink-read:var(--jt-ink-read); --ink-hollow:var(--jt-ink-hollow); }
+.job-plate-graph .dk { --ink:#1b1a17; --ink-run:#3f55c4; --ink-needs:#9a6400; --ink-bad:#c23c18; --ink-ok:#2a734b; --ink-pause:#74499f; --ink-read:#0b6b77; --ink-hollow:rgba(250,249,245,.55); }
 .job-plate-graph .edge { fill:none; stroke:var(--ink); stroke-opacity:.42; stroke-width:1; }
 .job-plate-graph .edge.deploy { stroke-dasharray:2 3; }
 .job-plate-graph .edge.on { stroke-dasharray:.1 3.4; stroke-linecap:round; stroke-width:1.8; stroke-opacity:.6; }
@@ -220,7 +223,8 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-plate-graph .core { stroke-width:1.4; }
 .job-plate-graph .hollow .core { fill:var(--ink-hollow); stroke:var(--ink); stroke-opacity:.45; }
 .job-plate-graph .running .core { fill:var(--ink-run); stroke:var(--ink-run); }
-.job-plate-graph .needs .core { fill:var(--ink-needs); stroke:var(--ink-needs); }
+.job-plate-graph :is(.needs,.change) .core { fill:var(--ink-needs); stroke:var(--ink-needs); }
+.job-plate-graph .read .core { fill:var(--ink-read); stroke:var(--ink-read); }
 .job-plate-graph .failing .core { fill:var(--ink-bad); stroke:var(--ink-bad); }
 .job-plate-graph .done .core { fill:var(--ink-ok); stroke:var(--ink-ok); }
 .job-plate-graph .paused .core { fill:var(--ink-pause); stroke:var(--ink-pause); }
@@ -228,7 +232,8 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-plate-graph .node[data-job]:is(:hover,:focus-visible) .core { stroke:var(--ink); stroke-opacity:1; stroke-width:2; }
 .job-plate-graph .lbl { font:600 7px var(--jobs-mono); letter-spacing:.08em; fill:var(--ink); fill-opacity:.88; pointer-events:none; }
 .job-plate-graph .halo { display:var(--jt-halo); fill:none; stroke-width:1.2; transform-box:fill-box; transform-origin:center; animation:jobs-halo 2.2s ease-out infinite; }
-.job-plate-graph .needs .halo { stroke:var(--ink-needs); animation-duration:3s; }
+.job-plate-graph :is(.needs,.change) .halo { stroke:var(--ink-needs); animation-duration:3s; }
+.job-plate-graph .read .halo { stroke:var(--ink-read); animation-duration:3s; }
 .job-plate-graph .running .halo { stroke:var(--ink-run); }
 .job-plate-graph .failing { animation:jobs-flicker 1.6s steps(2) infinite; animation-play-state:var(--jt-motion); }
 @keyframes jobs-halo { from { transform:scale(.6); opacity:.9; } to { transform:scale(2.4); opacity:0; } }
@@ -625,6 +630,13 @@ button.job-write:focus-visible { outline:2px solid var(--c); outline-offset:1px;
 .job-details-body { margin:4px 0 8px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, var(--surface-2) 50%, transparent); font-size:12px; color:var(--fg-muted); }
 .job-details-body code { display:block; overflow-wrap:anywhere; font-size:11px; }
 .job-detail-footer { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:18px; padding-top:12px; border-top:1px solid var(--border-muted); }
+/* The job's buttons and its checkpoints, one row under a rule (jobs-view.js jobDetail). */
+.job-detail-tail { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-top:18px; padding-top:12px; border-top:1px solid var(--border-muted); }
+.job-detail-tail > .job-actions { order:2; margin:0 0 0 auto; }
+.job-detail-tail > .job-detail-footer { flex:1 1 auto; margin:0; padding:0; border:0; }
+.job-delivered { display:flex; align-items:baseline; gap:8px; margin:14px 0 4px; font-size:13px !important; color:var(--fg) !important; }
+.job-delivered .icon { flex:none; align-self:center; color:var(--st-ok-fg); }
+.job-node .job-status:empty { display:none; }
 .job-flags { display:flex; gap:8px; }
 .job-flags-hint { flex:1; min-width:180px; margin:0; font-size:12px; color:var(--fg-muted); }
 .job-flags-hint b { color:var(--fg); font-weight:600; }
@@ -770,7 +782,12 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-event-fix.fixing small { display:inline; }
 .job-event-fix.declared>.icon, .job-event-fix.declared b { color:var(--st-bad-fg); }
 .job-event-fix ul { margin:6px 0 0; padding-left:16px; color:var(--fg-muted); font-size:11.5px; }
-.job-event-fix .ask { display:block; margin-top:6px; color:var(--fg); font-weight:500; }
+.job-event-fix b.ask { display:block; margin:0 0 4px; color:var(--fg); font-weight:600; }
+.job-event-more { margin:6px 0 0; font-size:12px; }
+.job-event-more > summary { padding:2px 0; color:var(--fg-muted); }
+.job-event-more[open] { padding:0; background:none; }
+.job-dialog .job-event-why p { margin:4px 0 0; white-space:pre-wrap; color:var(--fg-muted); }
+.job-event-why b { display:block; margin-top:6px; font-size:11.5px; color:var(--fg-muted) !important; }
 .job-event-fix.alone { grid-column:1 / -1; margin-top:0; padding-top:0; border-top:0; }
 .job-event-fix.alone>.icon { font-size:16px; margin-top:0; }
 .job-move-log { list-style:none; padding:0; margin:8px 0 0; font-size:12px; }
@@ -791,6 +808,7 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 /* A proposed plan change: what approving does to each sub-job, as a tag under its node and a line below. */
 .job-replan-ask { white-space:pre-wrap; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
 .job-replan-ask b { margin-right:6px; }
+.job-replan-ask .job-replan-queued { margin-right:8px; }
 .job-main-notice { margin:12px 0; padding:12px 14px; border:1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius:10px; background:color-mix(in srgb, var(--warn) 9%, var(--surface)); }
 .job-main-notice h3 { display:flex; align-items:baseline; gap:8px; white-space:nowrap; margin:0 0 6px; font-size:14px; color:var(--warn-fg); }
 .job-main-notice h3 small { min-width:0; margin-left:auto; white-space:normal; overflow-wrap:anywhere; text-align:right; font-weight:normal; color:var(--fg-muted); }
@@ -800,16 +818,6 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-main-agent { display:flex; align-items:center; gap:6px; }
 .job-main-agent svg { flex:none; width:15px; height:15px; }
 .job-main-error { color:var(--red-fg); }
-[data-ask-helper] { user-select:none; -webkit-user-select:none; }
-.job-helpers { list-style:none; margin:6px 0; padding:0; display:grid; gap:4px; font-size:12px; }
-.job-helpers li { display:flex; flex-wrap:wrap; align-items:center; gap:6px; color:var(--fg-muted); }
-.job-helpers li > svg { flex:none; width:14px; height:14px; }
-.job-helpers li > span { flex:1; min-width:0; }
-.job-helper-ideas { flex-basis:100%; list-style:none; margin:2px 0 4px 20px; padding:0; display:grid; gap:6px; }
-.job-helper-ideas li { display:grid; gap:3px; padding:6px 8px; border-left:2px solid var(--purple); background:var(--surface); border-radius:4px; }
-.job-helper-from { display:flex; align-items:center; gap:4px; font-size:11px; color:var(--fg-muted); }
-.job-helper-from svg { width:12px; height:12px; }
-.job-helper-ideas q { color:var(--fg); white-space:pre-wrap; quotes:none; }
 .job-mark { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; padding:1px 8px; border-radius:8px; color:var(--fg-muted); background:var(--surface-2); }
 .job-mark-added .job-mark,li.job-mark-added { color:var(--st-ok-fg); }
 .job-mark-added .job-mark { background:color-mix(in srgb, var(--st-ok) 15%, var(--surface)); }
@@ -819,22 +827,8 @@ button.job-flag[aria-disabled="true"]:hover { background:inherit; }
 .job-mark-removed .job-mark { background:color-mix(in srgb, var(--st-bad) 12%, var(--surface)); }
 .job-mark-removed .job-node-title { text-decoration:line-through; color:var(--fg-muted); }
 .job-mark-accept-red .job-mark,.job-mark-recover .job-mark,.job-mark-mark-done .job-mark,.job-mark-mark-merged .job-mark { color:var(--wf); background:color-mix(in srgb, var(--wf) 16%, var(--surface)); font-weight:600; }
-.job-mark-rework .job-mark,.job-mark-forward .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
+.job-mark-rework .job-mark,.job-mark-forward .job-mark,.job-mark-retry .job-mark { color:var(--st-run-fg); background:color-mix(in srgb, var(--st-run) 15%, var(--surface)); font-weight:600; }
 li.job-mark-act { color:var(--wf); }
-.job-triage { background:var(--surface-2); border-radius:12px; padding:12px 14px; display:grid; gap:8px; margin:0 0 14px; font-size:13px; }
-.job-triage header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.job-triage header .icon { color:var(--wf); }
-.job-triage header b { font-weight:600; }
-.job-triage p { margin:0; color:var(--fg); line-height:1.5; max-width:110ch; white-space:pre-wrap; }
-.job-triage ul { margin:0; padding:0; list-style:none; display:flex; flex-wrap:wrap; gap:6px; }
-.job-triage li { display:inline-flex; gap:6px; align-items:center; padding:3px 9px; border:1px solid var(--border-muted); border-radius:999px; font-size:11.5px; color:var(--fg-muted); }
-.job-triage li span { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--blue-fg); }
-.job-triage-more { margin:0 -10px; }
-.job-triage-more>summary { padding:4px 10px; }
-.job-triage-more[open] { background:none; }
-.job-triage-more ul { flex-direction:column; gap:4px; margin-top:4px; }
-.job-triage-more li { display:block; padding:0; border:0; border-radius:0; font-size:12px; overflow-wrap:anywhere; }
-.job-triage-more li span { margin-right:6px; }
 fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin:0 0 14px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:8px; }
 .job-options legend { font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-subtle); margin-bottom:8px; padding:0; }
 .job-option { display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px; align-items:start; padding:10px 12px; border:1px solid var(--border-muted); border-radius:12px; cursor:pointer; font-size:13px; background:var(--surface); }
@@ -843,7 +837,6 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-option b { font-weight:600; }
 .job-option small { color:var(--fg-muted); font-size:12px; line-height:1.4; }
 .job-option.sel { border-color:var(--blue); background:color-mix(in srgb, var(--blue) 10%, var(--surface)); }
-.job-option-only { grid-template-columns:minmax(0,1fr); cursor:default; margin:0 0 14px; }
 .job-option-rec { font-size:10.5px; font-weight:600; color:var(--blue-fg); margin-left:6px; }
 /* Every change is one row: what kind in a fixed column, then the step, so the
    titles line up whether or not the row opens to its field diff. */
@@ -857,37 +850,46 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-change-what { min-width:0; overflow-wrap:anywhere; }
 .job-change-what small { margin-left:6px; }
 .job-change-what small + small::before { content:"· "; }
-/* A proposal reads as a decision (jobs-view.js proposalHtml): one amber bar that
-   asks, with the buttons that answer, then a graph drawn as a diff. */
-.job-proposal-bar { position:sticky; top:-12px; z-index:2; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px 16px; align-items:center; margin:16px 0 4px; padding:12px 12px 12px 16px; border-radius:12px; background:color-mix(in srgb, var(--st-warn) 10%, var(--surface)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 40%, transparent), inset 4px 0 0 var(--st-warn), 0 -12px 0 var(--surface), 0 10px 14px -12px var(--shadow); }
-.job-proposal-head { display:grid; gap:2px; min-width:0; }
-.job-proposal-title { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--st-warn-fg); }
-.job-proposal-title b { font-weight:600; }
-.job-dialog .job-proposal-hint { font-size:12px; color:var(--fg-muted); }
-.job-actions.job-proposal-cta { margin:0; justify-content:flex-end; }
-.job-actions.job-proposal-cta button.primary { padding:10px 16px; border-radius:12px; margin-right:0; }
-/* Pinned 12px below the dialog's top (half its padding), the gap above filled by the surface shadow so nothing scrolls
-   through it; the ask is clamped to one line with its toggle beside it. */
-.job-proposal-bar .job-replan-ask { grid-column:1/-1; display:flex; align-items:baseline; gap:12px; margin:0; background:var(--surface); }
-.job-ask-text { flex:1; min-width:0; }
-.job-proposal-bar .job-ask-earlier { grid-column:1/-1; margin:0; }
-.job-ask-earlier ol { margin:0; padding-left:20px; max-height:30vh; overflow:auto; white-space:pre-wrap; color:var(--fg); }
+/* A proposal is one decision card (jobs-view.js proposalHtml): where it comes from,
+   what approving does, why, what it leaves you, the buttons; the rest folds below. */
+.job-decision { display:grid; gap:8px; margin:16px 0 4px; padding:14px 16px; border-radius:12px; background:color-mix(in srgb, var(--st-warn) 9%, var(--surface)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 40%, transparent), inset 4px 0 0 var(--st-warn); }
+.job-dialog .job-decision-kicker { display:flex; align-items:center; gap:6px; min-width:0; margin:0; font-size:12px; color:var(--st-warn-fg); }
+.job-decision-kicker > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.job-decision-kicker .icon { flex:none; width:14px; height:14px; }
+.job-dialog .job-decision-ask { margin:0; font-size:13px; font-weight:600; color:var(--fg); overflow-wrap:anywhere; }
+.job-dialog .job-decision-title { margin:0; font-size:15px; font-weight:600; line-height:1.35; color:var(--fg); overflow-wrap:anywhere; }
+.job-dialog .job-decision-why { margin:0; font-size:13.5px; line-height:1.5; color:var(--fg); max-width:90ch; overflow-wrap:anywhere; }
+.job-dialog .job-decision-leaves { margin:0; font-size:12.5px; color:var(--fg-muted); overflow-wrap:anywhere; }
+.job-decision-leaves b { margin-right:6px; font-weight:600; color:var(--fg); }
+.job-actions.job-proposal-cta { margin:4px 0 0; justify-content:flex-start; }
+.job-actions.job-proposal-cta button.primary { padding:8px 16px; border-radius:10px; }
+.job-decision-foot { display:flex; flex-wrap:wrap; align-items:flex-start; gap:2px 14px; }
+.job-decision-foot > details[open] { flex-basis:100%; }
+.job-decision-more { margin:0; font-size:12.5px; }
+.job-decision-more > summary { padding:2px 0; color:var(--fg-muted); }
+.job-decision-more[open] { padding:0; background:none; }
+.job-decision-more[open]>summary, .job-event-more[open]>summary { margin:0; }
+.job-decision-more>summary:hover, .job-event-more>summary:hover { background:none; }
+.job-decision-why-body { display:grid; gap:8px; padding:6px 0 4px; font-size:13px; }
+.job-dialog .job-decision-why-body p { margin:0; line-height:1.5; max-width:110ch; white-space:pre-wrap; }
+.job-decision-evidence { margin:0; padding:0; list-style:none; display:grid; gap:4px; }
+.job-decision-evidence li { font-size:12px; color:var(--fg-muted); overflow-wrap:anywhere; }
+.job-decision-evidence li span { margin-right:6px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--blue-fg); }
+.job-decision-why-body .job-replan-ask { margin:0; }
+.job-decision-why-body .job-replan-changes { margin:0; }
+.job-ask-earlier { margin:0; padding-left:20px; white-space:pre-wrap; color:var(--fg-muted); }
 .job-ask-earlier li+li { margin-top:6px; }
-.job-ask-text.job-ask-clamp { display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
-.job-ask-more { all:unset; cursor:pointer; flex:none; font-size:12px; font-weight:500; color:var(--blue-fg); white-space:nowrap; }
-.job-ask-more[hidden] { display:none; }
-.job-ask-more:hover { text-decoration:underline; }
-.job-ask-more:focus-visible { outline:2px solid var(--blue); outline-offset:2px; border-radius:4px; }
-@media (max-width:700px) { .job-proposal-bar { top:-8px; } }
-@media (max-width:640px) { .job-proposal-bar { grid-template-columns:1fr; } .job-actions.job-proposal-cta { justify-content:flex-start; } }
+.job-decision-other { all:unset; cursor:pointer; padding:2px 0; font-size:12.5px; color:var(--blue-fg); }
+.job-decision-other:hover { text-decoration:underline; }
+.job-decision-other:focus-visible { outline:2px solid var(--blue); outline-offset:2px; border-radius:4px; }
 /* Every changed node wears its colour as a ring; everything the change leaves alone fades back. */
 .job-mark-added { --dc:var(--st-ok); } .job-mark-edited { --dc:var(--st-run); } .job-mark-removed { --dc:var(--st-bad); }
-:is(.job-mark-rework,.job-mark-forward,.job-mark-accept-red,.job-mark-recover,.job-mark-mark-done,.job-mark-mark-merged) { --dc:var(--wf); }
+:is(.job-mark-rework,.job-mark-forward,.job-mark-retry,.job-mark-accept-red,.job-mark-recover,.job-mark-mark-done,.job-mark-mark-merged) { --dc:var(--wf); }
 .job-node[class*="job-mark-"]:not(.job-mark-kept,.job-mark-frozen) .job-node-tile { outline:2px solid var(--dc); outline-offset:4px; }
 .job-node.job-mark-added .job-node-tile { outline-style:dashed; }
 .job-node.job-mark-removed .job-node-tile { opacity:.5; outline-style:dashed; }
 .job-node[class*="job-mark-"]:not(.job-mark-kept,.job-mark-frozen) .job-mark { font-weight:600; }
-.job-mark-rework .job-mark,.job-mark-forward .job-mark { color:var(--wf); background:color-mix(in srgb, var(--wf) 16%, var(--surface)); }
+.job-mark-rework .job-mark,.job-mark-forward .job-mark,.job-mark-retry .job-mark { color:var(--wf); background:color-mix(in srgb, var(--wf) 16%, var(--surface)); }
 li.job-mark-rework { color:var(--wf); }
 .job-graph .job-node:is(.job-mark-kept,.job-mark-frozen),.job-stack:has(> .job-node:is(.job-mark-kept,.job-mark-frozen)) > .job-places { opacity:.38; filter:grayscale(.85); }
 .job-places details:not(:has(.job-write:not(.job-mark-kept,.job-mark-frozen))) { opacity:.38; filter:grayscale(.85); }
@@ -1066,7 +1068,7 @@ li.job-mark-rework { color:var(--wf); }
 .intro-chat { height:330px; display:flex; flex-direction:column; justify-content:flex-end; gap:12px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 36px); mask-image:linear-gradient(180deg, transparent, #000 36px); }
 .intro-chat .job-idea-thread { flex:none; gap:12px; padding:0; }
 .intro-chat .job-idea-msg { grid-template-columns:24px minmax(0,1fr); gap:10px; }
-.intro-chat .job-idea-orb { width:24px; height:24px; }
+.intro-chat .wrangler-mark { width:24px; height:24px; }
 .intro-chat .job-idea-body { font-size:13.5px; line-height:1.45; }
 .intro-chat .job-idea-body p { margin:0; font-size:inherit; line-height:inherit; }
 .intro-chat .job-idea-who time { display:none; }
@@ -1405,7 +1407,15 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .wn-ideas-chat { display:flex; flex-direction:column; justify-content:flex-end; height:360px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 56px); mask-image:linear-gradient(180deg, transparent, #000 56px); }
 .wn-ideas-chat .job-idea-thread { flex:none; gap:12px; padding:0; }
 .wn-ideas-chat :is(.job-launch-steps,.job-launch-fine) { display:none; }
-@media(prefers-reduced-motion:reduce) { .wn-fade { animation:none; } .wn-edge,.wn-art,.wn-note,.wn-ask .job-option,.wn-btn { transition:none; } }
+/* The wrangler conversation splash: a window that holds its tallest frame, newest at the foot. */
+.wn-edge.ghost { opacity:0; }
+.wn-edge.added { background:repeating-linear-gradient(90deg, var(--st-ok) 0 6px, transparent 6px 10px); }
+.wn-talk { display:flex; flex-direction:column; justify-content:flex-end; gap:8px; height:400px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 48px); mask-image:linear-gradient(180deg, transparent, #000 48px); }
+.wn-talk .job-talk { flex:none; margin:0; }
+.wn-talk .job-change { flex:none; margin:0; }
+.wn-talk :is(button,summary,.job-talk-convo-head) { cursor:default; }
+.wn-talk :is(.job-sent,.job-talk-msg,.job-talk-working,.job-talk-convo) { animation:wn-fade .35s ease-out; }
+@media(prefers-reduced-motion:reduce) { .wn-fade,.wn-talk * { animation:none; } .wn-edge,.wn-art,.wn-note,.wn-ask .job-option,.wn-btn { transition:none; } }
 @media(max-width:700px) {
   .jobs-update { padding:22px 20px; border-radius:20px; }
   .jobs-update h2 { font-size:24px; }
@@ -1413,6 +1423,7 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
   .wn-row3 { grid-template-columns:minmax(0,1fr) 14px minmax(0,1fr) 14px minmax(0,1fr); }
   .wn-row2 { grid-template-columns:minmax(0,1fr) 14px minmax(0,1.4fr); }
   .wn-row2s { grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr); }
+  .wn-talk { height:440px; }
   .wn-under,.wn-writes { grid-template-columns:1fr; }
 }
 
@@ -1766,19 +1777,23 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .job-idea-band > div { flex:1; min-width:0; }
 .job-idea-band .job-detail-cost { flex:none; margin-left:12px; border-color:color-mix(in srgb, var(--jt-ivory) 22%, transparent); background:color-mix(in srgb, var(--jt-night) 45%, transparent); color:var(--jt-ivory); }
 .job-idea > .job-error { margin:12px 26px 0; }
-.job-idea-orb { position:relative; flex:none; display:inline-block; width:30px; height:30px; border-radius:50%; overflow:hidden; background:radial-gradient(circle at 50% 50%, #fff 0 6%, #ffd2c0 12%, #c0508f 34%, #2a0f4d 62%, #08031a 100%); box-shadow:0 0 0 1px color-mix(in srgb, var(--fg) 10%, transparent), 0 0 18px -4px #c0508f; }
-.job-idea-orb::after { content:""; position:absolute; inset:-30%; border-radius:50%; background:conic-gradient(from 0deg, transparent 0 30%, rgba(255,210,192,.45) 42%, transparent 55% 80%, rgba(47,196,192,.35) 90%, transparent); animation:gx-spin 9s linear infinite; mix-blend-mode:screen; }
-.job-idea-orb.small { width:18px; height:18px; }
+.wrangler-mark { flex:none; display:block; width:30px; height:30px; overflow:visible; filter:drop-shadow(0 0 5px color-mix(in srgb, var(--jt-glow) 55%, transparent)); }
+.wrangler-mark.small { width:18px; height:18px; }
+.wrangler-mark-disk { fill:var(--jt-cta-bg); }
+.wrangler-mark-hat { fill:var(--jt-cta-fg); }
+.wrangler-mark-rope { fill:none; stroke:var(--jt-mark-rope); transform-origin:256px 256px; animation:gx-spin 2.4s linear infinite; }
+.wrangler-mark.busy .wrangler-mark-hat { transform-origin:256px 330px; animation:mark-tip 2.8s ease-in-out infinite; }
+@keyframes mark-tip { 0%,60%,100% { transform:none; } 72% { transform:translateY(-22px) rotate(-8deg); } 84% { transform:none; } }
 .job-idea-thread { flex:1; display:grid; align-content:start; gap:18px; padding:22px 26px 8px; }
 .job-idea-thread .job-sent { margin:0; }
 .job-idea-thread .job-sent-bubble { max-width:min(86%,560px); }
 .job-idea-msg { display:grid; grid-template-columns:30px minmax(0,1fr); gap:12px; max-width:720px; }
 .job-idea-msg.fresh { animation:job-idea-fade .4s both; }
-.job-idea-who { display:flex; align-items:baseline; gap:8px; margin-bottom:6px; font:600 10px/1.9 var(--jobs-mono); letter-spacing:.16em; text-transform:uppercase; color:var(--fg-muted); }
-.job-idea-who time { font-weight:400; letter-spacing:.04em; text-transform:none; color:var(--fg-subtle); }
+.job-idea-who { display:flex; align-items:baseline; gap:8px; margin-bottom:6px; font:600 12.5px/1.5 var(--font); color:var(--fg-muted); }
+.job-idea-who time { font-weight:400; font-size:11.5px; color:var(--fg-subtle); }
 .job-idea-body { padding:12px 15px; border-radius:4px 18px 18px 18px; background:color-mix(in srgb, var(--surface-2) 70%, transparent); box-shadow:inset 0 0 0 1px var(--border-muted); color:var(--fg); font-size:13.5px; line-height:1.6; overflow-wrap:anywhere; }
 .job-dialog .job-idea-body p { margin:0; font-size:inherit; color:inherit; }
-.job-idea-body :is(p,ol,ul)+:is(p,ol,ul) { margin-top:8px; }
+.job-idea-body :is(p,ol,ul)+:is(p,ol,ul), .job-dialog .job-idea-body :is(p,ol,ul)+:is(p,ol,ul) { margin-top:8px; }
 .job-idea-body :is(ol,ul) { margin:0; padding-left:20px; } .job-idea-body li+li { margin-top:4px; }
 .job-idea-body code { padding:1px 5px; border-radius:5px; background:color-mix(in srgb, var(--fg) 8%, transparent); font:12px var(--jobs-mono); }
 .job-idea-thinking { display:flex; align-items:center; gap:10px; padding-left:2px; font:500 12px var(--jobs-mono); }
@@ -1863,6 +1878,103 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .bhx-flash { opacity:0; background:radial-gradient(closest-side, #fff, rgba(255,255,255,.95) 20%, rgba(255,226,214,.55) 42%, rgba(240,138,154,.18) 70%, transparent); }
 .bhx-wave { box-sizing:border-box; opacity:0; border:1.5px solid rgba(255,236,228,.9); box-shadow:0 0 16px rgba(240,138,154,.55), inset 0 0 16px rgba(158,171,255,.4); }
 @media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-dock { padding-left:16px; padding-right:16px; } }
-@media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-title-loader i,.job-dialog .job-idea-band h2.titled > *,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-dialog .job-idea-band h2.titled > .job-title-loader { display:none; } }
+@media(prefers-reduced-motion:reduce) { .wrangler-mark-rope,.wrangler-mark-hat,.job-idea-shine,.job-title-loader i,.job-dialog .job-idea-band h2.titled > *,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-dialog .job-idea-band h2.titled > .job-title-loader { display:none; } }
+/* The job's conversation with the wrangler (job-talk.js), above the Add idea box: the human's bubbles,
+   the wrangler's answers, and each proposal as a card whose changes line up in one label column. */
+.job-talk { display:grid; gap:12px; margin:14px 0 6px; padding-top:12px; border-top:1px solid var(--border-muted); }
+.job-talk-head { display:flex; align-items:center; gap:6px; margin:0; font:600 10px/1.9 var(--jobs-mono); letter-spacing:.16em; text-transform:uppercase; color:var(--fg-muted); }
+.job-talk-head .icon { width:13px; height:13px; }
+.job-talk .job-sent { margin:0; }
+.job-talk .job-sent-bubble { max-width:min(86%,560px); }
+.job-talk-msg { grid-template-columns:18px minmax(0,1fr); gap:10px; max-width:none; }
+.job-talk-msg .wrangler-mark { margin-top:2px; }
+.job-talk-msg .job-idea-body { max-width:640px; }
+.job-talk-msg.error .job-idea-body { color:var(--red-fg); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--red) 35%, transparent); }
+.job-talk-card { display:grid; gap:10px; max-width:640px; padding:12px 14px; border-radius:4px 16px 16px 16px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); }
+.job-talk-card.tone-needs { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 60%, transparent); }
+.job-talk-card header, .job-talk-card > summary { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; }
+.job-talk-card header b, .job-talk-card > summary b { font-weight:600; }
+/* A decided card folds to one line (job-talk.js); its counts give way to the rows once open. */
+details.job-talk-card:not([open]) { gap:0; width:fit-content; padding:8px 12px; }
+.job-talk-card > summary { list-style:none; cursor:pointer; user-select:none; }
+.job-talk-card > summary::-webkit-details-marker { display:none; }
+.job-talk-card > summary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }
+.job-talk-counts { color:var(--fg-muted); font-size:12.5px; }
+.job-talk-counts::before { content:"· "; }
+details.job-talk-card[open] .job-talk-counts { display:none; }
+details.job-talk-card[open] > * + * { margin-top:10px; }
+.job-talk-card > summary svg { width:14px; height:14px; margin-left:auto; color:var(--fg-muted); transform:rotate(-90deg); transition:transform .15s ease; }
+details.job-talk-card[open] > summary svg { transform:none; }
+.job-talk-tag { padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; color:var(--fg-muted); background:var(--surface-2); }
+.job-talk-card.tone-needs .job-talk-tag { color:var(--st-warn-fg); background:color-mix(in srgb, var(--st-warn) 18%, transparent); }
+.job-talk-card.tone-ok .job-talk-tag { color:var(--st-ok-fg); background:color-mix(in srgb, var(--st-ok) 15%, transparent); }
+.job-talk-options { color:var(--fg-subtle); font-size:11.5px; }
+.job-talk-card .job-idea-body { padding:0; background:none; box-shadow:none; color:var(--fg-muted); }
+.job-talk-changes { margin:0; padding:0; list-style:none; display:grid; grid-template-columns:max-content minmax(0,1fr); gap:6px 10px; align-items:baseline; font-size:13px; }
+.job-talk-change { display:contents; }
+.job-talk-change .job-mark { justify-self:stretch; justify-content:center; }
+.job-talk-change-title { color:var(--fg); overflow-wrap:anywhere; }
+.job-talk-change-title small { margin-left:4px; color:var(--fg-muted); }
+.job-talk-then { display:block; margin-top:1px; font-size:12px; color:var(--fg-muted); }
+.job-talk-change.job-mark-removed .job-talk-change-title { text-decoration:line-through; color:var(--fg-muted); }
+.job-talk-none { margin:0; font-size:12.5px; color:var(--fg-muted); }
+.job-talk-card footer { display:flex; gap:8px; }
+.job-talk-card footer button { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; font-size:12.5px; }
+.job-talk-working { padding-left:0; }
+/* A forwarded idea is no plan change: one quiet line, then the step's session answering it, marked
+   as the session (a terminal chip, not Wrangler's mark). Its words live in the step's thread. */
+.job-talk-forward { display:grid; grid-template-columns:18px minmax(0,1fr); gap:10px; align-items:center; }
+.job-talk-forward .job-idea-who { margin:0; }
+.job-talk :is(.job-talk-forward,.job-talk-session) .job-idea-who { min-width:0; max-width:640px; white-space:nowrap; }
+.job-talk-step { min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:400; color:var(--fg-subtle); }
+.job-talk-step + time { flex:none; }
+.job-talk-session { display:grid; grid-template-columns:18px minmax(0,1fr); gap:10px; max-width:720px; }
+.job-talk-session-mark { display:inline-grid; place-items:center; width:18px; height:18px; margin-top:2px; border-radius:5px; color:var(--fg-muted); background:var(--surface-2); box-shadow:inset 0 0 0 1px var(--border); }
+.job-talk-session-mark .icon { width:11px; height:11px; }
+.job-talk-session .job-idea-body { max-width:640px; border-radius:4px 14px 14px 14px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); }
+.job-talk-session .job-msg-run { max-width:640px; }
+.job-talk-working .job-talk-session-mark { margin-top:0; }
+/* Several conversations at once (job-talk.js): one section each, one open at a time with the box at its foot. */
+.job-talk-convo { display:grid; grid-template-columns:minmax(0,1fr); gap:12px; padding:10px 12px; border-radius:10px; box-shadow:inset 0 0 0 1px var(--border-muted); transition:box-shadow .2s; }
+.job-talk-convo > .job-change { margin:0; }
+.job-talk-convo-head .job-title-loader { width:14ch; }
+.job-talk-convo-head .job-title-loader i + i { display:none; }
+.job-talk-convo-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; }
+.job-talk-convo-head b { font-weight:600; }
+.job-talk-convo-head small { color:var(--fg-muted); }
+.job-talk-tag.tone-working { color:var(--st-warn-fg); background:color-mix(in srgb, var(--st-warn) 18%, transparent); }
+.job-talk-convo-head[data-convo-fold] { cursor:pointer; user-select:none; }
+.job-talk-convo-tools { display:inline-flex; gap:2px; margin-left:auto; }
+.job-talk-convo-tools button { all:unset; display:inline-grid; place-items:center; width:24px; height:24px; border-radius:6px; color:var(--fg-muted); cursor:pointer; }
+.job-talk-convo-tools button:hover { color:var(--fg); background:var(--surface-2); }
+.job-talk-convo-tools button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.job-talk-convo-tools svg { width:14px; height:14px; }
+.job-talk-fold svg { transition:transform .15s ease; }
+.job-talk-convo.is-folded .job-talk-fold svg { transform:rotate(-90deg); }
+/* Folded: the title row alone. */
+.job-talk-convo.is-folded { padding-block:6px; }
+.job-talk-convo.is-folded:hover { box-shadow:inset 0 0 0 1px var(--border); }
+.job-talk-convo.is-folded .job-talk-convo-head b { font-weight:500; color:var(--fg-muted); }
+.job-change-to small { margin-left:6px; color:var(--fg-muted); font-weight:400; max-width:24ch; overflow:hidden; text-overflow:ellipsis; }
+.job-change-new { all:unset; display:inline-grid; place-items:center; width:16px; height:16px; margin:0 -4px 0 2px; border-radius:50%; color:var(--fg-muted); cursor:pointer; }
+.job-change-new:hover { color:var(--fg); background:color-mix(in srgb, var(--fg) 12%, transparent); }
+.job-change-new:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.job-change-new .icon { width:10px; height:10px; }
+@media(max-width:560px) { .job-change-to small { max-width:12ch; } }
 .job-idea-edit textarea { min-height:140px; resize:vertical; font:13.5px/1.5 var(--font); }
 .job-idea-edit-note { color:var(--fg-muted); }
+/* Go to plan on a waiting card (job-talk.js), and the flash it lands on. */
+.job-talk-goto { all:unset; display:inline-flex; align-items:center; gap:5px; margin-left:auto; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:500; color:var(--st-warn-fg); cursor:pointer; }
+.job-talk-goto:hover { background:color-mix(in srgb, var(--st-warn) 14%, transparent); }
+.job-talk-goto:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.job-talk-card > summary .job-talk-goto svg { width:13px; height:13px; margin:0; color:inherit; transform:none; }
+.job-talk-card > summary .job-talk-goto + svg { margin-left:0; }
+.job-decision.is-flash { animation:job-decision-flash 1.6s ease-out; }
+@keyframes job-decision-flash { 0%, 30% { box-shadow:inset 0 0 0 2px var(--st-warn), inset 4px 0 0 var(--st-warn), 0 0 0 4px color-mix(in srgb, var(--st-warn) 35%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .job-decision.is-flash { animation-duration:.01s; outline:2px solid var(--st-warn); } }
+/* The foot of an open conversation folds it, beside the box. */
+.job-talk-convo-foot { display:flex; justify-content:flex-end; margin-top:-6px; }
+.job-talk-collapse { all:unset; display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:6px; font-size:12px; color:var(--fg-muted); cursor:pointer; }
+.job-talk-collapse:hover { color:var(--fg); background:var(--surface-2); }
+.job-talk-collapse:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.job-talk-collapse svg { width:12px; height:12px; transform:rotate(180deg); }

@@ -1,11 +1,12 @@
 import { isPrSub, isSessionSub, isWriteSub, isHumanSub } from './jobs-schema.js';
-import { reworkSub } from './job-sub-ops.js';
+import { reworkSub, retrySub } from './job-sub-ops.js';
+import { redRef } from './job-red.js';
 import { parkedReadyRun, askAgent } from './job-parked.js';
 
 // The things approving a proposal can do to a sub-job that are not edits to the
 // plan: forward the human's words to its open session, rework its code, accept
-// its red pipeline, mark where it stands, or make a fix PR the way a merged
-// sub-job recovers. Each claims something about the
+// its red pipeline, mark where it stands, start a red step again as it is, or
+// make a fix PR the way a merged sub-job recovers. Each claims something about the
 // outside world, so each is PINNED to the exact head, merge commit or stage it
 // was written against (`pinOf`), and approval is refused if that has moved
 // (`checkActions`). Pure over the job draft job-store.js is about to persist,
@@ -63,7 +64,6 @@ export function gateAction(job, action, plan) {
   if (action.type === 'forward') {
     if (!action.note) throw new Error(`forward ${name}: put the human's words for it in \`note\``);
     if (!parked || sub.stage !== 'review' || sub.state !== 'verified' || !sub.ready) throw new Error(`${name} has no session open on its review to forward to: use rework instead`);
-    if (sub.answering) throw new Error(`${name}'s session is still answering the last message; ask again once it has`);
     return { sub, pin: { at: 'round', ref: String(sub.ready.receiptId), round: sub.ready.round || 1 } };
   }
   if (parked) throw new Error(action.type === 'rework' ? `${name}'s session is still open: forward the feedback to it instead` : `Wait for the step on ${name} to stop`);
@@ -71,6 +71,12 @@ export function gateAction(job, action, plan) {
     const pin = redPin(sub);
     if (!pin) throw new Error(`${name} has no red pipeline to accept${sub.pr?.dirty ? ' (merge conflicts cannot be overridden)' : ''}`);
     return { sub, pin };
+  }
+  // The human's Retry, suggested: pinned to the failure it was written about
+  // (job-red.js redRef), so a new error, head or run since refuses it.
+  if (action.type === 'retry') {
+    if (!sub.error) throw new Error(`${name} is not red: nothing to retry`);
+    return { sub, pin: { at: 'red', ref: redRef(job, sub) } };
   }
   if (action.type === 'recover') {
     if (!isPrSub(sub) || sub.stage !== 'deployment' || sub.recoveredBy || sub.deploymentResult?.status !== 'failing') throw new Error(`${name} has no failed post-merge run to recover from`);
@@ -128,7 +134,7 @@ export function checkActions(job, actions = [], plan) {
     if (pin.at !== a.pin?.at || pin.ref !== a.pin?.ref) throw new Error(`${quoted(sub.title)} has moved since this was proposed (${PIN_NOUN[a.pin?.at] || 'state'} ${short(a.pin?.ref)} is now ${short(pin.ref)}). Ask again.`);
   }
 }
-const PIN_NOUN = { head: 'head', merge: 'merge commit', stage: 'stage', round: 'review' };
+const PIN_NOUN = { head: 'head', merge: 'merge commit', stage: 'stage', round: 'review', red: 'failure' };
 const short = (ref) => String(ref ?? 'none').slice(0, 9);
 
 // Where a sub-job has gone since a proposal was written about it, in the words of
@@ -181,8 +187,8 @@ export function applyActions(job, actions = [], { now, images = [] }) {
     if (a.type === 'forward') {
       // The runner mails it on its next tick (job-runner.js deliverThread), and the
       // thread shows it as the human's, come through the planner.
-      askAgent(sub, { from: 'human', via: 'planner', ...forwarded(sub, a.note, images) }, now);
-      lines.push({ sub, detail: `Forwarded your words to ${name}'s open session` });
+      const id = askAgent(sub, { from: 'human', via: 'planner', ...forwarded(sub, a.note, images) }, now);
+      lines.push({ sub, detail: `Forwarded your words to ${name}'s open session`, forwarded: id });
     } else if (a.type === 'accept-red') {
       // Accepting red at an open PR IS the merge approval for that head: the
       // human just said "merge it as it stands".
@@ -191,6 +197,9 @@ export function applyActions(job, actions = [], { now, images = [] }) {
       if (!merged) sub.mergeApprovedHead = a.pin.ref;
       sub.error = null; sub.blocked = null; sub.state = 'watching'; sub.nextPollAt = 0;
       lines.push({ sub, detail: merged ? `Accepted the red post-merge run on ${name}` : `Accepted the red checks on ${name}; merging as it stands` });
+    } else if (a.type === 'retry') {
+      retrySub(sub, a.note);
+      lines.push({ sub, detail: `Retried ${name}` });
     } else if (a.type === 'recover') {
       // The fix lands before the dependants, which already wait on this one: it
       // counts as deployed the moment its fix does (job-runner.js).

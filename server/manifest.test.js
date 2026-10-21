@@ -27,7 +27,7 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   assert.ok(manifest.requires.includes('images:keep'));
   assert.ok(manifest.requires.includes('files:view'));
   assert.ok(declared.requires.includes('files:view'));
-  assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context', 'create_job', 'send_step_idea']);
+  assert.deepEqual(manifest.tools.map((t) => t.name), ['job_report', 'get_job_context', 'create_job']);
   assert.deepEqual(Object.keys(manifest.session), ['onBeforeDispatch']);
   assert.equal(manifest.client, 'public/index.js');
   assert.equal(manifest.styles, 'public/jobs.css');
@@ -373,7 +373,7 @@ test('a PR launch has the wrangler cut the worktree and keeps core off the job P
   await runtime.launch(job, sub, { id: 'run_1', phase: 'implementation' }, (...v) => { prepared = v; });
 
   const opts = spawned[0];
-  assert.equal(opts.cwd, '/repos/thing', 'the wrangler branches from the main checkout');
+  assert.equal(opts.cwd, '/repos/thing', 'Wrangler branches from the main checkout');
   assert.deepEqual(opts.worktree, { branch: placeholderBranch(job, sub), base: 'refs/remotes/origin/main', auto: true });
   assert.deepEqual(opts.addDirs, [inboxDir(job.id, sub.id)], 'only planning gets the repos parent; an implementation run gets its proof inbox');
   assert.equal(opts.taskId, 'task_7');

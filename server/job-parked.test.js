@@ -10,9 +10,12 @@ import { changeView } from './job-change.js';
 import { ensureInbox, roundDir, ideasDir } from './job-evidence.js';
 import { workingTreeHash } from './git.js';
 import { threadMail, jobPrompt } from './job-prompts.js';
-import { jobActionHandler } from './handlers.js';
+import { makeJobActionHandler } from './handlers.js';
 import { _resetForTests, runnerFor } from './jobs.js';
 import { looksLikeQuestion } from './job-parked.js';
+
+// Never a real Haiku run: a conversation an idea opens is named after the action.
+const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png body')]);
 // As the real façade: read() sees only the kept store, keep() copies a staged paste into it.
@@ -128,6 +131,37 @@ test('a question is mailed to the parked session, answered by a reply, and the r
   assert.throws(() => f.report({ kind: 'reply', text: 'Another' }), /wait for mail/);
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: receipt });
   assert.equal(f.sub().state, 'approved', 'a reply leaves the approval it did not touch standing');
+});
+
+test('two ideas in a row both reach the session: each has its own wrangler, the second waits behind the answer, and each reply pairs with its message', async (t) => {
+  const f = fixture(t); await f.start(); await f.ready();
+  const say = (text) => { const j = f.store.get(f.job.id); const v = changeView(j, j.subJobs[0]); return f.store.action(f.job.id, 'request-change', { subJobId: 'api', at: v.at, ref: v.ref, text }); };
+  say('Make the filter a dropdown');
+  await f.tick();
+  const first = f.launched.at(-1);
+  say('And sort it by date');
+  await f.tick();
+  const second = f.launched.at(-1);
+  assert.notEqual(second.run.id, first.run.id, 'the second idea gets its own wrangler');
+  assert.ok(first.run.ask && second.run.ask);
+  f.store.report(first.sid, first.run.id, { kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'Make the filter a dropdown' }] });
+  await f.tick();
+  assert.equal(f.mailed.length, 1, 'the first is mailed');
+  assert.ok(f.sub().answering, 'while the session is still answering the first');
+  f.store.report(second.sid, second.run.id, { kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'And sort it by date' }] });
+  const job = f.store.get(f.job.id);
+  assert.deepEqual([job.error ?? null, job.replan, job.talk.filter((m) => m.kind === 'error' || /could not/i.test(m.text || '')).length], [null, null, 0], 'accepted, not an error');
+  assert.deepEqual(f.sub().thread.map((m) => [m.text, !!m.sentAt]), [['Make the filter a dropdown', true], ['And sort it by date', false]]);
+  await f.tick();
+  assert.equal(f.mailed.length, 1, 'held until the answer in flight is in');
+  f.report({ kind: 'reply', text: 'Done: a dropdown.' });
+  assert.equal(f.sub().answering.id, f.sub().thread.at(-1).id, 'answering moves on to the queued message');
+  await f.tick();
+  assert.equal(f.mailed.length, 2);
+  assert.match(f.mailed[1].text, /"And sort it by date"/); assert.doesNotMatch(f.mailed[1].text, /dropdown/);
+  f.report({ kind: 'reply', text: 'Sorted newest first.' });
+  assert.equal(f.sub().answering, null);
+  assert.deepEqual(f.sub().thread.map((m) => [m.from, m.text]), [['human', 'Make the filter a dropdown'], ['agent', 'Done: a dropdown.'], ['human', 'And sort it by date'], ['agent', 'Sorted newest first.']]);
 });
 
 test('a forward-only idea lands in the step\'s thread with no plan-change prompt, recorded as Wrangler\'s', async (t) => {
@@ -263,7 +297,7 @@ test('pasted images go to the evidence folder and the session is mailed their pa
   const view = changeView(f.store.get(f.job.id), f.sub());
   await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: view.at, ref: view.ref, text: 'See attached', images: ['pasted.png'], attachments: [{ file: '../../etc/passwd' }] }, host);
   assert.equal(f.sub().thread, undefined, 'nothing reaches the session before the planner has read it');
-  assert.match(f.store.get(f.job.id).replan.feedback, /See attached\n\(Pasted images, read them: /, 'the planner reads the picture');
+  assert.match(f.store.get(f.job.id).convos[0].pending.asks[0].feedback, /See attached\n\(Pasted images, read them: /, 'the wrangler reads the picture');
   await f.propose([{ type: 'forward', sub: 'api', note: 'See attached' }]);
   const [m] = f.sub().thread;
   assert.equal(m.images.length, 1); assert.match(m.images[0].file, /^ask-.*-1\.png$/);
@@ -271,6 +305,7 @@ test('pasted images go to the evidence folder and the session is mailed their pa
   assert.deepEqual(Object.keys(host.kept), [], 'the kept copy is released once it is beside the round');
   const text = threadMail(f.store.get(f.job.id), f.run(), f.sub(), [m]);
   assert.ok(text.includes(path.join(roundDir(f.job.id, 'api', 1), m.images[0].file)));
+  assert.match(text, /A QUESTION: .*the first line is the answer itself.*End with one line starting "How I know:"/, 'a session\'s reply follows the same phrasing rules as the wrangler\'s');
 });
 
 test('an image that cannot be kept refuses the idea out loud, so nothing the human saw is quietly dropped', async (t) => {
@@ -279,7 +314,7 @@ test('an image that cannot be kept refuses the idea out loud, so nothing the hum
   const view = changeView(f.store.get(f.job.id), f.sub());
   await jobActionHandler.handler({ id: f.job.id, subJobId: 'api', action: 'request-change', at: view.at, ref: view.ref, text: 'See attached', images: ['gone.png'] }, host);
   assert.deepEqual(host.broadcasts.at(-1), { event: 'job-action-failed', jobId: f.job.id, action: 'request-change', subJobId: 'api', error: 'An attached image could not be kept. Attach it again.' });
-  assert.equal(f.store.get(f.job.id).replan, undefined, 'the planner is not handed an idea missing its picture');
+  assert.equal(f.store.get(f.job.id).convos, undefined, 'the wrangler is not handed an idea missing its picture');
   assert.equal(fs.existsSync(roundDir(f.job.id, 'api', 1)) && fs.readdirSync(roundDir(f.job.id, 'api', 1)).some((n) => n.startsWith('ask-')), false);
 });
 
@@ -303,8 +338,9 @@ test('an idea for the planner keeps its pasted images too, and hands the planner
   const job = f.store.get(f.job.id);
   const [file] = fs.readdirSync(ideasDir(f.job.id));
   assert.match(file, /^ask-.*-1\.png$/);
-  assert.ok(job.replan.feedback.startsWith('Split web in two\n(Pasted images, read them: '));
-  assert.ok(job.replan.feedback.includes(JSON.stringify(path.join(ideasDir(f.job.id), file))));
+  const { feedback } = job.convos[0].pending.asks[0];
+  assert.ok(feedback.startsWith('Split web in two\n(Pasted images, read them: '));
+  assert.ok(feedback.includes(JSON.stringify(path.join(ideasDir(f.job.id), file))));
   assert.equal(job.moves.at(-1).note, 'Split web in two', 'the history keeps the words, not the paths');
   assert.deepEqual(Object.keys(host.kept), [], 'the kept copy is released');
 });

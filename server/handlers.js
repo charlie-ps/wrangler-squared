@@ -1,9 +1,11 @@
 import { execFile as defaultExecFile } from 'node:child_process';
 import { access as defaultAccess } from 'node:fs/promises';
 import { kick, makeCreateJob } from './job-create.js';
+import { generateConvoTitle } from './job-title.js';
+import { runHeadlessClaude } from './headless-claude.js';
 import { settingsSchema } from './jobs-schema.js';
 import { runFile } from './job-github.js';
-import { thumbnailOf, readEvidence, keepAskImages, readIdeaImage } from './job-evidence.js';
+import { thumbnailOf, readEvidence, keepAskImages, readIdeaImage, readTalkImage } from './job-evidence.js';
 import { workingTreeHash } from './git.js';
 import { TREE_MOVED } from './job-store.js';
 import { readLog } from './job-running.js';
@@ -58,17 +60,32 @@ async function prepare(msg, host) {
     // the human saw it in the tray and believes it went.
     const got = names.map((n) => (host.images.keep(n) ? host.images.read(n) : null));
     for (const n of names) host.images.remove(n);
-    const kept = got.every(Boolean) ? keepAskImages({ jobId: job.id, subId: sub?.id, round: sub?.ready?.round, messageId: Date.now().toString(36), images: got }) : [];
+    const round = sub?.ready?.round;
+    const kept = got.every(Boolean) ? keepAskImages({ jobId: job.id, subId: sub?.id, round, messageId: Date.now().toString(36), images: got }) : [];
     if (kept.length < names.length) return { ...clean, refused: 'An attached image could not be kept. Attach it again.' };
-    return { ...clean, attachments: kept.map(({ file, mime, path }) => ({ file, mime, path })) };
+    // Where it was kept rides along, so the talk message can find it again (readTalkImage).
+    return { ...clean, attachments: kept.map(({ file, mime, path }) => ({ file, mime, path, ...(round != null ? { round } : {}) })) };
   }
   return clean;
 }
 
-export const jobActionHandler = {
+// A conversation an idea just opened is named by Haiku from its first message, as a
+// job is from its description (job-create.js): after the fact, so naming never
+// delays or fails a send, and billed to the card that answers it once one is up.
+async function nameConvo(host, jobId, convoId, run) {
+  const first = host.stores.jobs.get(jobId)?.talk?.find((m) => m.convo === convoId && m.from === 'human');
+  const { title, liveSessionId } = await generateConvoTitle(first?.text || '', { run });
+  host.stores.jobs.titleConvo(jobId, convoId, title);
+  await host.rebuild();
+  const sid = host.stores.jobs.get(jobId)?.runs.findLast((r) => r.convo === convoId && r.sessionId)?.sessionId;
+  if (sid && liveSessionId) host.sessions.bill(sid, liveSessionId);
+}
+
+export const makeJobActionHandler = ({ run = runHeadlessClaude } = {}) => ({
   type: 'job-action',
   async handler(raw, host) {
     const { refused, ...msg } = await prepare(raw, host);
+    const had = new Set((host.stores.jobs.get(msg.id)?.convos || []).map((c) => c.id));
     const ids = { jobId: msg.id, action: msg.action, ...(msg.subJobId ? { subJobId: msg.subJobId } : {}) };
     if (refused) { host.broadcast({ event: 'job-action-failed', ...ids, error: refused }); return; }
     // A refusal goes out as a frame rather than a throw, which never reaches the
@@ -83,6 +100,20 @@ export const jobActionHandler = {
     await host.rebuild();
     host.broadcast({ event: 'job-action-complete', ...ids });
     kick(host).catch((e) => host.log('job-action tick failed', e));
+    for (const c of host.stores.jobs.get(msg.id)?.convos || []) {
+      if (c.titlePending && !had.has(c.id)) nameConvo(host, msg.id, c.id, run).catch((e) => host.log('conversation title generation failed', e));
+    }
+  },
+});
+export const jobActionHandler = makeJobActionHandler();
+
+// The wrangler's answers the human now has in front of them: the job leaves the
+// to-read state. Silent, so neither a toast nor a closed dialog follows it.
+export const jobTalkSeenHandler = {
+  type: 'job-talk-seen',
+  async handler(msg, host) {
+    const convos = Array.isArray(msg.convos) ? msg.convos.filter((c) => typeof c === 'string').slice(0, 50) : [];
+    if (convos.length && host.stores.jobs.seenTalk(msg.id, convos)) await host.rebuild();
   },
 };
 
@@ -132,7 +163,8 @@ export const jobOpenIdeHandler = makeOpenIdeHandler();
 // store (`images:keep`) and nothing serves that store to a browser, so the bytes
 // ride the one outbound channel there is. Asked once per job per dialog, and a
 // name the store has lost is simply absent. Pictures pasted into a New idea's
-// conversation ride along as `idea:<file>`.
+// conversation ride along as `idea:<file>`, and those pasted into a running job's
+// conversations with the wrangler as `talk:<file>`.
 export const jobImagesHandler = {
   type: 'job-images',
   handler(msg, host) {
@@ -144,6 +176,11 @@ export const jobImagesHandler = {
     for (const { file } of (job?.idea?.thread || []).flatMap((m) => m.images || [])) {
       const got = readIdeaImage({ jobId: job.id, file });
       if (got) images.push({ name: `idea:${file}`, mime: got.mime, dataBase64: got.bytes.toString('base64') });
+    }
+    // A message saved before talk kept its files holds only a count.
+    for (const { file, sub, round } of (job?.talk || []).flatMap((m) => Array.isArray(m.images) ? m.images : [])) {
+      const got = readTalkImage({ jobId: job.id, subId: sub, round, file });
+      if (got) images.push({ name: `talk:${file}`, mime: got.mime, dataBase64: got.bytes.toString('base64') });
     }
     host.broadcast({ event: 'job-images', jobId: msg.id, images });
   },
@@ -243,4 +280,4 @@ export function makeFeatureRequestHandlers({ run = runFile } = {}) {
   }];
 }
 
-export const HANDLERS = [jobCreateHandler, jobActionHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler, jobEvidenceHandler, jobRunningLogsHandler, ...makeFeatureRequestHandlers()];
+export const HANDLERS = [jobCreateHandler, jobActionHandler, jobTalkSeenHandler, jobSettingsHandler, jobOpenIdeHandler, jobImagesHandler, jobEvidenceHandler, jobRunningLogsHandler, ...makeFeatureRequestHandlers()];

@@ -8,7 +8,7 @@ import { LEGACY_WRITE } from './job-writes.js';
 // the safe ones, and the planner's own limit is `maxReplans` tries per step, after
 // which the step is DECLARED red to the human with every attempt listed.
 // Never automatic, whatever the setting: Accept red, Mark done and Recover claim
-// something about the outside world; cancelling work that has a PR; changing a
+// something about the outside world; a retry is the human's to start; cancelling work that has a PR; changing a
 // frozen sub-job. Pure over the job draft job-store.js is about to persist, like
 // job-replan.js.
 
@@ -44,9 +44,24 @@ export function redScope(job, id) {
   }
   return scope;
 }
-// A pending plan change freezes what it may still edit: all of the job, or, for
-// a replan a red step started, that step and the sub-jobs after it.
-export const heldBy = (job, sub) => !!job.replan && (!job.replan.red || redScope(job, job.replan.red.sub).has(sub.id));
+// What a waiting proposal would change, in any of its options: the steps it
+// edits, cancels or acts on. Nothing else waits for the human to read it.
+export function touchedBy(proposal) {
+  const ids = new Set();
+  for (const o of proposal ? [proposal, ...(proposal.alternatives || [])] : []) {
+    for (const e of o.changes?.edited || []) ids.add(e.id);
+    for (const id of o.changes?.removed || []) ids.add(id);
+    for (const a of o.actions || []) ids.add(a.sub);
+  }
+  return ids;
+}
+// A plan change never pauses the job. While the wrangler drafts, only the step
+// the idea was typed on waits (its actions are pinned to what the human read),
+// and once its proposal is up so does whatever it touches, so the step it edits
+// is still the one the human approves. A red step's replan also holds that step
+// and the sub-jobs after it from the start.
+export const heldBy = (job, sub) => !!job.replan && (job.replan.source?.sub === sub.id || touchedBy(job.replan.proposal).has(sub.id)
+  || (!!job.replan.red && redScope(job, job.replan.red.sub).has(sub.id)));
 
 const note = (sub, entry) => { sub.red = { ...(sub.red || {}), attempts: [...(sub.red?.attempts || []), entry] }; };
 export const noteAttempt = (sub, run, summary, outcome, now) => note(sub, { at: now, run: run?.id || null, summary: oneLine(summary, 400), outcome });
@@ -67,6 +82,7 @@ export function holdRed(job, subId) {
   if (sub?.error) sub.red = { ...(sub.red || {}), held: redRef(job, sub) };
 }
 
+const othersRed = (job, sub) => job.subJobs.filter((s) => s.id !== sub.id && !!s.error && !s.cancelledAt && !['cleanup', 'done'].includes(s.stage) && !isHumanSub(s));
 // What the planner is told about the red step. It decides: fix the step, change
 // the plan, or escalate. `auto` says whether its fix lands without the human.
 export function redFeedback(job, sub, n, limit) {
@@ -79,7 +95,9 @@ export function redFeedback(job, sub, n, limit) {
     isPrSub(sub) && sub.pr?.url ? `PR ${sub.pr.url}${sub.pr.head ? ` at head ${sub.pr.head}` : ''}${sub.pr.dirty ? ' · merge conflicts' : ''}${checks.length ? ` · failing checks: ${checks.join(', ')}` : ''}${sub.stage === 'deployment' ? ` · post-merge run FAILING at merge ${sub.pr.mergeCommit}${runs.length ? ` (${runs.join(', ')})` : ''}` : ''}` : '',
     (sub.repairs || []).length ? `CI repairs already tried: ${sub.repairs.map((r) => (r.changes || []).join(' · ')).join(' | ')}` : '',
     (sub.red?.attempts || []).length ? `Your earlier tries on this step: ${triedLines(sub).join(' | ')}` : '',
-    job.reviewRed ?? true ? 'Red steps is "You decide": whatever you propose waits for the human.' : 'Red steps is "Wrangler replans": a rework of the step (and, only if the job\'s Plan checkpoint is Auto, plan edits that touch no PR) applies by itself. accept-red, mark and recover never do, so propose them only when they are the honest answer and cite the evidence.',
+    othersRed(job, sub).length ? `Also red right now: ${othersRed(job, sub).map((s) => `${s.id} ${quoted(s.title)}: ${oneLine(s.error)}`).join(' | ')}. Any that fail for the same cause belong in this one proposal: put them after the same fix.` : '',
+    job.reviewRed ?? true ? 'Red steps is "You decide": whatever you propose waits for the human.' : 'Red steps is "Wrangler replans": a rework of the step (and, only if the job\'s Plan checkpoint is Auto, plan edits that touch no PR) applies by itself. accept-red, mark, recover and retry never do, so propose them only when they are the honest answer and cite the evidence.',
+    'A failure that will not happen again (a race with another step, a lock, a network blip) that the step\'s own code did not cause is a retry action, {type:"retry",sub}: it waits for the human to approve it, whatever Red steps says. An unchanged plan with no actions changes nothing: it declares the step red to the human, and your diagnosis.summary is what they read on it, so say what you found and the decision they need, never what approving would do (there is nothing to approve).',
     'Only this step and the sub-jobs after it are held while you work; everything else keeps running. If neither a fix nor a plan change can get past it without a decision only the human can make, send the escalate receipt: what you found, what you tried, and the one decision you need, with up to three ranked options if there is a real choice.',
   ].filter(Boolean).join('\n');
 }
@@ -87,9 +105,10 @@ export function redFeedback(job, sub, n, limit) {
 // The whole of an automatic fix: a rework of the step, and plan edits only when
 // the human let the plan change without them (Plan on Auto) and none of them
 // cancels work that has a PR. Anything claiming something about the outside world
-// is the human's. Judged on the recommended option only.
+// is the human's, and so is a retry, whatever Red steps says. Judged on the
+// recommended option only.
 export function autoApplicable(job, proposal) {
-  if (proposal.escalation) return false;
+  if (proposal.escalation || proposal.actions.some((a) => a.type === 'retry')) return false;
   const { added, edited, removed } = proposal.changes;
   if (!proposal.actions.length && !added.length && !edited.length && !removed.length) return false;
   if (proposal.actions.some((a) => a.type !== 'rework')) return false;
@@ -116,7 +135,7 @@ export function settleProposal(job, run, { now, apply }) {
   const empty = !proposal.actions.length && ![...proposal.changes.added, ...proposal.changes.edited, ...proposal.changes.removed].length;
   if (empty) {
     const sub = subOf();
-    if (sub) { noteAttempt(sub, run, summary, 'declared', now); declareRed(job, sub, { summary: proposal.diagnosis?.summary || 'The planner found nothing it could change', ask: 'Decide how to carry on: send an idea in, accept the red, or retry', auto: false }, now); }
+    if (sub) { noteAttempt(sub, run, summary, 'declared', now); declareRed(job, sub, { summary: proposal.diagnosis?.summary || 'Wrangler found nothing it could change', ask: 'Decide how to carry on: send an idea in, accept the red, or retry', auto: false }, now); }
     job.replan = null;
     return 'declared';
   }

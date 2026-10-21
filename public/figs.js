@@ -1,4 +1,4 @@
-import { ICONS } from './icons.js';
+import { ICONS, wranglerMark } from './icons.js';
 import { proofListHtml } from './job-proof.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
 
@@ -9,7 +9,7 @@ import { runningChipHtml, stoppedHtml } from './job-running.js';
 // A composer at rest or with words in it (jobs-view.js changeBoxHtml markup). The
 // words sit in a span, not a textarea, so a long example wraps instead of scrolling.
 export const composer = (to, placeholder, hint, text = '') => `<div class="job-change${text ? ' has-text is-open' : ''}">
-  <div class="job-change-row"><span class="job-change-to"><i>${to[0]}</i>${to}</span><span class="job-change-text${text ? '' : ' ph'}">${text || placeholder}</span><span class="job-change-attach">${ICONS.image}</span><span class="job-change-go${text ? ' on' : ''}">${ICONS.send}</span></div>
+  <div class="job-change-row"><span class="job-change-to">${to === 'Wrangler' ? wranglerMark('small') : `<i>${to[0]}</i>`}${to}</span><span class="job-change-text${text ? '' : ' ph'}">${text || placeholder}</span><span class="job-change-attach">${ICONS.image}</span><span class="job-change-go${text ? ' on' : ''}">${ICONS.send}</span></div>
   <div class="job-change-foot"><span>${hint}</span><span>Paste or drop a screenshot</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 
 // Two drawn screenshots: the Customers table with a filter applied, and the export open in a spreadsheet.

@@ -73,6 +73,8 @@ test('a vague idea is its conversation: the planner\'s reply, escaped, and Enter
   assert.equal(f.q('#job-dialog .job-idea-band > .job-detail-cost').textContent, '$0.39', 'the price sits in the band');
   assert.equal(f.q('#job-dialog .job-idea .job-chips'), null, 'no chip row under it');
   assert.equal(f.q('.job-idea-thinking'), null, 'the planner is waiting, not thinking');
+  assert.equal(view.querySelector('.job-idea-msg > svg.wrangler-mark .wrangler-mark-hat') && view.querySelector('.job-idea-who').firstChild.textContent, 'Wrangler', 'it speaks as Wrangler, under its hat');
+  assert.deepEqual([f.q('[data-idea-composer] .job-change-to').textContent, !!f.q('[data-idea-composer] .job-change-to svg.wrangler-mark.small'), f.q('[data-idea-send]').getAttribute('aria-label')], ['To Wrangler', true, 'Send to Wrangler']);
   const box = f.q('[data-idea-composer] textarea');
   box.value = 'Green and unmerged for a day.'; box.dispatchEvent(new f.window.Event('input'));
   f.key(box, 'Enter', { shiftKey: true });
@@ -80,7 +82,7 @@ test('a vague idea is its conversation: the planner\'s reply, escaped, and Enter
   f.key(box, 'Enter');
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'idea-reply', text: 'Green and unmerged for a day.' });
   assert.equal([...f.q('#job-dialog').querySelectorAll('.job-sent-bubble')].at(-1).textContent, 'Green and unmerged for a day.', 'drawn at once');
-  assert.match(f.q('.job-idea-thinking').textContent, /Planner is thinking/);
+  assert.match(f.q('.job-idea-thinking').textContent, /Wrangler is thinking/);
   f.data.jobs[0].idea.thread.push({ id: 'm2', at: Date.now(), from: 'human', text: 'Green and unmerged for a day.', sentAt: null });
   f.view.update(f.data);
   assert.equal([...f.q('#job-dialog').querySelectorAll('.job-sent-bubble')].filter((b) => b.textContent === 'Green and unmerged for a day.').length, 1, 'never twice once the thread has it');
@@ -274,14 +276,15 @@ test('a suggestion something newer was said after is stale and cannot be pressed
   assert.equal(ideaStage(f.data.jobs[0]), 'thinking', 'an unsent reply is the planner\'s turn');
 });
 
-test('on the board an idea waiting on you is a needs-you stub; one the planner is on is working', () => {
+test('on the board an idea waiting on you is an amber stub; one the planner is on is working', () => {
   const reply = ideaJob([asked]), suggested = ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }]), thinking = ideaJob([], [parked({ parkedAt: null })]);
   assert.deepEqual([ideaStage(reply), ideaStage(suggested), ideaStage(thinking)], ['reply', 'suggested', 'thinking']);
   assert.deepEqual([jobNeedsReview(reply, null), jobNeedsReview(suggested, null), jobNeedsReview(thinking, null)], [true, true, false]);
-  assert.deepEqual([plateAsk(reply).label, plateAsk(reply).button], ['Your reply', 'Reply']);
+  assert.deepEqual([plateAsk(reply).label, plateAsk(reply).button, plateAsk(reply).tone], ['Wrangler asked', 'Reply', 'warn']);
+  assert.equal(plateAsk(suggested).tone, 'warn');
   assert.deepEqual([plateAsk(suggested).label, plateAsk(suggested).detail], ['Job suggested', '2 PRs · 1 session · 1 write · wrangler-squared']);
   assert.equal(plateAsk(thinking), null);
-  assert.deepEqual(jobStatus(thinking, null), { tone: 'working', text: 'Planner is reading the idea' });
+  assert.deepEqual(jobStatus(thinking, null), { tone: 'working', text: 'Wrangler is reading the idea' });
   assert.equal(ideaStage({ ...reply, idea: undefined }), null, 'a job not made from New idea has no conversation');
 });
 
@@ -290,6 +293,7 @@ test('the planner\'s prose is escaped before it is marked up, and a summary coun
   assert.equal(proseHtml('Two things:\n1. Whose CI?\n   a) ours\n2. Which pain?\nIf you mean (a), I would'), '<p>Two things:</p><ol><li>Whose CI?<br>a) ours</li><li>Which pain?</li></ol><p>If you mean (a), I would</p>');
   assert.equal(proseHtml('Three layers:\n\n1. One\n\n2. Two\n   more\n\n3. Three'), '<p>Three layers:</p><ol><li>One</li></ol><ol start="2"><li>Two<br>more</li></ol><ol start="3"><li>Three</li></ol>', 'a list split by blank lines keeps its written numbers');
   assert.equal(proseHtml('1. One\n2. Two\n3. Three'), '<ol><li>One</li><li>Two</li><li>Three</li></ol>');
+  assert.equal(proseHtml('**Why** it <waits>'), '<p><b>Why</b> it &lt;waits&gt;</p>');
   const s = suggestionSummary(suggest.plan);
   assert.deepEqual([s.work.length, s.repos.length, s.line], [3, 1, '3 sub-jobs · wrangler-squared · Slack']);
 });
@@ -310,7 +314,7 @@ test('an idea is a plate under a forming sky, tagged IDEA, idle while the planne
   assert.equal(ideaPlate.querySelector('.job-plate-tag').textContent, 'Idea');
   assert.equal(ideaPlate.querySelector('.job-plate-idea'), null, 'the card shows only its age');
   assert.doesNotMatch(ideaPlate.querySelector('.job-plate-where').textContent, /message/);
-  assert.equal(f.q('[data-board="think"] .job-status').textContent, 'Planner is reading the idea');
+  assert.equal(f.q('[data-board="think"] .job-status').textContent, 'Wrangler is reading the idea');
   f.q('[data-filter="ideas"]').click();
   assert.deepEqual([...document.querySelectorAll('.job-plate')].map((p) => p.dataset.board).sort(), ['later', 'reply', 'sugg', 'think'], 'the Ideas filter shows only ideas');
   assert.equal(f.q('[data-filter="ideas"] .jobs-rail-n').textContent, '4');

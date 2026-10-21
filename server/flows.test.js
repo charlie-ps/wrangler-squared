@@ -173,7 +173,7 @@ test('a PR step: plan, approve, launch, ready, code review, published, merge app
   const impl = f.runOf('api', 'implementation');
   assert.ok(impl.sessionId, 'approval launches the implementation');
   const { branch, path: wt } = f.sub('api').worktree;
-  assert.equal(git(wt, 'rev-parse', '--abbrev-ref', 'HEAD'), branch, 'the step works in the worktree the wrangler cut');
+  assert.equal(git(wt, 'rev-parse', '--abbrev-ref', 'HEAD'), branch, 'the step works in the worktree Wrangler cut');
 
   f.work('api', 'api.js', 'export const ok = true;\n');
   const parked = await f.report(impl, { kind: 'ready', checks: ['Tests pass'] });

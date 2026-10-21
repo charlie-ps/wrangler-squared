@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isFrozen, mergeReplan, approveReplan, replanStatus, requestReplan } from './job-replan.js';
+import { isFrozen, mergeReplan, approveReplan, replanStatus, requestReplan, discardReplan, startQueued, queuedReady } from './job-replan.js';
 import { jobPrompt } from './job-prompts.js';
 import { replanAsked } from '../public/replan-asks.js';
 
@@ -49,6 +49,26 @@ test('an approved brief or landing-order change sends code already written back 
   const k = fresh(true); approveReplan(k, 'p1', { now: 5 });
   assert.equal(at(k, 'b').stage, 'implementation', 'under code review the rework comes back through review');
   assert.equal(at(k, 'b').fixRequested, null); assert.match(at(k, 'b').note, /^Land b after a/);
+});
+
+test('an approved brief or after change sends a blocked step with no code back to wait on it; any other edit leaves it red', () => {
+  const blocked = { error: 'Blocked: needs a fix first', blocked: { summary: 'Needs a fix first', kind: 'blocked', phase: 'session', at: 1 }, red: { attempts: [{ outcome: 'proposed' }], held: 'r', declared: { ref: 'r' } } };
+  const subs = [session('s'), spec('p'), session('t')];
+  const at = (j, id) => j.subJobs.find((x) => x.id === id);
+  const j = job(subs, [live(subs[0], { stage: 'session', state: 'failed', ...structuredClone(blocked) }), live(subs[1], { state: 'failed', ...structuredClone(blocked) }),
+    live(subs[2], { stage: 'session', state: 'failed', ...structuredClone(blocked) })]);
+  j.replan = { feedback: 'Land a fix first', proposal: { id: 'p1', plan: { context: '', subJobs: [spec('fix'), session('s', { after: ['fix'] }), spec('p', [], { brief: 'Implement p on the fix' }),
+    session('t', { title: 'Renamed t' })] } } };
+  const { lines } = approveReplan(j, 'p1', { now: 5, buildSubJob: (p, s) => live(s) });
+  for (const id of ['s', 'p']) {
+    const s = at(j, id);
+    assert.deepEqual([s.state, s.error, s.blocked], ['queued', null, null], `${id} waits on its prerequisites again`);
+    assert.deepEqual([s.red.held, s.red.declared, s.red.attempts.length], [null, null, 1], 'the decision about the old red is gone; its history is kept');
+  }
+  assert.equal(at(j, 's').stage, 'session'); assert.deepEqual(at(j, 's').after, ['fix']);
+  assert.equal(at(j, 'p').stage, 'implementation'); assert.equal(at(j, 'p').brief, 'Implement p on the fix');
+  assert.deepEqual([at(j, 't').title, at(j, 't').state, at(j, 't').error], ['Renamed t', 'failed', 'Blocked: needs a fix first'], 'a new title asks nothing of the step');
+  assert.deepEqual(lines.map((l) => l.detail).filter((d) => !/^Plan change/.test(d)), ['Sent “Run s” back to wait for its new brief', 'Sent “Deliver p” back to wait for its new brief']);
 });
 
 const write = (id, by, action, extra = {}) => ({ id, kind: 'write', place: { type: 'jira' }, title: `Write ${id}`, storyId: 's', after: [], by, action, ...extra });
@@ -174,6 +194,77 @@ test('an approved base change reaches the live sub-job, which is what the launch
   assert.equal(k.subJobs[0].base, 'main');
 });
 
+// A running job with a planner drafting `first`, conversation c1 open.
+const drafting = () => {
+  const subs = [spec('a')];
+  const j = { ...job(subs, [live(subs[0])]), stage: 'active', talk: [], convos: [{ id: 'c1', at: 1, pending: null }, { id: 'c2', at: 1, pending: null }] };
+  requestReplan(j, 'first', 1, null, { convo: 'c1' });
+  j.runs.push({ id: 'run_plan', subJobId: null, stopped: false });
+  return j;
+};
+
+test('a change sent while the wrangler drafts queues FIFO with its convo, source and images, and says so in its conversation', () => {
+  const j = drafting();
+  assert.deepEqual(requestReplan(j, 'second', 2, null, { convo: 'c2', source: { sub: 'a', at: 'step', ref: 'x' }, images: [{ path: '/p.png' }] }), { queued: 1 });
+  assert.deepEqual(requestReplan(j, 'third', 3, null, { convo: 'c1' }), { queued: 2 });
+  assert.equal(j.replan.feedback, 'first', 'the change being drawn is untouched');
+  assert.deepEqual(j.replanQueue.map((q) => [q.feedback, q.convo]), [['second', 'c2'], ['third', 'c1']]);
+  assert.deepEqual(j.replanQueue[0].images, [{ path: '/p.png' }]); assert.equal(j.replanQueue[0].source.sub, 'a');
+  assert.deepEqual(j.talk.map((m) => [m.kind, m.convo]), [['queued', 'c2'], ['queued', 'c1']]);
+  assert.match(j.talk[0].text, /^Queued behind the plan change I am drawing now \(next in line\)/);
+  assert.match(j.talk[1].text, /\(number 2 in line\)/);
+  // The ask run handing over its own question is not the planner it waits behind.
+  const ask = drafting(); ask.runs[0].stopped = true; ask.runs.push({ id: 'run_ask', subJobId: null, ask: 'm1', stopped: false });
+  ask.replan = null;
+  assert.deepEqual(requestReplan(ask, 'more', 2, null, { running: 'run_ask', convo: 'c2' }), {}, 'no change drawn or waiting: it starts its own');
+  assert.equal(replanAsked(ask.replan), 'more');
+});
+
+test('an ask run\'s hand-over queues behind a change no planner has claimed yet, never becoming its proposal', () => {
+  const j = drafting(); j.runs[0].stopped = true;
+  j.replan.red = { sub: 'a', auto: true, n: 1 };
+  j.runs.push({ id: 'run_ask', subJobId: null, ask: 'm1', convo: 'c2', stopped: false });
+  assert.deepEqual(requestReplan(j, 'unrelated docs step', 2, null, { running: 'run_ask', convo: 'c2' }), { queued: 1 });
+  assert.deepEqual([j.replan.feedback, j.replan.convo, j.replan.red.human, j.replan.earlier], ['first', 'c1', undefined, []], 'the change waiting is untouched');
+  assert.deepEqual(j.replanQueue.map((q) => [q.feedback, q.convo]), [['unrelated docs step', 'c2']]);
+  // One whose planner died stopped the job: the next idea is its way back, as before.
+  j.error = 'Planner stopped'; delete j.replanQueue;
+  assert.deepEqual(requestReplan(j, 'try again', 3, null, { running: 'run_ask', convo: 'c2' }), {});
+  assert.equal(j.replan.feedback, 'try again');
+});
+
+test('approving the current change starts a planning round for the next queued one against the plan as it stands', () => {
+  const j = drafting();
+  requestReplan(j, 'second', 2, null, { convo: 'c2' });
+  requestReplan(j, 'third', 3, null, { convo: 'c1' });
+  j.runs[0].report = { kind: 'plan' };
+  j.replan.proposal = { id: 'p1', plan: { context: '', stories: [], subJobs: [spec('a', [], { title: 'Renamed a' })] }, actions: [] };
+  approveReplan(j, 'p1', { now: 5 });
+  assert.equal(j.plan.subJobs[0].title, 'Renamed a');
+  assert.deepEqual([j.replan.feedback, j.replan.convo, j.replan.proposal, j.replan.previous], ['second', 'c2', null, null], 'its own round, not folded into the last');
+  assert.deepEqual(j.replanQueue.map((q) => q.feedback), ['third']);
+  assert.equal(j.talk.at(-1).kind, 'dequeued'); assert.equal(j.talk.at(-1).convo, 'c2');
+  assert.deepEqual(requestReplan(j, 'fourth', 6), {}, 'nothing drafting yet: a new idea folds into the next change as before');
+});
+
+test('discarding starts the next queued change once the discarded planner has stopped; the runner retries until then', () => {
+  const j = drafting();
+  requestReplan(j, 'second', 2, null, { convo: 'c2' });
+  discardReplan(j);
+  assert.equal(j.replan, null, 'the discarded planner is still drafting');
+  assert.equal(queuedReady(j), false);
+  assert.deepEqual(requestReplan(j, 'third', 3), { queued: 2 }, 'still behind the queue');
+  j.runs[0].stopped = true;
+  assert.equal(queuedReady(j), true);
+  assert.equal(startQueued(j, 4), true);
+  assert.equal(j.replan.feedback, 'second');
+  assert.deepEqual(j.replanQueue.map((q) => q.feedback), ['third']);
+  // With nothing drafting, discard starts the next one itself.
+  discardReplan(j);
+  assert.equal(j.replan.feedback, 'third'); assert.equal(j.replanQueue, undefined);
+  assert.equal(startQueued(j, 5), false, 'one change at a time');
+});
+
 // A write the proposal kept as it stood, edited by the human outside a red
 // replan's hold and then made, or a step already landed whose stored entry no
 // longer matches: either way the proposal now asks a landed step to change, and
@@ -194,7 +285,7 @@ test('a landed step whose stored spec moved after the proposal goes back to the 
   moveSpec(kept); Object.assign(kept.subJobs.find((s) => s.id === 'w-local'), { stage: 'done', state: 'done' });
   const back = approveReplan(kept, 'p1', { now: 9, buildSubJob: (_, s) => s });
   assert.equal(back.sentBack, true, 'edited, then made: back to the planner, not “w-local has already landed”');
-  assert.deepEqual(back.lines.map((l) => l.detail), ['“Write w-local” has finished and changed since the plan change was proposed, so it went back to the planner']);
+  assert.deepEqual(back.lines.map((l) => l.detail), ['“Write w-local” has finished and changed since the plan change was proposed, so it went back to Wrangler']);
   assert.match(kept.replan.feedback, /“Write w-local” \(w-local\) has finished and changed/);
   assert.equal(kept.replan.proposal, null);
   assert.equal(kept.subJobs.find((s) => s.id === 'a').brief, 'Implement a', 'nothing of the proposal applied');

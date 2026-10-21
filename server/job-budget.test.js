@@ -9,9 +9,12 @@ import { limitOf, isOver, budgetOf, withSpendLimit, BudgetEnforcer, INTERRUPT_CO
 import { withLiveUsd } from './job-spend.js';
 import { JobSpendRefresh } from './job-spend-refresh.js';
 import { settingsSchema } from './jobs-schema.js';
-import { jobSettingsHandler, jobActionHandler } from './handlers.js';
+import { jobSettingsHandler, makeJobActionHandler } from './handlers.js';
 import { _resetForTests, runnerFor, noteGraph } from './jobs.js';
 import { fakeHost } from './test-helpers.js';
+
+// Never a real Haiku run: a conversation an idea opens is named after the action.
+const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
 
 const input = { title: 'Reliable sign-in', intent: 'Customers can sign in reliably', repos: ['/repo'] };
 const plan = { context: '', stories: [], subJobs: [{ id: 'api', title: 'Deliver api', repo: '/repo', after: [], brief: 'Implement api' }] };
@@ -192,17 +195,12 @@ test('a new X in Settings re-evaluates every job in flight: lower pauses one alr
   assert.deepEqual(f.get().moves.filter((m) => m.move.startsWith('budget')).map((m) => m.move), ['budget-pause', 'budget-release', 'budget-pause', 'budget-release']);
 });
 
-test('a budget-paused job starts no helper, and cancelling it clears the budget pause', async (t) => {
+test('cancelling a budget-paused job clears the budget pause', async (t) => {
   const f = fixture(t);
   await f.active();
   f.usd.set(f.launched.at(-1).sid, 9);
   f.store.settings({ spendLimit: 1 });
   await f.tick();
-  let spawned = 0;
-  f.runner.runtime.spawnHelper = async () => { spawned++; return 'helper'; };
-  f.store.action(f.job.id, 'ask-helper', { subJobId: f.get().subJobs[0].id });
-  await f.tick();
-  assert.equal(spawned, 0);
   assert.throws(() => f.store.action(f.job.id, 'top-up', { topUps: 5 }));
   f.store.action(f.job.id, 'cancel-job');
   assert.equal(f.get().budgetPaused, null);

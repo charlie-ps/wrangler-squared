@@ -38,7 +38,7 @@ async function treeOf(host, caller, runId) {
 
 export const jobReportTool = {
   name: 'job_report',
-  description: 'Submit the receipt for your assigned Wrangler² step, then stop. One receipt per run: plan (a plan change may also carry diagnosis, actions pinned to a head, merge commit, stage or review round — forward to a session open on review, rework, accept-red, mark, recover — and up to three ranked options), ready (the working tree awaits the human\'s code review, nothing committed; with Code on You review your session then stays open, paused, for the human to write to you; each Show me item of your prompt is answered by a check of that exact text carrying shots, run or couldNot, and a receipt that leaves one out is refused), reply (text, shots?, run?: answers a human who wrote to your paused session; changes nothing, the session stays paused; from a new idea\'s planner it is a turn in the conversation, with suggest?:[{title, plan}] offering one job, or 2–4 when the idea is several jobs), published (the PR url), repaired, deployed or completed (with writes: one result per write your prompt lists — written, already, or failed with the place\'s own error — with its link, or a made output\'s location). A session whose prompt puts writes under review first sends drafts (each reviewed write as it would make it) and waits for mail with the human\'s decision before it completes. Checks are normally 1–3 bullets of a few words, e.g. "Build passed"; keep the detail in the transcript. Only the assigned session can report; identical retries are safe, and a terminal recap does not advance the job. If you cannot finish, go up one level: {kind:"blocked", summary:"one sentence"}, or {kind:"replan", summary, why?} when the work needs more than your step, both of which go to the planner first; {kind:"escalate", summary, tried?, ask} declares your step red for the human with what you found, what you tried and the decision you need (the planner may also attach up to three options). You never change the plan yourself.',
+  description: 'Submit the receipt for your assigned Wrangler² step, then stop. One receipt per run: plan (a plan change may also carry diagnosis, actions pinned to a head, merge commit, stage or review round — forward to a session open on review, rework, accept-red, mark, recover, retry (a red step started again as it is; always waits for the human) — and up to three ranked options), ready (the working tree awaits the human\'s code review, nothing committed; with Code on You review your session then stays open, paused, for the human to write to you; each Show me item of your prompt is answered by a check of that exact text carrying shots, run or couldNot, and a receipt that leaves one out is refused), reply (text, shots?, run?: answers a human who wrote to your paused session; changes nothing, the session stays paused; from a new idea\'s planner it is a turn in the conversation, with suggest?:[{title, plan}] offering one job, or 2–4 when the idea is several jobs; from a planner asked a question about a running job it is the answer, shown in the job\'s conversation), published (the PR url), repaired, deployed or completed (with writes: one result per write your prompt lists — written, already, or failed with the place\'s own error — with its link, or a made output\'s location). A session whose prompt puts writes under review first sends drafts (each reviewed write as it would make it) and waits for mail with the human\'s decision before it completes. Checks are normally 1–3 bullets of a few words, e.g. "Build passed"; keep the detail in the transcript. Only the assigned session can report; identical retries are safe, and a terminal recap does not advance the job. If you cannot finish, go up one level: {kind:"blocked", summary:"one sentence"}, or {kind:"replan", summary, why?} when the work needs more than your step, both of which go to the planner first; {kind:"escalate", summary, tried?, ask} declares your step red for the human with what you found, what you tried and the decision you need (the planner may also attach up to three options). You never change the plan yourself.',
   inputSchema: { runId: z.string(), report: reportSchema },
   async handler({ host, caller }, { runId, report }) {
     try {
@@ -75,23 +75,13 @@ export const getJobContextTool = {
     for (const s of job.subJobs) if (isHumanSub(s) && !(direct.has(s.id) && s.stage === 'done' && !s.cancelledAt)) {
       if (s.result) delete s.result.output;
     }
+    // A conversation's wrangler reads its own conversation: the others are listed
+    // in its prompt only so it knows of them (job-talk.js).
+    if (hit.run.convo) {
+      job.talk = (job.talk || []).filter((m) => m.convo === hit.run.convo);
+      job.convos = (job.convos || []).filter((c) => c.id === hit.run.convo);
+    }
     return result({ job, run: hit.run });
-  },
-};
-
-// Ask an agent's way back (job-helper.js): the helper sends what it found exactly
-// as the step's Add idea box would, so the planner proposes and the human approves.
-// Only the session a step's helper entry names may call it, about that step.
-export const sendStepIdeaTool = {
-  name: 'send_step_idea',
-  description: 'For a helper session the human opened from one step of a Wrangler² job (Ask an agent): send an idea about that step to the job\'s planner, exactly as the step\'s Add idea box does. The planner proposes a change (feedback to the step\'s own agent, a rework, or a plan edit) and the human approves it; this never changes the plan or the step itself. Call it only when the human asks you to send something; text is the idea in plain words, written so the planner can act on it without this conversation. Refused for any session that is not a helper of a step.',
-  inputSchema: { text: z.string().min(1) },
-  async handler({ host, caller }, { text }) {
-    try {
-      const job = host.stores.jobs.helperIdea(caller, text);
-      await host.rebuild();
-      return result({ accepted: true, jobId: job.id, next: 'Sent to the job\'s planner. Its proposal waits for the human\'s approval on the board; tell the human it was sent.' });
-    } catch (e) { return errorResult(e.message); }
   },
 };
 
@@ -118,7 +108,7 @@ export function makeCreateJobTool(deps) {
 }
 export const createJobTool = makeCreateJobTool();
 
-export const TOOLS = [jobReportTool, getJobContextTool, createJobTool, sendStepIdeaTool];
+export const TOOLS = [jobReportTool, getJobContextTool, createJobTool];
 
 // Per-caller veto (manifest `hideTool`): a job step must not see the spawning and
 // scheduling tools — core's mcp/server.js skipped them for an `automationRun`

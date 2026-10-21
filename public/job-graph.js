@@ -52,7 +52,7 @@ const branchEditorHtml = (s, i, base, open) => `<details class="job-node-deps jo
   <input data-base="${i}" value="${esc(s.base || '')}" placeholder="${esc(base || 'Default branch')}" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Land on branch"></details>`;
 // A place pill's parts: the glyph, a short mono label, a dot per write in its
 // state, and ↗ once the place exists.
-const urgentOf = (states) => ['failing', 'needs'].find((st) => states.includes(st));
+const urgentOf = (states) => ['failing', 'needs', 'change', 'read'].find((st) => states.includes(st));
 const placePillClass = (p, states, base = 'job-place') => { const u = urgentOf(states); return `${base} ${p.exists ? '' : 'ghost'} ${p.type === 'other' ? 'other' : ''} ${u ? `tone-${STATES[u].tone} urgent` : ''}`; };
 // The ↗ is its own link straight to the place: a link inside a summary follows
 // without toggling it.
@@ -194,7 +194,7 @@ export function planLayout(plan) {
 // node in its live state and labelled with what approval would do to it.
 export const rocketHtml = (id) => `<g class="job-edge-glyph" data-glyph="${esc(id)}"><circle r="12"/><g transform="translate(-9.6 -9.6) scale(.8)">${ROCKET_PATH}</g></g>`;
 const MARKS = { frozen: 'Locked · already landed', removed: 'Will be cancelled', added: 'New', edited: 'Edited', kept: 'Unchanged',
-  'accept-red': 'Accept red', recover: 'Waits for its fix', rework: 'Rework', forward: 'To its open session', 'mark-done': 'Marked done', 'mark-merged': 'Marked merged' };
+  'accept-red': 'Accept red', recover: 'Waits for its fix', rework: 'Rework', forward: 'To its open session', 'mark-done': 'Marked done', 'mark-merged': 'Marked merged', retry: 'Retry this step' };
 // `was` (a proposal's live plan) diffs the drawing: a dependency the change drops
 // stays drawn, struck, so the graph shows every edge it adds and every one it takes away.
 const FIELD_NAMES = { title: 'title', brief: 'brief', check: 'check', show: 'show me', after: 'waits for', action: 'action', on: 'trigger', by: 'session', review: 'review', why: 'why', place: 'place', base: 'base' };
@@ -224,7 +224,7 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     const cls = `job-write tone-${STATES[state].tone} ${dormant ? 'dormant' : ''} ${markOf ? `job-mark-${markOf(w)}` : ''}`;
     const line = markOf ? MARKS[markOf(w)] : !stateOf || pending(w, state) ? writeWhen({ reviewWrites }, w) : lineOf ? lineOf(w) : STATES[state].label;
     const reviewed = writeReviewed({ reviewWrites }, w);
-    const flags = `${reviewed && !editable ? `<span class="job-write-review" title="${isMakeWrite(w) ? 'Reviewed once published' : 'Drafted for your review before it is written'}">${ICONS.eye}</span>` : ''}${editable && !w.added ? `<span class="job-proposed" title="Proposed by the planner">${ICONS.sparkle}</span>` : ''}`;
+    const flags = `${reviewed && !editable ? `<span class="job-write-review" title="${isMakeWrite(w) ? 'Reviewed once published' : 'Drafted for your review before it is written'}">${ICONS.eye}</span>` : ''}${editable && !w.added ? `<span class="job-proposed" title="Proposed by Wrangler">${ICONS.sparkle}</span>` : ''}`;
     const body = `<span class="job-write-state ${stateSolid(state) ? 'on' : ''}">${stateIconHtml(state)}</span><b>${esc(writeAction(w))}${flags}</b><span class="job-write-line">${esc(line)}</span>`;
     const tip = esc([KIND_TITLE.write, w.title, w.why ? `Why: ${w.why}` : ''].filter(Boolean).join('\n'));
     if (editable) {

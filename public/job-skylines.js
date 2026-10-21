@@ -13,6 +13,7 @@ export const PAL = {
   bad: ['#1e0100', '#6c0a02', '#c41c06', '#f43a12', '#ff6a3c', '#ffc0a6', '#ffffff'],
   ok: ['#011410', '#054a2e', '#12935c', '#2ccf87', '#7aefb6', '#d4ffec', '#ffffff'],
   pause: ['#0f041f', '#3c1477', '#6c38c8', '#a06af2', '#c59cff', '#ecdcff', '#ffffff'],
+  read: ['#020f12', '#053c45', '#0e7c88', '#24b6c2', '#6fe0e6', '#d2fbfc', '#ffffff'],
   idle: ['#0b0d12', '#2a2f3b', '#525a6b', '#8a90a0', '#cfd2da', '#f4f4f6', '#ffffff'],
 };
 // Before the collapse (an idea's sky): the cloud's emission, violet to H-alpha rose to a

@@ -8,9 +8,12 @@ import { JobRunner } from './job-runner.js';
 import { reportSchema } from './jobs-schema.js';
 import { jobPrompt, ideaMail, SPLIT_PRINCIPLE } from './job-prompts.js';
 import { liveSuggestion, inConversation, suggestionsOf, ideaEditable, IDEA_TEXT_MAX } from './job-idea.js';
-import { makeJobCreateHandler, jobActionHandler, jobImagesHandler } from './handlers.js';
+import { makeJobCreateHandler, makeJobActionHandler, jobImagesHandler } from './handlers.js';
 import { ideasDir } from './job-evidence.js';
 import { _resetForTests, runnerFor } from './jobs.js';
+
+// Never a real Haiku run: a conversation an idea opens is named after the action.
+const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
 
 const plan = (title = 'Nudge') => ({ context: 'ctx', stories: [], subJobs: [{ id: 'nudge', title, repo: '/repo', after: [], brief: 'Build it', show: ['Plate shows the wait'] }] });
 const suggest = (title = 'Nudge when a green PR waits') => ({ title, plan: plan() });
@@ -92,7 +95,7 @@ test('accepting the suggestion is the plan receipt and its approval, even with P
   assert.ok(job.approvedAt, 'no second Approve for the plan just accepted');
   assert.ok(job.idea.thread.at(-1).acceptedAt);
   assert.equal(inConversation(job), false);
-  assert.match(job.moves.at(-1).detail, /from the planner's suggestion/);
+  assert.match(job.moves.at(-1).detail, /from Wrangler's suggestion/);
   await f.tick();
   assert.equal(f.run(planner).stopped, true);
   assert.equal(f.run(planner).error, undefined, 'stopped quietly, not as a missing receipt');

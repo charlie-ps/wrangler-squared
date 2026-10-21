@@ -3,6 +3,7 @@ import { dropSub, reworkSub, validatePlan, notStarted } from './job-sub-ops.js';
 import { milestoneReached } from './job-writes.js';
 import { stampActions, checkActions, applyActions, movedActions, landedAs, changeView } from './job-actions.js';
 import { parkedReadyRun } from './job-parked.js';
+import { noteProposal, closeProposal, noteQueued, noteDequeued } from './job-talk.js';
 import { replanAsks, replanAsked } from '../public/replan-asks.js';
 
 // Changing the plan of a job that is already running. The human asks with
@@ -40,6 +41,41 @@ const liveRun = (job, subId) => job.runs.some((r) => !r.stopped && r.parkedFor !
 // prerequisites, must not merge as if it met the new plan.
 const REWORKS = ['brief', 'after'];
 const hasCode = (sub) => isPrSub(sub) && (sub.stage === 'review' || (sub.stage === 'pr' && !!sub.pr));
+// An open PR that only gained prerequisites keeps its code: it waits for them,
+// then its branch takes them from the base and its checks run again, with no
+// agent (job-runner.js). A new brief still sends it back to work.
+const catchesUp = (sub, fields) => isPrSub(sub) && sub.stage === 'pr' && !!sub.pr?.url && fields.includes('after') && !fields.includes('brief');
+// Mirrors approveReplan's own test for a red step with no code (PR #220).
+const requeues = (sub, fields) => !!sub.error && !isWriteSub(sub) && fields.some((k) => REWORKS.includes(k));
+const landed = (dep) => !!dep && (isPrSub(dep) ? !!dep.deployed : dep.stage === 'done' && !dep.cancelledAt);
+// What approval does to each step the proposal adds or sends back, in the words
+// its card shows: when it starts, and what it waits for.
+const MILESTONE = { started: () => 'starts', pr: () => 'opens its PR', merged: () => 'merges', deployed: (t) => (t && !isPrSub(t) ? 'is done' : 'deploys'), dropped: () => 'is dropped' };
+function thenOf(job, merged, changes) {
+  const live = new Map(job.subJobs.map((s) => [s.id, s]));
+  const specOf = (id) => merged.subJobs.find((s) => s.id === id);
+  const after = (id) => {
+    const waits = (specOf(id).after || []).filter((d) => !landed(live.get(d))).map((d) => quoted(specOf(d)?.title || d));
+    const on = specOf(id).on;
+    const when = on && !milestoneReached(live.get(on.sub), on.at) ? `once ${quoted(specOf(on.sub)?.title || on.sub)} ${MILESTONE[on.at](specOf(on.sub))}` : '';
+    return [waits.length ? `after ${waits.join(', ')}` : '', when].filter(Boolean).join(', ') || 'now';
+  };
+  const then = {};
+  for (const id of changes.added) if (!isWriteSub(specOf(id))) then[id] = `Starts ${after(id)}`;
+  for (const { id, fields } of changes.edited) {
+    const sub = live.get(id);
+    if (catchesUp(sub, fields)) then[id] = `Keeps its PR · branch updated ${after(id)}`;
+    else if (hasCode(sub) && fields.some((k) => REWORKS.includes(k))) then[id] = `Back to work ${after(id)}`;
+    else if (requeues(sub, fields)) then[id] = `Re-queued · starts ${after(id)}`;
+  }
+  return then;
+}
+function catchUp(sub, now) {
+  sub.error = null; sub.blocked = null; sub.mergeApprovedHead = null; sub.fixRequested = null;
+  if (sub.red) sub.red = { ...sub.red, held: null, declared: null };
+  sub.catchUp = { at: now }; sub.state = 'watching'; sub.nextPollAt = 0;
+  return `Sent ${quoted(sub.title)} to wait for its new prerequisites, then update its branch`;
+}
 
 // The proposal laid over the current plan: what each sub-job becomes, and the
 // merged plan approval would install. Throws the first rule the proposal breaks,
@@ -124,35 +160,75 @@ export function mergeReplan(job, proposal) {
 // last, and the oldest dropped past the cap. `source` is the step and view
 // the latest idea was typed on (job-actions.js holds the step's actions to it);
 // `images` are every idea's pictures, for a forward to carry into a thread.
+// `running` is the ask run handing its question over as a change, and `convo` the
+// conversation its card is drawn in (job-talk.js). Ask runs answer alongside it.
+// One sent while the wrangler is drafting (or behind others already waiting) joins
+// the FIFO `job.replanQueue` instead, and is planned on its own once the change
+// ahead is approved or discarded (startQueued). Returns `{ queued: n }`, its place.
 export const REPLAN_FEEDBACK_MAX = 16000;
-export function requestReplan(job, feedback, now, red = null, { source = null, images = [] } = {}) {
+export const replanQueue = (job) => job.replanQueue || [];
+// A planner still writing the proposal for `job.replan`; one that has reported is done.
+const drafting = (job, except = null) => job.runs.some((r) => !r.stopped && !r.report && !r.subJobId && !r.ask && r.id !== except);
+// A change set but not yet claimed by a planner (a red triage, a dequeued idea,
+// slots full) is being drawn all the same: an ask run's hand-over must not become
+// its proposal. One whose planner died (`job.error`) takes the next idea as its own.
+const undrawn = (job) => !!job.replan && !job.replan.proposal && !job.error;
+export function requestReplan(job, feedback, now, red = null, { source = null, images = [], running = null, convo = null } = {}) {
   if (job.stage !== 'active') throw new Error('Only a running job has a plan to change');
-  if (job.runs.some((r) => !r.stopped && !r.subJobId)) throw new Error('Wait for the planning step to finish');
   const text = String(feedback || '').trim().slice(0, 8000);
   if (!text) throw new Error('Explain the change you want');
+  if (!job.replan?.proposal && (drafting(job, running) || (running && undrawn(job)) || (!job.replan && replanQueue(job).length))) {
+    (job.replanQueue ||= []).push({ feedback: text, at: now, ...(source ? { source } : {}), ...(images.length ? { images } : {}), ...(convo ? { convo } : {}), ...(red ? { red } : {}) });
+    noteQueued(job, convo, job.replanQueue.length, now);
+    return { queued: job.replanQueue.length };
+  }
+  startReplan(job, text, now, red, { source, images, convo });
+  return {};
+}
+function startReplan(job, text, now, red, { source, images, convo }) {
   clearPlanningError(job);
   const prev = job.replan;
+  if (prev?.proposal) closeProposal(job, prev.proposal.id, 'revised', now);
   const asks = [...replanAsks(prev), text];
   while (asks.length > 1 && asks.join('').length > REPLAN_FEEDBACK_MAX) asks.shift();
   const actions = (prev?.proposal?.actions || []).map(({ pin: _pin, ...a }) => a);
   job.replan = { feedback: text, earlier: asks.slice(0, -1), at: now, proposal: null, previous: prev?.proposal?.plan || prev?.previous || null,
     ...(actions.length ? { previousActions: actions } : prev?.proposal ? {} : prev?.previousActions ? { previousActions: prev.previousActions } : {}),
     ...(source || prev?.source ? { source: source || prev.source } : {}),
+    ...(convo || prev?.convo ? { convo: convo || prev.convo } : {}),
     ...(images.length || prev?.images?.length ? { images: [...(prev?.images || []), ...images] } : {}),
     ...(red ? { red } : prev?.red ? { red: { ...prev.red, auto: false, human: true } } : {}) };
+}
+
+// The next queued change becomes the plan change, drawn against the plan as it
+// stands now, so its source is re-pinned to its step as it is now (as sendBack
+// does). Waits while a planner is still drafting (a discarded one stopping): the
+// runner tries again each tick.
+export const queuedReady = (job) => !job.replan && job.stage === 'active' && !job.cancelledAt && !!replanQueue(job).length && !drafting(job);
+export function startQueued(job, now) {
+  if (!queuedReady(job)) return false;
+  const [next, ...rest] = job.replanQueue;
+  if (rest.length) job.replanQueue = rest; else delete job.replanQueue;
+  const step = next.source && job.subJobs.find((s) => s.id === next.source.sub);
+  const view = step && changeView(job, step);
+  startReplan(job, next.feedback, now, next.red || null, { source: view ? { sub: step.id, ...view } : next.source || null, images: next.images || [], convo: next.convo || null });
+  noteDequeued(job, next.convo, now);
+  return true;
 }
 
 // A planning session that died or blocked set the job's error, which holds the
 // whole job; once its replan is gone (discarded, approved or asked again), so is
 // the reason to hold it.
 function clearPlanningError(job) {
-  if (job.runs.filter((r) => !r.subJobId).at(-1)?.phase === 'planning') { job.error = null; job.blocked = null; }
+  if (job.runs.filter((r) => !r.subJobId && !r.ask).at(-1)?.phase === 'planning') { job.error = null; job.blocked = null; }
 }
 
 export function discardReplan(job) {
   if (!job.replan) throw new Error('No plan change is pending');
   clearPlanningError(job);
+  if (job.replan.proposal) closeProposal(job, job.replan.proposal.id, 'discarded', Date.now());
   job.replan = null;
+  startQueued(job, Date.now());
 }
 
 // The receipt of a re-planning run is a proposal, never the plan. Merged here so
@@ -168,10 +244,11 @@ export function proposeReplan(job, run, report, now) {
 export function proposeOptions(job, run, options, extra, now) {
   const option = (o) => {
     const { plan: merged, changes } = mergeReplan(job, o.plan);
-    return { label: o.label || null, why: o.why || null, plan: o.plan, merged, changes, actions: stampActions(job, o.actions, merged, changes) };
+    return { label: o.label || null, why: o.why || null, leaves: o.leaves || null, plan: o.plan, merged, changes, then: thenOf(job, merged, changes), actions: stampActions(job, o.actions, merged, changes) };
   };
   const [first, ...rest] = options.map(option);
   job.replan = { ...job.replan, proposal: { id: run.id, ...first, ...extra, alternatives: rest, at: now } };
+  noteProposal(job, job.replan.proposal, now);
 }
 // The proposal's options as the human picks between them: the first is the one
 // recommended, and the only one a proposal without alternatives has.
@@ -180,8 +257,8 @@ export const optionsOf = (proposal) => [proposal, ...(proposal.alternatives || [
 // Pinned to the proposal the human read, and merged again against the job as it
 // is now: something may have landed since, which is fine unless the proposal
 // changes it. An edit under a live step would change the brief out from under
-// the session working to it; launches are held while a proposal waits, so the
-// step finishes and the human approves again.
+// the session working to it; a step the proposal touches does not launch while
+// it waits, so the step finishes and the human approves again.
 export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 }) {
   const proposal = job.replan?.proposal;
   if (!proposal || proposal.id !== proposalId) throw new Error('The proposal changed. Review the latest version before approving.');
@@ -216,9 +293,16 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
     // already exists: it stays there for Accept.
     if (isWriteSub(sub) && ['write', 'review'].includes(sub.stage) && !(isMakeWrite(sub) && sub.result)) { sub.stage = 'write'; sub.state = 'queued'; sub.error = null; sub.blocked = null; delete sub.writeApprovedAt; delete sub.draft; }
     lines.push({ sub, detail: `Plan change edited ${quoted(spec.title)} (${fields.join(', ')})` });
+    if (catchesUp(sub, fields)) { lines.push({ sub, detail: catchUp(sub, now) }); continue; }
     // The rework launches once the new prerequisites have landed (job-runner.js).
     if (hasCode(sub) && fields.some((k) => REWORKS.includes(k))) {
       lines.push({ sub, detail: reworkSub(job, sub, `${replanAsked(job.replan)}\n\nNew brief: ${spec.brief}`, now) });
+    } else if (sub.error && !isWriteSub(sub) && fields.some((k) => REWORKS.includes(k))) {
+      // A step that went red before writing any code starts over on its new
+      // brief, once its new prerequisites land, as Retry would send it.
+      sub.error = null; sub.blocked = null; sub.state = 'queued';
+      if (sub.red) sub.red = { ...sub.red, held: null, declared: null };
+      lines.push({ sub, detail: `Sent ${quoted(sub.title)} back to wait for its new brief` });
     }
   }
   // Installed first: a story's create dropped here unlinks the story on it.
@@ -249,7 +333,9 @@ export function approveReplan(job, proposalId, { now, buildSubJob, option = 0 })
     changes.removed.length && `${changes.removed.length} cancelled`, chosen.actions?.length && `${chosen.actions.length} ${chosen.actions.length === 1 ? 'action' : 'actions'}`].filter(Boolean).join(', ') || 'no sub-job changed';
   const feedback = job.replan.feedback;
   clearPlanningError(job);
+  closeProposal(job, proposal.id, 'approved', now, lines.filter((l) => l.forwarded).map((l) => ({ sub: l.sub.id, message: l.forwarded })));
   job.replan = null;
+  startQueued(job, now);
   return { lines, detail: `Changed the plan: ${summary}`, feedback };
 }
 
@@ -288,8 +374,8 @@ function sendBack(job, moved, now) {
   const view = step && changeView(job, step);
   requestReplan(job, `Wrangler, not the human: the human approved your last proposal, but it could not apply because the job moved under it: ${what}. Propose again against the job as it stands now; the human's ideas above still stand.`,
     now, null, { source: view ? { sub: step.id, ...view } : source });
-  return { lines: moved.map(({ sub, how }) => ({ sub, detail: `${quoted(sub.title)} ${how} since the plan change was proposed, so it went back to the planner` })),
-    detail: `Sent the plan change back to the planner: ${moved.map(({ sub, how }) => `${quoted(sub.title)} ${how}`).join(', ')} since it was proposed`, feedback: job.replan.feedback, sentBack: true };
+  return { lines: moved.map(({ sub, how }) => ({ sub, detail: `${quoted(sub.title)} ${how} since the plan change was proposed, so it went back to Wrangler` })),
+    detail: `Sent the plan change back to Wrangler: ${moved.map(({ sub, how }) => `${quoted(sub.title)} ${how}`).join(', ')} since it was proposed`, feedback: job.replan.feedback, sentBack: true };
 }
 
 // The re-planner's view of the job: every sub-job as it stands, which ones are
@@ -300,7 +386,7 @@ export function replanStatus(job, sub) {
     : sub.on ? ` · on ${sub.on.sub}/${sub.on.at}` : '';
   const red = sub.pr?.checkStatus === 'failing' && sub.stage === 'pr' ? ` · checks FAILING at head ${sub.pr.head}${sub.pr.dirty ? ' (merge conflicts)' : ''}`
     : sub.stage === 'deployment' && sub.deploymentResult?.status === 'failing' ? ` · post-merge run FAILING at merge ${sub.pr?.mergeCommit}${sub.recoveredBy ? ` (recovering via ${sub.recoveredBy})` : ''}` : '';
-  const run = liveRun(job, sub.id) ? ' · a step is running' : parkedReadyRun(job, sub) && sub.ready ? ` · its session is OPEN on review round ${sub.ready.round || 1}${sub.answering ? ' (answering the last message)' : ' (forward feedback to it)'}` : '';
+  const run = liveRun(job, sub.id) ? ' · a step is running' : parkedReadyRun(job, sub) && sub.ready ? ` · its session is OPEN on review round ${sub.ready.round || 1}${sub.answering ? ' (answering the last message; forward feedback to it, it is read next)' : ' (forward feedback to it)'}` : '';
   const state = sub.cancelledAt ? 'cancelled' : `${sub.stage}${sub.state ? `/${sub.state}` : ''}`;
   return `- ${sub.id} (${sub.kind || 'pr'}) ${JSON.stringify(sub.title)}: ${state}${pr}${red}${write}${run}${isFrozen(sub) ? ' · FROZEN' : ''}`;
 }

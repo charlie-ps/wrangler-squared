@@ -2,7 +2,7 @@ import { esc, tildify } from './util.js';
 import { ICONS } from './icons.js';
 import { SCENES, sceneArt, hash } from './model-plates.js';
 import { skyHtml, inflowHtml } from './job-skylines.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, redFixReady, budgetHeld, ideaStage, liveSuggestion, ideaOpen, uncreatedSuggestions, suggestedLabel } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, isMakeWrite, writeAwaitingReview, writeReviewed, writeTarget, writeVerb, placesOf, PLACES, webUrl, edgesOf, kindClass, kindCountLabel, dependencyLine, dependencySatisfied, jobCostLabel, JOB_COST_TITLE, reviewFlagsLabel, prNumber, promptsWaiting, promptWhere, codeAwaitingReview, deploymentStalled, mergeApprovable, replanProposed, redDeclared, wranglerUnread, redFixReady, budgetHeld, ideaStage, liveSuggestion, ideaOpen, uncreatedSuggestions, suggestedLabel } from './jobs.js';
 import { STATES, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, mainWaiting } from './job-state.js';
 import { hasProof, proofSummary, summaryText, filmHtml } from './job-proof.js';
 import { runningDotHtml } from './job-running.js';
@@ -126,7 +126,7 @@ function skyGraphHtml(job, scene, lvl, art) {
     const [x, y, k] = pos.get(s.id), state = stateOf(job, s), kind = kindClass(s), n = isPrSub(s) ? prNumber(s) : '';
     const line = lineOf(job, s);
     const tip = [s.title, `${KIND_NAME[kind]} · ${line}`, dependencyLine(plan, s)].filter(Boolean).join('\n');
-    const halo = ['running', 'needs'].includes(state) ? `<circle class="halo" cx="${x}" cy="${y}" r="6"/>` : '';
+    const halo = ['running', 'needs', 'change', 'read'].includes(state) ? `<circle class="halo" cx="${x}" cy="${y}" r="6"/>` : '';
     const tag = labels && k <= 2 ? `<text class="lbl ${ink(x, y + 15)}" x="${x}" y="${y + 17}" text-anchor="middle">${KIND_TAG[kind]}${n ? ` #${esc(n)}` : ''}</text>` : '';
     floor = Math.max(floor, y + 6, tag ? y + 20 : 0);
     out.push(`<g class="node ${kind} ${stateSolid(state) ? state : 'hollow'} ${state} tone-${STATES[state].tone} ${ink(x, y)}" data-state="${state}" data-node="${esc(s.id)}" ${open(s)} aria-label="${esc(`${s.title}: ${line}`)}"><title>${esc(tip)}</title>${halo}${SHAPES[kind](x, y)}${tag}<circle cx="${x}" cy="${y}" r="13" fill="transparent"/></g>`);
@@ -154,7 +154,7 @@ function placesHtml(job) {
   if (!places.length) return '';
   return `<div class="job-plate-places">${places.map((p, i) => {
     const states = p.writes.map((w) => stateOf(job, w));
-    const tone = states.includes('failing') ? 'tone-bad urgent' : states.includes('needs') ? 'tone-warn urgent' : '';
+    const tone = states.includes('failing') ? 'tone-bad urgent' : states.some((st) => ['needs', 'change'].includes(st)) ? 'tone-warn urgent' : states.includes('read') ? 'tone-read urgent' : '';
     const tip = [`${PLACES[p.type].name} · ${p.name}`, ...p.writes.map((w) => `${writeTarget(plan, w)}: ${lineOf(job, w)}${writeReviewed(job, w) ? ' (you review it first)' : ''}`)].join('\n');
     const href = p.type === 'file' ? null : webUrl(p.url);
     const body = `${PLACES[p.type].icon}<span class="job-plate-place-name">${esc(p.label)}</span>${states.map((st) => `<i class="tone-${STATES[st].tone}"></i>`).join('')}${p.exists ? '<span class="job-plate-place-out" aria-hidden="true">↗</span>' : ''}`;
@@ -182,8 +182,8 @@ export function placePopHtml(job, i) {
 // read first. Null when nothing needs you.
 export function plateAsk(job) {
   const state = jobState(job);
-  const tone = state === 'failing' ? 'bad' : 'warn';
-  const whole = (label, button, detail = '') => ({ tone, label, detail, button, icon: state === 'failing' ? ICONS.x : ICONS.doc, act: 'open', sub: '' });
+  const tone = state === 'failing' ? 'bad' : state === 'read' ? 'read' : 'warn';
+  const whole = (label, button, detail = '') => ({ tone, label, detail, button, icon: state === 'failing' ? ICONS.x : state === 'read' ? ICONS.note : state === 'change' ? ICONS.eye : ICONS.doc, act: 'open', sub: '' });
   if (job.error) return whole('Needs attention', 'Open');
   // At its spend limit nothing of the job moves until the human adds to it. The
   // figures and Add $X stay in the job's own dialog: the board never shows the limit.
@@ -195,7 +195,7 @@ export function plateAsk(job) {
     const [p] = prompts;
     return { tone, label: 'Prompt waiting', detail: `${promptWhere(job, p)}${prompts.length > 1 ? ` +${prompts.length - 1}` : ''}`, button: 'Answer', icon: ICONS.terminal, act: 'session', sub: p.sub?.id || '', session: p.sessionId };
   }
-  if (!['needs', 'failing'].includes(state)) {
+  if (!['needs', 'change', 'read', 'failing'].includes(state)) {
     const [m, ...more] = mainWaiting(job);
     return m ? { tone: 'warn', label: jobLabel(job), detail: `${tildify(m.path)}${more.length ? ` +${more.length}` : ''}`, button: 'Resolve', icon: ICONS.branch, act: 'open', sub: '' } : null;
   }
@@ -204,10 +204,17 @@ export function plateAsk(job) {
   if (idea === 'suggested') {
     const msg = liveSuggestion(job), left = uncreatedSuggestions(msg);
     const detail = left.length === 1 ? [kindCountLabel(left[0].plan.subJobs), repoLine({ plan: left[0].plan })].filter(Boolean).join(' · ') : left.map((x) => x.title).join(' · ');
-    return { ...whole(suggestedLabel(msg), 'Review', detail), icon: ICONS.eye };
+    return whole(suggestedLabel(msg), 'Review', detail);
   }
-  if (idea === 'reply') return { ...whole('Your reply', 'Reply', 'The planner asked you'), icon: ICONS.note };
+  if (idea === 'reply') return whole('Wrangler asked', 'Reply', 'Wrangler asked you');
   if (!live(job)) return job.plan ? whole('Plan ready', 'Review plan', kindCountLabel(job.plan.subJobs)) : whole(jobLabel(job), 'Open');
+  // A plan change opens on the job; a reply where its conversation is drawn (a step's,
+  // until it is escalated).
+  if (state === 'change') return whole(jobLabel(job), job.replan.proposal.escalation ? 'Decide' : 'Review', job.replan.proposal.label || '');
+  if (state === 'read') {
+    const [m] = wranglerUnread(job).length ? wranglerUnread(job) : job.subJobs.flatMap((s) => wranglerUnread(job, s).map((x) => ({ ...x, step: s.id })));
+    if (m) return { ...whole('Wrangler replied', 'Read', m.text.split('\n')[0]), sub: m.step || '' };
+  }
   const lead = leadSub(job, state);
   if (!lead) return whole(jobLabel(job), replanProposed(job) ? 'Review' : 'Open');
   const peers = job.subJobs.filter((s) => subState(job, s) === state).length - 1;

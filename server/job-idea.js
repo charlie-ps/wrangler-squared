@@ -40,7 +40,7 @@ const nextId = (job, now) => `msg_${now.toString(36)}${ideaThread(job).length.to
 // one written before the human's newest message reached it.
 export function plannerReply(job, run, report, now) {
   if (!inConversation(job)) throw new Error('A planning reply is for a new idea\'s conversation; report the plan instead');
-  if (report.shots || report.run || report.running) throw new Error('A planning reply is text, with an optional suggest:[{title, plan}]');
+  if (report.shots || report.run || report.running || report.escalate) throw new Error('A planning reply is text, with an optional suggest:[{title, plan}]');
   if (run.parkedFor === 'idea' && run.parkedAt && !run.mailedAt) {
     if (JSON.stringify(run.lastReply) === JSON.stringify(report)) return false;
     throw new Error('You already replied; wait for mail with the human\'s answer');
@@ -75,7 +75,7 @@ export function humanReply(job, text, now, attachments = []) {
 export function acceptIdea(job, { messageId, index = 0, all = false }, now) {
   if (!inConversation(job)) throw new Error('This idea is no longer a conversation');
   const msg = liveSuggestion(job);
-  if (!msg || msg.id !== messageId) throw new Error('The planner\'s suggestion changed since you looked. Read the latest one and try again.');
+  if (!msg || msg.id !== messageId) throw new Error('Wrangler\'s suggestion changed since you looked. Read the latest one and try again.');
   const open = uncreated(msg);
   if (!all && !open.includes(index)) throw new Error('That job was already created from this suggestion.');
   if (!Array.isArray(msg.suggest)) msg.suggest = suggestionsOf(msg);

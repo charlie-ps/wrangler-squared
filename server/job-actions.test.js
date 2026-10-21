@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gateAction, stampActions, checkActions, applyActions, forwardsOnly, changeView } from './job-actions.js';
-import { proposeReplan, approveReplan, optionsOf } from './job-replan.js';
+import { proposeReplan, approveReplan, optionsOf, requestReplan } from './job-replan.js';
 import { reportSchema } from './jobs-schema.js';
 import { buildSubJob } from './job-store.js';
 import { autoApplicable } from './job-red.js';
 import { requestChange } from './job-change.js';
+import { askToReplan } from './job-talk.js';
 
 const spec = (id, after = [], extra = {}) => ({ id, title: `Deliver ${id}`, kind: 'pr', repo: '/repo', storyId: 'story', after, brief: `Implement ${id}`, ...extra });
 const PR = 'https://github.com/o/r/pull/1';
@@ -93,9 +94,9 @@ test('recover waits for the fix; rework sends code or a session result back to i
   assert.equal(subOf(k, 'fix').note, 'rename it');
 });
 
-test('a plan receipt may carry a diagnosis, actions and up to two alternatives, and nothing else', () => {
+test('a plan receipt may carry a diagnosis, actions, what each option leaves you and up to two alternatives, and nothing else', () => {
   const plan = { context: 'c', stories: [{ id: 'story', key: 'A-1', title: 'Story' }], subJobs: [spec('api')] };
-  const ok = { kind: 'plan', plan, label: 'Accept', why: 'unrelated', actions: [{ type: 'accept-red', sub: 'api' }], diagnosis: { summary: 'flaky', evidence: [{ label: 'run 1', detail: 'timeout' }] }, alternatives: [{ label: 'Fix it', plan }, { label: 'Wait', plan, actions: [{ type: 'mark', sub: 'api', position: 'done', evidence: '#1' }] }] };
+  const ok = { kind: 'plan', plan, label: 'Accept', why: 'unrelated', leaves: 'Merge main into next by hand', actions: [{ type: 'accept-red', sub: 'api' }], diagnosis: { summary: 'flaky', evidence: [{ label: 'run 1', detail: 'timeout' }] }, alternatives: [{ label: 'Fix it', plan, leaves: 'Nothing' }, { label: 'Wait', plan, actions: [{ type: 'mark', sub: 'api', position: 'done', evidence: '#1' }] }] };
   assert.equal(reportSchema.safeParse(ok).success, true);
   assert.equal(reportSchema.safeParse({ ...ok, alternatives: [...ok.alternatives, { label: 'Third', plan }] }).success, false);
   assert.equal(reportSchema.safeParse({ ...ok, actions: [{ type: 'delete', sub: 'api' }] }).success, false);
@@ -107,9 +108,10 @@ test('a proposal carries ranked options, each merged and stamped; approving the 
   const j = job(subs, { api: redOf() });
   j.replan = { feedback: 'Checks red', at: 1, proposal: null };
   const alt = { ...empty(j), subJobs: [...subs, spec('flake', [], { brief: 'Stabilise it' })].map((s) => (s.id === 'api' ? { ...s, after: ['flake'] } : s)) };
-  proposeReplan(j, { id: 'run_1' }, { plan: empty(j), label: 'Accept', why: 'Noise', actions: [{ type: 'accept-red', sub: 'api' }], diagnosis: { summary: 'flaky' }, alternatives: [{ label: 'Fix it first', plan: alt }] }, 5);
+  proposeReplan(j, { id: 'run_1' }, { plan: empty(j), label: 'Accept', why: 'Noise', leaves: 'Fix the flake later', actions: [{ type: 'accept-red', sub: 'api' }], diagnosis: { summary: 'flaky' }, alternatives: [{ label: 'Fix it first', plan: alt }] }, 5);
   const p = j.replan.proposal;
   assert.deepEqual(optionsOf(p).map((o) => o.label), ['Accept', 'Fix it first']);
+  assert.deepEqual(optionsOf(p).map((o) => o.leaves), ['Fix the flake later', null], 'what each option leaves the human, kept for the decision card');
   assert.deepEqual(p.actions[0].pin, { at: 'head', ref: 'h1' });
   assert.deepEqual(p.alternatives[0].changes.added, ['flake']);
   assert.throws(() => approveReplan(structuredClone(j), 'run_1', { now: 6, buildSubJob, option: 2 }), /Choose one of/);
@@ -158,14 +160,14 @@ const parkedJob = (patches = {}) => {
   return j;
 };
 
-test('forward pins to the open review round; a step with no open session, or one still answering, is refused', () => {
+test('forward pins to the open review round; a step with no open session is refused, one still answering is not', () => {
   const j = parkedJob();
   assert.deepEqual(gateAction(j, { type: 'forward', sub: 'api', note: 'Tighten it' }).pin, { at: 'round', ref: 'run_i#2', round: 2 });
   assert.throws(() => gateAction(j, { type: 'forward', sub: 'api' }), /human's words for it in `note`/);
   assert.throws(() => gateAction(j, { type: 'rework', sub: 'api', note: 'x' }), /session is still open: forward the feedback to it instead/, 'nothing ends a session that could answer');
   assert.throws(() => gateAction(j, { type: 'forward', sub: 'web', note: 'x' }), /no session open on its review to forward to: use rework instead/);
   subOf(j, 'api').answering = { id: 'msg_1', kind: 'ask', round: 2 };
-  assert.throws(() => gateAction(j, { type: 'forward', sub: 'api', note: 'x' }), /still answering/);
+  assert.deepEqual(gateAction(j, { type: 'forward', sub: 'api', note: 'x' }).pin, { at: 'round', ref: 'run_i#2', round: 2 }, 'it queues behind the answer in flight');
   j.runs[0].stopped = true; subOf(j, 'api').answering = null;
   assert.throws(() => gateAction(j, { type: 'forward', sub: 'api', note: 'x' }), /use rework instead/);
   assert.deepEqual(gateAction(j, { type: 'rework', sub: 'api', note: 'x' }).pin, { at: 'stage', ref: 'review' });
@@ -188,6 +190,48 @@ test('approving a forward posts the human\'s words into the open session\'s thre
   assert.match(lines.at(-1).detail, /Forwarded your words to “Deliver api”'s open session/);
 });
 
+test('a forward approved while the session is still answering is accepted and queued behind the message in flight', () => {
+  const j = parkedJob();
+  subOf(j, 'api').thread = [{ id: 'msg_1', at: 1, from: 'human', via: 'planner', to: 'agent', text: 'Tighten it', round: 2, sentAt: 2 }];
+  subOf(j, 'api').answering = { id: 'msg_1', at: 1, kind: 'change', round: 2 };
+  j.replan = { feedback: 'About api: Does it work narrow?', at: 3, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#2' } };
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'Does it work narrow?' }] }, 4);
+  assert.deepEqual(j.replan.proposal.actions[0].pin, { at: 'round', ref: 'run_i#2', round: 2 });
+  approveReplan(j, 'run_p', { now: 5, buildSubJob });
+  const [, m] = subOf(j, 'api').thread;
+  assert.deepEqual([m.text, m.sentAt], ['Does it work narrow?', null], 'queued, not yet sent');
+  assert.deepEqual(subOf(j, 'api').answering, { id: 'msg_1', at: 1, kind: 'change', round: 2 }, 'still answering the first');
+});
+
+test('a forward on a moved review round, or a finished review, is still refused', () => {
+  const j = parkedJob();
+  j.replan = { feedback: 'About api: Tighten it', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#2' } };
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'Tighten it' }] }, 2);
+  Object.assign(subOf(j, 'api'), parkedOf(3));
+  assert.throws(() => checkActions(j, j.replan.proposal.actions, j.plan), /has moved since .*run_i#2 is now .*run_i#3/);
+  const out = approveReplan(j, 'run_p', { now: 3, buildSubJob });
+  assert.equal(out.sentBack, true, 'a new round sends it back to the wrangler');
+  assert.equal(subOf(j, 'api').thread, undefined, 'nothing reaches the session');
+  const k = parkedJob({ api: { ...parkedOf(), state: 'approved' } });
+  assert.throws(() => gateAction(k, { type: 'forward', sub: 'api', note: 'x' }), /no session open on its review/);
+});
+
+test('a forwards-only proposal is noted as a forward with no prose, and its approval names the thread message it became; a plan change keeps its words', () => {
+  const j = parkedJob();
+  j.replan = { feedback: 'About api: Tighten it', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#2' } };
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'Tighten it' }], why: 'Passes your words straight to the agent.' }, 2);
+  const card = j.talk.at(-1);
+  assert.deepEqual([card.kind, card.forward, card.text, card.changes], ['proposal', true, '', [{ mark: 'forward', title: 'Deliver api', sub: 'api' }]]);
+  approveReplan(j, 'run_p', { now: 3, buildSubJob });
+  assert.deepEqual([card.outcome, card.forwarded], ['approved', [{ sub: 'api', message: subOf(j, 'api').thread[0].id }]]);
+
+  const k = parkedJob();
+  k.replan = { feedback: 'Add web2', at: 1, proposal: null, previous: null };
+  proposeReplan(k, { id: 'run_q' }, { kind: 'plan', plan: { ...empty(k), subJobs: [...empty(k).subJobs, { id: 'web2', title: 'Deliver web2', repo: '/r', brief: 'b' }] }, actions: [{ type: 'forward', sub: 'api', note: 'x' }], why: 'Adds web2.' }, 2);
+  const mixed = k.talk.at(-1);
+  assert.deepEqual([mixed.forward, mixed.text], [undefined, 'Adds web2.'], 'a real plan change is still a card with its words');
+});
+
 test('a forward or rework on the step the idea came from is refused once that view has moved: a new round is not what the human read', () => {
   const j = parkedJob();
   j.replan = { feedback: 'x', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#1' } };
@@ -198,6 +242,29 @@ test('a forward or rework on the step the idea came from is refused once that vi
   assert.equal(approveReplan(j, 'run_p', { now: 3, buildSubJob }).sentBack, true);
   assert.equal(subOf(j, 'api').thread, undefined);
   assert.deepEqual(j.replan.source, { sub: 'api', at: 'code', ref: 'run_i#3' }, 'the planner may act on the round the human now has in front of them');
+});
+
+test('a retry pins to the failure it was written about, refuses a step that is not red, and starts it again as the human\'s Retry would', () => {
+  const lock = "Command failed: git fetch origin: error: cannot lock ref 'refs/remotes/origin/main'";
+  const j = job([spec('api'), spec('web')], { api: { stage: 'implementation', state: 'queued', error: lock, red: { held: 'x' } } });
+  assert.throws(() => gateAction(j, { type: 'retry', sub: 'web' }), /“Deliver web” is not red: nothing to retry/);
+  const actions = stampActions(j, [{ type: 'retry', sub: 'api' }], j.plan, { removed: [] });
+  assert.deepEqual(actions[0].pin, { at: 'red', ref: `${lock}|||0` });
+  subOf(j, 'api').error = 'Command failed: npm ci';
+  assert.throws(() => checkActions(j, actions, j.plan), /“Deliver api” has moved since this was proposed \(failure Command f/);
+  subOf(j, 'api').error = lock;
+  checkActions(j, actions, j.plan);
+  assert.deepEqual(applyActions(j, actions, { now: 9 }).map((l) => l.detail), ['Retried “Deliver api”']);
+  const api = subOf(j, 'api');
+  assert.deepEqual([api.error, api.blocked, api.state, api.replanAllowance, api.red.held], [null, null, 'queued', 1, null]);
+});
+
+test('a red step\'s fix never applies a retry by itself, whatever else it carries', () => {
+  const j = job([spec('api')], { api: { stage: 'implementation', state: 'queued', error: 'cannot lock ref' } });
+  j.replan = { feedback: 'x', at: 1, proposal: null, previous: null };
+  proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'retry', sub: 'api' }] }, 2);
+  assert.equal(autoApplicable({ ...j, reviewPlan: false, reviewRed: false }, j.replan.proposal), false);
+  assert.equal(autoApplicable(j, { ...j.replan.proposal, actions: [{ type: 'rework', sub: 'api', note: 'x' }] }), true, 'a rework alone still would');
 });
 
 test('a red step\'s fix never applies a forward by itself', () => {
@@ -222,7 +289,8 @@ test('only a proposal of forwards and nothing else skips the human: any plan cha
 // The job moved under a proposal the human is about to approve: what it edits or
 // acts on has since landed. No press could ever approve it, so it goes back.
 const openPrOf = () => ({ stage: 'pr', state: 'watching', pr: { url: PR, head: 'h1', checkStatus: 'passing' } });
-const ideaOn = (j, id, text) => { const sub = subOf(j, id); requestChange(j, sub, { ...changeView(j, sub), text }, { now: 1 }); };
+// Typed on the step, read by an ask run that proposes a change (job-talk.js askToReplan).
+const ideaOn = (j, id, text) => { const sub = subOf(j, id); requestChange(j, sub, { ...changeView(j, sub), text }, { now: 1 }); const convo = j.convos.find((c) => c.id === j.talk.at(-1).convo); for (const a of convo.pending.asks) a.sentAt ??= 1; askToReplan(j, { id: 'run_a', convo: convo.id }, requestReplan, 1); };
 const land = (j, id, patch) => Object.assign(subOf(j, id), patch);
 
 test('Unit test: brief edit on a PR that merges before approval goes back to the planner', () => {
@@ -232,8 +300,8 @@ test('Unit test: brief edit on a PR that merges before approval goes back to the
   land(j, 'api', { stage: 'deployment', mergedAt: 3, pr: { ...subOf(j, 'api').pr, mergeCommit: 'm1' } });
   const back = approveReplan(j, 'run_p', { now: 4, buildSubJob });
   assert.equal(back.sentBack, true);
-  assert.deepEqual(back.lines.map((l) => l.detail), ['“Deliver api” has merged since the plan change was proposed, so it went back to the planner']);
-  assert.equal(back.detail, 'Sent the plan change back to the planner: “Deliver api” has merged since it was proposed');
+  assert.deepEqual(back.lines.map((l) => l.detail), ['“Deliver api” has merged since the plan change was proposed, so it went back to Wrangler']);
+  assert.equal(back.detail, 'Sent the plan change back to Wrangler: “Deliver api” has merged since it was proposed');
   assert.equal(subOf(j, 'api').brief, 'Implement api', 'nothing of the stale proposal is applied');
   assert.equal(j.replan.proposal, null, 'the planner runs again');
   assert.deepEqual(j.replan.earlier, ['About “Deliver api” (api, pr/watching): Rename the flag'], 'the human\'s idea stays, once');

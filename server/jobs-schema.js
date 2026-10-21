@@ -488,8 +488,8 @@ export const draftSchema = z.object({ id, text: commentSchema.optional(), title:
 // each acts on a live sub-job and is pinned by the server to the head, merge
 // commit, stage or review round it was written against. `evidence` is mandatory on a mark: the
 // PR or ticket that shows it is true. `fix` is the sub-job whose landing a
-// recover waits for.
-export const ACTION_TYPES = ['forward', 'rework', 'accept-red', 'mark', 'recover'];
+// recover waits for. A retry is the human's Retry, suggested: never automatic.
+export const ACTION_TYPES = ['forward', 'rework', 'accept-red', 'mark', 'recover', 'retry'];
 // A forward or rework note carries the human's own words, which run past one line.
 export const actionNoteSchema = z.string().trim().min(1).max(2000);
 export const actionSchema = z.object({ type: z.enum(ACTION_TYPES), sub: id, note: actionNoteSchema.optional(), position: z.enum(['merged', 'done']).optional(),
@@ -499,7 +499,8 @@ export const diagnosisSchema = z.object({ summary: z.string().trim().min(1).max(
   evidence: z.array(z.object({ label: line, detail: line }).strict()).max(6).optional() }).strict();
 // Up to three ranked options: the receipt's own plan is the first (recommended),
 // `alternatives` are the rest. Each is a whole plan plus the actions it carries.
-const optionShape = { label: line, why: z.string().trim().max(400).optional(), actions: z.array(actionSchema).max(6).optional() };
+// `leaves` is what the human still has to do once it is approved (the decision card's last line).
+const optionShape = { label: line, why: z.string().trim().max(400).optional(), leaves: z.string().trim().max(400).optional(), actions: z.array(actionSchema).max(6).optional() };
 export const alternativeSchema = z.object({ ...optionShape, plan: planSchema }).strict();
 // A job the idea's planner offers: what the human creates with one press, and
 // exactly the plan receipt it would otherwise have sent (job-idea.js acceptIdea).
@@ -514,8 +515,10 @@ export const reportSchema = z.discriminatedUnion('kind', [
   // Answers a human who wrote to a session parked on its ready receipt (job-store.js):
   // the run stays parked, the tree and the round unchanged. From a new idea's planner
   // it is a turn in the conversation instead (job-idea.js), and may suggest jobs.
+  // From the wrangler answering a step's conversation, `escalate` also shows it on
+  // the job (job-talk.js).
   receipt({ kind: z.literal('reply'), text: z.string().trim().min(1).max(4000), shots: z.array(shotSchema).min(1).max(4).optional(), run: runProofSchema.optional(), running: runningSchema.optional(),
-    suggest: suggestionsSchema.optional() }),
+    suggest: suggestionsSchema.optional(), escalate: z.boolean().optional() }),
   receipt({ kind: z.literal('published'), url: prUrlSchema }),
   receipt({ kind: z.literal('repaired'), changes: checksSchema, checks: checksSchema }),
   receipt({ kind: z.literal('deployed'), checks: checksSchema }),

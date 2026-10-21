@@ -118,7 +118,7 @@ text as public as the rest of this repo.
   (`pendingLaunch.adopt`) so the store's copy keeps its `cleanupHead` and rename.
 - **A job's spend limit is `settings.spendLimit` × (1 + `job.topUps`), never stored**
   (`server/job-budget.js`). The runner's `enforceBudget` runs first each tick: over, it sets
-  `job.budgetPaused` (claim and `allowed()` refuse it, as do `tendHelpers` and a main
+  `job.budgetPaused` (claim and `allowed()` refuse it, as does a main
   resolution) and interrupts each `working` run card through `sessions:interrupt`, one per card
   per `INTERRUPT_COOLDOWN_MS`, stamping `run.budgetHaltedAt`; under again it releases the job and
   mails each halted run to carry on. `settle()` never idle-reaps a budget-paused job's runs. The
@@ -143,29 +143,110 @@ text as public as the rest of this repo.
   human read (`changeView`, mirrored client-side in `public/jobs.js`): a moved
   head, receipt, revision or proposal refuses it. Every idea goes to ONE
   recipient, the planner (`requestReplan`, with `replan.source = {sub, at, ref}`
-  and the idea's `images`), except a first plan (redrawn via `job.feedback`); a
+  and the idea's `images`), unless it reads as a question (an ask run, below), and
+  except a first plan (redrawn via `job.feedback`); a
   declared red still goes up with what was tried. The planner sorts it into
   actions on live steps (`forward` to a session parked on review, `rework`) and
   plan edits, and the human approves that proposal (one of `forward`s alone is
   applied at once, `forwardsOnly`): an action on the source step
   is refused at stamp and approval once its view has moved (`job-actions.js
   sourceHolds`). A second idea while a proposal waits adds to it (`Earlier: … /
-  Now: …`, `previousActions`); while the planner is drawing the box steps aside.
+  Now: …`, `previousActions`); while the planner is drawing one, another change (or an ask run's hand-over) joins the FIFO
+  `job.replanQueue` with its convo, source and images (`requestReplan` returns `{queued}`, its
+  conversation says so), and `startQueued` makes the next one its own replan once the current one is
+  approved or discarded and no planner is still drafting (the runner retries it each tick).
   The box is not a `<form>`, so
   a tick's redraw is held back only while text is typed in it. Its pictures are
   kept (`handlers.js prepare`: the round's folder, else `ideasDir`) and reach the
   planner as paths in the idea's words; a `forward` to the step it was typed on
   carries that round's pictures as thread images. What was sent stays as a bubble (`askSent`) until the dialog
   moves on, ticked by `job-action-complete`, refused back into the box.
+- **The Add idea box writes to conversations with "the wrangler"** (`server/job-talk.js`,
+  `public/job-talk.js`). "The wrangler" is the board's name for the planner: every
+  user-facing string says it, internal identifiers (`planner`, `job.replan`,
+  `route: 'planner'`) do not. On a running job every idea is said on `job.talk`
+  (capped at 200) in one of `job.convos` (`m.convo`; `request-change {convo?}`, none
+  opens a new one, from the job or from a step, `convo.sub`), which outlive a plan
+  change: human messages, answers, errors and one `kind:'proposal'` card per
+  proposal (`noteProposal`, drawn in `job.replan.convo`), whose `outcome` (approved,
+  discarded, revised) `approveReplan`, `discardReplan` and `requestReplan` stamp.
+  Several conversations answer AT ONCE, each with its own ASK run (`run.convo`,
+  `run.ask`): `claim` lets one run per conversation stand beside the plan run, and
+  `activeFor`, `requestReplan` and `triageRed` look past ask runs. An idea that
+  `looksLikeQuestion` sets `convo.pending = {asks, source, images}`; ANYTHING said in
+  that conversation before its run replies is one more ask for the SAME run: queued
+  before launch it rides in the prompt (`claim` marks it sent), after launch the
+  runner mails it (`deliverAsks`, `askMail`), never a new run. An ask run never sets
+  `job.replan`, so a question holds nothing. It answers with `reply` (`answerAsk`,
+  ends the run; asks it never read start the conversation's next run, which reads
+  that conversation's last 12 messages), or proposes with `plan` (`askToReplan`
+  folds every ask into `requestReplan` exactly as a change idea, Earlier/Now
+  included). Each wrangler's prompt lists the others at work (`otherWranglers`: other
+  pending conversations and a plan change being drawn). A fresh replan run may also
+  `reply` when the idea was only a question (`answerReplan`, refused once a red or
+  earlier proposal rides on it). An ask run that dies or blocks says so in its
+  conversation (`askFailed`), never `job.error`. `planningRun` (client) ignores ask
+  runs, so Approve stays live while one answers. ONE box, and ONE
+  conversation open at a time, with the box at its foot (`boxHtml`, `data-change-convo`):
+  `replyTarget` is the human's pick (a title row opens that one and folds the other, the
+  open one's header or the chip's × folds it), else `defaultTarget`, the one at work or
+  spoken in last; '' (none open, and where a failing step's dialog opens, until its first message starts one) puts the box below them all
+  for a new one. Drafts are kept per target (`boxDrafts`), pasted pictures by
+  `askImages[].box`, and the sent bubble lands at the end of its conversation
+  (`askSent.convo`) or above the box. Haiku names each new conversation from its
+  first message after the send (`handlers.js nameConvo`, `convo.titlePending` drawn
+  as a loader, `titleConvo`); without a title it is "Conversation N". Folded, a
+  conversation is its title row alone. A conversation opened from a step
+  (`convo.sub`) is that step's: its wrangler's prompt names the step
+  (`stepConvoLine`), and it shows ONLY on that step's dialog until the wrangler
+  escalates it (`reply {escalate:true}`, or any proposal it draws, `escalate` →
+  `convo.escalatedAt`); then the job's list shows it too (`talkFor`, client-side
+  only). A step's dialog shows only what was said on it. Where the view takes no reply, a conversation not at work
+  and not the one the human spoke in last folds to its title row (`convoOpen`; clicks are client-side, per id). Its ×
+  (`dismiss-convo`, refused while it answers or holds a plan change) stamps `convo.dismissedAt`,
+  which hides it everywhere until anything new is said in it (`say` clears it, so a reply
+  from a stale box or a wrangler's message brings it back). A job
+  saved with the old single `job.ask` is migrated on load (`migrateTalk`). Open PR #209
+  keeps a step's sent ideas on `job.replan.asks`; once both land, the step dialog
+  should draw them from the thread, not twice.
+- **A plan change never pauses the job** (`server/job-red.js heldBy`, mirrored as
+  `heldByReplan`). While the wrangler drafts, only the step the idea was typed on
+  (`job.replan.source.sub`) waits; once its proposal is up, so does every step it
+  edits, cancels or acts on in any option (`touchedBy`); a red replan adds its
+  `redScope`. Everything else launches, merges and gets approved, so a proposal
+  can go stale under it: `mergeReplan` at approval refuses that, as before. A replan
+  planner that dies or blocks says so in its conversation and drops the change
+  (`job-talk.js replanFailed`); only one with no conversation still sets
+  `job.error`. On approval (`approveReplan`) a red step whose brief or `after`
+  changed is re-queued (PR #220's hunk, kept byte-identical so the two merge cleanly), and an
+  open PR whose only change is `after` CATCHES UP instead of a rework:
+  `sub.catchUp` stops repairs and merges until its new prerequisites land, then the
+  runner updates its branch once. Each proposal carries `then` (`thenOf`), the
+  card's "Re-queued · starts after …" line, drawn in the thread and proposal view.
+- **A plan change is ONE decision card, and its words are written for it** (`public/jobs-view.js
+  proposalHtml`, `server/job-prompts.js PROPOSAL_VOICE`). The card is the picked option's `label`
+  (heading), `why`, `leaves` (what the human still has to do; on the receipt and each alternative)
+  and Approve/Discard; what Wrangler found, its evidence and the asks wait behind Why, other options fold to their
+  labels, and the graph, every change and the plan details are drawn under the card as before. A
+  declaration leads with its `ask` and the summary's first sentence (`ESCALATE_VOICE`), and an answer
+  leads with the answer in its first line (`REPLY_RULES`). The prompts are PHRASING rules, never sentence counts
+  or length caps: text may grow when a case needs it, because the UI folds it.
+- **`change` and `read` head `STATE_ORDER`, above `failing`** (`public/job-state.js`). `change` (amber) is a
+  plan waiting on you: a plan change and the steps it acts on (so a red job with a proposal waiting shows "Plan
+  change ready" / "Fix proposed" while its red step stays red), a first plan, an idea's question or suggestion.
+  `read` (teal `--st-read`, core's `--rt`) is only a wrangler `answer` newer than its conversation's `seenAt`. Everything else you act on stays amber `needs`. `seenAt` is
+  stamped by the human writing in the conversation (`say`) or by the board's silent `job-talk-seen` frame
+  while a dialog draws the answer (`jobs-view.js markSeen`); it is not a revision.
 - **Red steps go up one level before the human** (`server/job-red.js`). A sub-job
   with an `error` is sent to the planner by the runner's `triageRed` when
   `settings.maxReplans` > 0 (0 = the old "red waits for you"), one replan at a
   time, stamped `run.red` and counted per step; the replan carries `job.replan.red
   = {sub, auto, n}` and holds only that step and its dependants (`heldBy`, mirrored
   client-side as `heldByReplan`/`redScope`: use them, never `!job.replan`, for
-  per-sub gates). The sixth checkpoint `reviewRed` (true = "You decide", the
-  default) only chooses whether the proposal waits; Accept red, Mark and Recover
-  are never applied automatically. A red is DECLARED by `declareRed` (tries used up,
+  per-sub gates), plus whatever its proposal touches. The prompt lists the other red
+  steps so one cause gets one proposal. The sixth checkpoint `reviewRed` (true = "You decide", the
+  default) only chooses whether the proposal waits; Accept red, Mark, Recover and
+  Retry are never applied automatically. A red is DECLARED by `declareRed` (tries used up,
   `escalate`, a planner that blocked or died, an empty proposal) and its
   `declared.ref` is `redRef` (error, head, merge commit, run count): a new
   failure, head or run un-declares it and a decision about the old one
@@ -173,9 +254,10 @@ text as public as the rest of this repo.
   "go up one level" receipts. The board's states are `redFixing` (not counted in
   Needs you), `redFixReady` and `redDeclared` in `public/jobs.js`.
 - **A proposal can carry actions and up to three ranked options**
-  (`server/job-actions.js`, applied by `approveReplan`): `accept-red`, `mark`
+  (`server/job-actions.js`, applied by `approveReplan`): `accept-red`, `retry`, `mark`
   (merged/done, `evidence` required), `rework` and `recover {fix}` on a live
-  sub-job. The server stamps each with a pin (PR head, merge commit or stage) at
+  sub-job. The server stamps each with a pin (PR head, merge commit, stage or, for
+  a retry, the failure's `redRef`) at
   proposal time and `approve-replan` refuses if it moved; the planner never
   writes a pin (the schema is strict). Options are the receipt's own plan first,
   then `alternatives` (max 2), each merged and stamped when the receipt lands, so
@@ -187,10 +269,15 @@ text as public as the rest of this repo.
   drafts park (no slot, `settle()` holds it only to its card existing) but never matched by
   `draftsDecided`. The run waits on `waitsOnReview`; approve, a rework, drop or a retry end
   it quietly and the publish run then claims the sub-job. An approved `forward {sub, note}`
-  action (pinned to `{at:'round', ref: ready.receiptId}`, refused while `answering`; a `rework`
+  action (pinned to `{at:'round', ref: ready.receiptId}`; one made while it is `answering` queues behind
+  that reply, mailed one at a time to a waiting run, `answered` moving `answering` on; a `rework`
   of a parked step is refused in its favour) writes a `sub.thread` message (`askAgent`,
   `via: 'planner'`, `sentAt: null`) and the runner mails
-  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again). The
+  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again); the session's
+  words go above anything still queued (`sayInThread`), so each reply sits under its message. In the
+  wrangler conversation a forwards-only card (`forward: true`, no prose) is one line, and its
+  approval stamps `forwarded: [{sub, message}]`, so `public/job-talk.js` draws the session's
+  answers from `sub.thread` right after it. The
   agent answers with `reply {text, shots?, run?}` (parks again; tree and round unchanged) or
   a fresh `ready`: round n+1, `receiptId` `<run>#n`, the old round kept in `sub.earlier`.
   Pasted images are copied into the round's folder and mailed as paths
@@ -261,22 +348,6 @@ text as public as the rest of this repo.
   A notice nothing is retrying or resolving (`job-state.js mainWaiting`) is a Needs you ask
   beside the stage roll-up, never part of it: `jobNeedsYou`, `jobLabel` ("Local main behind",
   even on a Delivered job) and `plateAsk` all read it, below any step's own ask.
-- **Ask an agent opens the human's own session about a step, never a step** (`server/job-helper.js`).
-  Every step's dialog has the button, at any stage and on a cancelled job. `ask-helper` queues
-  `{id, at, sessionId: null}` on `sub.helpers` (refused while one is queued: that is the double-click
-  guard) and marks a waiting human task `doing` unless a replan holds it; the runner's `tendHelpers`
-  spawns it inside the tick, like `tendMain`, so no `pendingLaunch` is in flight: a plain session (no
-  worktree, no PR automation; the job's agent/model/effort and task) in `helperCwd` (the step's checkout,
-  else a prerequisite PR's, else `''`, a scratch workspace; never a worktree), briefed by
-  `job-prompts.js helperPrompt`. A failed spawn is `error` on that entry, which frees the button. Its id is
-  kept OUT of `sub.sessions` (cleanup archives those; Open session's caret lists them by run phase, its button and Review code read the last) and
-  `job.runs` (`runForSession` would hand it job_report, the worker skill and the job's sandbox). What it
-  finds comes back only through `send_step_idea` (`server/tools.js`), when the human asks: the store's
-  `helperIdea` resolves the caller against `sub.helpers[].sessionId` (anything else is refused) and runs
-  the step's own `requestChange`, pinned to `changeView` as it stands at the call, with `from: 'helper'`,
-  which marks the planner's words and the move (`helper-idea`). Only the server sets `from`: the board's
-  `request-change` overwrites it. The idea is kept on its entry (`helper.ideas`), drawn under that helper
-  in the step's dialog. It never edits the plan.
 - **A Codex job's sandbox is the manifest's `codexPolicy` hook** (host API 1.12),
   next to `skillsFor` and gated the same way (`runForSession`). Its context
   carries the façade as `ext`, not `host`. A job with no `sandbox` field (one

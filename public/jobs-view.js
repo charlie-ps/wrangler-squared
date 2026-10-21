@@ -1,9 +1,10 @@
 import { esc, tildify } from './util.js';
-import { ICONS } from './icons.js';
-import { CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, uncreatedSuggestions, ideaEditable, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT } from './jobs.js';
+import { ICONS, wranglerMark } from './icons.js';
+import { wranglerUnread, convoGroups, convosOf, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, uncreatedSuggestions, ideaEditable, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel, leadSentence } from './jobs.js';
+import { talkHtml, convoTitle, defaultTarget } from './job-talk.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml, ideaEditHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener, fieldName } from './job-graph.js';
-import { assignScenes, plateHtml, placePopHtml, askActs } from './job-plates.js';
+import { assignScenes, plateHtml, placePopHtml, askActs, plateAsk } from './job-plates.js';
 import { jobMenuItems, jobReference, mountJobMenu } from './job-menu.js';
 import { holdSkies, mountSkies, releaseSkies, spinTo } from './job-skylines.js';
 import { wireDeps, relight } from './job-deps.js';
@@ -90,10 +91,18 @@ const staleHint = (sub) => {
     ? `${cancelled.join(', ')} was cancelled on merge commit ${commit} and no later run that includes it has started in ${minutes} min. If it was cancelled on purpose, Request changes and say so. Wrangler keeps polling in case a run appears.`
     : `No GitHub Actions run has started for merge commit ${commit} in ${minutes} min. If this repository does not deploy for these paths, Request changes and say so. Wrangler keeps polling in case a run appears.`;
 };
-const DECLARED_BY = { agent: 'Declared by its agent', planner: 'Declared by the planner', auto: 'Declared automatically' };
+const DECLARED_BY = { agent: 'Declared by its agent', planner: 'Declared by Wrangler', auto: 'Declared automatically' };
+function declaredHtml(ev, f, more, key) {
+  const { head, rest } = leadSentence(f.detail);
+  const behind = `${rest ? `<p>${esc(rest)}</p>` : ''}${f.tried.length ? `<b>Tried</b><ul>${f.tried.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}`;
+  const why = behind ? more(`declared:${key}`, `Why${f.tried.length ? ` · tried ${f.tried.length}` : ''}`, `<div class="job-event-why">${behind}</div>`, 'job-event-more') : '';
+  return `<div class="job-event-fix declared${ev.detail ? '' : ' alone'}">${ICONS.x}<span>${f.ask ? `<b class="ask">${esc(f.ask)}</b>` : `<b>${esc(f.title)}</b>`}${esc(head)}${why}<small>${DECLARED_BY[f.by] || DECLARED_BY.planner}${f.options ? ' · options are in the job’s plan change' : ''}</small></span></div>`;
+}
 // What happened, in the danger register. Title and detail are agent- or
-// observation-written, so both are escaped.
-function eventHtml(job, sub) {
+// observation-written, so both are escaped. A declaration leads with the decision
+// it needs and the first sentence of why; the rest and what was tried wait behind
+// `more` (the dialog's kept disclosure).
+function eventHtml(job, sub, more) {
   const ev = eventFor(job, sub);
   if (!ev) return '';
   const f = ev.fix;
@@ -102,8 +111,8 @@ function eventHtml(job, sub) {
   const fix = !f ? '' : f.kind === 'fixing'
     ? `<div class="job-event-fix fixing">${ICONS.spin}<span><b>${esc(f.title)}</b><small>try ${f.n}</small></span></div>`
     : f.kind === 'ready'
-      ? `<div class="job-event-fix ready">${ICONS.sparkle}<span><b>${esc(f.title)}</b>${esc(f.detail)}<small>${f.waits ? 'Waiting because Red steps is “You decide”' : 'Waiting for you: it changes the plan or claims something about the outside world'}</small></span></div>`
-      : `<div class="job-event-fix declared${ev.detail ? '' : ' alone'}">${ICONS.x}<span><b>${esc(f.title)}</b>${esc(f.detail)}${f.tried.length ? `<ul>${f.tried.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}${f.ask ? `<span class="ask">Needs you: ${esc(f.ask)}</span>` : ''}<small>${DECLARED_BY[f.by] || DECLARED_BY.planner}${f.options ? ' · options are in the job’s plan change' : ''}</small></span></div>`;
+      ? `<div class="job-event-fix ready">${ICONS.sparkle}<span><b>${esc(f.title)}</b>${esc(leadSentence(f.detail).head)}<small>${f.waits ? 'Waiting because Red steps is “You decide”' : 'Waiting for you: it changes the plan or claims something about the outside world'}</small></span></div>`
+      : declaredHtml(ev, f, more, sub?.id || 'job');
   // A declaration that repeats the failure word for word stands in for it.
   if (!ev.detail && f) return `<div class="job-event">${fix}</div>`;
   return `<div class="job-event">${ICONS.x}<div><b>${esc(ev.title)}</b><p>${esc(ev.detail)}</p>${fix}</div></div>`;
@@ -163,7 +172,7 @@ export function writeFieldsHtml(plan, w, { ticket = false, pick = false, job = n
   // Radios rather than a select, so "Something else" can read as the open-ended one.
   const picker = pick ? `<fieldset class="job-place-pick"><legend>Place</legend>${types.map((t) => `<label class="job-place-opt ${t === 'other' ? 'other' : ''}" title="${esc(PLACES[t].name)}"><input type="radio" name="placeType" value="${t}" ${t === type ? 'checked' : ''}>${PLACES[t].icon}<span>${esc(t === 'other' ? 'Something else' : PLACES[t].short)}</span></label>`).join('')}</fieldset>
     ${type !== 'jira' && actions.length > 1 ? `<div class="job-form-row"><label>Do<select name="actionType">${actions.map((x) => `<option value="${x}" ${x === a.type ? 'selected' : ''}>${esc(actionLabel(x))}</option>`).join('')}</select></label></div>` : ''}` : '';
-  const why = w.why ? `<p class="job-write-why"><b>Planner:</b> ${esc(w.why)}</p>` : '';
+  const why = w.why ? `<p class="job-write-why"><b>Wrangler:</b> ${esc(w.why)}</p>` : '';
   const filled = '{pr.url}, {pr.title} and {deploy.run} come from its session\'s trigger, {<write id>.url} from that write once made';
   const tip = (hint) => hint ? ` title="${esc(hint)}"` : '';
   const refField = (label, hint, placeholder) => `<label${tip(hint)}>${label}<input name="ref" maxlength="500" value="${esc(w.place?.ref || '')}" placeholder="${esc(placeholder)}"></label>`;
@@ -388,7 +397,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const runLogs = new Map();
   // What "Ask about this" starts the Request changes box with, once.
   let askDraft = null;
+  // The one box writes to one conversation at a time: the one the human pointed it
+  // at, by view ('' the job, else a step's id; '' a new conversation), and what was
+  // typed for each target while it pointed elsewhere (`<view>|<convo>`).
+  const replyTo = new Map(), boxDrafts = new Map();
   // Pictures pasted, dropped or picked into an idea box, staged as they land (api.images.stage); sent with the idea.
+  // Each is the box's it went into (`box`: its conversation's id, '' for a new one).
   let askImages = [];
   // The idea last sent from this dialog, drawn as a bubble above its box until the
   // dialog moves on: `state` is sending, sent or failed (the job-action frames).
@@ -498,6 +512,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       b.setAttribute('aria-pressed', String(key === filter));
       b.querySelector('.jobs-rail-n').textContent = n || '';
       b.querySelector('.jobs-rail-n').classList.toggle('ask', key === 'needs' && n > 0);
+      // Amber while anything needs acting on; the read tone once all that waits is a wrangler reply to read.
+      b.querySelector('.jobs-rail-n').classList.toggle('read', key === 'needs' && n > 0 && data.jobs.filter((j) => test(j)).every((j) => plateAsk(j)?.tone === 'read'));
     }
     assignScenes(data.jobs, scenes);
     const test = FILTERS.find(([key]) => key === filter)[2];
@@ -549,7 +565,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if (chip) chip.outerHTML = stateChip(jobState(reviewed), jobLabel(reviewed));
     }
     // A picture waiting in a box is as much a draft as words are.
-    const typing = askImages.length > 0 || [...dialog.querySelectorAll('.job-change textarea, [data-approve-note], [data-retry-note]')].some((t) => t.value);
+    const boxes = new Set([...dialog.querySelectorAll('.job-change')].map((b) => b.dataset.changeConvo || ''));
+    const typing = askImages.some((i) => boxes.has(i.box)) || [...dialog.querySelectorAll('.job-change textarea, [data-approve-note], [data-retry-note]')].some((t) => t.value);
     // An empty reply box with the cursor in it is someone reading the thread: it redraws, keeping the cursor.
     const composing = document.activeElement?.closest?.('[data-idea-composer]');
     const humanForm = dialog.querySelector('#job-human-form');
@@ -570,6 +587,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (!dialog.open) { dialog.showModal(); markOpened(); }
   }
   const more = (key, summary, body, cls = '') => `<details class="job-more ${cls}" data-keep="${key}" ${openMore.has(key) ? 'open' : ''}><summary>${summary}</summary>${body}</details>`;
+  // The conversations the human folded or unfolded by hand, by id; kept across redraws and dialogs.
+  const convoFold = new Map();
   // Which of a proposal's options is picked; it resets with a new proposal.
   let optionPick = { id: null, i: 0 };
   const pickedOption = (job) => (optionPick.id === job.replan?.proposal?.id && proposalOptions(job.replan.proposal)[optionPick.i] ? optionPick.i : 0);
@@ -577,10 +596,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     send({ type: 'job-action', id: selected.jobId, subJobId: subId || undefined, action: name, ...extra });
   }
   function openDetail(jobId, subId) {
-    selected = { jobId, subId }; ideaEdit = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); ideaSent = null; ideaFiring = null; ideaSeen = null; revision = null; writeEdit = null; storyDraft = null; commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(jobId);
+    selected = { jobId, subId }; ideaEdit = null; planDraft = null; proofView = null; askDraft = null; replyTo.clear(); boxDrafts.clear(); clearAskImages(); clearAskSent(); ideaSent = null; ideaFiring = null; ideaSeen = null; revision = null; writeEdit = null; storyDraft = null; commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(jobId);
     const job = data.jobs.find((j) => j.id === jobId);
     if (!subId && job?.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
     const sub = job?.subJobs.find((s) => s.id === subId);
+    if (sub && subState(job, sub) === 'failing') replyTo.set(sub.id, '');
     renderDetail();
   }
   const reviewDefault = () => !!data.jobs.find((j) => j.id === selected?.jobId)?.reviewWrites;
@@ -588,15 +608,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // Connectors follow the tiles' rendered rectangles, so anything that can move a
   // node (a dependency editor opening, the dialog resizing) re-traces them.
   const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => layoutGraphEdges(dialog.querySelector('.job-graph'))) : null;
-  // Show more is offered only while the clamp hides something (or to undo an expanded ask).
-  const askObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => fitAsk()) : null;
-  function fitAsk() {
-    askObserver?.disconnect();
-    const text = dialog.querySelector('.job-proposal-bar .job-ask-text');
-    if (!text) return;
-    text.nextElementSibling.hidden = !openMore.has('proposal-ask') && text.scrollHeight <= text.clientHeight + 1;
-    askObserver?.observe(text);
-  }
   function wireGraph() {
     const graph = dialog.querySelector('.job-graph');
     observer?.disconnect();
@@ -779,12 +790,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // session reads last (server/job-prompts.js). A coordinator error has no session
   // to read it, so the job's own Retry stays plain.
   const retrySplitHtml = (primary) => `<span class="job-split job-retry-split"><button id="job-retry" ${primary ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button><details class="job-split-more" data-keep="retry-note" ${openMore.has('retry-note') ? 'open' : ''}><summary aria-label="Add a note for Retry to send" title="Add a note for Retry to send">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>Note sent with Retry<textarea data-retry-note maxlength="180" rows="2" placeholder="Optional. Shown on the card until the retried session reports"></textarea></label></div></details></span>`;
-  // Ask an agent: the human's own sessions about this step (server/job-helper.js),
-  // newest last. A queued one is the only state that holds the button.
-  const helperQueued = (sub) => (sub.helpers || []).some((h) => !h.sessionId && !h.error);
-  const askHelperHtml = (sub) => helperQueued(sub)
-    ? `<button type="button" data-ask-helper disabled title="An agent session is starting for this step">${ICONS.spin}Starting an agent</button>`
-    : `<button type="button" data-ask-helper title="Start your own agent session, briefed with this step and the job, to investigate or help. It never changes the step or the plan: when you ask, it sends what it finds to the planner, as Add idea does.">${ICONS.robot}Ask an agent</button>`;
   // Every run's session, newest first: a repair or publish run hides the implementation one behind it.
   const sessionSplitHtml = (job, sub, primary) => {
     const button = `<button id="job-session" ${primary ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>`;
@@ -792,9 +797,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const items = sub.sessions.map((sid, i) => { const run = job.runs?.find((r) => r.sessionId === sid); return `<button type="button" data-step-session="${esc(sid)}">${ICONS.terminal}<span>${esc(PHASE_LABEL[run?.phase] || `Session ${i + 1}`)}${run?.startedAt ? ` · ${esc(when(run.startedAt))}` : ''}</span><span class="job-split-hint">${onBoard(sid) ? 'Open' : 'Restore'}</span></button>`; }).reverse().join('');
     return `<span class="job-split job-session-split">${button}<details class="job-split-more" data-keep="session-menu" ${openMore.has('session-menu') ? 'open' : ''}><summary aria-label="Open an earlier session of this step" title="Open an earlier session of this step">${ICONS.caret}</summary><div class="job-split-menu">${items}</div></details></span>`;
   };
-  const helpersHtml = (sub) => sub.helpers?.length ? `<h3>Helper sessions</h3><ul class="job-helpers">${sub.helpers.map((h, i) => `<li>${h.sessionId ? ICONS.robot : h.error ? ICONS.x : ICONS.spin}<span>Helper ${i + 1} · ${h.sessionId ? `started ${esc(when(h.at))}` : h.error ? `could not start: ${esc(h.error)}` : 'starting'}</span>${h.sessionId ? `<button type="button" data-helper-session="${esc(h.sessionId)}">${ICONS.terminal}${onBoard(h.sessionId) ? 'Open' : 'Restore'}</button>` : ''}${helperIdeasHtml(h)}</li>`).join('')}</ul>` : '';
-  // What a helper sent the planner (send_step_idea), as the step's Add idea box would.
-  const helperIdeasHtml = (h) => h.ideas?.length ? `<ul class="job-helper-ideas">${h.ideas.map((m) => `<li><span class="job-helper-from">${ICONS.robot}From the helper · sent to the planner ${esc(when(m.at))}</span><q>${esc(m.text)}</q></li>`).join('')}</ul>` : '';
   const approvalNoteFor = (sub) => sub.approvalNote ? `<h3>Context for later steps</h3><p class="job-approval-note">${esc(sub.approvalNote)}</p>` : '';
   // What a whole-job cancel did and what it left: the sub-job nodes say Dropped
   // one by one, this is the sentence that says why all of them do.
@@ -820,10 +822,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     return more('history', `${ICONS.wrench}History <small>${list.length}</small>`, `<ul class="job-move-log">${list.slice().reverse().map((m) => `<li><span>${esc(m.detail || m.move)}${m.note && NOTED_APPROVALS.has(m.move) ? `<q>${esc(m.note)}</q>` : ''}</span><small>${esc(when(m.at))}</small></li>`).join('')}</ul>`, 'job-moves-history');
   }
   // A picture that could not be attached stays in the tray, marked, until the
-  // human retries or removes it: one quietly gone was believed sent.
-  const askTrayHtml = () => askImages.map((i) => `<li class="job-image ${i.failed ? 'failed' : i.name ? '' : 'uploading'}"${i.failed ? ` title="${esc(i.failed)}"` : ''}>${i.url ? `<img src="${esc(i.url)}" alt="">` : ''}${i.failed ? `<button type="button" class="job-image-retry" data-ask-retry="${i.id}" ${i.blob ? '' : 'disabled'} aria-label="Couldn’t attach${i.blob ? ', retry' : ''}">${ICONS.x}<span>${i.blob ? 'Retry' : 'Failed'}</span></button>` : ''}<button type="button" class="job-image-remove" data-ask-image="${i.id}" aria-label="Remove image" title="Remove">×</button></li>`).join('');
-  const askErrorText = () => {
-    const bad = askImages.filter((i) => i.failed);
+  // human retries or removes it: one quietly gone was believed sent. Each
+  // target of the box (a conversation, '' a new one) holds its own (`box`).
+  const boxImages = (key) => askImages.filter((i) => i.box === key);
+  const askTrayHtml = (key) => boxImages(key).map((i) => `<li class="job-image ${i.failed ? 'failed' : i.name ? '' : 'uploading'}"${i.failed ? ` title="${esc(i.failed)}"` : ''}>${i.url ? `<img src="${esc(i.url)}" alt="">` : ''}${i.failed ? `<button type="button" class="job-image-retry" data-ask-retry="${i.id}" ${i.blob ? '' : 'disabled'} aria-label="Couldn’t attach${i.blob ? ', retry' : ''}">${ICONS.x}<span>${i.blob ? 'Retry' : 'Failed'}</span></button>` : ''}<button type="button" class="job-image-remove" data-ask-image="${i.id}" aria-label="Remove image" title="Remove">×</button></li>`).join('');
+  const askErrorText = (key) => {
+    const bad = boxImages(key).filter((i) => i.failed);
     if (!bad.length) return '';
     return `Couldn’t attach ${bad.length > 1 ? `${bad.length} images` : 'this image'}: ${bad[0].failed.replace(/\.$/, '')}. Retry or remove ${bad.length > 1 ? 'them' : 'it'} to send.`;
   };
@@ -834,15 +838,15 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // travels replaces that box, and its Send must still learn the upload landed.
   const paintAskBoxes = () => dialog.querySelectorAll('.job-change').forEach(paintAsk);
   function syncAsk(box) {
-    const text = box.querySelector('textarea'), send = box.querySelector('[data-change-send], [data-idea-send]');
-    send.disabled = !text.value.trim() || askImages.some((i) => !i.name);
-    box.classList.toggle('has-text', !!text.value.trim()); box.classList.toggle('has-img', askImages.length > 0);
+    const text = box.querySelector('textarea'), send = box.querySelector('[data-change-send], [data-idea-send]'), mine = boxImages(box.dataset.changeConvo || '');
+    send.disabled = !text.value.trim() || mine.some((i) => !i.name);
+    box.classList.toggle('has-text', !!text.value.trim()); box.classList.toggle('has-img', mine.length > 0);
     text.style.height = 'auto'; if (text.scrollHeight) text.style.height = `${Math.min(text.scrollHeight, 160)}px`;
   }
   function paintAsk(box) {
-    const tray = box.querySelector('.job-change-tray'), error = box.querySelector('.job-change-error');
-    tray.innerHTML = askTrayHtml(); tray.hidden = !askImages.length;
-    error.textContent = askErrorText(); error.hidden = !error.textContent;
+    const tray = box.querySelector('.job-change-tray'), error = box.querySelector('.job-change-error'), key = box.dataset.changeConvo || '';
+    tray.innerHTML = askTrayHtml(key); tray.hidden = !boxImages(key).length;
+    error.textContent = askErrorText(key); error.hidden = !error.textContent;
     tray.querySelectorAll('[data-ask-image]').forEach((b) => b.onclick = () => { const i = askImages.find((x) => String(x.id) === b.dataset.askImage); if (i?.url) URL.revokeObjectURL(i.url); askImages = askImages.filter((x) => x !== i); paintAskBoxes(); });
     tray.querySelectorAll('[data-ask-retry]').forEach((b) => b.onclick = () => { const i = askImages.find((x) => String(x.id) === b.dataset.askRetry); if (i?.blob) stageAsk(i); });
     syncAsk(box);
@@ -856,14 +860,15 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // with the idea, and kept by the server (server/handlers.js prepare).
   function wireAskImages(box) {
     const text = box.querySelector('textarea'), file = box.querySelector('.job-change-attach input');
+    const key = box.dataset.changeConvo || '';
     const take = (dt, e) => {
       const { sources } = imageSources(dt);
       if (!sources.length) return;
       e?.preventDefault();
-      for (const source of sources.slice(0, Math.max(0, MAX_ASK_IMAGES - askImages.length))) (async () => {
+      for (const source of sources.slice(0, Math.max(0, MAX_ASK_IMAGES - boxImages(key).length))) (async () => {
         let blob = null;
         try { blob = blobOf(await frameOf(source)); } catch { /* drawn as a failed tile below */ }
-        const item = { id: ++askSeq, name: null, blob, url: blob && URL.createObjectURL(blob), failed: blob ? null : 'That picture could not be read.' };
+        const item = { id: ++askSeq, box: key, name: null, blob, url: blob && URL.createObjectURL(blob), failed: blob ? null : 'That picture could not be read.' };
         askImages.push(item);
         if (blob) stageAsk(item); else paintAskBoxes();
       })();
@@ -878,37 +883,74 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   // What was sent, above the box it came from: the words and pictures lift into a
   // bubble, and the line under it says who has it once the server took it. Once the
-  // conversation shows the message itself, its row there is the receipt instead.
-  function askSentHtml(sub) {
-    if (!askSent || askSent.subId !== (sub?.id ?? null)) return '';
-    if (askSent.state === 'sent' && sub?.thread?.some((m) => m.from === 'human' && m.text === askSent.text && m.at >= askSent.at - 60000)) return '';
+  // conversation shows the message itself, even before the ack, its row there is the receipt instead.
+  function askSentHtml(job, sub, key = '') {
+    if (!askSent || askSent.subId !== (sub?.id ?? null) || (askSent.convo || '') !== key) return '';
+    const held = (m) => m.from === 'human' && m.text === askSent.text && m.at >= askSent.at - 60000;
+    if (askSent.state !== 'failed' && (sub?.thread?.some(held) || talkFor(job, sub).some(held))) return '';
     const s = askSent, fresh = s.drawn !== s.state; s.drawn = s.state;
     const pics = s.images.length ? `<span class="job-sent-imgs">${s.images.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
     const n = s.images.length ? ` with ${s.images.length} image${s.images.length > 1 ? 's' : ''}` : '';
     const meta = s.state === 'failed' ? `<span class="job-sent-meta failed">${ICONS.x}Not sent: ${esc(s.error || 'refused')}. Your words${s.hadImages ? ' and pictures' : ''} are back in the box.</span>`
-      : s.state === 'sent' ? `<span class="job-sent-meta"><i class="job-sent-tick">${ICONS.check}</i>Sent to ${esc(s.to.toLowerCase())}${n} · ${esc(new Date(s.at).toLocaleTimeString(undefined, { timeStyle: 'short' }))}</span>`
-      : `<span class="job-sent-meta"><span class="job-sent-sending">Sending to ${esc(s.to.toLowerCase())}…</span></span>`;
+      : s.state === 'sent' ? `<span class="job-sent-meta"><i class="job-sent-tick">${ICONS.check}</i>Sent to ${esc(s.to)}${n} · ${esc(new Date(s.at).toLocaleTimeString(undefined, { timeStyle: 'short' }))}</span>`
+      : `<span class="job-sent-meta"><span class="job-sent-sending">Sending to ${esc(s.to)}…</span></span>`;
     return `<div class="job-sent ${s.state}${fresh ? ' fresh' : ''}" data-sent-state="${s.state}"><div class="job-sent-bubble">${pics}<span>${esc(s.text)}</span></div>${meta}</div>`;
   }
-  // The one box an idea goes in through, on every step, review and proposal. It is
+  // The conversation the box writes to: the human's pick while it is still in
+  // view, else the one spoken in last (job-talk.js defaultTarget). A failing step
+  // opens on a new one, since what to do about it is a new decision (openDetail);
+  // once that is sent, its follow-ups go to the conversation it started.
+  function replyTarget(job, sub, view) {
+    if (view.at === 'plan') return '';
+    const picked = replyTo.get(sub?.id || '');
+    if (picked === '' || picked && convoGroups(job, sub).some((g) => g.convo?.id === picked)) return picked;
+    return defaultTarget(job, sub);
+  }
+  // The one box an idea goes in through, on every step, review and proposal: at the
+  // foot of the conversation it replies to, the only one open (job-talk.js), else
+  // below them all for a new one. Its chip says who hears it and where, and its ×
+  // folds that conversation to start a new one instead. It is
   // pinned to the thing in view (`at`, `ref`, read when this was drawn): the server
   // refuses it if that has since changed. Not a <form>, so a tick's redraw is held
-  // back only while something is typed (renderBoards), never by the box's presence.
-  // At rest it is one line naming who hears it; focus, words or a picture open it.
-  function changeBoxHtml(job, sub) {
-    const view = changeView(job, sub), sent = askSentHtml(sub);
-    // Every idea goes to the planner: while it is drawing a proposal it takes no
-    // other, and once one waits any box adds to it. A step Wrangler is fixing is
-    // the planner's for now.
-    if (!view || (sub && redFixing(job, sub)) || (replanPending(job) && !job.replan.proposal)) return sent;
-    const route = changeRoute(view.at, job, sub), draft = askDraft && askDraft.subId === sub?.id ? askDraft.text : '';
-    // Something went wrong: what to say is the decision, so the box starts open.
-    const open = sub && subState(job, sub) === 'failing';
-    return `${sent}<div class="job-change${open ? ' is-open' : ''}" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}" data-change-to="${esc(route.to)}">
-      <ul class="job-change-tray" ${askImages.length ? '' : 'hidden'}>${askTrayHtml()}</ul>
-      <p class="job-change-error" role="alert" ${askErrorText() ? '' : 'hidden'}>${esc(askErrorText())}</p>
-      <div class="job-change-row"><span class="job-change-to" title="Who hears it"><i>${esc(route.to[0])}</i>${esc(route.to)}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="Add idea for ${esc(route.to.toLowerCase())}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to.toLowerCase())}" title="Send (↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
+  // back only while something is typed (renderBoards), never by a box's presence.
+  // At rest it is one line; focus, words or a picture open it.
+  function boxHtml(job, sub, view, key) {
+    const convo = key ? convosOf(job).find((c) => c.id === key) || null : null;
+    const base = changeRoute(view.at, job, sub);
+    const draft = askDraft && askDraft.subId === sub?.id && (askDraft.convo || '') === key ? askDraft.text : boxDrafts.get(`${sub?.id || ''}|${key}`) || '';
+    // Said before its wrangler replies, it goes to that wrangler.
+    const route = !convo ? base : askPending(job, convo) ? { ...base, placeholder: 'Add to your question…' }
+      : { ...base, placeholder: 'Reply in this conversation…' };
+    const where = convo ? `↩ ${convoTitle(job, convo)}` : view.at === 'plan' || !talkFor(job, sub).some((m) => m.convo) ? '' : 'New conversation';
+    const fresh = convo ? `<button type="button" class="job-change-new" data-change-new title="Start a new conversation instead" aria-label="Start a new conversation instead">${ICONS.x}</button>` : '';
+    const sent = convo ? '' : askSentHtml(job, sub);
+    const open = !convo && sub && subState(job, sub) === 'failing';
+    const mine = boxImages(key);
+    return `${sent}<div class="job-change${open ? ' is-open' : ''}" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}" data-change-convo="${esc(key)}" data-change-to="${esc(route.to)}">
+      <ul class="job-change-tray" ${mine.length ? '' : 'hidden'}>${askTrayHtml(key)}</ul>
+      <p class="job-change-error" role="alert" ${askErrorText(key) ? '' : 'hidden'}>${esc(askErrorText(key))}</p>
+      <div class="job-change-row"><span class="job-change-to" title="Who hears it">${wranglerMark('small')}${esc(route.to)}${where ? `<small>${esc(where)}</small>` : ''}${fresh}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="${convo ? `Reply in ${esc(convoTitle(job, convo))}` : `Add idea for ${esc(route.to)}`}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to)}" title="Send (↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
       <div class="job-change-foot"><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
+  }
+  // What was sent to a conversation is drawn at its end, where the answer comes, above
+  // the box; one that starts a new conversation, above the box below them all.
+  function changeBoxHtml(job, sub) {
+    const view = changeView(job, sub);
+    // A step Wrangler is fixing is the wrangler's for now.
+    const open = view && !(sub && redFixing(job, sub));
+    const target = open && view.at !== 'plan' ? replyTarget(job, sub, view) : null;
+    const talk = talkHtml(job, sub, target ? (convo) => `${askSentHtml(job, sub, convo.id)}${boxHtml(job, sub, view, convo.id)}` : null, convoFold, openMore, target);
+    return open ? target ? talk : `${talk}${boxHtml(job, sub, view, '')}` : talk + askSentHtml(job, sub);
+  }
+  // Opens another conversation with the box at its foot (or none, for a new one),
+  // keeping what was typed for the last one.
+  function aimBox(sub, key) {
+    const box = dialog.querySelector('.job-change[data-change-convo]:not([data-idea-composer])');
+    if (box) boxDrafts.set(`${sub?.id || ''}|${box.dataset.changeConvo || ''}`, box.querySelector('textarea').value);
+    replyTo.set(sub?.id || '', key);
+    renderDetail();
+    const text = dialog.querySelector('.job-change[data-change-convo]:not([data-idea-composer]) textarea');
+    if (text) { text.focus(); text.setSelectionRange(text.value.length, text.value.length); }
   }
   // One control for reading the diff: Wrangler's own view, the desktop IDE in its menu.
   const reviewCodeHtml = (sub) => `<span class="job-split"><button id="job-diff" title="Review code in Wrangler">${ICONS.code}Review code</button>${sub.worktree?.path ? `<details class="job-split-more" data-keep="review-menu" ${openMore.has('review-menu') ? 'open' : ''}><summary aria-label="More ways to review code" title="More ways to review code">${ICONS.caret}</summary><div class="job-split-menu"><button id="job-ide" title="Review code in ${esc(ideApp())}">In ${esc(ideApp())}</button></div></details>` : ''}</span>`;
@@ -991,14 +1033,19 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       : typeof (now[k] ?? was[k]) === 'string' || (now[k] ?? was[k]) == null ? wordsDiffHtml(was[k] ?? '', now[k] ?? '') : `<del>${esc(JSON.stringify(was[k] ?? null))}</del> <ins>${esc(JSON.stringify(now[k] ?? null))}</ins>`;
     return `<dl class="job-edit-diff">${fields.map((k) => `<dt>${esc(fieldName(k))}</dt><dd>${row(k)}</dd>`).join('')}</dl>`;
   }
-  const ACT_KIND = { 'accept-red': 'Accept red', recover: 'Recover', 'mark-merged': 'Mark merged', 'mark-done': 'Mark done', forward: 'Forward', rework: 'Rework' };
-  // The proposal laid over the live job (server/job-replan.js): every node in its
-  // current state, labelled with what approving does to it, and the same in words.
+  // Hovering it lists what waits, oldest first.
+  const queuedTag = (job) => queuedLabel(job) ? `<span class="job-talk-tag tone-working job-replan-queued" title="${esc(replanQueued(job).map((q, i) => `${i + 1}. ${q.feedback}`).join('\n'))}">${esc(queuedLabel(job))}</span>` : '';
+  const ACT_KIND = { 'accept-red': 'Accept red', recover: 'Recover', 'mark-merged': 'Mark merged', 'mark-done': 'Mark done', forward: 'Forward', rework: 'Rework', retry: 'Retry' };
+  // A plan change is ONE decision card: what approving does (the option's label),
+  // why, what it leaves you, and the two buttons. What Wrangler found, its
+  // evidence and the asks wait behind Why, and the other options fold to their
+  // labels. Under the card the graph and every change are drawn as they were.
   function proposalHtml(job) {
     const proposal = job.replan.proposal;
     const options = proposalOptions(proposal);
     const picked = pickedOption(job);
-    const { merged, changes, actions = [] } = options[picked];
+    const option = options[picked];
+    const { merged, changes, actions = [], then = {} } = option;
     const liveSub = (id) => job.subJobs.find((x) => x.id === id);
     const acting = new Map(actions.map((a) => [a.sub, a]));
     const markOf = (s) => acting.has(s.id) ? actionMark(acting.get(s.id)) : changes.frozen.includes(s.id) ? 'frozen' : changes.removed.includes(s.id) ? 'removed' : changes.added.includes(s.id) ? 'added' : changes.edited.some((e) => e.id === s.id) ? 'edited' : 'kept';
@@ -1006,33 +1053,38 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const pr = (id) => { const s = liveSub(id); return s?.pr?.url ? ` · ${link(s.pr.url, `PR #${prNumber(s)}`)} stays open on GitHub` : ''; };
     // Every row is kind | step, so titles line up whether or not the row opens.
     const row = (kind, what) => `<span class="job-change-kind">${esc(kind)}</span><span class="job-change-what">${what}</span>`;
-    const items = [...changes.added.map((id) => `<li class="job-mark-added">${row('New', esc(title(id)))}</li>`),
-      ...changes.edited.map((e) => `<li class="job-mark-edited"><details><summary>${row('Edited', esc(editLine(e, merged)))}</summary>${editDiffHtml(job.plan.subJobs.find((s) => s.id === e.id), merged.subJobs.find((s) => s.id === e.id), e.fields, title)}</details></li>`),
-      ...changes.removed.map((id) => `<li class="job-mark-removed">${row('Will be cancelled', `${esc(title(id))}${pr(id) ? ` <small>${pr(id).replace(/^ · /, '')}</small>` : ''}`)}</li>`),
-      ...actions.map((a) => { const l = actionLine(a, merged); return `<li class="job-mark-act job-mark-${actionMark(a)}" title="${esc(pinLine(a.pin))}">${row(ACT_KIND[actionMark(a)] || a.type, `${esc(l.text)}${l.detail ? ` <small>${esc(l.detail)}</small>` : ''}`)}</li>`; })];
-    const d = proposal.diagnosis;
-    const diagnosis = d ? `<div class="job-triage"><header>${ICONS.sparkle}<b>What Wrangler found</b></header><p>${esc(d.summary)}</p>${d.evidence?.length ? more('triage-details', `Details (${d.evidence.length})`, `<ul>${d.evidence.map((e) => `<li><span>${esc(e.label)}</span>${esc(e.detail)}</li>`).join('')}</ul>`, 'job-triage-more') : ''}</div>` : '';
-    const choose = options.length > 1 ? `<fieldset class="job-options"><legend>Choose one</legend>${options.map((o, i) => `<label class="job-option ${i === picked ? 'sel' : ''}"><input type="radio" name="opt" value="${i}" ${i === picked ? 'checked' : ''}><span><b>${esc(o.label || `Option ${i + 1}`)}${i === 0 ? '<span class="job-option-rec">Recommended</span>' : ''}</b>${o.why ? `<small>${esc(o.why)}</small>` : ''}</span></label>`).join('')}</fieldset>`
-      : proposal.label || proposal.why ? `<div class="job-option sel job-option-only"><span><b>${esc(proposal.label || 'Recommended')}</b>${proposal.why ? `<small>${esc(proposal.why)}</small>` : ''}</span></div>` : '';
-    // A red step's replan was Wrangler's own (job-red.js): say which step, not what a human typed.
+    // What approval does to it (server/job-replan.js thenOf): when it starts, and behind what.
+    const thenOf = (id) => (then[id] ? `<span class="job-talk-then">${esc(then[id])}</span>` : '');
+    const acts = actions.map((a) => { const l = actionLine(a, merged); return `<li class="job-mark-act job-mark-${actionMark(a)}" title="${esc(pinLine(a.pin))}">${row(ACT_KIND[actionMark(a)] || a.type, `${esc(l.text)}${l.detail ? ` <small>${esc(l.detail)}</small>` : ''}`)}</li>`; });
+    const items = [...changes.added.map((id) => `<li class="job-mark-added">${row('New', `${esc(title(id))}${thenOf(id)}`)}</li>`),
+      ...changes.edited.map((e) => `<li class="job-mark-edited"><details><summary>${row('Edited', `${esc(editLine(e, merged))}${thenOf(e.id)}`)}</summary>${editDiffHtml(job.plan.subJobs.find((s) => s.id === e.id), merged.subJobs.find((s) => s.id === e.id), e.fields, title)}</details></li>`),
+      ...changes.removed.map((id) => `<li class="job-mark-removed">${row('Will be cancelled', `${esc(title(id))}${pr(id) ? ` <small>${pr(id).replace(/^ · /, '')}</small>` : ''}`)}</li>`), ...acts];
+    // A red step's replan was Wrangler's own (job-red.js): the card names that step, never a human's words.
     const red = job.replan.red && !job.replan.red.human ? job.replan.red : null;
     const redSub = red && liveSub(red.sub);
-    const words = red ? `<b>${proposal.escalation ? 'Declared red' : 'Red step'}</b> ${esc(redSub?.title || red.sub)}${redSub?.error ? ` · ${esc(redSub.error)}` : ''}${proposal.escalation?.ask ? `<br><b>Needs you</b> ${esc(proposal.escalation.ask)}` : ''}` : `<b>You asked</b> ${esc(latestAsk(job.replan))}`;
-    // The bar stays pinned while the graph scrolls under it, so a long ask shows one line until asked for more (fitAsk).
-    const askOpen = openMore.has('proposal-ask');
-    const asked = `<p class="job-replan-ask"><span class="job-ask-text ${askOpen ? '' : 'job-ask-clamp'}">${words}</span><button type="button" class="job-ask-more" data-ask-more hidden>${askOpen ? 'Show less' : 'Show more'}</button></p>`;
-    // The latest ask leads; the ones before it stay one click away, oldest first.
-    const earlier = red ? [] : replanAsks(job.replan).slice(0, -1);
-    const before = earlier.length ? more('proposal-earlier', `Earlier asks (${earlier.length})`, `<ol>${earlier.map((a) => `<li>${esc(a)}</li>`).join('')}</ol>`, 'job-ask-earlier') : '';
-    // The decision, and the two buttons that make it, head the proposal: nothing else on the dialog looks like this.
-    const blocked = job.runs.some((r) => !r.stopped && !r.subJobId);
-    const bar = `<section class="job-proposal-bar" aria-label="Plan change waiting for you"><div class="job-proposal-head"><span class="job-proposal-title">${ICONS.eye}<b>Plan change waiting for your decision</b></span><span class="job-proposal-hint">${blocked ? 'Wrangler is still planning; approve once it stops.' : 'Nothing new starts until you approve or discard it. Running steps carry on.'}</span></div>
-      <div class="job-actions job-proposal-cta tone-warn"><button class="primary" data-action="approve-replan" ${blocked ? 'disabled' : ''}>${ICONS.check}Approve change</button><button data-action="discard-replan">${ICONS.x}Discard</button></div>${asked}${before}</section>`;
+    const counts = [[changes.added.length, 'new'], [changes.edited.length, 'edited'], [changes.removed.length, 'cancelled']].filter(([n]) => n).map(([n, w]) => `${n} ${w}`);
+    const kicker = red ? [redSub?.title || red.sub, proposal.escalation ? 'declared red' : redSub?.error].filter(Boolean).join(' · ')
+      : ['Plan change', counts.join(', ') || [...new Set(actions.map((a) => ACT_KIND[actionMark(a)] || a.type))].join(', ')].filter(Boolean).join(' · ');
+    const d = proposal.diagnosis;
+    // The card's line under its heading is the option's why; with none, what Wrangler found leads instead.
+    const why = option.why || (picked === 0 && d ? leadSentence(d.summary).head : '');
+    const heading = option.label || (red ? 'Proposed fix' : 'Proposed change');
+    const blocked = planningRun(job);
+    const others = options.map((o, i) => i === picked ? '' : `<button type="button" class="job-decision-other" data-option="${i}">${i === 0 ? 'Recommended' : 'Other option'}: ${esc(o.label || `Option ${i + 1}`)}</button>`).join('');
+    const asks = red ? [] : replanAsks(job.replan);
+    const whyBody = `${d ? `<p>${esc(d.summary)}</p>` : ''}${d?.evidence?.length ? `<ul class="job-decision-evidence">${d.evidence.map((e) => `<li><span>${esc(e.label)}</span>${esc(e.detail)}</li>`).join('')}</ul>` : ''}`
+      + (asks.length ? `<p class="job-replan-ask"><b>You asked</b> ${esc(asks.at(-1))}</p>${asks.length > 1 ? `<ol class="job-ask-earlier">${asks.slice(0, -1).map((a) => `<li>${esc(a)}</li>`).join('')}</ol>` : ''}` : '');
+    const whyMore = whyBody ? more('proposal-why', `Why${d?.evidence?.length ? ` (${d.evidence.length})` : ''}`, `<div class="job-decision-why-body">${whyBody}</div>`, 'job-decision-more') : '';
     const count = (n, cls, label) => n ? `<span class="job-diff-key job-mark-${cls}"><b>${n}</b> ${label}</span>` : '';
     const kept = merged.subJobs.filter((s) => ['kept', 'frozen'].includes(markOf(s))).length;
     const legend = `<p class="job-diff-legend">${count(changes.added.length, 'added', 'new')}${count(changes.edited.length, 'edited', 'edited')}${count(changes.removed.length, 'removed', 'cancelled')}${count(actions.length, 'rework', actions.length === 1 ? 'action' : 'actions')}${count(kept, 'kept', 'unchanged')}<span class="job-diff-edges"><i class="added"></i>new link<i class="gone"></i>dropped link</span></p>`;
-    return `${bar}${diagnosis}${choose}${legend}${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, editsOf: (id) => changes.edited.find((e) => e.id === id)?.fields || [], was: job.plan, openTickets, reviewWrites: job.reviewWrites, base: job.base })}
-      <ul class="job-replan-changes">${items.join('') || '<li>No sub-job changes</li>'}</ul>${planMoreHtml(job, merged)}`;
+    const planHtml = `${legend}${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, editsOf: (id) => changes.edited.find((e) => e.id === id)?.fields || [], was: job.plan, openTickets, reviewWrites: job.reviewWrites, base: job.base })}
+      <ul class="job-replan-changes">${items.join('')}</ul>${planMoreHtml(job, merged)}`;
+    return `<section class="job-decision${red ? ' is-red' : ''}" aria-label="Plan change waiting for you"><p class="job-decision-kicker">${ICONS.eye}<span>${esc(kicker)}</span>${queuedTag(job)}</p>
+      ${proposal.escalation?.ask ? `<p class="job-decision-ask">${esc(proposal.escalation.ask)}</p>` : ''}<h3 class="job-decision-title">${esc(heading)}${options.length > 1 && picked === 0 ? '<span class="job-option-rec">Recommended</span>' : ''}</h3>
+      ${why ? `<p class="job-decision-why">${esc(why)}</p>` : ''}${option.leaves ? `<p class="job-decision-leaves"><b>Leaves you</b> ${esc(option.leaves)}</p>` : ''}
+      <div class="job-actions job-proposal-cta tone-warn"><button class="primary" data-action="approve-replan" ${blocked ? 'disabled' : ''} title="${blocked ? 'Wrangler is still planning; approve once it stops' : 'Only the steps it changes wait until you approve or discard it'}">${ICONS.check}Approve</button><button data-action="discard-replan">${ICONS.x}Discard</button></div>
+      ${whyMore || others ? `<div class="job-decision-foot">${whyMore}${others}</div>` : ''}</section>${planHtml}`;
   }
   // The job dialog's one extended button: the single most urgent thing the job is
   // waiting on. A green PR awaiting approval merges from here, pinned to the head
@@ -1160,9 +1212,20 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const actions = `${job.error ? `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>` : ''}<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel idea</button>`;
     // What was on screen when the dialog opened is not new; only what arrives after fades in.
     if (ideaSeen?.jobId !== job.id) for (const m of ideaThread(job)) ideaDrawn.add(m.id);
-    return ideaViewHtml(job, { cost, actions, error, pending: ideaSent?.jobId === job.id ? ideaSent : null, firing: ideaFiring?.jobId === job.id ? ideaFiring : null, fresh: freshMessage, tray: askTrayHtml(), titled: titledNow(job) });
+    return ideaViewHtml(job, { cost, actions, error, pending: ideaSent?.jobId === job.id ? ideaSent : null, firing: ideaFiring?.jobId === job.id ? ideaFiring : null, fresh: freshMessage, tray: askTrayHtml(''), titled: titledNow(job) });
   }
   const conversationHtml = (job) => ideaThread(job).length ? more('idea', `${ICONS.note}Conversation <small>${ideaThread(job).length + 1}</small>`, ideaThreadHtml(job), 'job-idea-past') : '';
+  // A node's colour and icon already say done, queued or planned, so only the
+  // states they cannot say carry a line. A delivered job is one line of what
+  // landed; its all-green graph waits behind a disclosure.
+  const QUIET_LINE = ['done', 'queued', 'planned'];
+  function liveGraphHtml(job) {
+    const graph = planGraphHtml({ ...job.plan, subJobs: job.subJobs }, { stateOf: (s) => subState(job, s), lineOf: (s) => QUIET_LINE.includes(subState(job, s)) ? '' : subLine(job, s), openTickets, reviewWrites: job.reviewWrites, base: job.base });
+    if (job.stage !== 'done' || job.cancelledAt) return graph;
+    const landed = job.subJobs.filter((s) => !s.cancelledAt && s.pr?.url);
+    const line = landed.length ? `Delivered: ${landed.map((s) => link(s.pr.url, `${s.title} #${prNumber(s)}`)).join(' · ')}` : 'Delivered';
+    return `<p class="job-delivered">${ICONS.check}<span>${line}</span></p>${more('steps', `Steps <small>${job.subJobs.length}</small>`, graph, 'job-steps-more')}`;
+  }
   function jobDetail(job) {
     if (inConversation(job)) return ideaDetail(job);
     const state = jobState(job);
@@ -1172,7 +1235,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const hints = [job.cancelledAt ? cancelledText(job) : '',
       job.stage === 'backlog' && !job.cancelledAt ? 'Planning proposes Jira story titles without touching Jira. You review the plan before tickets are created or work begins.' : '',
       job.stage === 'planning' && !job.plan && !job.cancelledAt ? 'Wrangler will bring the plan here for review.' : '',
-      replanPending(job) ? replanProposed(job) ? 'Approving applies the change: new sub-jobs are added, edited ones take their new brief, removed ones are cancelled with any PR left open on GitHub. Locked sub-jobs have already landed and stay as they are. No new step starts until you approve or discard.' : 'Wrangler is re-planning and will bring the proposal here. No new step starts meanwhile; running steps carry on.' : ''].filter(Boolean);
+      replanPending(job) ? replanProposed(job) ? 'Approving applies the change: new sub-jobs are added, edited ones take their new brief, removed ones are cancelled with any PR left open on GitHub. Locked sub-jobs have already landed and stay as they are. Only the steps it changes wait until you approve or discard it; the rest of the job carries on.' : 'Wrangler is working on it and will bring any proposal here. Only held steps wait meanwhile; the rest of the job carries on.' : ''].filter(Boolean);
     const chips = stateChip(state, jobLabel(job), hints) + (plan ? storyChips(plan.stories || []) : repoChips(job.repos))
       + (job.base ? chip(ICONS.branch, `→ ${job.base}`, { title: `Every PR lands on ${job.base} unless it names another branch` }) : '') + costChip(job.usd, job.usdEstimated, `${JOB_COST_TITLE}${job.usdEstimated ? ' · includes an estimate for Codex sessions' : ''}`);
     let body = '', fab = '', extra = '';
@@ -1186,7 +1249,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const authority = authorityText(job, planDraft);
       fab = `<button class="primary" data-action="approve-plan" title="${esc(bad.length ? `Finish ${bad.length === 1 ? 'the write' : `${bad.length} writes`} first: ${writeProblem(bad[0])}` : authority)}" ${running || bad.length ? 'disabled' : ''}>${ICONS.check}Approve ${planDraft.subJobs.filter((s) => !isWriteSub(s)).length}</button>`;
     } else if (replanProposed(job)) body = proposalHtml(job);
-    else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Re-planning</b> ${esc(latestAsk(job.replan))}</p>` : ''}${supersededHtml(job)}${planGraphHtml({ ...job.plan, subJobs: job.subJobs }, { stateOf: (s) => subState(job, s), lineOf: (s) => subLine(job, s), openTickets, reviewWrites: job.reviewWrites, base: job.base })}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
+    else if (live && !(job.cancelledAt && !job.subJobs.length)) body = `${replanPending(job) ? `<p class="job-replan-ask"><b>Wrangling</b>${queuedTag(job)} ${esc(latestAsk(job.replan))}</p>` : replanQueued(job).length ? `<p class="job-replan-ask"><b>Wrangling</b>${queuedTag(job)} Starts once the last change's wrangler has stopped</p>` : ''}${supersededHtml(job)}${liveGraphHtml(job)}${planMoreHtml(job, job.plan)}${movesHistoryHtml(job)}`;
     else if (ideaEditable(job) && ideaEdit === job.id) body = ideaEditHtml(job, stripHtml(job));
     else body = `<p class="job-intent">${esc(job.intent)}</p>${stripHtml(job)}`;
     if (job.error) fab = `<button class="primary" id="job-retry">${ICONS.wrench}Retry</button>`;
@@ -1196,11 +1259,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     else if (job.stage === 'active') fab = leadFab(job);
     else if (!fab) fab = promptFab(job);
     if (job.stage === 'active' && !job.cancelledAt) extra = replanProposed(job) ? ''
-      : replanPending(job) ? `<button data-action="discard-replan" title="Stop re-planning and keep the plan as it is">${ICONS.x}Discard change</button>` : '';
+      : replanPending(job) ? `<button data-action="discard-replan" title="Stop wrangling and keep the plan as it is">${ICONS.x}Discard change</button>` : '';
     const tail = job.cancelledAt || job.stage === 'done' ? '' : `<button data-action="${job.paused ? 'resume' : 'pause'}" title="${job.paused ? 'Resume job' : 'Pause new work for this job'}">${job.paused ? `${ICONS.play}Resume` : `${ICONS.pause}Pause`}</button><button class="danger" id="job-cancel">${ICONS.stop}Cancel job</button>`;
     const ask = changeBoxHtml(job, null);
-    return `${appbar(job.title, chips)}${eventHtml(job, null)}${budgetHtml(job)}${mainNoticeHtml(job)}${body}${conversationHtml(job)}${ask}
-      <div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${tail}</div>${footerHtml(job)}`;
+    // The job's buttons and its checkpoints share one row; a delivered job has no checkpoints left to switch.
+    const done = job.stage === 'done' && !job.cancelledAt;
+    const buttons = fab || extra || tail ? `<div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${tail}</div>` : '';
+    return `${appbar(job.title, chips)}${eventHtml(job, null, more)}${budgetHtml(job)}${mainNoticeHtml(job)}${body}${conversationHtml(job)}${ask}
+      ${buttons || !done ? `<div class="job-detail-tail">${buttons}${done ? '' : footerHtml(job)}</div>` : ''}`;
   }
   // What a write's state means, in sentences: the chip's tooltip carries them all,
   // and the review / already-there one is also the box above it.
@@ -1366,11 +1432,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       ${workflows.length ? `<h4>What runs on merge <small>${workflows.filter((w) => w.triggers).length} of ${workflows.length}</small></h4><ul class="job-checks">${workflows.map((w) => `<li class="${w.triggers ? 'passed' : ''}">${w.triggers ? '✓' : '○'} ${esc(w.name)} <small>${esc(w.reason)}</small></li>`).join('')}</ul>` : ''}
       ${sub.repairs.length ? `<h4>Changes after failed checks</h4>${sub.repairs.map((r, i) => `<div class="job-repair"><b>Repair ${i + 1}</b>${receiptHtml(r.changes)}<details><summary>Re-verified</summary>${receiptHtml(r.checks)}</details></div>`).join('')}` : ''}`;
     const detailsOpen = openMore.has('details');
-    actions += askHelperHtml(sub);
     if (!isWriteSub(sub)) actions += `<button type="button" class="job-details-toggle" data-details-toggle aria-expanded="${detailsOpen}">${ICONS.doc}Details</button>`;
     return `${appbar(sub.title, chips, kicker, line)}${depsHtml(job, sub)}
-      ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub)}
-      ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}${helpersHtml(sub)}
+      ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub, more)}
+      ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}
       ${reviewing ? changeBoxHtml(job, sub) : ''}${actions.trim() ? `<div class="job-actions tone-${STATES[state].tone}">${actions}</div>` : ''}${reviewing ? '' : changeBoxHtml(job, sub)}
       ${isWriteSub(sub) ? '' : `<div class="job-details-body" ${detailsOpen ? '' : 'hidden'}>${details}</div>`}`;
   }
@@ -1385,11 +1450,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const wireProofAsk = (sub) => dialog.querySelectorAll('[data-proof-ask]').forEach((b) => b.onclick = () => {
     const item = proofItems(sub)[+b.dataset.proofAsk];
     if (!item) return;
+    replyTo.set(sub.id, '');
     askDraft = { subId: sub.id, text: item.couldNot ? `You couldn’t show “${item.text}”. Please try another way: ` : `About “${item.text}”: ` };
     proofView = null;
     renderDetail();
     askDraft = null;
-    const box = dialog.querySelector('.job-change textarea');
+    const box = dialog.querySelector('.job-change[data-change-convo=""] textarea');
     if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
   });
   function wireProofViewer(job, sub) {
@@ -1468,7 +1534,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   function openShot(b) {
     const slots = [...b.closest('.job-msg-att').querySelectorAll('[data-shot-at] [data-ev-file]')];
-    shotBox = { jobId: selected.jobId, subId: selected.subId, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
+    shotBox = { jobId: slots[0].dataset.evJob, subId: slots[0].dataset.evSub, round: Number(slots[0].dataset.evRound), files: slots.map((e) => e.dataset.evFile), at: +b.dataset.shotAt };
     shotZoom = document.createElement('dialog');
     shotZoom.className = 'job-shotbox';
     applyTheme(shotZoom);
@@ -1482,6 +1548,17 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     document.body.append(shotZoom);
     shotZoom.showModal();
     paintShotBox();
+  }
+  // The wrangler's answers this dialog draws are read once it is open on them: tell the
+  // server once per answer, so the job leaves the to-read state on its next tick. A
+  // folded conversation draws none of its answers, so it is read only once unfolded.
+  const seenSent = new Set();
+  function markSeen(job, sub) {
+    const drawn = new Set([...dialog.querySelectorAll('.job-talk-convo[data-convo]:not(.is-folded)')].map((e) => e.dataset.convo));
+    const unread = wranglerUnread(job, sub || null).filter((m) => !seenSent.has(m.id) && drawn.has(m.convo));
+    if (!unread.length) return;
+    for (const m of unread) seenSent.add(m.id);
+    send({ type: 'job-talk-seen', id: job.id, convos: [...new Set(unread.map((m) => m.convo))] });
   }
   function renderDetail() {
     const job = data.jobs.find((j) => j.id === selected?.jobId);
@@ -1507,6 +1584,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     scrolls();
     flags.painting = false;
     if (viewing) { wireProofViewer(job, sub); return; }
+    markSeen(job, sub);
     if (!sub && inConversation(job)) wireIdea(job);
     wireFooter();
     if (focus) dialog.querySelector(`.job-detail-footer [data-review="${focus}"]`)?.focus();
@@ -1581,12 +1659,44 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     dialog.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
     dialog.querySelectorAll('[data-open-path]').forEach((b) => b.onclick = () => openPath(b));
     dialog.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
+    // A conversation opens on its title row, folding the one that was open, and the box
+    // goes with it; open, its header folds it. × is for good (job-talk.js).
+    dialog.querySelectorAll('[data-convo-fold]').forEach((el) => el.onclick = (e) => {
+      if (e.target.closest('[data-convo-dismiss], a, .job-proof')) return;
+      const box = el.closest('[data-convo]'), folded = box.classList.contains('is-folded');
+      if (box.closest('[data-talk-target]')) return aimBox(sub, folded ? box.dataset.convo : '');
+      convoFold.set(box.dataset.convo, folded);
+      renderDetail();
+    });
+    // Its foot folds it as its header does, then brings that header back into view.
+    dialog.querySelectorAll('[data-convo-collapse]').forEach((b) => b.onclick = () => {
+      const id = b.closest('[data-convo]').dataset.convo;
+      if (b.closest('[data-talk-target]')) aimBox(sub, '');
+      else { convoFold.set(id, false); renderDetail(); }
+      [...dialog.querySelectorAll('[data-convo]')].find((c) => c.dataset.convo === id)?.querySelector('.job-talk-convo-head')?.scrollIntoView?.({ block: 'nearest' });
+    });
+    // The waiting card in a conversation jumps to the decision card at the top, which flashes once.
+    dialog.querySelectorAll('[data-goto-plan]').forEach((b) => b.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const card = dialog.querySelector('.job-decision');
+      if (!card) return;
+      const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      card.scrollIntoView?.({ behavior: calm ? 'auto' : 'smooth', block: 'start' });
+      card.classList.remove('is-flash'); void card.offsetWidth; card.classList.add('is-flash');
+      setTimeout(() => card.classList.remove('is-flash'), 1600);
+    });
+    dialog.querySelectorAll('[data-convo-dismiss]').forEach((b) => b.onclick = () => {
+      const id = b.closest('[data-convo]').dataset.convo;
+      if (!pressBusy(b)) return;
+      if (dialog.querySelector('.job-change[data-change-convo]:not([data-idea-composer])')?.dataset.changeConvo === id) replyTo.set(sub?.id || '', '');
+      action('dismiss-convo', { convo: id }, null);
+    });
+    // Pressing one must not blur the box: it would fold shut and shift the rows from under the pointer.
+    dialog.querySelectorAll('[data-talk-target] [data-convo-fold], [data-talk-target] [data-convo-collapse], [data-change-new]').forEach((b) => b.onmousedown = (e) => e.preventDefault());
+    dialog.querySelectorAll('[data-change-new]').forEach((b) => b.onclick = () => aimBox(sub, ''));
     dialog.querySelectorAll('[data-open-idea-job]').forEach((b) => b.onclick = () => openDetail(b.dataset.openIdeaJob, ''));
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });
     wireGraph();
-    fitAsk();
-    const askMore = dialog.querySelector('[data-ask-more]');
-    if (askMore) askMore.onclick = () => { if (!openMore.delete('proposal-ask')) openMore.add('proposal-ask'); renderDetail(); };
     hydrateStrips();
     wireWriteEditor();
     const bind = (id, fn) => { const e = dialog.querySelector(id); if (e) e.onclick = fn; };
@@ -1594,16 +1704,17 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const text = box.querySelector('textarea'), send = box.querySelector('[data-change-send]');
       send.onclick = () => {
         if (!text.value.trim() || send.disabled) return;
-        const images = askImages.map((i) => i.name).filter(Boolean);
-        action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim(), ...(images.length ? { images } : {}) });
+        const key = box.dataset.changeConvo || '', mine = askImages.filter((i) => i.box === key);
+        const images = mine.map((i) => i.name).filter(Boolean);
+        action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim(), ...(box.dataset.changeConvo ? { convo: box.dataset.changeConvo } : {}), ...(images.length ? { images } : {}) });
         clearAskSent();
-        askSent = { jobId: job.id, subId: sub?.id ?? null, text: text.value.trim(), items: askImages, images: askImages.map((i) => i.url), to: box.dataset.changeTo, at: Date.now(), state: 'sending' };
-        askImages = []; text.value = '';
+        askSent = { jobId: job.id, subId: sub?.id ?? null, convo: key, text: text.value.trim(), items: mine, images: mine.map((i) => i.url), to: box.dataset.changeTo, at: Date.now(), state: 'sending' };
+        askImages = askImages.filter((i) => i.box !== key); text.value = ''; convoFold.delete(key); boxDrafts.delete(`${sub?.id || ''}|${key}`);
         renderDetail();
       };
       wireAskImages(box);
     });
-    dialog.querySelectorAll('input[name="opt"]').forEach((r) => r.onchange = () => { optionPick = { id: job.replan.proposal.id, i: +r.value }; renderDetail(); });
+    dialog.querySelectorAll('[data-option]').forEach((b) => b.onclick = () => { optionPick = { id: job.replan.proposal.id, i: +b.dataset.option }; renderDetail(); });
     // Only the popup's own button sends its words: plain Retry sends none.
     const retry = (b, note) => { if (pressBusy(b)) action('retry', { subJobId: sub?.error ? sub.id : undefined, ...only({ note }) }); };
     bind('#job-retry', (e) => retry(e.currentTarget, dialog.querySelector('[data-retry-note]')?.value.replace(/\s+/g, ' ').trim()));
@@ -1636,8 +1747,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
     bind('#job-session', () => { dialog.close(); onSession(sub.sessions.at(-1)); });
     dialog.querySelectorAll('[data-step-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.stepSession); });
-    bind('[data-ask-helper]', (e) => { if (pressBusy(e.currentTarget)) action('ask-helper', {}, sub.id); });
-    dialog.querySelectorAll('[data-helper-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.helperSession); });
     // Reviewing the code is a round trip out to the board's diff panel, so hand over
     // where the reader came FROM as well as what to show — index.js re-opens this
     // same detail via openDetail once the panel closes. Every run of a sub-job
@@ -1801,7 +1910,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const panels = {
       general: section('Editor', `<label title="A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…">IDE<input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label>`, 'Review code’s “In IDE” opens a step’s worktree in this app.')
         + section('Local checkout', '<label class="job-toggle job-settings-main" title="Once a PR lands on the default branch, fast-forward your own checkout of it. A checkout with work of its own is left alone and the job tells you, with fixes an agent can make.">Keep local main updated<input type="checkbox" class="job-switch" name="updateMain" ' + (data.settings.updateMain === false ? '' : 'checked') + '></label>'),
-      automation: section('Repairs and replans', `<label>CI repairs per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to the planner this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label>`, 'These limits apply across all jobs.')
+      automation: section('Repairs and replans', `<label>CI repairs per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to Wrangler this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label>`, 'These limits apply across all jobs.')
         + section('Spend', `<label title="Dollars, cents allowed, $100 unless you change it. Empty for no limit. A job that reaches it is paused and its working sessions interrupted, until you add this much again on the job.">Job spend limit ($)<input type="number" name="spendLimit" min="0.01" max="100000" step="0.01" placeholder="No limit" value="${data.settings.spendLimit === undefined ? DEFAULT_SPEND_LIMIT : data.settings.spendLimit ?? ''}"></label>`, 'Each job may spend this much, plus this much again for every time you top it up. A new figure applies to jobs already running.')
         + section('Deployments', `<label>Deploy wait (min)<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label>`, 'How long a merge may go without any deployment run before the job asks you.'),
       review: `<fieldset class="job-prop job-settings-review"><legend>Defaults for new jobs</legend>${reviewPointsHtml(reviewDefaultsOf(data.settings), { warn: true })}</fieldset>`,
@@ -1835,7 +1944,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     e.preventDefault();
     run();
   });
-  dialog.addEventListener('close', () => { shotZoom?.close(); releaseSkies(dialog); ideaEdit = null; ideaSent = null; ideaFiring = null; ideaSeen = null; selected = null; planDraft = null; proofView = null; askDraft = null; clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
+  dialog.addEventListener('close', () => { shotZoom?.close(); releaseSkies(dialog); ideaEdit = null; ideaSent = null; ideaFiring = null; ideaSeen = null; selected = null; planDraft = null; proofView = null; askDraft = null; replyTo.clear(); boxDrafts.clear(); clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(); });
   render();
   // openDetail is exposed for the return leg of the diff round trip only — it opens
   // the same dialog a board card's click does, from a job/sub id pair index.js kept.
@@ -1863,9 +1972,13 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   function changeFailed(msg) {
     if (askSent?.state !== 'sending' || msg.jobId !== askSent.jobId || (msg.subJobId ?? null) !== askSent.subId) return false;
     // The pictures go back in the tray with the words: the bubble lets go of them.
-    const items = askSent.items || [];
+    // A conversation gone meanwhile (dismissed, or pruned) cannot take them: a new one does.
+    const job = data.jobs.find((j) => j.id === askSent.jobId);
+    if (askSent.convo && !(job && convoGroups(job, job.subJobs.find((s) => s.id === askSent.subId) || null).some((g) => g.convo?.id === askSent.convo))) askSent.convo = '';
+    const items = (askSent.items || []).map((i) => ({ ...i, box: askSent.convo || '' }));
     askImages = [...items, ...askImages];
-    Object.assign(askSent, { state: 'failed', error: msg.error, hadImages: items.length > 0, items: [], images: [] }); askDraft = { subId: askSent.subId ?? undefined, text: askSent.text };
+    Object.assign(askSent, { state: 'failed', error: msg.error, hadImages: items.length > 0, items: [], images: [] }); askDraft = { subId: askSent.subId ?? undefined, convo: askSent.convo, text: askSent.text };
+    replyTo.set(askSent.subId || '', askSent.convo || '');
     if (dialog.open) renderDetail();
     askDraft = null;
     return true;
@@ -1878,8 +1991,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     }
     // A saved idea stays open, back on its words: the rebuild before this frame already carries them.
     if (msg?.action === 'edit-idea') { if (msg.jobId === selected?.jobId) { ideaEdit = null; if (dialog.open) renderDetail(); } return; }
-    // A Retry's, a fix's or a helper's outcome lands on a later tick, in the dialog it was pressed in.
-    if (['retry-main', 'dismiss-main', 'resolve-main', 'ask-helper'].includes(msg?.action)) return;
+    // A Retry's, a fix's or a dismissal's outcome lands on a later tick, in the dialog it was pressed in.
+    if (['retry-main', 'dismiss-main', 'resolve-main', 'dismiss-convo'].includes(msg?.action)) return;
     // A New idea that is planning opens on its conversation once the snapshot has it.
     if (msg?.event === 'job-created' && msg.idea && msg.started) { openOnCreate = msg.jobId; if (data.jobs.some((j) => j.id === msg.jobId)) { openOnCreate = null; openDetail(msg.jobId); } return; }
     // A reply stays in its conversation for the next tick. A created job closes the dialog it was pressed in,
@@ -1892,7 +2005,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       return;
     }
     // An idea stays on screen as its bubble: the tick is the confirmation, not a closed dialog.
-    if (msg?.action === 'request-change' && askSent?.state === 'sending' && msg.jobId === askSent.jobId && (msg.subJobId ?? null) === askSent.subId) { askSent.state = 'sent'; askSent.at = Date.now(); if (dialog.open) renderDetail(); return; }
+    if (msg?.action === 'request-change' && askSent?.state === 'sending' && msg.jobId === askSent.jobId && (msg.subJobId ?? null) === askSent.subId) { askSent.state = 'sent'; askSent.at = Date.now(); if (!askSent.convo) replyTo.delete(askSent.subId || ''); if (dialog.open) renderDetail(); return; }
     if (dialog.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;
     dialog.close();
   }, openDetail };
