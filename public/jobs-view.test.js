@@ -14,6 +14,8 @@ const hint = (f) => f.q('#job-dialog .job-chip-state').title;
 // A press stays busy until a redraw or its timeout; a test pressing again with neither hands it back as the timeout would.
 const release = (b) => { b.removeAttribute('aria-busy'); b.disabled = false; };
 const deploys = (summary = 'Deploys on merge · Deploy') => ({ head: 'head1', base: 'main', expected: true, workflows: [{ name: 'Deploy', file: 'deploy.yml', triggers: true, reason: 'runs on push' }], summary });
+// An idle conversation is folded to one line: a click on each folded header opens it.
+const unfold = (f) => { for (let head; (head = f.q('#job-dialog .job-talk-convo.is-folded .job-talk-convo-head'));) head.click(); };
 function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value: 'sonnet', label: 'Sonnet', default: true }], efforts: [{ value: 'high', label: 'High' }, { value: 'max', label: 'Max' }] }, { id: 'codex', label: 'Codex', models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true }], efforts: [{ value: 'high', label: 'High' }] }], extra = {}) {
   const window = new Window({ url: 'http://localhost:7878' });
   const prevDoc = globalThis.document, prevFormData = globalThis.FormData;
@@ -677,7 +679,7 @@ test('switching to Auto while work waits at the checkpoint asks first, and only 
   assert.equal(f.q('[data-review-undo]'), null, 'released work has no Undo');
 });
 
-test('Plan switched to Auto on a drafted plan approves the draft on display; a finished job locks every checkpoint', (t) => {
+test('Plan switched to Auto on a drafted plan approves the draft on display; a delivered job has no checkpoints left to switch', (t) => {
   const f = fixture(t);
   f.data.jobs[0].plan = { ...plan, subJobs: [...plan.subJobs, { id: 'spike', kind: 'session', title: 'Run spike', storyId: 'story', after: [], brief: 'Do it here' }] };
   f.view.update(f.data); f.view.openDetail('job1');
@@ -691,9 +693,13 @@ test('Plan switched to Auto on a drafted plan approves the draft on display; a f
   f.q('#job-dialog').close();
   const job = f.data.jobs[0]; job.stage = 'done'; job.subJobs = [{ id: 'spike', kind: 'session', title: 'Run spike', after: [], brief: 'Do it here', sessions: [], repairs: [], stage: 'done' }]; f.view.update(f.data);
   f.view.openDetail('job1');
+  assert.equal(f.q('.job-detail-footer'), null, 'nothing left to switch, so no tiles');
+  assert.match(f.q('.job-delivered').textContent, /^Delivered/);
+  assert.equal(f.q('.job-steps-more').open, false, 'the all-green graph waits behind Steps');
+  job.cancelledAt = 2; f.view.update(f.data); f.view.openDetail('job1');
   assert.deepEqual([...document.querySelectorAll('.job-detail-footer [data-review]')].map((b) => [b.dataset.review, b.getAttribute('aria-disabled')]),
-    [['reviewPlan', 'true'], ['reviewCode', 'true'], ['reviewMerge', 'true'], ['reviewSessions', 'true'], ['reviewRed', 'true']]);
-  assert.match(footerButton(f, 'reviewMerge').getAttribute('aria-label'), /The job is finished/);
+    [['reviewPlan', 'true'], ['reviewCode', 'true'], ['reviewMerge', 'true'], ['reviewSessions', 'true'], ['reviewRed', 'true']], 'a cancelled job keeps its locked tiles');
+  assert.match(footerButton(f, 'reviewMerge').getAttribute('aria-label'), /The job was cancelled/);
 });
 
 test('the Plan checkpoint can be set to Auto in the new-job form, and is a flag on the job', (t) => {
@@ -1729,7 +1735,7 @@ test('Add idea on a running job asks the planner for a proposal; the sent idea s
   job.runs = [{ id: 'plan2', subJobId: null, phase: 'planning', stopped: false }];
   f.view.created({ event: 'job-action-complete', jobId: 'job1', action: 'request-change' }); f.view.update(f.data);
   assert.equal(f.q('#job-dialog').open, true);
-  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Re-planning');
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Wrangling');
   assert.notEqual(jobStatus(job, job.subJobs[1]).text, 'Held for the plan change', 'a change being drawn pauses nothing');
   assert.match(f.q('.job-replan-ask').textContent, /Split web in two/);
   assert.ok(f.q('.job-change textarea'), 'a question can still be asked while the change is drawn');
@@ -1749,7 +1755,8 @@ test('the box is a conversation with the wrangler: a question and its answer in 
   const thread = () => f.q('#job-dialog .job-talk');
   assert.match(thread().querySelector('.job-talk-head').textContent, /Conversation with Wrangler/);
   assert.equal(thread().querySelector('.job-sent-bubble').innerHTML, '<span>Why is &lt;b&gt;web&lt;/b&gt; slow?</span>', 'the human\'s words, escaped');
-  assert.match(thread().querySelector('.job-sent-meta').textContent, /You · on Deliver web/);
+  assert.match(thread().querySelector('.job-talk-convo-head').textContent, /on Deliver web/);
+  assert.doesNotMatch(thread().querySelector('.job-sent-meta').textContent, /Deliver web/, 'the header names the step, the message does not again');
   assert.match(thread().querySelector('.job-talk-working').textContent, /Wrangler is looking into it…/);
   assert.equal(f.q('#job-dialog .job-change textarea').placeholder, 'Add to your question…', 'what is said before the reply goes to the same wrangler');
   assert.equal(f.q('#job-dialog .job-change').dataset.changeConvo, 'c1');
@@ -1970,15 +1977,12 @@ test('a change idea goes straight to a proposal card in the same thread, with it
     changes: [{ mark: 'added', title: 'Deliver cli' }, { mark: 'edited', title: 'Deliver web', detail: 'brief, show' }] });
   f.view.update(f.data);
   const card = f.q('#job-dialog .job-talk-card');
-  assert.match(card.querySelector('header').textContent, /Proposed a change.*Waiting for you/);
+  assert.equal(card.tagName, 'DETAILS', 'on the job the waiting card folds like a decided one: the decision card above says it');
+  assert.match(card.querySelector('summary').textContent, /Proposed a change.*Waiting for you/);
   assert.deepEqual([...card.querySelectorAll('.job-talk-change')].map((li) => [li.querySelector('.job-mark').textContent, li.querySelector('.job-talk-change-title').textContent]),
     [['New', 'Deliver cli'], ['Edited', 'Deliver web brief, show']]);
-  assert.ok(card.querySelector('[data-talk-review]'), 'Review proposal, which is drawn at the top of this dialog');
-  const dialog = f.q('#job-dialog'), scrolls = [];
-  dialog.scrollTo = (o) => scrolls.push(o);
-  card.querySelector('[data-talk-review]').click();
-  assert.deepEqual(scrolls, [{ top: 0, behavior: 'smooth' }], 'scrolls the dialog up to the proposal, not the sticky bar into a view it never leaves');
-  assert.ok(f.q('[data-action="approve-replan"]'), 'the proposal is approved where it always was');
+  assert.equal(card.querySelector('[data-talk-review]'), null);
+  assert.ok(f.q('.job-decision [data-action="approve-replan"]'), 'the proposal is approved on the decision card');
   f.view.openDetail('job1', 'web');
   assert.equal(f.q('#job-dialog .job-talk'), null, 'a job-level idea stays on the job');
   f.view.openDetail('job1');
@@ -2003,10 +2007,12 @@ test('a forwarded idea is one line in the conversation, and the session\'s reply
   f.q('[data-board="job1"] .job-plate-open').click();
   const talk = f.q('#job-dialog .job-talk');
   assert.equal(talk.querySelector('.job-talk-card'), null, 'no Proposed a change card, no Approved tag');
-  assert.equal(talk.querySelector('.job-talk-forward').textContent.replace(/\d.*$/, '').trim(), 'Wrangler forwarded this to Deliver api\'s session');
+  assert.equal(talk.querySelector('.job-talk-forward').textContent.replace(/\d.*$/, '').trim(), 'Forwarded toDeliver api');
+  assert.equal(talk.querySelector('.job-talk-forward .job-talk-step').textContent, 'Deliver api', 'the step is its own muted span');
   const said = [...talk.querySelectorAll('.job-talk-session')];
   assert.equal(said.length, 1, 'only what answered this message, not what came after the next one');
-  assert.match(said[0].querySelector('.job-idea-who').textContent, /^Session · Deliver api/);
+  assert.match(said[0].querySelector('.job-idea-who').textContent, /^SessionDeliver api/);
+  assert.equal(said[0].querySelector('.job-idea-who .job-talk-step').textContent, 'Deliver api');
   assert.equal(said[0].querySelector('.job-idea-body').textContent, 'Checked at 375px: it <wraps> fine.');
   assert.equal(said[0].querySelector('.wrangler-mark'), null, 'not Wrangler\'s mark');
   assert.deepEqual([...said[0].querySelectorAll('[data-shot-at] [data-ev-file]')].map((e) => [e.dataset.evSub, e.dataset.evFile]), [['api', 'narrow.png']]);
@@ -2030,6 +2036,7 @@ test('a forward the human discarded never claims it went, and a forward inside a
       changes: [{ mark: 'forward', title: 'Deliver api', sub: 'api' }] }];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
+  unfold(f);
   const [real, gone] = f.q('#job-dialog .job-talk').querySelectorAll('.job-talk-card');
   assert.match(real.querySelector('summary').textContent, /^Proposed a change.*Approved.*1 new, 1 forward/);
   assert.match(real.querySelector('.job-idea-body').textContent, /Adds a CLI\./);
@@ -2039,7 +2046,7 @@ test('a forward the human discarded never claims it went, and a forward inside a
   job.talk[1].forwarded = [{ sub: 'api', message: 'm1' }];
   f.view.update(f.data);
   const after = f.q('#job-dialog .job-talk-card.tone-ok').closest('.job-talk-msg').nextElementSibling;
-  assert.match(after.textContent, /^Session · Deliver api.*Done\./, 'what the session said follows the change that forwarded to it');
+  assert.match(after.textContent, /^SessionDeliver api.*Done\./, 'what the session said follows the change that forwarded to it');
 });
 
 test('a decided proposal card folds to one line of counts by kind, opens on a click and stays as the human left it', (t) => {
@@ -2052,6 +2059,7 @@ test('a decided proposal card folds to one line of counts by kind, opens on a cl
   job.runs = [];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
+  unfold(f);
   const card = () => f.q('#job-dialog details.job-talk-card');
   assert.equal(card().open, false, 'decided: folded');
   assert.equal(card().querySelector('summary').textContent, 'Proposed a changeApproved1 edited, 1 rework', 'counts in the order of the marks');
@@ -2070,10 +2078,8 @@ test('a decided proposal card folds to one line of counts by kind, opens on a cl
 
   job.replan = { feedback: 'x', at: 2, convo: 'c1', proposal: { id: 'p1', plan: job.plan, merged: job.plan, changes: { frozen: [], kept: [], edited: [], added: [], removed: [] }, actions: [], alternatives: [] }, previous: null };
   f.view.update(f.data);
-  assert.equal(card(), null, 'waiting: not a fold');
-  const live = f.q('#job-dialog .job-talk-card');
-  assert.match(live.querySelector('header').textContent, /Waiting for you/);
-  assert.ok(live.querySelector('[data-talk-review]'));
+  assert.match(card().querySelector('summary').textContent, /^Proposed a fixWaiting for you/, 'waiting, it still folds on the job: the decision card at the top is where it is read');
+  assert.ok(f.q('#job-dialog .job-decision [data-action="approve-replan"]'));
 });
 
 test('a plan change about a sub-job awaiting review freezes it: held, not needs-you, and nothing to approve or move; one about the job holds nothing', (t) => {
@@ -2085,7 +2091,7 @@ test('a plan change about a sub-job awaiting review freezes it: held, not needs-
   assert.equal(jobNeedsReview(job, job.subJobs[0]), true, 'an idea typed on the job holds no step');
   job.replan = { feedback: 'Rethink api', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'r1' } };
   f.view.update(f.data);
-  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Re-planning');
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Wrangling');
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false); assert.equal(f.q('#jobs-review-count').textContent, '');
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   assert.equal(f.q('[data-action="approve-code"]'), null);
@@ -2854,7 +2860,7 @@ test('a merged sub-job\'s idea goes to the planner; the box stays while the plan
   assert.deepEqual([f.q('.job-change').dataset.changeAt, f.q('.job-change-to').textContent], ['step', 'Wrangler']);
 });
 
-test('a plan change reads as a decision: one bar asks and holds both buttons, unchanged work fades and each edit says what it changes (charlie-ps/wrangler-squared#214)', (t) => {
+test('a plan change reads as one decision card holding both buttons; under it the graph and each edit, unchanged work fading (charlie-ps/wrangler-squared#214)', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued' }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }, { ...sub('docs'), stage: 'implementation', state: 'queued' }];
   job.plan = { ...plan, subJobs: [sub('api'), sub('web', ['api']), sub('docs')] };
@@ -2862,14 +2868,17 @@ test('a plan change reads as a decision: one bar asks and holds both buttons, un
   job.replan = { feedback: 'Put a CLI in front of web', at: 1, previous: null, proposal: { id: 'run_p', plan: merged, merged,
     changes: { frozen: [], kept: ['api', 'docs'], edited: [{ id: 'web', fields: ['brief', 'show', 'after'] }], added: ['cli'], removed: [] } } };
   f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
-  const bar = f.q('#job-dialog .job-proposal-bar');
-  assert.match(bar.querySelector('.job-proposal-title').textContent, /Plan change waiting for your decision/);
-  assert.match(bar.querySelector('.job-replan-ask').textContent, /You asked Put a CLI in front of web/);
-  assert.ok(bar.querySelector('[data-action="approve-replan"]') && bar.querySelector('[data-action="discard-replan"]'), 'the buttons sit in the bar that asks');
+  const card = f.q('#job-dialog .job-decision');
+  assert.equal(card.querySelector('.job-decision-kicker').textContent, 'Plan change · 1 new, 1 edited');
+  assert.equal(card.querySelector('.job-decision-title').textContent, 'Proposed change', 'no label: a plain heading, never an invented one');
+  assert.match(card.querySelector('.job-decision-more .job-replan-ask').textContent, /You asked Put a CLI in front of web/, 'the ask waits behind Why');
+  assert.ok(card.querySelector('[data-action="approve-replan"]') && card.querySelector('[data-action="discard-replan"]'), 'the buttons sit on the card');
   assert.equal(document.querySelectorAll('#job-dialog [data-action="approve-replan"]').length, 1, 'not repeated in the footer');
   assert.equal(document.querySelectorAll('#job-dialog [data-action="discard-replan"]').length, 1);
-  assert.ok(bar.compareDocumentPosition(f.q('#job-dialog .job-graph')) & 4, 'the bar comes before the graph');
-  f.q('.job-proposal-bar [data-action="approve-replan"]').click();
+  assert.equal(card.querySelector('.job-graph'), null, 'the graph is not in the card');
+  assert.ok(card.compareDocumentPosition(f.q('#job-dialog .job-graph')) & 4, 'it is drawn right under it, always');
+  assert.ok(f.q('#job-dialog .job-plan-more'), 'and so are the plan details');
+  card.querySelector('[data-action="approve-replan"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_p' });
   assert.equal(f.q('.job-diff-legend').textContent.replace(/\s+/g, ' ').trim(), '1 new1 edited2 unchangednew linkdropped link'.replace(/\s+/g, ' '));
   assert.ok(f.q('.job-node[data-node="api"]').classList.contains('job-mark-kept'), 'unchanged work is marked to fade');
@@ -2885,47 +2894,50 @@ test('a plan change reads as a decision: one bar asks and holds both buttons, un
   assert.deepEqual([...rows['waits for'].children].map((e) => `${e.tagName} ${e.textContent}`), ['INS + Deliver cli', 'DEL − Deliver api']);
 });
 
-test('the proposal bar clamps a long ask to a few lines: Show more only when the clamp hides something, and it stays open across redraws', (t) => {
+test('the decision card leads with the option: its label, why and what it leaves you; a red step names the step and its failure, never an ask', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
-  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued' }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
-  job.replan = { feedback: 'Short', at: 1, previous: null, proposal: { id: 'run_p', plan: job.plan, merged: job.plan, changes: { frozen: [], kept: ['api', 'web'], edited: [], added: [], removed: [] } } };
-  // happy-dom lays nothing out, so a clamped ask "overflows" exactly when its words are long.
-  const proto = Object.getPrototypeOf(f.window.document.createElement('span'));
-  const height = (e) => e.classList?.contains('job-ask-clamp') && e.textContent.length > 200 ? 300 : 80;
-  Object.defineProperty(proto, 'scrollHeight', { get() { return height(this); }, configurable: true });
-  Object.defineProperty(proto, 'clientHeight', { get() { return this.classList?.contains('job-ask-clamp') ? 80 : height(this); }, configurable: true });
+  job.subJobs = [{ ...sub('api'), stage: 'deployment', state: 'watching', error: 'Post-merge run failed: Sync next', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', mergeCommit: 'm1' } }];
+  job.plan = { ...plan, subJobs: [sub('api')] };
+  job.replan = { feedback: 'RED STEP', at: 1, previous: null, red: { sub: 'api', auto: false, n: 1 }, proposal: { id: 'run_p', label: 'Accept the failing <b>sync</b>', why: 'It was already failing before this change.', leaves: 'Merge main into next by hand.',
+    plan: job.plan, merged: job.plan, changes: { frozen: [], kept: ['api'], edited: [], added: [], removed: [] }, actions: [{ type: 'accept-red', sub: 'api', pin: { at: 'merge', ref: 'm1' } }],
+    diagnosis: { summary: 'The copy of main into next hits conflicts. It failed the same way before.', evidence: [{ label: 'run 1', detail: 'Sync next' }, { label: 'run 2', detail: 'Test passed' }] } } };
   f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
-  assert.ok(f.q('.job-proposal-bar .job-ask-text').classList.contains('job-ask-clamp'));
-  assert.equal(f.q('.job-proposal-bar [data-ask-more]').hidden, true, 'a short ask has no toggle');
-  job.replan.feedback = 'Long '.repeat(80); f.view.update(f.data);
-  const more = f.q('.job-proposal-bar [data-ask-more]');
-  assert.equal(more.hidden, false); assert.equal(more.textContent, 'Show more');
-  more.click();
-  assert.ok(!f.q('.job-proposal-bar .job-ask-text').classList.contains('job-ask-clamp'), 'expanded shows every line');
-  assert.equal(f.q('.job-proposal-bar [data-ask-more]').textContent, 'Show less');
-  assert.equal(f.sent.filter((m) => m.type === 'job-action').length, 0, 'the toggle sends nothing');
-  job.replan.feedback += 'and more'; f.view.update(f.data);
-  assert.ok(!f.q('.job-proposal-bar .job-ask-text').classList.contains('job-ask-clamp'), 'a redraw keeps it open');
-  f.q('.job-proposal-bar [data-ask-more]').click();
-  assert.ok(f.q('.job-proposal-bar .job-ask-text').classList.contains('job-ask-clamp'));
-  assert.equal(f.q('.job-proposal-bar [data-ask-more]').textContent, 'Show more');
+  const card = f.q('#job-dialog .job-decision');
+  assert.ok(card.classList.contains('is-red'));
+  assert.equal(card.querySelector('.job-decision-kicker').textContent, 'Deliver api · Post-merge run failed: Sync next');
+  assert.equal(card.querySelector('.job-decision-title').innerHTML, 'Accept the failing &lt;b&gt;sync&lt;/b&gt;', 'escaped');
+  assert.equal(card.querySelector('.job-decision-why').textContent, 'It was already failing before this change.');
+  assert.equal(card.querySelector('.job-decision-leaves').textContent, 'Leaves you Merge main into next by hand.');
+  const why = card.querySelector('.job-decision-more');
+  assert.equal(why.querySelector('summary').textContent, 'Why (2)');
+  assert.equal(why.open, false, 'what Wrangler found waits behind Why');
+  assert.match(why.textContent, /hits conflicts.*run 1Sync next.*run 2Test passed/s);
+  assert.equal(why.querySelector('.job-replan-ask'), null, 'Wrangler\'s own replan quotes no ask');
+  assert.equal(f.q('#job-dialog .job-replan-changes .job-mark-act .job-change-what').textContent, 'Counts “Deliver api” as landed despite its failing run after merge', 'the action row is drawn under the card, as before');
+  assert.ok(f.q('#job-dialog .job-graph'), 'and so is the graph');
+  why.open = true; why.dispatchEvent(f.event('toggle')); f.view.update(f.data);
+  assert.equal(f.q('#job-dialog .job-decision-more').open, true, 'opened, it stays open across a tick');
+
+  delete job.replan.proposal.why; job.replan.proposal.leaves = null; f.view.update(f.data);
+  assert.equal(f.q('.job-decision-why').textContent, 'The copy of main into next hits conflicts.', 'with no why, the first sentence of what Wrangler found');
+  assert.equal(f.q('.job-decision-leaves'), null, 'nothing left to you, no line');
 });
 
-test('the proposal bar says the latest ask, with the earlier ones listed once each behind a toggle, also for a nested ask saved before', (t) => {
+test('behind Why the card says the latest ask, with the earlier ones listed once each, also for a nested ask saved before', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued' }];
   const proposal = { id: 'run_p', plan: job.plan, merged: job.plan, changes: { frozen: [], kept: ['api'], edited: [], added: [], removed: [] } };
   job.replan = { feedback: 'Rename the button', earlier: ['Add CSV export', 'Make it smaller'], at: 1, previous: null, proposal };
   f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
-  assert.equal(f.q('.job-proposal-bar .job-ask-text').textContent, 'You asked Rename the button');
-  assert.equal(f.q('.job-proposal-bar .job-ask-earlier summary').textContent, 'Earlier asks (2)');
+  assert.equal(f.q('.job-decision-more .job-replan-ask').textContent, 'You asked Rename the button');
+  assert.equal(f.q('.job-decision-more summary').textContent, 'Why');
   assert.deepEqual([...f.window.document.querySelectorAll('.job-ask-earlier li')].map((l) => l.textContent), ['Add CSV export', 'Make it smaller']);
   job.replan = { feedback: 'Earlier: Earlier: Add CSV export\n\nNow: Make it smaller\n\nNow: Rename the button', at: 1, previous: null, proposal };
   f.view.update(f.data);
-  assert.equal(f.q('.job-proposal-bar .job-ask-text').textContent, 'You asked Rename the button');
+  assert.equal(f.q('.job-decision-more .job-replan-ask').textContent, 'You asked Rename the button');
   assert.deepEqual([...f.window.document.querySelectorAll('.job-ask-earlier li')].map((l) => l.textContent), ['Add CSV export', 'Make it smaller']);
   job.replan = { feedback: 'Just this', earlier: [], at: 1, previous: null, proposal }; f.view.update(f.data);
-  assert.equal(f.q('.job-proposal-bar .job-ask-earlier'), null, 'one ask has no list');
+  assert.equal(f.q('.job-ask-earlier'), null, 'one ask has no list');
 });
 
 test('a proposal with a diagnosis, ranked options and actions: options switch the graph, actions are marks on the node, approve names the option', (t) => {
@@ -2941,25 +2953,27 @@ test('a proposal with a diagnosis, ranked options and actions: options switch th
     alternatives: [{ label: 'Fix the flaky test first', why: 'A new PR first', plan: fixed, merged: fixed, changes: changes({ added: ['flake'], edited: [{ id: 'api', fields: ['after'] }], kept: ['web'] }), actions: [] }] } };
   f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
   const html = () => f.q('#job-dialog').innerHTML;
-  assert.match(f.q('.job-triage header').textContent, /What Wrangler found/);
-  assert.match(f.q('.job-triage p').textContent, /times out/);
-  assert.equal(f.q('.job-triage details').open, false, 'evidence waits behind Details');
-  assert.match(f.q('.job-triage details').textContent, /Details \(1\)run 88213e2e/);
-  assert.equal(f.q('.job-options legend').textContent, 'Choose one');
+  const why = f.q('.job-decision-more');
+  assert.equal(why.querySelector('summary').textContent, 'Why (1)');
+  assert.equal(why.open, false, 'what Wrangler found and its evidence wait behind Why');
+  assert.match(why.textContent, /times out.*run 88213e2e/s);
   assert.ok(!html().includes('<b>times out</b>') && !html().includes('<i>flake</i>'), 'agent text is escaped');
-  assert.deepEqual([...document.querySelectorAll('.job-option b')].map((b) => b.textContent), ['Accept the red checksRecommended', 'Fix the flaky test first']);
-  assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Accept red', 'the action is drawn on the node it acts on');
+  assert.equal(f.q('.job-decision-title').textContent, 'Accept the red checksRecommended');
+  assert.equal(f.q('.job-decision-why').textContent, 'Unrelated <i>flake</i>');
+  assert.deepEqual([...document.querySelectorAll('[data-option]')].map((b) => b.textContent), ['Other option: Fix the flaky test first'], 'the other option folds to its label');
   const act = f.q('.job-replan-changes .job-mark-act');
   assert.equal(act.querySelector('.job-change-kind').textContent, 'Accept red');
   assert.equal(act.querySelector('.job-change-what').textContent, 'Merges “Deliver api” despite its failing checks');
   assert.equal(act.title, 'Not applied if its PR has new commits by the time you approve');
   f.q('[data-action="approve-replan"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_p', option: 0 });
-  const second = f.q('input[name="opt"][value="1"]'); second.checked = true; second.dispatchEvent(f.event('change'));
-  assert.equal(f.q('.job-node[data-node="flake"] .job-mark').textContent, 'New');
+  f.q('[data-option="1"]').click();
+  assert.equal(f.q('.job-decision-title').textContent, 'Fix the flaky test first', 'the picked option becomes the card');
+  assert.equal(f.q('.job-decision-why').textContent, 'A new PR first');
+  assert.deepEqual([...document.querySelectorAll('[data-option]')].map((b) => b.textContent), ['Recommended: Accept the red checks']);
+  assert.equal(f.q('.job-node[data-node="flake"] .job-mark').textContent, 'New', 'and its graph');
   assert.equal(f.q('.job-node[data-node="api"] .job-mark').textContent, 'Edited · waits for');
   assert.equal(document.querySelectorAll('.job-replan-changes .job-mark-act').length, 0, 'the other option\'s action is not shown');
-  assert.ok(f.q('.job-option.sel').textContent.includes('Fix the flaky test first'));
   f.q('[data-action="approve-replan"]').click();
   assert.equal(f.sent.at(-1).option, 1);
 });
@@ -2975,11 +2989,11 @@ test('a recover is a mark on the merged node that waits for its fix, and a propo
   const act = f.q('.job-replan-changes .job-mark-act');
   assert.equal(act.querySelector('.job-change-kind').textContent, 'Recover');
   assert.equal(act.querySelector('.job-change-what').textContent, 'Fixes “Deliver api” with a new PR, “Deliver fix”');
-  assert.equal(f.q('.job-option-only'), null, 'no label or why, nothing to read');
+  assert.equal(f.q('.job-decision-why'), null, 'no why and nothing found: no line to read');
   job.replan.proposal = { ...job.replan.proposal, label: 'Fix it with a <b>new</b> PR', why: 'The deploy stays red until it lands.' }; f.view.update(f.data);
-  assert.equal(f.q('.job-option-only').textContent, 'Fix it with a <b>new</b> PRThe deploy stays red until it lands.', 'a lone option still says what it does, escaped');
+  assert.equal(f.q('.job-decision-title').textContent + f.q('.job-decision-why').textContent, 'Fix it with a <b>new</b> PRThe deploy stays red until it lands.', 'a lone option still says what it does, escaped');
   assert.equal(f.q('.job-replan-changes .job-mark-act').title, 'Not applied if its merge has changed by the time you approve', 'the pin is a tooltip, not text to read');
-  assert.equal(f.q('.job-options'), null, 'one option needs no chooser');
+  assert.equal(f.q('[data-option]'), null, 'one option needs no chooser');
   f.q('[data-action="approve-replan"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_q' });
 });
@@ -3414,6 +3428,7 @@ test('a follow-up the thread holds before its ack shows once: the conversation\'
   job.convos = [{ id: 'c1', at: 1 }];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
+  unfold(f);
   const box = () => f.q('#job-dialog .job-change[data-change-convo="c1"]');
   const text = box().querySelector('textarea'); text.value = 'What other options do I have?'; text.dispatchEvent(f.event('input'));
   box().querySelector('[data-change-send]').click();
@@ -3426,6 +3441,7 @@ test('a follow-up the thread holds before its ack shows once: the conversation\'
   assert.doesNotMatch(f.q('#job-dialog').textContent, /Sending to Wrangler…/);
   f.view.created({ event: 'job-action-complete', jobId: 'job1', subJobId: null, action: 'request-change' });
   assert.equal(copies(), 1, 'and still one once the ack lands');
+  assert.equal(f.q('#job-dialog [data-convo="c1"]').classList.contains('is-folded'), false, 'written in, it stays open');
 });
 
 // ---- Red steps (server/job-red.js): Fixing is Wrangler's, Declared red is yours ----
@@ -3474,7 +3490,7 @@ test('a fix waiting on you is Fix ready (Needs you); approving opens the proposa
   assert.match(dialog.querySelector('.job-event-fix.ready').textContent, /The e2e times out on the SSO stub.*Waiting because Red steps is “You decide”/);
   const review = dialog.querySelector('[data-open-job].primary'); assert.equal(review.textContent, 'Review fix');
   review.click();
-  assert.match(f.q('#job-dialog').textContent, /Red step.*Deliver api.*repair limit/s, 'the proposal says which step, not what a person typed');
+  assert.match(f.q('#job-dialog .job-decision-kicker').textContent, /^Deliver api · .*repair limit/, 'the proposal says which step, not what a person typed');
   assert.ok(f.q('#job-dialog [data-action="approve-replan"]'));
 });
 
@@ -3489,8 +3505,11 @@ test('a declared red is the only red you act on: counted in Needs you, with what
   f.view.openDetail('job1', 'api');
   const dialog = f.q('#job-dialog');
   const box = dialog.querySelector('.job-event-fix.declared');
-  assert.match(box.textContent, /Declared red.*QA sign-off/); assert.deepEqual([...box.querySelectorAll('li')].map((l) => l.textContent), ['Replan 1: reran e2e twice', 'Replan 2: added a wait']);
-  assert.match(box.querySelector('.ask').textContent, /Needs you: Merge #412 with the red check, or hold it\?/);
+  assert.equal(box.querySelector('.ask').textContent, 'Merge #412 with the red check, or hold it?', 'the decision it needs heads the card');
+  assert.match(box.textContent, /hold it\?login-flow\.spec is flaky on main and needs QA sign-off/);
+  const tried = box.querySelector('.job-event-more');
+  assert.equal(tried.open, false); assert.equal(tried.querySelector('summary').textContent, 'Why · tried 2');
+  assert.deepEqual([...tried.querySelectorAll('li')].map((l) => l.textContent), ['Replan 1: reran e2e twice', 'Replan 2: added a wait'], 'what was tried waits behind it');
   assert.ok(dialog.querySelector('.job-change'), 'your own words go to the planner with all of it');
   // With options waiting, Decide opens them on the job.
   job.replan = { feedback: 'Declared red', at: 1, red: { sub: 'api', auto: false }, proposal: { id: 'run_e', label: 'Accept red and merge', plan, merged: plan, changes: { frozen: [], kept: ['api'], edited: [], added: [], removed: [] }, actions: [{ type: 'accept-red', sub: 'api', pin: { at: 'head', ref: 'h1' } }],
@@ -3499,10 +3518,10 @@ test('a declared red is the only red you act on: counted in Needs you, with what
   assert.equal(f.q('#job-dialog [data-open-job].primary').textContent, 'Decide');
   assert.equal(plateAsk(job).sub, '');
   f.q('#job-dialog [data-open-job].primary').click();
-  assert.match(f.q('#job-dialog').textContent, /Declared red.*Deliver api.*Needs you.*Merge #412/s);
+  assert.match(f.q('#job-dialog .job-decision').textContent, /Deliver api · declared red.*Merge #412 with the red check, or hold it\?.*Accept red and merge/s);
 });
 
-test('a step its own agent escalated shows one block: the declaration in full, footed "Declared by its agent"', (t) => {
+test('a step its own agent escalated shows one block: its ask, the first sentence, the rest behind Why, footed "Declared by its agent"', (t) => {
   const f = fixtureWithRed(t);
   const job = redJob(f); const api = job.subJobs[0];
   const summary = `Cannot reproduce the log noise on main. ${'Ran isolated servers for six minutes with codex off PATH. '.repeat(5)}A fix without the real line would be a guess.`;
@@ -3512,10 +3531,11 @@ test('a step its own agent escalated shows one block: the declaration in full, f
   assert.deepEqual([eventFor(job, api).title, eventFor(job, api).detail], ['Worker blocked', ''], 'the card still says what happened');
   f.view.openDetail('job1', 'api');
   const event = f.q('#job-dialog .job-event');
-  assert.equal(event.querySelectorAll('.job-event-fix').length, 1); assert.equal(event.querySelector('p'), null, 'the cut-off copy is gone');
-  assert.ok(event.textContent.includes(summary));
+  assert.equal(event.querySelectorAll('.job-event-fix').length, 1);
+  assert.equal([...event.querySelectorAll('p')].filter((p) => !p.closest('.job-event-why')).length, 0, 'the cut-off copy is gone');
+  assert.match(event.querySelector('.job-event-fix > span').textContent, /^Paste the repeating log line\?Cannot reproduce the log noise on main\.Why/, 'the ask, then the first sentence');
+  assert.ok(event.querySelector('.job-event-why').textContent.includes('A fix without the real line would be a guess.'), 'the rest, in full, behind Why');
   assert.deepEqual([...event.querySelectorAll('li')].map((l) => l.textContent), ['Ran it with codex off PATH']);
-  assert.match(event.querySelector('.ask').textContent, /Needs you: Paste the repeating log line\?/);
   assert.equal(event.querySelector('small').textContent, 'Declared by its agent');
 });
 

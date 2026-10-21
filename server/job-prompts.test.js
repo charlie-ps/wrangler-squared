@@ -40,6 +40,8 @@ test('every phase ends with its own receipt call, naming this run and the blocke
     const text = jobPrompt(planned, { ...briefed, pr: { url: 'https://github.com/org/repo/pull/1', mergeCommit: 'abc123' }, check: 'Sign-in works in dev' }, { ...run, phase });
     assert.match(text, /job_report \{runId:"run1"/, phase);
     assert.match(text, /Blocked: \{kind:"blocked", summary:"one sentence"\}/, phase);
+    // A step's escalation is drawn as a card: its ask heads it, the summary's first sentence under it.
+    if (phase !== 'planning') assert.match(text, /kind:"escalate".*`ask` is the one decision you need, as a question.*Commands and hashes go in tried/, phase);
   }
 });
 

@@ -29,6 +29,9 @@ const blockedLine = 'Blocked: {kind:"blocked", summary:"one sentence"}.';
 // step, changes the plan or escalates; escalate is for a decision only the human
 // can make, with what you found and tried.
 const upLine = 'Needs more than this step (a plan change): {kind:"replan", summary:"one sentence", why?:"the reason"}. Only the human can decide it: {kind:"escalate", summary:"what you found", tried?:["what you tried"], ask:"the one decision you need"}.';
+// An escalation is drawn as a card (public/jobs-view.js eventHtml): the ask heads
+// it, the summary's first sentence sits under it, the rest behind a disclosure.
+export const ESCALATE_VOICE = 'An escalation is shown to the human as a card: `ask` is its heading and the summary\'s FIRST sentence is the only line under it; the rest sits behind a closed disclosure. So `ask` is the one decision you need, as a question they can answer with a yes/no or a pick. The summary\'s first sentence says what stopped you, in plain words; the rest holds only the facts they need to make that decision: cut how you got there. Commands and hashes go in tried, one line each, never repeated in the summary.';
 const lines = (...parts) => parts.filter(Boolean).join('\n');
 const afterLine = (job, sub) => `After: ${(sub?.after || []).map((id) => (job.subJobs || []).find((s) => s.id === id)?.title || id).join(' · ') || 'none'}.`;
 // Quoted text from other steps, each item JSON-encoded so it reads as data, cut to
@@ -152,7 +155,7 @@ export function threadMail(job, run, sub, messages) {
   return lines(
     `${job.title}: you reported ready (round ${round}) and the human has written back. They see your proof and the working tree as you left them.`,
     ...said,
-    `A QUESTION: answer it from what you know, changing nothing: ${reportCall(run, 'kind:"reply", text:"your answer", shots?:[...], run?:{cmd,out,exit}')} Anything you capture to answer goes in $JOB_EVIDENCE (\`export JOB_EVIDENCE=${dir}\`).`,
+    `A QUESTION: answer it from what you know, changing nothing: ${reportCall(run, 'kind:"reply", text:"your answer", shots?:[...], run?:{cmd,out,exit}')} ${REPLY_RULES} Anything you capture to answer goes in $JOB_EVIDENCE (\`export JOB_EVIDENCE=${dir}\`).`,
     `A CHANGE: make it in this worktree, leave it UNCOMMITTED, re-verify and answer every Show me item again for this new round: ${reportCall(run, 'kind:"ready", checks:[...], running?:[...]')} List what is running in running again: anything the new receipt leaves out is stopped, and a restart you do not list is not kept. If it needs more than this PR, say so in a reply instead.`,
     'Then stop and wait: the session stays open for the next message.',
   );
@@ -173,9 +176,24 @@ const replyCall = (run) => reportCall(run, `kind:"reply", text:"your message to 
 // that chose it stays in the planner's head (a stored reply opened by naming its
 // request type and that nothing would be built).
 const REPLY_VOICE = 'Write it as a colleague talking: answer the question, or ask what you need, straight away. Whether this is a question, work or unclear, and what you weighed about its environment, is your own thinking: never name the kind of request, say nothing will be built, or open with a stock preamble.';
-// The proposal is read by a human who has not seen the code or the plan; the
-// detail behind it goes in evidence (public/jobs-view.js proposalHtml).
-const PROPOSAL_VOICE = 'Write the summary and every option\'s label and why for the human, who has not read the code, the plan or this prompt. Name things as they see them (the message, the button, the PR, the step\'s title), never file or function names, sub-job ids, or the plan\'s own words: brief, show, check, context, round, forward, rework, frozen, pinned. Short sentences, no quoted internal text unless the human asked about that text. The session open on a step\'s review is the agent that did that work, now waiting on the human\'s verdict: call it that (the agent that built it), never a reviewer. Paths, ids, commands, plan lines and runs go in evidence.';
+// The proposal is read by a human who glances and decides: one card (public/
+// jobs-view.js proposalHtml) of label, why and leaves, with the diagnosis and its
+// evidence behind a disclosure. Phrasing rules, never a length: a tangled case
+// may run longer, a simple one stays short.
+const PROPOSAL_VOICE = [
+  'Write for a human who glances, decides and moves on. The board shows your proposal as ONE card: the option\'s `label` as its heading, its `why` under it, its `leaves` line, then Approve and Discard. The diagnosis, its evidence and the action notes sit behind a closed "Why" disclosure, so the card must stand on its own.',
+  'Every clause you write must tell the human one of three things: what is wrong, what approving does, or what it leaves them to do. Cut anything else, however true. Let the case set the length: a simple case needs a few words, a tangled one may need more, but never pad and never repeat.',
+  '- label: what approving does, as a plain verb phrase.',
+  '- why: the fact that makes it the right call. Never restate the label.',
+  '- leaves: what the human still has to do afterwards. Leave it out when nothing.',
+  '- diagnosis.summary: what is wrong, or what they asked for, in the facts needed to judge the card. Never say what approving does (the card says it), never say which step this is about (the card names it), never narrate how you investigated.',
+  '- diagnosis.evidence: the proof, one line each (a run, a commit, a file, a PR).',
+  '- An action\'s note is for the agent that receives it, not the human: only what that agent needs to act (a forward or rework still carries the human\'s own words unchanged).',
+  '- alternatives: the same rules. Offer one only when a different choice is genuinely reasonable.',
+  'Say each fact once across the whole card. No preamble, no restating the question, no reassurance, no hedging. Name things as the human sees them (the message, the button, the PR, the step\'s title), never file or function names, sub-job ids, or the plan\'s own words: brief, show, check, context, round, forward, rework, frozen, pinned. Paths, ids, commands, plan lines and run numbers go in evidence only. The session open on a step\'s review is the agent that did that work, now waiting on the human\'s verdict: call it that (the agent that built it), never a reviewer.',
+].join('\n');
+// The human reads an answer at a glance, so its first line is the answer. Phrasing rules, never a length.
+export const REPLY_RULES = 'The human reads the FIRST LINE of your text at a glance, so the first line is the answer itself, with no preamble ("Yes.", "This answer is about…" are wasted) and no saying which step this is about (the conversation already says it). After it, include only what the human needs to act: what they can do, and what happens if they leave it. Cut background, history and explanation they did not ask for, however true. End with one line starting "How I know:" naming the runs, commits or files. Let the question set the length: a yes/no gets a line, a tangled one may need more, but never pad and never repeat. No headings.';
 // A pasted picture is a file the planner reads by path, as threadMail's are.
 const sayings = (job, messages) => messages.map((m) => `${m.from === 'planner' ? 'You' : 'The human'}: ${JSON.stringify(m.text)}${m.images?.length ? ` (pasted images, read them: ${m.images.map((i) => JSON.stringify(path.join(ideasDir(job.id), i.file))).join(', ')})` : ''}${suggestedLine(m)}`);
 const titles = (list) => list.map((x) => JSON.stringify(x.title)).reduce((acc, t, i, all) => (i === 0 ? t : `${acc}${i === all.length - 1 ? ' and' : ','} ${t}`), '');
@@ -321,7 +339,8 @@ const proposalRules = (job) => [
   'Besides editing the plan, a proposal can carry ACTIONS on a live sub-job, each applied only when the human approves and refused if its head, merge commit, stage or review round has moved by then (the board pins it): {type:"accept-red",sub,note?} waves through the failing checks of an open PR (or the failing post-merge run of a merged one) that you have shown are unrelated; {type:"mark",sub,position:"merged"|"done",evidence} says the work is merged or done elsewhere, and `evidence` (one line citing the PR or ticket that shows it) is REQUIRED or the receipt is refused; {type:"forward",sub,note} hands the human\'s words to the session still OPEN on that sub-job\'s code review (its status says so): it answers a question or makes the change as a new round, keeping its context; a proposal of forwards and nothing else (no plan change, no other action, no alternatives) is sent at once with no approval, since the words are the human\'s own, and the human sees only that you forwarded them, so its summary is a few words, never a plan change explained; {type:"rework",sub,note} sends its code or result back to its own agent with the note (a step whose session is open takes forward, never rework); {type:"recover",sub,fix} is for a MERGED sub-job whose post-merge run failed: add a new PR sub-job that fixes it, name its id as `fix`, and the merged one counts as landed when the fix does; {type:"retry",sub,note?} starts a RED step again as it is (the human\'s Retry) for a failure its own work did not cause and that will not happen again (a race, a lock, a network blip), and it ALWAYS waits for the human\'s approval. One action per sub-job. Never use accept-red or mark to hide a real failure.',
   'Every idea the human types comes to you, from the job or from one step. Sort it sentence by sentence. Feedback on, or a question about, what a live sub-job already produced (a mock-up, a PR\'s code or result) is an action on THAT sub-job, in the human\'s own words, kept unchanged: `forward` when its session is open on review, else `rework`. Never write it into a later sub-job\'s brief, which cannot fix it. New work, reordering and dropping are plan edits. One idea can need both in the same proposal, and a step\'s feedback folds into its one action (see "An idea from the human" in the job-worker skill). If an idea reads two ways, rank both as options.',
   'Several steps red or blocked on one cause are one proposal: add the fix as a new sub-job and put each of them after it. Approval sends every one whose brief or after changed back to wait for the fix, and each starts by itself once it lands; an open PR whose only change is its after keeps its code and has its branch updated instead. No retry action is needed for them.',
-  `Say what you found: \`diagnosis:{summary, evidence?:[{label,detail}]}\`. The summary is at most four sentences: first what is wrong or what the human asked, then what approving your recommended option does. Evidence holds up to six details behind it (a run, a file, a PR). If more than one answer is reasonable, rank them: your plan and actions are option 1 (the recommended one) with \`label\` and \`why\`, and \`alternatives:[{label,why?,plan,actions?}]\` hold at most two more. Each option is a whole plan. A label says what happens if they pick it, in a few words starting with a verb; its why says what they get and what they give up, in one or two sentences. ${PROPOSAL_VOICE}`,
+  `Say what you found: \`diagnosis:{summary, evidence?:[{label,detail}]}\`, with up to six pieces of evidence. If more than one answer is reasonable, rank them: your plan and actions are option 1 (the recommended one) with \`label\`, \`why\` and \`leaves\`, and \`alternatives:[{label,why?,leaves?,plan,actions?}]\` hold at most two more. Each option is a whole plan.`,
+  PROPOSAL_VOICE,
   `Current plan: ${JSON.stringify(job.plan)}`,
 ];
 // A conversation so far (job-talk.js), newest last, so a follow-up reads as one.
@@ -363,7 +382,7 @@ const replanBlock = (job, run) => lines(
   sourceLine(job, job.replan),
   job.replan.red ? '' : stepConvoLine(job, convoById(job, job.replan.convo)),
   `Requested change: ${replanAsked(job.replan)}`,
-  mayAnswer(job) ? `If those words are only a question and nothing should change, answer it instead of proposing: ${reportCall(run, `kind:"reply", text:"your answer, plain words, at most 4000 characters"${convoById(job, job.replan.convo)?.sub ? ', escalate?:true' : ''}`)} The board shows it in the job's conversation and no plan change is made.` : '',
+  mayAnswer(job) ? `If those words are only a question and nothing should change, answer it instead of proposing: ${reportCall(run, `kind:"reply", text:"your answer"${convoById(job, job.replan.convo)?.sub ? ', escalate?:true' : ''}`)} The board shows it in the job's conversation and no plan change is made. ${REPLY_RULES}` : '',
 );
 // A question in one of the job's conversations (job-talk.js): answered, not
 // planned. The board calls the planner "the wrangler", so that is who the human is
@@ -379,7 +398,7 @@ const askBlock = (job, run, convo) => lines(
   stepConvoLine(job, convo),
   ...convo.pending.asks.map((a, i) => `${i ? 'Then the human added' : 'The human wrote'}: ${a.feedback}`),
   'Find out before you answer or propose, READ-ONLY: get_job_context gives every run with its sessionId, read_session_transcript reads a step\'s session (open the raw transcriptPath it returns when the detail matters), `gh pr view`/`gh pr diff` read a PR, and a step\'s worktree is on disk. Change nothing anywhere.',
-  `To answer, reply in plain words (short paragraphs, a list where it helps, at most 4000 characters), saying what you know and how you know it: ${reportCall(run, `kind:"reply", text:"your answer"${convo.sub ? ', escalate?:true' : ''}`)} No plan change is made and nothing is held. Anything more the human says before you reply reaches you here by mail: answer all of it in that one reply.`,
+  `To answer, reply: ${reportCall(run, `kind:"reply", text:"your answer"${convo.sub ? ', escalate?:true' : ''}`)} ${REPLY_RULES} No plan change is made and nothing is held. Anything more the human says before you reply reaches you here by mail: answer all of it in that one reply.`,
   'You may answer or propose. If the human wants a change (an instruction, or "can you make it…?", "should we drop step 3?" meant as "do"), do not ask permission: propose it as a plan change, with the rules below, and report the plan receipt instead of a reply. Only then does anything wait for the human.',
   ...proposalRules(job),
 );
@@ -398,7 +417,7 @@ const cloneInto = (dir) => dir ? `into ${dir}/<repository-name>` : 'beside your 
 export function jobPrompt(job, sub, run) {
   const dir = checkoutsDir();
   const checkouts = dir && displayPath(dir);
-  const report = (body, lead = '') => `${lead}job_report {runId:"${run.id}", ${body}}. ${blockedLine}${run.phase === 'planning' ? '' : ` ${upLine}`}`;
+  const report = (body, lead = '') => `${lead}job_report {runId:"${run.id}", ${body}}. ${blockedLine}${run.phase === 'planning' ? '' : ` ${upLine} ${ESCALATE_VOICE}`}`;
   const attribution = `End the commit message${sub?.pr?.url ? '' : ' and the PR description'} with exactly this line:\n${ATTRIBUTION}`;
   const target = targetOf(job, sub);
   const baseFlag = target ? ` with \`gh pr create --base ${target}\` (this ${sub?.base ? 'PR' : 'job'} lands on ${target}, not the default branch)` : '';
@@ -434,8 +453,8 @@ export function jobPrompt(job, sub, run) {
       run.ask && convoById(job, run.convo)?.pending ? askBlock(job, run, convoById(job, run.convo)) : job.replan ? replanBlock(job, run) : job.plan || job.previousPlan || job.feedback ? `Previous plan / feedback: ${JSON.stringify({ plan: job.plan || job.previousPlan, feedback: job.feedback })}` : '',
       inConversation(job) && !job.previousPlan && !job.feedback ? ideaBlock(job, run) : '',
       '',
-      job.replan?.red ? `If no fix or plan change can get this step past red without a decision only the human can make, declare it red instead: ${reportCall(run, 'kind:"escalate", summary:"what you found", tried?:["what you tried"], ask:"the one decision you need", sub?:"<the red step\'s id>", options?:[{label, why?, plan, actions?}] (at most three, ranked)')}` : '',
-      report(`kind:"plan", ${job.replan || run.ask ? 'label?, why?, actions?:[{type,sub,note?,position?,evidence?,fix?}], diagnosis?:{summary,evidence?:[{label,detail}]}, alternatives?:[{label,why?,plan,actions?}], ' : ''}plan:{context, stories:[{id,key?,project?,title,fields?:[{name,value}]}], workflows:{PROJECT:[status]}, jiraSite?, subJobs:[{id,title,kind:"pr"|"session"|"human"|"write",repo,base?,storyId?,jiraKey?,after:[],brief,check?,show?:["a thing to see"],on?:{sub,at},place?:{type,ref?,name?},action?,by?,review?,why?}]}`),
+      job.replan?.red ? `If no fix or plan change can get this step past red without a decision only the human can make, declare it red instead: ${reportCall(run, 'kind:"escalate", summary:"what you found", tried?:["what you tried"], ask:"the one decision you need", sub?:"<the red step\'s id>", options?:[{label, why?, leaves?, plan, actions?}] (at most three, ranked)')} ${ESCALATE_VOICE}` : '',
+      report(`kind:"plan", ${job.replan || run.ask ? 'label?, why?, leaves?, actions?:[{type,sub,note?,position?,evidence?,fix?}], diagnosis?:{summary,evidence?:[{label,detail}]}, alternatives?:[{label,why?,leaves?,plan,actions?}], ' : ''}plan:{context, stories:[{id,key?,project?,title,fields?:[{name,value}]}], workflows:{PROJECT:[status]}, jiraSite?, subJobs:[{id,title,kind:"pr"|"session"|"human"|"write",repo,base?,storyId?,jiraKey?,after:[],brief,check?,show?:["a thing to see"],on?:{sub,at},place?:{type,ref?,name?},action?,by?,review?,why?}]}`),
     ),
     implementation: lines(
       heading(job, sub),

@@ -15,7 +15,8 @@ import { shotButtonHtml } from './job-proof.js';
 // Each is named by Haiku from its first message (server titlePending), else
 // "Conversation N". The job dialog shows all of them, a step's
 // dialog only what was said on that step: a conversation started there shows on
-// the job too only once its wrangler escalated it. Pure markup; jobs-view.js draws and
+// the job too only once its wrangler escalated it. A conversation names its step
+// once, in its header, never again on each message. Pure markup; jobs-view.js draws and
 // wires the boxes. Every word is escaped.
 
 export const WRANGLER_NAME = 'Wrangler';
@@ -23,8 +24,8 @@ const time = (at) => at ? new Date(at).toLocaleTimeString(undefined, { timeStyle
 const MARK = { added: 'New', edited: 'Edited', removed: 'Cancelled', rework: 'Rework', forward: 'Forward', 'accept-red': 'Accept red', mark: 'Mark', recover: 'Recover', retry: 'Retry' };
 const OUTCOME = { approved: ['ok', 'Approved'], discarded: ['muted', 'Discarded'], revised: ['muted', 'Revised'] };
 
-function humanHtml(job, m, onJob) {
-  const step = onJob && m.sub ? job.subJobs.find((s) => s.id === m.sub)?.title || m.sub : null;
+function humanHtml(job, m, onJob, here = null) {
+  const step = onJob && m.sub && m.sub !== here ? job.subJobs.find((s) => s.id === m.sub)?.title || m.sub : null;
   // Kept pictures are a strip the dialog fills from a job-images frame (`talk:<file>`);
   // a message saved before they were kept holds only how many there were.
   const kept = Array.isArray(m.images) ? m.images : [];
@@ -52,12 +53,13 @@ function proposalHtml(job, m, onJob, kept) {
   const [tone, label] = cardState(job, m);
   const live = tone === 'needs';
   const rows = (m.changes || []).map((c) => `<li class="job-talk-change job-mark-${esc(c.mark)}"><span class="job-mark">${esc(MARK[c.mark] || c.mark)}</span><span class="job-talk-change-title">${esc(c.mark === 'forward' ? `To ${c.title}'s session` : c.title)}${c.detail ? ` <small>${esc(c.detail)}</small>` : ''}${c.then ? `<span class="job-talk-then">${esc(c.then)}</span>` : ''}</span></li>`).join('');
-  const button = live ? onJob ? `<button type="button" data-talk-review title="The proposal is drawn at the top of this dialog">${ICONS.eye}Review proposal</button>` : `<button type="button" data-open-job title="Opens the job dialog on the proposal">${ICONS.eye}Review proposal</button>` : '';
+  const button = live && !onJob ? `<button type="button" data-open-job title="Opens the job dialog on the proposal">${ICONS.eye}Review proposal</button>` : '';
   const options = m.options > 1 ? `<small class="job-talk-options">${m.options} options</small>` : '';
   const queued = live && queuedLabel(job) ? `<span class="job-talk-tag tone-working">${esc(queuedLabel(job))}</span>` : '';
   const title = `<b>${isForward(m) ? 'Forward your words' : m.red ? 'Proposed a fix' : 'Proposed a change'}</b><span class="job-talk-tag">${esc(label)}</span>${queued}${options}`;
   const body = `${m.text ? `<div class="job-idea-body">${proseHtml(m.text)}</div>` : ''}${rows ? `<ul class="job-talk-changes">${rows}</ul>` : '<p class="job-talk-none">No sub-job changes</p>'}`;
-  if (live) return `<div class="job-talk-card tone-${tone}"><header>${title}</header>${body}${button ? `<footer>${button}</footer>` : ''}</div>`;
+  // On the job the waiting proposal is the decision card at the top, so here it folds like a decided one.
+  if (live && !onJob) return `<div class="job-talk-card tone-${tone}"><header>${title}</header>${body}${button ? `<footer>${button}</footer>` : ''}</div>`;
   const key = `talk-card:${m.id}`;
   return `<details class="job-talk-card tone-${tone}" data-keep="${esc(key)}" ${kept?.has(key) ? 'open' : ''}><summary>${title}<span class="job-talk-counts">${esc(countsOf(m.changes || []))}</span>${ICONS.caret}</summary>${body}</details>`;
 }
@@ -66,11 +68,14 @@ function proposalHtml(job, m, onJob, kept) {
 // noteProposal), or an older card that did no more than that.
 export const isForward = (m) => m.kind === 'proposal' && (m.forward || (!m.red && (m.options || 1) === 1 && m.changes?.length > 0 && m.changes.every((c) => c.mark === 'forward')));
 const stepTitle = (job, id) => job.subJobs.find((s) => s.id === id)?.title || id;
-const sessionsOf = (titles) => titles.length === 1 ? `${titles[0]}'s session` : `${titles.slice(0, -1).join(', ')} and ${titles.at(-1)}'s sessions`;
-function forwardLine(job, m) {
-  const titles = [...new Set((m.forwarded?.length ? m.forwarded.map((f) => stepTitle(job, f.sub)) : m.changes.map((c) => c.title)))];
-  return `${WRANGLER_NAME} forwarded this to ${sessionsOf(titles)}`;
+const listOf = (titles) => titles.length === 1 ? titles[0] : `${titles.slice(0, -1).join(', ')} and ${titles.at(-1)}`;
+function forwardedTo(job, m, here = null) {
+  const ids = m.forwarded?.length ? m.forwarded.map((f) => f.sub) : null;
+  if (ids?.length && ids.every((id) => id === here)) return 'its session';
+  return listOf([...new Set(ids ? ids.map((id) => stepTitle(job, id)) : m.changes.map((c) => c.title))]);
 }
+// A speaker's label, then the step it is about: muted, one line, cut short.
+const whoHtml = (label, step, at) => `<div class="job-idea-who">${label}${step ? `<span class="job-talk-step" title="${esc(step)}">${esc(step)}</span>` : ''}<time>${esc(time(at))}</time></div>`;
 
 // What the session said back to a forwarded message, read from the step's thread
 // (the source of truth): everything after it up to the next message sent to it.
@@ -81,27 +86,27 @@ export function repliesTo(sub, messageId) {
   const next = thread.findIndex((t, k) => k > at && t.to === 'agent');
   return thread.slice(at + 1, next < 0 ? undefined : next).filter((t) => t.from === 'agent' || t.from === 'system');
 }
-function sessionHtml(job, sub, t) {
+function sessionHtml(job, sub, t, here = null) {
   const files = [...(t.shots || []), ...(t.images || [])].map((x) => x.file);
   const attach = files.length ? `<div class="job-msg-att">${files.map((f, k) => shotButtonHtml(job, sub, t.round, f, k)).join('')}</div>` : '';
   const run = t.run ? `<pre class="job-msg-run"><i>$</i> ${esc(t.run.cmd)}\n${esc(t.run.out)}\n<b class="${t.run.exit === 0 ? 'ok' : 'bad'}">exit ${esc(t.run.exit)}</b></pre>` : '';
   const text = t.from === 'system' ? `Reported ready again: round ${t.round}` : t.text;
-  return `<div class="job-talk-session" data-talk-thread="${esc(t.id)}"><span class="job-talk-session-mark" aria-hidden="true">${ICONS.terminal}</span><div><div class="job-idea-who">Session · ${esc(sub.title)}<time>${esc(time(t.at))}</time></div><div class="job-idea-body">${proseHtml(text)}</div>${run}${attach}</div></div>`;
+  return `<div class="job-talk-session" data-talk-thread="${esc(t.id)}"><span class="job-talk-session-mark" aria-hidden="true">${ICONS.terminal}</span><div>${whoHtml('Session', sub.id === here ? '' : sub.title, t.at)}<div class="job-idea-body">${proseHtml(text)}</div>${run}${attach}</div></div>`;
 }
 // Each approved forward's answers, or that its session is still at it.
-const answersHtml = (job, m) => (m.forwarded || []).map(({ sub: id, message }) => {
+const answersHtml = (job, m, here = null) => (m.forwarded || []).map(({ sub: id, message }) => {
   const sub = job.subJobs.find((s) => s.id === id);
   if (!sub) return '';
   const got = repliesTo(sub, message);
-  const working = !got.length && sub.answering?.id === message ? `<div class="job-idea-thinking job-talk-working"><span class="job-talk-session-mark" aria-hidden="true">${ICONS.terminal}</span><span class="job-idea-shine">${esc(sub.title)}'s session is working on it…</span></div>` : '';
-  return got.map((t) => sessionHtml(job, sub, t)).join('') + working;
+  const working = !got.length && sub.answering?.id === message ? `<div class="job-idea-thinking job-talk-working"><span class="job-talk-session-mark" aria-hidden="true">${ICONS.terminal}</span><span class="job-idea-shine">${sub.id === here ? 'Its session' : `${esc(sub.title)}'s session`} is working on it…</span></div>` : '';
+  return got.map((t) => sessionHtml(job, sub, t, here)).join('') + working;
 }).join('');
-const forwardHtml = (job, m) => `<div class="job-talk-forward" data-talk="${esc(m.id)}">${wranglerMark('small')}<span>${esc(forwardLine(job, m))}</span><time>${esc(time(m.outcomeAt || m.at))}</time></div>`;
+const forwardHtml = (job, m, here = null) => `<div class="job-talk-forward" data-talk="${esc(m.id)}">${wranglerMark('small')}${whoHtml('Forwarded to', forwardedTo(job, m, here), m.outcomeAt || m.at)}</div>`;
 
-function messageHtml(job, m, onJob, kept) {
-  if (m.from === 'human') return humanHtml(job, m, onJob);
-  if (isForward(m) && m.outcome === 'approved') return forwardHtml(job, m) + answersHtml(job, m);
-  if (m.kind === 'proposal') return wranglerHtml(m, proposalHtml(job, m, onJob, kept), 'proposal') + answersHtml(job, m);
+function messageHtml(job, m, onJob, kept, here) {
+  if (m.from === 'human') return humanHtml(job, m, onJob, here);
+  if (isForward(m) && m.outcome === 'approved') return forwardHtml(job, m, here) + answersHtml(job, m, here);
+  if (m.kind === 'proposal') return wranglerHtml(m, proposalHtml(job, m, onJob, kept), 'proposal') + answersHtml(job, m, here);
   return wranglerHtml(m, `<div class="job-idea-body">${proseHtml(m.text)}</div>`, m.kind === 'error' ? 'error' : '');
 }
 
@@ -151,7 +156,9 @@ function groupHtml(job, group, groups, sub, boxFor, fold, kept, target) {
   const tools = convo ? `<span class="job-talk-convo-tools"><button type="button" class="job-talk-fold" aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} ${esc(title)}">${ICONS.caret}</button>${liveIn(job, convo) ? '' : `<button type="button" class="job-talk-dismiss" data-convo-dismiss title="Dismiss this conversation" aria-label="Dismiss ${esc(title)}">${ICONS.x}</button>`}</span>` : '';
   // Folded, a conversation is its title row alone.
   const head = `<header class="job-talk-convo-head"${convo ? ' data-convo-fold' : ''}><b>${name}</b>${step && open ? `<small>on ${esc(step)}</small>` : ''}${raised}${state}${more}${tools}</header>`;
-  const body = open ? `${messages.map((m) => messageHtml(job, m, onJob, kept)).join('')}${workingHtml(job, convo)}${convo && boxFor ? boxFor(convo) : ''}` : '';
+  // The header names the step once; its messages never say it again.
+  const here = convo?.sub || sub?.id || null;
+  const body = open ? `${messages.map((m) => messageHtml(job, m, onJob, kept, here)).join('')}${workingHtml(job, convo)}${convo && boxFor ? boxFor(convo) : ''}` : '';
   return `<div class="job-talk-convo${open ? '' : ' is-folded'}" data-convo="${esc(convo?.id || '')}">${head}${body}</div>`;
 }
 
