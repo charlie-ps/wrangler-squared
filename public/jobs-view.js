@@ -1647,7 +1647,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         if (!images) return;
         const busy = images.busy();
         form.querySelector('#job-share-images').hidden = !images.names().length && !busy;
-        form.querySelectorAll('.job-create-foot button').forEach((b) => { b.disabled = busy; b.title = busy ? 'Waiting for images to finish uploading' : ''; });
+        // A pressed Start planning holds both buttons until the job lands; an upload must not free them.
+        const foot = form.querySelectorAll('.job-create-foot button');
+        if (![...foot].some(isBusy)) foot.forEach((b) => { b.disabled = busy; b.title = busy ? 'Waiting for images to finish uploading' : ''; });
       },
     });
     dialog.addEventListener('close', () => images.dispose(), { once: true });
@@ -1666,7 +1668,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     };
     bindReviewPoints(form);
     form.onsubmit = (e) => {
-      e.preventDefault(); if (images.busy()) return; const values = new FormData(form);
+      e.preventDefault(); if (images.busy()) return;
+      if (!pressBusy(submitterOf(e), { also: form.querySelectorAll('.job-create-foot button') })) return;
+      const values = new FormData(form);
       const taskId = values.get('taskId');
       // Enter and the primary button both start planning; only the grey button parks it.
       send({ type: 'job-create', idea: true, start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', ...reviewFlagsOf(values), ...sandbox.value(), images: images.names(), shareImages: values.has('shareImages'), taskId: taskId && taskId !== '__new__' ? taskId : null } });
