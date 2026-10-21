@@ -67,7 +67,7 @@ test('every idea goes to the planner, pinned to the step and view it was typed o
   assert.throws(() => requestChange(open, open.subJobs[0], { at: 'pr', ref: 'h0', text: 'x' }, { now: 1 }), /changed since you looked/);
   assert.throws(() => requestChange(open, open.subJobs[0], { at: 'pr', ref: 'h1', text: '  ' }, { now: 1 }), /Explain/);
   const busy = job(); busy.runs.push({ id: 'run_p', subJobId: null, stopped: false });
-  assert.match(ask(busy, 'api').detail, /^Queued an idea about “Deliver api” behind the one the wrangler is drawing$/);
+  assert.match(ask(busy, 'api').detail, /^Queued an idea about “Deliver api” behind the one Wrangler is drawing$/);
   assert.ok(!busy.replan); assert.equal(busy.replanQueue[0].source.sub, 'api');
 });
 

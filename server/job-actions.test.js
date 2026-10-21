@@ -297,8 +297,8 @@ test('Unit test: brief edit on a PR that merges before approval goes back to the
   land(j, 'api', { stage: 'deployment', mergedAt: 3, pr: { ...subOf(j, 'api').pr, mergeCommit: 'm1' } });
   const back = approveReplan(j, 'run_p', { now: 4, buildSubJob });
   assert.equal(back.sentBack, true);
-  assert.deepEqual(back.lines.map((l) => l.detail), ['“Deliver api” has merged since the plan change was proposed, so it went back to the wrangler']);
-  assert.equal(back.detail, 'Sent the plan change back to the wrangler: “Deliver api” has merged since it was proposed');
+  assert.deepEqual(back.lines.map((l) => l.detail), ['“Deliver api” has merged since the plan change was proposed, so it went back to Wrangler']);
+  assert.equal(back.detail, 'Sent the plan change back to Wrangler: “Deliver api” has merged since it was proposed');
   assert.equal(subOf(j, 'api').brief, 'Implement api', 'nothing of the stale proposal is applied');
   assert.equal(j.replan.proposal, null, 'the planner runs again');
   assert.deepEqual(j.replan.earlier, ['About “Deliver api” (api, pr/watching): Rename the flag'], 'the human\'s idea stays, once');

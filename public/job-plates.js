@@ -206,7 +206,7 @@ export function plateAsk(job) {
     const detail = left.length === 1 ? [kindCountLabel(left[0].plan.subJobs), repoLine({ plan: left[0].plan })].filter(Boolean).join(' · ') : left.map((x) => x.title).join(' · ');
     return whole(suggestedLabel(msg), 'Review', detail);
   }
-  if (idea === 'reply') return whole('Wrangler asked', 'Reply', 'The wrangler asked you');
+  if (idea === 'reply') return whole('Wrangler asked', 'Reply', 'Wrangler asked you');
   if (!live(job)) return job.plan ? whole('Plan ready', 'Review plan', kindCountLabel(job.plan.subJobs)) : whole(jobLabel(job), 'Open');
   // A plan change opens on the job; a reply where its conversation is drawn (a step's,
   // until it is escalated).

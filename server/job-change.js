@@ -39,7 +39,7 @@ export function requestChange(job, sub, { at, ref, text, attachments, convo: con
     if (job.runs.some((r) => !r.stopped)) throw new Error('Wait for planning to finish');
     job.feedback = idea;
     job.previousPlan = job.plan || job.previousPlan; job.plan = null; job.error = null;
-    return { detail: 'Asked the wrangler to redraw the plan', route: 'planner' };
+    return { detail: 'Asked Wrangler to redraw the plan', route: 'planner' };
   }
   const target = convoById(job, convoId);
   if (convoId && !target) throw new Error('That conversation has gone. Start a new one.');
@@ -57,7 +57,7 @@ export function requestChange(job, sub, { at, ref, text, attachments, convo: con
     const convo = target || openConvo(job, sub, now);
     say(job, { ...said, convo: convo.id }, now);
     requestReplan(job, `About ${quoted(sub.title)} (${sub.id}), which was declared red: ${d.summary}${d.tried?.length ? `\nTried: ${d.tried.join(' | ')}` : ''}${d.ask ? `\nThe decision asked of the human: ${d.ask}` : ''}\nThe human says: ${idea}`, now, { sub: sub.id, auto: false, human: true }, { source, images, convo: convo.id });
-    return { detail: `Sent the declared red on ${quoted(sub.title)} back to the wrangler`, route: 'planner' };
+    return { detail: `Sent the declared red on ${quoted(sub.title)} back to Wrangler`, route: 'planner' };
   }
   // Anything else is a question, answered in the thread, or a change of plan on a
   // running job, even a word for one step's open session: the planner proposes,
@@ -66,12 +66,12 @@ export function requestChange(job, sub, { at, ref, text, attachments, convo: con
   const convo = target || openConvo(job, sub, now);
   if (job.stage === 'active' && (convo.pending || looksLikeQuestion(typed))) {
     const sent = ask(convo, say(job, { ...said, convo: convo.id }, now), { feedback, source, images }, now);
-    if (sent === 'follow-up') return { detail: 'Sent to the wrangler that is answering', route: 'planner' };
-    return { detail: sub ? `Asked the wrangler about ${quoted(sub.title)}` : 'Asked the wrangler', route: 'planner' };
+    if (sent === 'follow-up') return { detail: 'Sent to Wrangler that is answering', route: 'planner' };
+    return { detail: sub ? `Asked Wrangler about ${quoted(sub.title)}` : 'Asked Wrangler', route: 'planner' };
   }
   say(job, { ...said, convo: convo.id }, now);
   if (requestReplan(job, feedback, now, null, { source, images, convo: convo.id }).queued) {
-    return { detail: `Queued ${sub ? `an idea about ${quoted(sub.title)}` : 'a plan change'} behind the one the wrangler is drawing`, route: 'planner' };
+    return { detail: `Queued ${sub ? `an idea about ${quoted(sub.title)}` : 'a plan change'} behind the one Wrangler is drawing`, route: 'planner' };
   }
-  return { detail: sub ? `Sent the wrangler an idea about ${quoted(sub.title)}` : 'Asked the wrangler to change the plan', route: 'planner' };
+  return { detail: sub ? `Sent Wrangler an idea about ${quoted(sub.title)}` : 'Asked Wrangler to change the plan', route: 'planner' };
 }

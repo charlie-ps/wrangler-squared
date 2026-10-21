@@ -224,7 +224,7 @@ export function planGraphHtml(plan, { editable = false, stateOf = null, lineOf =
     const cls = `job-write tone-${STATES[state].tone} ${dormant ? 'dormant' : ''} ${markOf ? `job-mark-${markOf(w)}` : ''}`;
     const line = markOf ? MARKS[markOf(w)] : !stateOf || pending(w, state) ? writeWhen({ reviewWrites }, w) : lineOf ? lineOf(w) : STATES[state].label;
     const reviewed = writeReviewed({ reviewWrites }, w);
-    const flags = `${reviewed && !editable ? `<span class="job-write-review" title="${isMakeWrite(w) ? 'Reviewed once published' : 'Drafted for your review before it is written'}">${ICONS.eye}</span>` : ''}${editable && !w.added ? `<span class="job-proposed" title="Proposed by the wrangler">${ICONS.sparkle}</span>` : ''}`;
+    const flags = `${reviewed && !editable ? `<span class="job-write-review" title="${isMakeWrite(w) ? 'Reviewed once published' : 'Drafted for your review before it is written'}">${ICONS.eye}</span>` : ''}${editable && !w.added ? `<span class="job-proposed" title="Proposed by Wrangler">${ICONS.sparkle}</span>` : ''}`;
     const body = `<span class="job-write-state ${stateSolid(state) ? 'on' : ''}">${stateIconHtml(state)}</span><b>${esc(writeAction(w))}${flags}</b><span class="job-write-line">${esc(line)}</span>`;
     const tip = esc([KIND_TITLE.write, w.title, w.why ? `Why: ${w.why}` : ''].filter(Boolean).join('\n'));
     if (editable) {

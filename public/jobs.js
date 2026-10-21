@@ -403,15 +403,15 @@ export function editLine(edit, plan) {
   if (!effects.length) return `Renames it to ${name}`;
   return `Changes ${name}: ${effects.length === 1 ? effects[0] : `${effects.slice(0, -1).join(', ')} and ${effects.at(-1)}`}`;
 }
-// Every idea goes to one recipient, the planner, which the board calls "the
-// wrangler" (server/job-change.js): a question is answered in the job's
+// Every idea goes to one recipient, the planner, which the board calls
+// Wrangler (server/job-change.js): a question is answered in the job's
 // conversation (server/job-talk.js), and anything else is sorted into feedback
 // for a live step and changes to the plan, a proposal the human approves. `to`
-// names it on the box, `mark` is its initial.
-const WRANGLER = { to: 'The wrangler', mark: 'W', placeholder: 'Ask the wrangler, or say what to change…' };
+// names it on the box, beside Wrangler's mark.
+const WRANGLER = { to: 'Wrangler', placeholder: 'Ask Wrangler, or say what to change…' };
 const STEP = { ...WRANGLER, placeholder: 'Ask about this step, or say what to change…' };
 const CHANGE_ROUTE = {
-  plan: { ...WRANGLER, placeholder: 'Add an idea for the wrangler…' },
+  plan: { ...WRANGLER, placeholder: 'Add an idea for Wrangler…' },
   proposal: { ...WRANGLER, placeholder: 'Ask about this proposal, or add to it…' },
 };
 export function changeRoute(at, job = null, sub = null) {
@@ -599,7 +599,7 @@ export function jobStatus(job, sub) {
   if (sub && sub.stage !== 'done' && cancelledDependencies(job, sub).length) return { tone: 'needs', text: triggerDropped(job, sub) ? 'Trigger dropped' : 'Depends on a dropped sub-job' };
   if (isWriteSub(sub)) return writeStatusLine(job, sub);
   const idea = !sub && ideaStage(job);
-  if (idea) return idea === 'thinking' ? { tone: 'working', text: ideaThread(job).length ? 'The wrangler is thinking' : 'The wrangler is reading the idea' } : { tone: 'needs', text: idea === 'suggested' ? suggestedLabel(liveSuggestion(job)) : 'Your reply' };
+  if (idea) return idea === 'thinking' ? { tone: 'working', text: ideaThread(job).length ? 'Wrangler is thinking' : 'Wrangler is reading the idea' } : { tone: 'needs', text: idea === 'suggested' ? suggestedLabel(liveSuggestion(job)) : 'Your reply' };
   const run = liveRun(job, sub);
   if (run) {
     if (run.status === 'needs-you') return { tone: 'needs', text: 'Waiting on a prompt' };

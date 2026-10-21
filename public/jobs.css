@@ -61,7 +61,7 @@
   --jt-title-shadow:0 2px 18px rgba(0,0,0,.6); --jt-ink-shadow:0 1px 10px #000; --jt-loader-glow:rgba(255,214,226,.15);
   --jt-mast-min:176px; --jt-mast-pad:24px 22px 20px; --jt-mast-pad-narrow:96px 16px 16px; --jt-mast-rule:0;
   --jt-pause-bg:rgba(60,20,119,.45); --jt-run-glow:0 0 6px #6f7cff;
-  --jt-cta-bg:#f4ede2; --jt-cta-fg:#05070c; --jt-cta-hover:#fff;
+  --jt-cta-bg:#f4ede2; --jt-cta-fg:#05070c; --jt-cta-hover:#fff; --jt-mark-rope:#ffba50;
   --jt-hover-mix:45%; --jt-hover-lift:none;
   --jt-radius-mast:20px; --jt-radius-plate:18px; --jt-radius-dialog:28px; --jt-radius-pill:999px; --jt-dialog-line:0;
   --jt-art-bg:#05070c; --jt-art-rule:0;
@@ -77,7 +77,7 @@
   --jt-title-shadow:none; --jt-ink-shadow:none; --jt-loader-glow:color-mix(in srgb, var(--fg) 15%, transparent);
   --jt-mast-min:0; --jt-mast-pad:18px 18px 16px; --jt-mast-pad-narrow:18px 16px 16px; --jt-mast-rule:1px solid var(--border-muted);
   --jt-pause-bg:color-mix(in srgb, var(--purple) 14%, transparent); --jt-run-glow:none;
-  --jt-cta-bg:var(--accent); --jt-cta-fg:var(--accent-fg); --jt-cta-hover:color-mix(in srgb, var(--accent) 85%, #fff);
+  --jt-cta-bg:var(--accent); --jt-cta-fg:var(--accent-fg); --jt-cta-hover:color-mix(in srgb, var(--accent) 85%, #fff); --jt-mark-rope:var(--accent);
   --jt-hover-mix:85%; --jt-hover-lift:0 2px 4px color-mix(in srgb, var(--fg) 10%, transparent), 0 16px 32px -14px color-mix(in srgb, var(--fg) 40%, transparent);
   --jt-radius-mast:10px; --jt-radius-plate:8px; --jt-radius-dialog:10px; --jt-radius-pill:6px; --jt-dialog-line:1px solid var(--border);
   --jt-art-bg:radial-gradient(circle, var(--border-muted) 1px, transparent 1.3px) 0 0 / 14px 14px, color-mix(in srgb, var(--surface-2) 55%, var(--surface)); --jt-art-rule:1px solid var(--border-muted);
@@ -1062,7 +1062,7 @@ li.job-mark-rework { color:var(--wf); }
 .intro-chat { height:330px; display:flex; flex-direction:column; justify-content:flex-end; gap:12px; overflow:hidden; -webkit-mask-image:linear-gradient(180deg, transparent, #000 36px); mask-image:linear-gradient(180deg, transparent, #000 36px); }
 .intro-chat .job-idea-thread { flex:none; gap:12px; padding:0; }
 .intro-chat .job-idea-msg { grid-template-columns:24px minmax(0,1fr); gap:10px; }
-.intro-chat .job-idea-orb { width:24px; height:24px; }
+.intro-chat .wrangler-mark { width:24px; height:24px; }
 .intro-chat .job-idea-body { font-size:13.5px; line-height:1.45; }
 .intro-chat .job-idea-body p { margin:0; font-size:inherit; line-height:inherit; }
 .intro-chat .job-idea-who time { display:none; }
@@ -1771,9 +1771,13 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .job-idea-band > div { flex:1; min-width:0; }
 .job-idea-band .job-detail-cost { flex:none; margin-left:12px; border-color:color-mix(in srgb, var(--jt-ivory) 22%, transparent); background:color-mix(in srgb, var(--jt-night) 45%, transparent); color:var(--jt-ivory); }
 .job-idea > .job-error { margin:12px 26px 0; }
-.job-idea-orb { position:relative; flex:none; display:inline-block; width:30px; height:30px; border-radius:50%; overflow:hidden; background:radial-gradient(circle at 50% 50%, #fff 0 6%, #ffd2c0 12%, #c0508f 34%, #2a0f4d 62%, #08031a 100%); box-shadow:0 0 0 1px color-mix(in srgb, var(--fg) 10%, transparent), 0 0 18px -4px #c0508f; }
-.job-idea-orb::after { content:""; position:absolute; inset:-30%; border-radius:50%; background:conic-gradient(from 0deg, transparent 0 30%, rgba(255,210,192,.45) 42%, transparent 55% 80%, rgba(47,196,192,.35) 90%, transparent); animation:gx-spin 9s linear infinite; mix-blend-mode:screen; }
-.job-idea-orb.small { width:18px; height:18px; }
+.wrangler-mark { flex:none; display:block; width:30px; height:30px; overflow:visible; filter:drop-shadow(0 0 5px color-mix(in srgb, var(--jt-glow) 55%, transparent)); }
+.wrangler-mark.small { width:18px; height:18px; }
+.wrangler-mark-disk { fill:var(--jt-cta-bg); }
+.wrangler-mark-hat { fill:var(--jt-cta-fg); }
+.wrangler-mark-rope { fill:none; stroke:var(--jt-mark-rope); transform-origin:256px 256px; animation:gx-spin 2.4s linear infinite; }
+.wrangler-mark.busy .wrangler-mark-hat { transform-origin:256px 330px; animation:mark-tip 2.8s ease-in-out infinite; }
+@keyframes mark-tip { 0%,60%,100% { transform:none; } 72% { transform:translateY(-22px) rotate(-8deg); } 84% { transform:none; } }
 .job-idea-thread { flex:1; display:grid; align-content:start; gap:18px; padding:22px 26px 8px; }
 .job-idea-thread .job-sent { margin:0; }
 .job-idea-thread .job-sent-bubble { max-width:min(86%,560px); }
@@ -1868,7 +1872,7 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .bhx-flash { opacity:0; background:radial-gradient(closest-side, #fff, rgba(255,255,255,.95) 20%, rgba(255,226,214,.55) 42%, rgba(240,138,154,.18) 70%, transparent); }
 .bhx-wave { box-sizing:border-box; opacity:0; border:1.5px solid rgba(255,236,228,.9); box-shadow:0 0 16px rgba(240,138,154,.55), inset 0 0 16px rgba(158,171,255,.4); }
 @media(max-width:560px) { .job-idea-band { padding:16px; } .job-dialog .job-idea-band h2 { font-size:24px; } .job-idea-thread,.job-idea-dock { padding-left:16px; padding-right:16px; } }
-@media(prefers-reduced-motion:reduce) { .job-idea-orb::after,.job-idea-shine,.job-title-loader i,.job-dialog .job-idea-band h2.titled > *,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-dialog .job-idea-band h2.titled > .job-title-loader { display:none; } }
+@media(prefers-reduced-motion:reduce) { .wrangler-mark-rope,.wrangler-mark-hat,.job-idea-shine,.job-title-loader i,.job-dialog .job-idea-band h2.titled > *,.job-launch::before,.job-idea-msg { animation:none !important; } .job-launch-sky { transition:none; } .job-dialog .job-idea-band h2.titled > .job-title-loader { display:none; } }
 /* The job's conversation with the wrangler (job-talk.js), above the Add idea box: the human's bubbles,
    the wrangler's answers, and each proposal as a card whose changes line up in one label column. */
 .job-talk { display:grid; gap:12px; margin:14px 0 6px; padding-top:12px; border-top:1px solid var(--border-muted); }
@@ -1877,7 +1881,7 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .job-talk .job-sent { margin:0; }
 .job-talk .job-sent-bubble { max-width:min(86%,560px); }
 .job-talk-msg { grid-template-columns:18px minmax(0,1fr); gap:10px; max-width:none; }
-.job-talk-msg .job-idea-orb { margin-top:2px; }
+.job-talk-msg .wrangler-mark { margin-top:2px; }
 .job-talk-msg .job-idea-body { max-width:640px; }
 .job-talk-msg.error .job-idea-body { color:var(--red-fg); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--red) 35%, transparent); }
 .job-talk-card { display:grid; gap:10px; max-width:640px; padding:12px 14px; border-radius:4px 16px 16px 16px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); }
@@ -1912,7 +1916,7 @@ details.job-talk-card[open] > summary svg { transform:none; }
 .job-talk-card footer button { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; font-size:12.5px; }
 .job-talk-working { padding-left:0; }
 /* A forwarded idea is no plan change: one quiet line, then the step's session answering it, marked
-   as the session (a terminal chip, not the wrangler's orb). Its words live in the step's thread. */
+   as the session (a terminal chip, not Wrangler's mark). Its words live in the step's thread. */
 .job-talk-forward { display:grid; grid-template-columns:18px minmax(0,1fr); gap:10px; align-items:center; }
 .job-talk-forward .job-idea-who { margin:0; }
 .job-talk :is(.job-talk-forward,.job-talk-session) .job-idea-who { min-width:0; max-width:640px; white-space:nowrap; }

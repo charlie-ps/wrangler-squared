@@ -198,7 +198,7 @@ test('a session step gets the same scratch workspace as planning: no repository,
     assert.equal(spawned[0].cwd, '', phase);
     assert.equal(spawned[0].worktree, undefined, phase);
     assert.deepEqual(spawned[0].addDirs, [checkouts], phase);
-    assert.deepEqual(prepared, ['s_1', undefined], 'the wrangler cut nothing, so there is no record to report');
+    assert.deepEqual(prepared, ['s_1', undefined], 'Wrangler cut nothing, so there is no record to report');
     // And nothing git-shaped to undo afterwards: no worktree, no branch, no PR.
     await runtime.cleanup({}, { id: 'spike', kind: 'session', sessions: ['s_1'], pr: null, worktree: undefined }, { updateMain: true });
   });

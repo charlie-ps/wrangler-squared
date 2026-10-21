@@ -1,5 +1,5 @@
 import { esc, tildify } from './util.js';
-import { ICONS } from './icons.js';
+import { ICONS, wranglerMark } from './icons.js';
 import { wranglerUnread, convoGroups, convosOf, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, uncreatedSuggestions, ideaEditable, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel } from './jobs.js';
 import { talkHtml, convoTitle, defaultTarget } from './job-talk.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml, ideaEditHtml } from './job-idea.js';
@@ -91,7 +91,7 @@ const staleHint = (sub) => {
     ? `${cancelled.join(', ')} was cancelled on merge commit ${commit} and no later run that includes it has started in ${minutes} min. If it was cancelled on purpose, Request changes and say so. Wrangler keeps polling in case a run appears.`
     : `No GitHub Actions run has started for merge commit ${commit} in ${minutes} min. If this repository does not deploy for these paths, Request changes and say so. Wrangler keeps polling in case a run appears.`;
 };
-const DECLARED_BY = { agent: 'Declared by its agent', planner: 'Declared by the wrangler', auto: 'Declared automatically' };
+const DECLARED_BY = { agent: 'Declared by its agent', planner: 'Declared by Wrangler', auto: 'Declared automatically' };
 // What happened, in the danger register. Title and detail are agent- or
 // observation-written, so both are escaped.
 function eventHtml(job, sub) {
@@ -164,7 +164,7 @@ export function writeFieldsHtml(plan, w, { ticket = false, pick = false, job = n
   // Radios rather than a select, so "Something else" can read as the open-ended one.
   const picker = pick ? `<fieldset class="job-place-pick"><legend>Place</legend>${types.map((t) => `<label class="job-place-opt ${t === 'other' ? 'other' : ''}" title="${esc(PLACES[t].name)}"><input type="radio" name="placeType" value="${t}" ${t === type ? 'checked' : ''}>${PLACES[t].icon}<span>${esc(t === 'other' ? 'Something else' : PLACES[t].short)}</span></label>`).join('')}</fieldset>
     ${type !== 'jira' && actions.length > 1 ? `<div class="job-form-row"><label>Do<select name="actionType">${actions.map((x) => `<option value="${x}" ${x === a.type ? 'selected' : ''}>${esc(actionLabel(x))}</option>`).join('')}</select></label></div>` : ''}` : '';
-  const why = w.why ? `<p class="job-write-why"><b>The wrangler:</b> ${esc(w.why)}</p>` : '';
+  const why = w.why ? `<p class="job-write-why"><b>Wrangler:</b> ${esc(w.why)}</p>` : '';
   const filled = '{pr.url}, {pr.title} and {deploy.run} come from its session\'s trigger, {<write id>.url} from that write once made';
   const tip = (hint) => hint ? ` title="${esc(hint)}"` : '';
   const refField = (label, hint, placeholder) => `<label${tip(hint)}>${label}<input name="ref" maxlength="500" value="${esc(w.place?.ref || '')}" placeholder="${esc(placeholder)}"></label>`;
@@ -892,8 +892,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const pics = s.images.length ? `<span class="job-sent-imgs">${s.images.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
     const n = s.images.length ? ` with ${s.images.length} image${s.images.length > 1 ? 's' : ''}` : '';
     const meta = s.state === 'failed' ? `<span class="job-sent-meta failed">${ICONS.x}Not sent: ${esc(s.error || 'refused')}. Your words${s.hadImages ? ' and pictures' : ''} are back in the box.</span>`
-      : s.state === 'sent' ? `<span class="job-sent-meta"><i class="job-sent-tick">${ICONS.check}</i>Sent to ${esc(s.to.toLowerCase())}${n} · ${esc(new Date(s.at).toLocaleTimeString(undefined, { timeStyle: 'short' }))}</span>`
-      : `<span class="job-sent-meta"><span class="job-sent-sending">Sending to ${esc(s.to.toLowerCase())}…</span></span>`;
+      : s.state === 'sent' ? `<span class="job-sent-meta"><i class="job-sent-tick">${ICONS.check}</i>Sent to ${esc(s.to)}${n} · ${esc(new Date(s.at).toLocaleTimeString(undefined, { timeStyle: 'short' }))}</span>`
+      : `<span class="job-sent-meta"><span class="job-sent-sending">Sending to ${esc(s.to)}…</span></span>`;
     return `<div class="job-sent ${s.state}${fresh ? ' fresh' : ''}" data-sent-state="${s.state}"><div class="job-sent-bubble">${pics}<span>${esc(s.text)}</span></div>${meta}</div>`;
   }
   // The conversation the box writes to: the human's pick while it is still in
@@ -928,7 +928,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     return `${sent}<div class="job-change${open ? ' is-open' : ''}" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}" data-change-convo="${esc(key)}" data-change-to="${esc(route.to)}">
       <ul class="job-change-tray" ${mine.length ? '' : 'hidden'}>${askTrayHtml(key)}</ul>
       <p class="job-change-error" role="alert" ${askErrorText(key) ? '' : 'hidden'}>${esc(askErrorText(key))}</p>
-      <div class="job-change-row"><span class="job-change-to" title="Who hears it"><i>${esc(route.mark || route.to[0])}</i>${esc(route.to)}${where ? `<small>${esc(where)}</small>` : ''}${fresh}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="${convo ? `Reply in ${esc(convoTitle(job, convo))}` : `Add idea for ${esc(route.to.toLowerCase())}`}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to.toLowerCase())}" title="Send (↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
+      <div class="job-change-row"><span class="job-change-to" title="Who hears it">${wranglerMark('small')}${esc(route.to)}${where ? `<small>${esc(where)}</small>` : ''}${fresh}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="${convo ? `Reply in ${esc(convoTitle(job, convo))}` : `Add idea for ${esc(route.to)}`}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to)}" title="Send (↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
       <div class="job-change-foot"><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
   }
   // What was sent to a conversation is drawn at its end, where the answer comes, above
@@ -1875,7 +1875,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const panels = {
       general: section('Editor', `<label title="A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…">IDE<input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label>`, 'Review code’s “In IDE” opens a step’s worktree in this app.')
         + section('Local checkout', '<label class="job-toggle job-settings-main" title="Once a PR lands on the default branch, fast-forward your own checkout of it. A checkout with work of its own is left alone and the job tells you, with fixes an agent can make.">Keep local main updated<input type="checkbox" class="job-switch" name="updateMain" ' + (data.settings.updateMain === false ? '' : 'checked') + '></label>'),
-      automation: section('Repairs and replans', `<label>CI repairs per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to the wrangler this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label>`, 'These limits apply across all jobs.')
+      automation: section('Repairs and replans', `<label>CI repairs per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to Wrangler this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label>`, 'These limits apply across all jobs.')
         + section('Spend', `<label title="Dollars, cents allowed, $100 unless you change it. Empty for no limit. A job that reaches it is paused and its working sessions interrupted, until you add this much again on the job.">Job spend limit ($)<input type="number" name="spendLimit" min="0.01" max="100000" step="0.01" placeholder="No limit" value="${data.settings.spendLimit === undefined ? DEFAULT_SPEND_LIMIT : data.settings.spendLimit ?? ''}"></label>`, 'Each job may spend this much, plus this much again for every time you top it up. A new figure applies to jobs already running.')
         + section('Deployments', `<label>Deploy wait (min)<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label>`, 'How long a merge may go without any deployment run before the job asks you.'),
       review: `<fieldset class="job-prop job-settings-review"><legend>Defaults for new jobs</legend>${reviewPointsHtml(reviewDefaultsOf(data.settings), { warn: true })}</fieldset>`,
