@@ -86,7 +86,7 @@ test('a red PR a plan change moved behind a fix waits for it instead of reading 
 
 test('a job rolls up to its most urgent sub-job, and before work starts follows its own stage', () => {
   assert.equal(jobState(job({ stage: 'backlog' })), 'planned');
-  assert.equal(jobState(job({ stage: 'planning', plan: { subJobs: [], stories: [] } })), 'read', 'a plan to review is the wrangler\'s to read');
+  assert.equal(jobState(job({ stage: 'planning', plan: { subJobs: [], stories: [] } })), 'change', 'a plan to review is amber, like a plan change');
   assert.equal(jobState(job({ stage: 'planning', runs: [run(null, { phase: 'planning' })] })), 'running');
   assert.equal(jobState(job({ stage: 'jira', runs: [run(null, { phase: 'jira' })] })), 'running');
   assert.equal(jobState(job({ stage: 'planning', paused: true })), 'paused');

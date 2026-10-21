@@ -500,7 +500,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       b.setAttribute('aria-pressed', String(key === filter));
       b.querySelector('.jobs-rail-n').textContent = n || '';
       b.querySelector('.jobs-rail-n').classList.toggle('ask', key === 'needs' && n > 0);
-      // Amber while anything needs acting on; the read tone once all that waits is the wrangler's to read.
+      // Amber while anything needs acting on; the read tone once all that waits is a wrangler reply to read.
       b.querySelector('.jobs-rail-n').classList.toggle('read', key === 'needs' && n > 0 && data.jobs.filter((j) => test(j)).every((j) => plateAsk(j)?.tone === 'read'));
     }
     assignScenes(data.jobs, scenes);

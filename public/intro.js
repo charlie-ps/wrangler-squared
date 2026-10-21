@@ -64,7 +64,7 @@ function graph(phase) {
 // row is an idea, drawn under its forming sky (job-skylines.js inflowHtml) while
 // the planner talks it through, then the job it became.
 const BOARD = [['Dark mode for reports', 3], ['CSV export', 3], ['Rotate secret', 3], ['Node 22', 4]];
-const IDEA = { thinking: ['idle', 0, 'The wrangler is reading it'], reply: ['read', 1, 'The wrangler asked you'], suggested: ['read', 2, 'Job suggested · review'] };
+const IDEA = { thinking: ['idle', 0, 'The wrangler is reading it'], reply: ['warn', 1, 'The wrangler asked you'], suggested: ['warn', 2, 'Job suggested · review'] };
 const BOARD_FRAMES = [
   [['thinking'], ['running', '2 agents working', 0], ['running', 'Writing the PR', 1], ['planned', 'Backlog', 0]],
   [['thinking'], ['running', '2 agents working', 1], ['review', 'Ready for your review', 1], ['planned', 'Backlog', 0]],
@@ -74,7 +74,7 @@ const BOARD_FRAMES = [
   [['running', 'Starting its sub-jobs', 0], ['done', 'Delivered', 3], ['done', 'Delivered', 3], ['running', '2 agents working', 3]],
   [['running', '2 agents working', 0], ['done', 'Delivered', 3], ['done', 'Delivered', 3], ['review', 'Check the backfill', 3]],
 ];
-const waits = ([st]) => st === 'review' || IDEA[st]?.[0] === 'read';
+const waits = ([st]) => st === 'review' || IDEA[st]?.[0] === 'warn';
 const needYou = (phase) => BOARD_FRAMES[phase].filter(waits).length;
 function board(phase) {
   const need = needYou(phase);
@@ -196,7 +196,7 @@ export const INTRO_STEPS = [
     figure: () => kindsFigure() },
   { tab: 'Needs you',
     title: 'Amber means it is waiting on you.',
-    body: `<p>Each job is a card coloured by its state: blue while agents work, <b>amber when it needs you</b>, <b>teal when the wrangler wrote something for you to read</b> (a plan or a reply), red when something failed, green when delivered. A plan change waiting on you outranks red: when one would get a red step past its failure, the card shows it in amber. A job turns amber at each checkpoint you marked ${YOU}, and whenever an agent needs your decision. The <b>Needs me</b> chip filters the board down to those cards.</p><p>Red goes to the wrangler first. It fixes the step or changes the plan while the rest of the job carries on, and only that step and the ones after it wait. If it can’t, the step is <b>declared red</b> and waits for you to decide.</p>`,
+    body: `<p>Each job is a card coloured by its state: blue while agents work, <b>amber when it needs you</b> (a plan to review included), <b>teal when the wrangler replied to you</b>, red when something failed, green when delivered. A plan waiting on you outranks red: when one would get a red step past its failure, the card shows it in amber. A job turns amber at each checkpoint you marked ${YOU}, and whenever an agent needs your decision. The <b>Needs me</b> chip filters the board down to those cards.</p><p>Red goes to the wrangler first. It fixes the step or changes the plan while the rest of the job carries on, and only that step and the ones after it wait. If it can’t, the step is <b>declared red</b> and waits for you to decide.</p>`,
     anim: { frames: RED.length, ms: 1500, still: 4 },
     figure: (reviews, phase) => needsFigure(phase) },
   { tab: 'Receipts',

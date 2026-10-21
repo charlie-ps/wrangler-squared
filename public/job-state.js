@@ -18,8 +18,8 @@ export const STATES = {
   dropped: { tone: 'idle', icon: 'stop', label: 'Dropped' },
 };
 // Most urgent first: the board sorts by it and a job rolls up to its sub-jobs' first.
-// A plan change waiting on you, then anything else the wrangler wrote for you (a plan,
-// a reply), outrank a red step: they are usually what gets past it, and a red card hid them.
+// A plan waiting on you (a change, a first plan, an idea's question or suggestion), then a
+// wrangler reply to read, outrank a red step: they are usually what gets past it, and a red card hid them.
 export const STATE_ORDER = ['change', 'read', 'failing', 'needs', 'paused', 'running', 'queued', 'waiting', 'planned', 'done', 'dropped'];
 export const stateIconHtml = (state) => ICONS[STATES[state].icon];
 // A solid tile is a step that is moving or settled; a hollow one has not begun.
@@ -52,7 +52,7 @@ export function jobState(job) {
   if (job.stage === 'done') return 'done';
   if (job.stage !== 'active') {
     if (job.paused || budgetHeld(job)) return 'paused';
-    if (jobNeedsReview(job, null)) return runStatus(job, null) === 'needs-you' ? 'needs' : replanProposed(job) ? 'change' : 'read';
+    if (jobNeedsReview(job, null)) return runStatus(job, null) === 'needs-you' ? 'needs' : 'change';
     if (job.runs.some((r) => !r.stopped)) return 'running';
     return job.stage === 'backlog' ? 'planned' : 'queued';
   }
@@ -117,8 +117,8 @@ export function jobLabel(job) {
   if (!['needs', 'change', 'read', 'failing'].includes(state) && mainWaiting(job).length) return `Local ${mainWaiting(job)[0].base} behind`;
   if (budgetHeld(job)) return 'Paused for budget';
   if (job.stage === 'backlog') return job.paused ? 'Paused' : 'Backlog';
-  if (job.stage === 'planning' && state === 'read' && job.plan && !runStatus(job, null)) return 'Plan ready';
-  if (state === 'read' && ideaStage(job) === 'reply') return 'Wrangler asked';
+  if (job.stage === 'planning' && state === 'change' && job.plan && !runStatus(job, null)) return 'Plan ready';
+  if (state === 'change' && ideaStage(job) === 'reply') return 'Wrangler asked';
   if (job.stage !== 'active') return jobStatus(job, null).text;
   if (state === 'done') return 'Delivered';
   if (state === 'paused') return 'Paused';
