@@ -3,7 +3,7 @@ import { access as defaultAccess } from 'node:fs/promises';
 import { kick, makeCreateJob } from './job-create.js';
 import { settingsSchema } from './jobs-schema.js';
 import { runFile } from './job-github.js';
-import { thumbnailOf, readEvidence, keepAskImages, readIdeaImage } from './job-evidence.js';
+import { thumbnailOf, readEvidence, keepAskImages, readIdeaImage, readTalkImage } from './job-evidence.js';
 import { workingTreeHash } from './git.js';
 import { TREE_MOVED } from './job-store.js';
 import { readLog } from './job-running.js';
@@ -58,9 +58,11 @@ async function prepare(msg, host) {
     // the human saw it in the tray and believes it went.
     const got = names.map((n) => (host.images.keep(n) ? host.images.read(n) : null));
     for (const n of names) host.images.remove(n);
-    const kept = got.every(Boolean) ? keepAskImages({ jobId: job.id, subId: sub?.id, round: sub?.ready?.round, messageId: Date.now().toString(36), images: got }) : [];
+    const round = sub?.ready?.round;
+    const kept = got.every(Boolean) ? keepAskImages({ jobId: job.id, subId: sub?.id, round, messageId: Date.now().toString(36), images: got }) : [];
     if (kept.length < names.length) return { ...clean, refused: 'An attached image could not be kept. Attach it again.' };
-    return { ...clean, attachments: kept.map(({ file, mime, path }) => ({ file, mime, path })) };
+    // Where it was kept rides along, so the talk message can find it again (readTalkImage).
+    return { ...clean, attachments: kept.map(({ file, mime, path }) => ({ file, mime, path, ...(round != null ? { round } : {}) })) };
   }
   return clean;
 }
@@ -132,7 +134,8 @@ export const jobOpenIdeHandler = makeOpenIdeHandler();
 // store (`images:keep`) and nothing serves that store to a browser, so the bytes
 // ride the one outbound channel there is. Asked once per job per dialog, and a
 // name the store has lost is simply absent. Pictures pasted into a New idea's
-// conversation ride along as `idea:<file>`.
+// conversation ride along as `idea:<file>`, and those pasted into a running job's
+// conversations with the wrangler as `talk:<file>`.
 export const jobImagesHandler = {
   type: 'job-images',
   handler(msg, host) {
@@ -144,6 +147,11 @@ export const jobImagesHandler = {
     for (const { file } of (job?.idea?.thread || []).flatMap((m) => m.images || [])) {
       const got = readIdeaImage({ jobId: job.id, file });
       if (got) images.push({ name: `idea:${file}`, mime: got.mime, dataBase64: got.bytes.toString('base64') });
+    }
+    // A message saved before talk kept its files holds only a count.
+    for (const { file, sub, round } of (job?.talk || []).flatMap((m) => Array.isArray(m.images) ? m.images : [])) {
+      const got = readTalkImage({ jobId: job.id, subId: sub, round, file });
+      if (got) images.push({ name: `talk:${file}`, mime: got.mime, dataBase64: got.bytes.toString('base64') });
     }
     host.broadcast({ event: 'job-images', jobId: msg.id, images });
   },
