@@ -42,7 +42,13 @@ export function say(job, entry, now) {
 export function openConvo(job, sub, now) {
   const convo = { id: `convo_${now.toString(36)}${convosOf(job).length.toString(36)}`, at: now, ...(sub ? { sub: sub.id } : {}), pending: null, seenAt: 0, titlePending: true };
   (job.convos ||= []).push(convo);
-  if (job.convos.length > CONVOS_MAX) job.convos.splice(0, job.convos.findIndex((c) => !c.pending) + 1);
+  if (job.convos.length > CONVOS_MAX) {
+    // Past the cap the oldest at rest goes, with its messages, so none is left
+    // pointing at it; never one its wrangler or a plan change is still at work in.
+    const busy = (c) => c === convo || c.pending || convoRun(job, c) || job.replan?.convo === c.id || (job.replanQueue || []).some((q) => q.convo === c.id);
+    const i = job.convos.findIndex((c) => !busy(c));
+    if (i >= 0) { const [gone] = job.convos.splice(i, 1); job.talk = talkOf(job).filter((m) => m.convo !== gone.id); }
+  }
   return convo;
 }
 
@@ -100,8 +106,11 @@ export function answerAsk(job, run, report, now) {
 
 // The ask run found a change was wanted: it becomes a plan change exactly as if
 // the idea had been sent as one, folded into any proposal already waiting.
+// Never past a follow-up still on its way: the runner mails it and the run reports again.
+export const UNSENT_ASK = 'The human wrote again while you were working and it is on its way to you by mail: read your mail, then reply or report the plan';
 export function askToReplan(job, run, requestReplan, now) {
   const convo = ownConvo(job, run);
+  if (unsentAsks(convo).length) throw new Error(UNSENT_ASK);
   const { asks, source, images } = convo.pending;
   const sent = requestReplan(job, asks.map((a) => a.feedback).join('\n\n'), now, null, { source, images, running: run.id, convo: convo.id });
   convo.pending = null;

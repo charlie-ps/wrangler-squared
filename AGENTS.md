@@ -190,7 +190,7 @@ text as public as the rest of this repo.
   conversation open at a time, with the box at its foot (`boxHtml`, `data-change-convo`):
   `replyTarget` is the human's pick (a title row opens that one and folds the other, the
   open one's header or the chip's × folds it), else `defaultTarget`, the one at work or
-  spoken in last; '' (none open, always on a failing step) puts the box below them all
+  spoken in last; '' (none open, and where a failing step's dialog opens, until its first message starts one) puts the box below them all
   for a new one. Drafts are kept per target (`boxDrafts`), pasted pictures by
   `askImages[].box`, and the sent bubble lands at the end of its conversation
   (`askSent.convo`) or above the box. Haiku names each new conversation from its

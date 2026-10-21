@@ -290,7 +290,7 @@ test('only a proposal of forwards and nothing else skips the human: any plan cha
 // acts on has since landed. No press could ever approve it, so it goes back.
 const openPrOf = () => ({ stage: 'pr', state: 'watching', pr: { url: PR, head: 'h1', checkStatus: 'passing' } });
 // Typed on the step, read by an ask run that proposes a change (job-talk.js askToReplan).
-const ideaOn = (j, id, text) => { const sub = subOf(j, id); requestChange(j, sub, { ...changeView(j, sub), text }, { now: 1 }); askToReplan(j, { id: 'run_a', convo: j.talk.at(-1).convo }, requestReplan, 1); };
+const ideaOn = (j, id, text) => { const sub = subOf(j, id); requestChange(j, sub, { ...changeView(j, sub), text }, { now: 1 }); const convo = j.convos.find((c) => c.id === j.talk.at(-1).convo); for (const a of convo.pending.asks) a.sentAt ??= 1; askToReplan(j, { id: 'run_a', convo: convo.id }, requestReplan, 1); };
 const land = (j, id, patch) => Object.assign(subOf(j, id), patch);
 
 test('Unit test: brief edit on a PR that merges before approval goes back to the planner', () => {

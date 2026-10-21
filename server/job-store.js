@@ -467,7 +467,7 @@ export class JobStore {
       }
       if (action === 'retry') {
         if (!(s || j).error) throw new Error('Nothing is blocked');
-        if (j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null))) throw new Error('The previous session is still stopping');
+        if (j.runs.some((r) => runnable(r) && r.subJobId === (s?.id || null) && !r.convo)) throw new Error('The previous session is still stopping');
         // A write is only ever made by its session: retrying one runs that
         // session again for it (job-writes.js).
         if (isWriteSub(s)) { reopenWrite(j, s); record(j, s, 'retry', note, `Retried ${quoted(s.title)}`); return; }
@@ -649,6 +649,8 @@ export class JobStore {
       // from every step but the planner's own (which has no one above it but you).
       const up = report.kind === 'blocked' || report.kind === 'escalate' || (report.kind === 'replan' && r.phase !== 'planning');
       if (!expected.includes(report.kind) && !up) throw new Error(`This run must submit ${expected.join(' or ')}`);
+      // A conversation's wrangler answers or proposes; declaring a step red is the red planner's.
+      if (r.ask && report.kind === 'escalate') throw new Error('Answer in this conversation with kind:"reply", or propose with kind:"plan"; only the planner sent after a red step declares it red');
       const s = j.subJobs.find((s) => s.id === r.subJobId);
       // Drafts park the run rather than end it: the session waits for mail with
       // the human's decision (job-runner.js), then completes. Its receipt is the
@@ -761,6 +763,9 @@ export class JobStore {
       }
       return;
     }
+    // A plan change discarded or approved while its planner worked: what that planner
+    // says now is about nothing, kept on the run like a stale plan.
+    if ((report.kind === 'blocked' || report.kind === 'escalate') && !s && r.phase === 'planning' && !r.ask && j.stage === 'active' && !j.replan) return;
     // The planner says a red step is beyond a fix: declared to the human, its
     // options (when it gave any) waiting in the proposal view.
     if (report.kind === 'escalate' && !s) {
