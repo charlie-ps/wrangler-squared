@@ -78,7 +78,7 @@ export function escalate(convo, now) {
 export function dismissConvo(job, id, now) {
   const convo = convoById(job, id);
   if (!convo || convo.dismissedAt) throw new Error('That conversation is already gone');
-  if (convo.pending || convoRun(job, convo)) throw new Error('The wrangler is still answering in that conversation');
+  if (convo.pending || convoRun(job, convo)) throw new Error('Wrangler is still answering in that conversation');
   if (job.replan && job.replan.convo === convo.id) throw new Error('That conversation has a plan change in progress. Approve or discard it first.');
   convo.dismissedAt = now;
   return convo;

@@ -1,4 +1,4 @@
-import { ICONS } from './icons.js';
+import { ICONS, wranglerMark } from './icons.js';
 import { SHOTS, proofFigure, runningBar } from './figs.js';
 import { plateHtml } from './job-plates.js';
 import { ideaThreadHtml } from './job-idea.js';
@@ -289,8 +289,8 @@ function talkFigure(phase) {
   const f = TALK[phase];
   const xl = f.xl === 'proposed' ? `<div class="job-node tone-idle job-mark-added wn-fade">${tile('queued', 'pr')}<strong class="job-node-title">Add Excel export</strong><span class="job-status">Proposed</span></div>`
     : f.xl ? node('queued', 'pr', 'Add Excel export', 'After Add CSV export') : '';
-  const box = `<div class="job-change${f.text ? ' has-text' : ''}"><div class="job-change-row"><span class="job-change-to"><i>W</i>The wrangler${f.c1 ? '<small>New conversation</small>' : ''}</span><div class="job-change-text${f.text ? '' : ' ph'}">${f.text || 'Add idea: a question, a change, new work…'}</div><label class="job-change-attach">${ICONS.image}</label><button type="button" class="job-change-go${f.go ? ' on' : ''}" tabindex="-1">${ICONS.send}</button></div></div>`;
-  return `<div class="wn-row2s" role="img" aria-label="A running job: you ask the wrangler a question and it answers while the PR carries on, then you ask for new work and approve the PR it proposes">
+  const box = `<div class="job-change${f.text ? ' has-text' : ''}"><div class="job-change-row"><span class="job-change-to">${wranglerMark('small')}Wrangler${f.c1 ? '<small>New conversation</small>' : ''}</span><div class="job-change-text${f.text ? '' : ' ph'}">${f.text || 'Add idea: a question, a change, new work…'}</div><label class="job-change-attach">${ICONS.image}</label><button type="button" class="job-change-go${f.go ? ' on' : ''}" tabindex="-1">${ICONS.send}</button></div></div>`;
+  return `<div class="wn-row2s" role="img" aria-label="A running job: you ask Wrangler a question and it answers while the PR carries on, then you ask for new work and approve the PR it proposes">
       <div class="wn-stack">${node(f.pr[0], 'pr', 'Add CSV export', f.pr[1])}</div>
       <span class="wn-edge${!f.xl ? ' ghost' : f.xl === 'proposed' ? ' added' : ''}"></span>
       <div class="wn-stack">${xl}</div>
@@ -392,10 +392,10 @@ export const UPDATES = [
     ])}`,
     anim: { frames: 9, ms: 1700, still: 3 }, figure: (phase) => ideasFigure(phase) },
   { id: 'wrangler-talk', date: '2026-10-21', icon: 'note', tone: 'run',
-    title: 'Talk it through with the wrangler',
-    body: `<p><b>Add idea</b> is now a conversation with <b>the wrangler</b>, the planner behind every job. Ask it something and it answers right there. Ask for a change and its proposal turns up in the same thread, ready to approve.</p>${done([
+    title: 'Talk it through with Wrangler',
+    body: `<p><b>Add idea</b> is now a conversation with <b>Wrangler</b>, the planner behind every job. Ask it something and it answers right there. Ask for a change and its proposal turns up in the same thread, ready to approve.</p>${done([
       '<b>Several conversations at once</b>, each with its own box. The box at the bottom starts a new one.',
-      '<b>The job keeps running</b> while the wrangler thinks. Only the steps a change touches wait for it.',
+      '<b>The job keeps running</b> while Wrangler thinks. Only the steps a change touches wait for it.',
       '<b>It tidies up after itself</b>: quiet conversations fold to a strip, approved proposals to one line, and × dismisses one.',
     ])}`,
     anim: { frames: 10, ms: 1700, still: 7 }, figure: (phase) => talkFigure(phase) },

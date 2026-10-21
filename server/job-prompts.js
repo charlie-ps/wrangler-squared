@@ -369,7 +369,7 @@ const replanBlock = (job, run) => lines(
 // planned. The board calls the planner "the wrangler", so that is who the human is
 // talking to.
 const askBlock = (job, run, convo) => lines(
-  'This job is ALREADY RUNNING and the human has ASKED YOU A QUESTION about it in one of the job\'s conversations (the board calls you "the wrangler"). Where each sub-job stands now:',
+  'This job is ALREADY RUNNING and the human has ASKED YOU A QUESTION about it in one of the job\'s conversations (the board calls you "Wrangler"). Where each sub-job stands now:',
   ...standing(job),
   job.replan?.proposal ? `A plan change you proposed is waiting for the human: ${JSON.stringify({ plan: job.replan.proposal.plan, actions: job.replan.proposal.actions, diagnosis: job.replan.proposal.diagnosis })}` : '',
   `Current plan: ${JSON.stringify(job.plan)}`,

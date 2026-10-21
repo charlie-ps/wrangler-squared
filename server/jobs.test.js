@@ -1614,7 +1614,7 @@ test('a session that ends without a receipt holds its writes; a plan change bein
   change(f, null, 'Also cover SSO');
   f.report({ kind: 'published', url: PR_URL }, f.workerFor('api', 'implementation')); await f.tick();
   job = f.store.get(f.job.id);
-  assert.equal(f.launched.filter((l) => l.sub?.id === 'later').length, 1, 'talking to the wrangler pauses nothing');
+  assert.equal(f.launched.filter((l) => l.sub?.id === 'later').length, 1, 'talking to Wrangler pauses nothing');
 });
 
 test('every write names the session that makes it; only a session waits on a milestone, which must be reachable; links are ordered', async (t) => {
@@ -2581,7 +2581,7 @@ test('a plan change that moves a green PR behind new work reworks it, and neithe
   f.report({ kind: 'published', url: PR_URL }, f.workerFor('web')); f.setPr({ checkStatus: 'passing' }); await f.tick();
   f.store.action(f.job.id, 'approve-merge', { subJobId: 'web', head: 'head1' });
   change(f, 'web', 'Web needs the new api'); await f.tick();
-  assert.deepEqual(f.merged, [], 'the step the idea was typed on waits for the wrangler');
+  assert.deepEqual(f.merged, [], 'the step the idea was typed on waits for Wrangler');
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web', ['api'], { brief: 'Implement web on the new api' })]) }, f.last());
   f.store.action(f.job.id, 'approve-replan', { proposalId: f.last().run.id });
   const web = () => f.store.get(f.job.id).subJobs.find((s) => s.id === 'web');
@@ -2613,7 +2613,7 @@ test('an idea typed on the job holds nothing while the wrangler draws it: a gree
   change(f, null, 'Also cover SSO'); await f.tick();
   assert.ok(f.store.get(f.job.id).replan, 'the change is being drawn');
   f.setPr({ checkStatus: 'passing' }); await f.tick();
-  assert.equal(f.merged.length, 1, 'the PR merges under the wrangler');
+  assert.equal(f.merged.length, 1, 'the PR merges under Wrangler');
   f.setPr({ state: 'MERGED', mergeCommit: 'm1' }); f.store.update(f.job.id, (j) => { j.subJobs[0].nextPollAt = 0; }); await f.tick(); await f.tick();
   assert.ok(f.workerFor('notes', 'session'), 'and the step after it starts');
 });
@@ -2859,8 +2859,8 @@ test('a proposal whose step merged before approval goes back to the planner, and
   const job = f.store.get(f.job.id);
   assert.equal(job.replan.proposal, null);
   assert.deepEqual(job.moves.slice(-2).map((m) => [m.move, m.subJobId, m.detail]), [
-    ['replan-sent-back', null, 'Sent the plan change back to the wrangler: “Deliver api” has merged since it was proposed'],
-    ['replan-sent-back', 'api', '“Deliver api” has merged since the plan change was proposed, so it went back to the wrangler']]);
+    ['replan-sent-back', null, 'Sent the plan change back to Wrangler: “Deliver api” has merged since it was proposed'],
+    ['replan-sent-back', 'api', '“Deliver api” has merged since the plan change was proposed, so it went back to Wrangler']]);
   await f.tick();
   const again = plannerOf(f);
   assert.notEqual(again.run.id, planner.run.id, 'a fresh planning run picks it up');
@@ -3408,7 +3408,7 @@ test('a message sent before the wrangler replies reaches the same running sessio
   assert.match(talk(f).at(-1)[2], /is api deployed/);
   await f.tick();
   assert.equal(runs(), 1, 'no new run');
-  assert.deepEqual(f.mailed.map((m) => m.sid), [asker.sid], 'mailed to the wrangler that is answering');
+  assert.deepEqual(f.mailed.map((m) => m.sid), [asker.sid], 'mailed to Wrangler that is answering');
   assert.match(f.mailed[0].text, /wrote again in your conversation[\s\S]*The human added: Also, is api deployed\?[\s\S]*ONE reply/);
   await f.tick();
   assert.equal(f.mailed.length, 1, 'mailed once');
@@ -3514,5 +3514,5 @@ test('a dismissed conversation comes back when anything new is said in it, by th
   f.store.action(f.job.id, 'dismiss-convo', { convo: id });
   const job = f.store.get(f.job.id);
   say(job, { from: 'wrangler', kind: 'answer', text: 'Web has started.', convo: id }, 9);
-  assert.equal(job.convos[0].dismissedAt, undefined, 'the wrangler said something in it');
+  assert.equal(job.convos[0].dismissedAt, undefined, 'Wrangler said something in it');
 });

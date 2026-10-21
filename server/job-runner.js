@@ -186,7 +186,7 @@ export class JobRunner {
         // away ends it.
         else if (run.parkedAt && !run.mailedAt) {
           if (await this.runtime.exists(run)) continue;
-          error = run.parkedFor === 'idea' ? 'The wrangler\'s session was closed while it waited for your reply. Retry to plan again.' : 'Session was closed while its drafts waited for review. Retry to run it again.';
+          error = run.parkedFor === 'idea' ? 'Wrangler\'s session was closed while it waited for your reply. Retry to plan again.' : 'Session was closed while its drafts waited for review. Retry to run it again.';
         }
         else if (!(await this.runtime.isAlive(run))) error = 'Session stopped without a receipt. Open it to see why, then retry.';
         // Stopped at the spend limit, a session sits idle by design until a top-up.
@@ -581,7 +581,7 @@ export class JobRunner {
       this.patchRun(id, run.id, (r) => { r.mailedAt = now; r.idleSince = null; });
       this.store.update(id, (j) => { for (const m of j.idea.thread) if (batch.some((b) => b.id === m.id)) m.sentAt = now; j.idea.error = null; });
     } catch (e) {
-      const note = `Could not send your reply to the wrangler: ${shortError(e)}`;
+      const note = `Could not send your reply to Wrangler: ${shortError(e)}`;
       if (job.idea.error !== note) this.store.update(id, (j) => { j.idea.error = note; });
     }
   }

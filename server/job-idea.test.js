@@ -92,7 +92,7 @@ test('accepting the suggestion is the plan receipt and its approval, even with P
   assert.ok(job.approvedAt, 'no second Approve for the plan just accepted');
   assert.ok(job.idea.thread.at(-1).acceptedAt);
   assert.equal(inConversation(job), false);
-  assert.match(job.moves.at(-1).detail, /from the wrangler's suggestion/);
+  assert.match(job.moves.at(-1).detail, /from Wrangler's suggestion/);
   await f.tick();
   assert.equal(f.run(planner).stopped, true);
   assert.equal(f.run(planner).error, undefined, 'stopped quietly, not as a missing receipt');

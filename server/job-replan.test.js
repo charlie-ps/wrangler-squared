@@ -271,7 +271,7 @@ test('a landed step whose stored spec moved after the proposal goes back to the 
   moveSpec(kept); Object.assign(kept.subJobs.find((s) => s.id === 'w-local'), { stage: 'done', state: 'done' });
   const back = approveReplan(kept, 'p1', { now: 9, buildSubJob: (_, s) => s });
   assert.equal(back.sentBack, true, 'edited, then made: back to the planner, not “w-local has already landed”');
-  assert.deepEqual(back.lines.map((l) => l.detail), ['“Write w-local” has finished and changed since the plan change was proposed, so it went back to the wrangler']);
+  assert.deepEqual(back.lines.map((l) => l.detail), ['“Write w-local” has finished and changed since the plan change was proposed, so it went back to Wrangler']);
   assert.match(kept.replan.feedback, /“Write w-local” \(w-local\) has finished and changed/);
   assert.equal(kept.replan.proposal, null);
   assert.equal(kept.subJobs.find((s) => s.id === 'a').brief, 'Implement a', 'nothing of the proposal applied');

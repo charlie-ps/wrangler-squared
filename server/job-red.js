@@ -135,7 +135,7 @@ export function settleProposal(job, run, { now, apply }) {
   const empty = !proposal.actions.length && ![...proposal.changes.added, ...proposal.changes.edited, ...proposal.changes.removed].length;
   if (empty) {
     const sub = subOf();
-    if (sub) { noteAttempt(sub, run, summary, 'declared', now); declareRed(job, sub, { summary: proposal.diagnosis?.summary || 'The wrangler found nothing it could change', ask: 'Decide how to carry on: send an idea in, accept the red, or retry', auto: false }, now); }
+    if (sub) { noteAttempt(sub, run, summary, 'declared', now); declareRed(job, sub, { summary: proposal.diagnosis?.summary || 'Wrangler found nothing it could change', ask: 'Decide how to carry on: send an idea in, accept the red, or retry', auto: false }, now); }
     job.replan = null;
     return 'declared';
   }

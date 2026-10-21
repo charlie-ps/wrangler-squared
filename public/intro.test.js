@@ -114,7 +114,7 @@ test('the Jobs step plays a mini board whose rail badge counts the amber rows', 
   assert.ok(frames(1).some((el) => el.querySelectorAll('.intro-mini-job:is(.tone-warn,.tone-read)').length === 2));
   const idea = frames(1).map((el) => el.querySelector('.intro-mini-job'));
   assert.deepEqual(idea.map((r) => r.querySelector('.gx.nb[data-inflow]')?.dataset.stage ?? null), ['0', '0', '1', '0', '2', null, null], 'an idea under its forming sky, brighter as the planner asks and suggests, then the job it became');
-  assert.deepEqual(idea.slice(0, 5).map((r) => r.querySelector('small').textContent), ['Idea · The wrangler is reading it', 'Idea · The wrangler is reading it', 'Idea · The wrangler asked you', 'Idea · The wrangler is reading it', 'Idea · Job suggested · review']);
+  assert.deepEqual(idea.slice(0, 5).map((r) => r.querySelector('small').textContent), ['Idea · Wrangler is reading it', 'Idea · Wrangler is reading it', 'Idea · Wrangler asked you', 'Idea · Wrangler is reading it', 'Idea · Job suggested · review']);
   assert.ok(idea[2].classList.contains('tone-warn'), 'a question waiting on you counts, in amber');
   assert.equal(idea[5].querySelector('small').textContent, 'Starting its sub-jobs', 'creating the suggested job approved its plan');
   const before = fig().querySelector('.intro-figure').innerHTML;
@@ -168,9 +168,9 @@ test('New idea plays an idea, the planner’s question, the job it suggests, the
   page(t);
   const els = frames(step('New idea'));
   const said = (el) => [...el.querySelectorAll('.job-sent-bubble, .job-idea-body, .job-idea-thinking, .job-launch-title')].map((n) => n.textContent.trim());
-  assert.deepEqual(said(els[0]), ['Add a dark mode to the reports dashboard', 'The wrangler is reading the idea…']);
+  assert.deepEqual(said(els[0]), ['Add a dark mode to the reports dashboard', 'Wrangler is reading the idea…']);
   assert.match(said(els[1]).at(-1), /follow the system setting/, 'then it asks');
-  assert.deepEqual(said(els[2]).slice(-2), ['Follow the system, with a switch to override it. Land it on next.', 'The wrangler is thinking…']);
+  assert.deepEqual(said(els[2]).slice(-2), ['Follow the system, with a switch to override it. Land it on next.', 'Wrangler is thinking…']);
   assert.equal(els[3].querySelector('.job-launch.live .job-launch-title').textContent, 'Dark mode for the reports dashboard', 'and suggests a job');
   assert.ok(els[4].querySelector('.job-launch.done'), 'Create job pressed');
   assert.equal(els[3].querySelector('.intro-chat-plan'), null);
@@ -188,7 +188,7 @@ test('the last step’s checklist says an idea is talked through before its plan
   const p = page(t);
   createIntro({ storage: memoryStorage() }).open(INTRO_STEPS.length - 1);
   const items = [...p.q('.intro-panel:not([inert]) .intro-done').querySelectorAll('li')].map((li) => li.textContent);
-  assert.ok(items.includes('New idea: talk it through with the wrangler, then approve the plan'));
+  assert.ok(items.includes('New idea: talk it through with Wrangler, then approve the plan'));
 });
 
 test('Sub-jobs draws three kinds and the places a session writes to; Jira is a place, not a kind', (t) => {

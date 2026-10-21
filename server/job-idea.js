@@ -75,7 +75,7 @@ export function humanReply(job, text, now, attachments = []) {
 export function acceptIdea(job, { messageId, index = 0, all = false }, now) {
   if (!inConversation(job)) throw new Error('This idea is no longer a conversation');
   const msg = liveSuggestion(job);
-  if (!msg || msg.id !== messageId) throw new Error('The wrangler\'s suggestion changed since you looked. Read the latest one and try again.');
+  if (!msg || msg.id !== messageId) throw new Error('Wrangler\'s suggestion changed since you looked. Read the latest one and try again.');
   const open = uncreated(msg);
   if (!all && !open.includes(index)) throw new Error('That job was already created from this suggestion.');
   if (!Array.isArray(msg.suggest)) msg.suggest = suggestionsOf(msg);
