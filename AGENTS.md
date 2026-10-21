@@ -254,10 +254,12 @@ text as public as the rest of this repo.
   drafts park (no slot, `settle()` holds it only to its card existing) but never matched by
   `draftsDecided`. The run waits on `waitsOnReview`; approve, a rework, drop or a retry end
   it quietly and the publish run then claims the sub-job. An approved `forward {sub, note}`
-  action (pinned to `{at:'round', ref: ready.receiptId}`, refused while `answering`; a `rework`
+  action (pinned to `{at:'round', ref: ready.receiptId}`; one made while it is `answering` queues behind
+  that reply, mailed one at a time to a waiting run, `answered` moving `answering` on; a `rework`
   of a parked step is refused in its favour) writes a `sub.thread` message (`askAgent`,
   `via: 'planner'`, `sentAt: null`) and the runner mails
-  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again). In the
+  it (`deliverThread`, `threadMail`), setting `mailedAt` (the run is working again); the session's
+  words go above anything still queued (`sayInThread`), so each reply sits under its message. In the
   wrangler conversation a forwards-only card (`forward: true`, no prose) is one line, and its
   approval stamps `forwarded: [{sub, message}]`, so `public/job-talk.js` draws the session's
   answers from `sub.thread` right after it. The
