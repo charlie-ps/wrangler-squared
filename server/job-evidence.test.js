@@ -225,7 +225,7 @@ test('Code on Auto still asks for ready when there is something to show, so the 
   assert.equal(leavesUncommitted(auto, spec('api')), false);
   assert.equal(leavesUncommitted({ ...auto, reviewCode: true }, spec('api')), true);
   const text = jobPrompt(auto, sub, { id: 'run1', phase: 'implementation' });
-  assert.match(text, /Leave every change UNCOMMITTED: a later step commits and pushes it/);
+  assert.match(text, /Leave every change UNCOMMITTED: Code is on Auto, so nobody reviews it: your proof is kept on the step and a later step commits and pushes it straight after your receipt/);
   assert.doesNotMatch(text, /the human reviews the working tree/, 'nobody reads it first on Auto');
   assert.match(text, /kind:"ready"/);
   assert.match(jobPrompt(auto, spec('api'), { id: 'run1', phase: 'implementation' }), /kind:"published"/);

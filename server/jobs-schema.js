@@ -46,19 +46,17 @@ export const proofSchema = z.object({ text: line, note: line.optional(), shots: 
 });
 export const readyChecksSchema = z.array(z.union([line, proofSchema])).min(1).max(16);
 // What the agent left running for the human to try (docs: "See it working", PR 3).
-// The agent starts it (detached, so it outlives the session going dormant) and
-// says how to stop it; the extension never starts anything, it only tears down
-// what a receipt listed. `pid` is the group leader's, `stop` a command run in the
-// worktree (`docker compose -p x down`), `log` a file the agent redirected the
+// The agent starts it (detached, so it outlives the session going dormant); the
+// extension never starts anything, it only kills the process groups a receipt
+// listed. `pid` is the group leader's, `log` a file the agent redirected the
 // output to (read back for the Logs button, job-running.js).
 export const MAX_RUNNING = 6;
 export const runningItemSchema = z.object({
   name: line,
   url: z.string().trim().max(300).refine((u) => /^https?:\/\/[^\s]+$/i.test(u), 'url must be an http(s) address').optional(),
   pid: z.number().int().min(2).max(4194304).optional(),
-  stop: z.string().trim().min(1).max(300).refine((s) => !/[\r\n]/.test(s), 'stop is one command on one line').optional(),
   log: z.string().trim().max(400).refine((p) => p.startsWith('/') && !/[\r\n]/.test(p), 'log is an absolute file path').optional(),
-}).strict().refine((r) => r.url || r.pid || r.stop, 'A running entry needs a url, a pid or a stop command');
+}).strict().refine((r) => r.url || r.pid, 'A running entry needs a url or a pid');
 export const runningSchema = z.array(runningItemSchema).max(MAX_RUNNING);
 export const checkText = (c) => typeof c === 'string' ? c : c.text;
 // Every Show me item must be answered by a proof check whose text is the item
@@ -169,9 +167,9 @@ export const writeRefs = (sub) => [...`${sub.action?.comment || ''} ${sub.action
 // and approval launches a `publish` session that commits, pushes and opens the
 // PR. Off, one session does all of it. Read through this helper: a job created
 // before the flag existed has no field and reviews like a new one.
-export const reviewCode = (job) => job?.reviewCode ?? true;
+export const reviewCode = (job) => reviewOf(job, 'reviewCode');
 // Red steps: true (also what a job from before the flag reads) is "You decide".
-export const reviewRed = (job) => job?.reviewRed ?? true;
+export const reviewRed = (job) => reviewOf(job, 'reviewRed');
 // The one line every PR description and squash commit a job lands must end with.
 export const ATTRIBUTION = 'Made with Agent Wrangler and the charlie-ps/wrangler-squared extension';
 // A story either already exists in Jira (key) or is a proposal (no key, optional
@@ -388,6 +386,10 @@ const imageName = z.string().regex(/^paste-\d{1,20}-[a-f0-9]{4,32}\.(?:png|jpg|g
 // `reviewRed` is the sixth: true is "You decide" (a red step gets a fix proposed
 // and waits for you), false is "Wrangler replans" (job-red.js).
 export const REVIEW_DEFAULTS = { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true };
+// Every reader of a checkpoint goes through this, so a job saved before a flag
+// existed is gated by the same default everywhere (the store's switch, the
+// runner's merge, the board's tiles): Merge unset is You review, never Auto.
+export const reviewOf = (job, field) => job?.[field] ?? REVIEW_DEFAULTS[field];
 export const SANDBOX_MODES = ['locked', 'auto', 'full'];
 export const jobInputSchema = z.object({
   title: line.optional(), intent: z.string().trim().min(1).max(16000),

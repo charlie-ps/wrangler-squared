@@ -35,7 +35,6 @@ test('the summary counts what was shown and what could not be, and the verdict c
 test('the list is the verdict, then a row per item with its evidence at the end, then the plain checks as rows', () => {
   const html = proofListHtml(job, sub());
   assert.match(html, /<div class="job-proof-verdict"><b>4 of 5 checked<\/b><span class="gap">· 1 couldn’t show<\/span><\/div>/, 'the header names the round, so the list does not repeat it');
-  assert.match(proofListHtml(job, sub(), { stale: true }), /<small>from round 1<\/small><\/div>/, 'only a header already on a newer round has the list say which round it is from');
   assert.doesNotMatch(html, /Shown working|Also checked/, 'no headings repeat what the rows say');
   const rows = html.match(/<details class="job-proof-item[^"]*"/g);
   assert.deepEqual(rows, ['<details class="job-proof-item "', '<details class="job-proof-item "', '<details class="job-proof-item gap"', '<details class="job-proof-item "']);

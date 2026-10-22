@@ -6,9 +6,11 @@ import { say, ask, convoById, openConvo } from './job-talk.js';
 export { changeView };
 
 // request-change: the one way a human's idea enters a job, from the plan, a code
-// review, a session's result, an open PR, a write, or a pending proposal. The
-// idea is pinned to what was on screen (`at` names the view, `ref` the exact
-// thing in it) and goes to one recipient, the planner ("the wrangler" on the
+// review, a session's result, an open PR, a write, or a pending proposal. It is
+// never refused as stale: the step moving under it is the planner's to judge
+// (replan.source keeps what the step was when it was typed, job-prompts.js
+// sourceLine), and only an action's pin is checked at approval (job-actions.js
+// checkActions). It goes to one recipient, the planner ("the wrangler" on the
 // board), which sorts it into actions on live steps (forward to an open session,
 // rework) and plan edits: one proposal the human approves (job-replan.js,
 // job-actions.js). On a running job every idea is also said in one of the job's
@@ -25,14 +27,13 @@ export const CHANGE_TEXT_MAX = 8000;
 // (server/handlers.js prepare kept them on disk).
 const withImages = (idea, attachments) => attachments?.length ? `${idea}\n(Pasted images, read them: ${attachments.map((a) => JSON.stringify(a.path)).join(', ')})` : idea;
 
-export function requestChange(job, sub, { at, ref, text, attachments, convo: convoId }, { now }) {
+export function requestChange(job, sub, { text, attachments, convo: convoId }, { now }) {
   const typed = String(text || '').trim().slice(0, CHANGE_TEXT_MAX);
   if (!typed) throw new Error('Explain the change you want');
   const files = (attachments || []).filter((a) => typeof a?.path === 'string');
   const idea = withImages(typed, files);
   const view = changeView(job, sub);
   if (!view) throw new Error(sub ? 'Nothing is left to change here' : 'The job has nothing to change right now');
-  if (view.at !== at || view.ref !== String(ref)) throw new Error('This changed since you looked. Review the latest version and ask again.');
   // The first plan is still the planner's own to redraw.
   if (view.at === 'plan') {
     if (job.runs.some((r) => !r.stopped)) throw new Error('Wait for planning to finish');
@@ -42,9 +43,10 @@ export function requestChange(job, sub, { at, ref, text, attachments, convo: con
   }
   const target = convoById(job, convoId);
   if (convoId && !target) throw new Error('That conversation has gone. Start a new one.');
-  // Kept beside the round they were typed on (a code review), a step's pictures can
-  // go on into its session's thread when the planner forwards the idea there.
-  const source = sub ? { sub: sub.id, at: view.at, ref: view.ref } : null;
+  // What the step was when the idea was typed, for the planner to set beside it as
+  // it is now. A step's pictures are kept beside the round they were typed on (a code
+  // review), so they can go on into its session's thread when the idea is forwarded.
+  const source = sub ? { sub: sub.id, at: view.at, ref: view.ref, state: `${sub.stage}/${sub.state}` } : null;
   const images = files.map(({ file, mime, path }) => ({ sub: sub?.id || null, round: view.at === 'code' ? sub.ready.round || 1 : null, file, mime, path }));
   // The message keeps where each picture was kept, so the thread can draw it (handlers.js jobImagesHandler).
   const kept = files.map(({ file, mime, round }) => ({ file, mime, ...(sub ? { sub: sub.id } : {}), ...(sub && Number.isInteger(round) ? { round } : {}) }));
