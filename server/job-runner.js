@@ -14,7 +14,7 @@ import { waitsOnReview, unsentFor } from './job-parked.js';
 import { noteMain } from './job-main.js';
 import { stderrLine } from './git.js';
 import { budgetOf, liveCards, budgetContinueMail } from './job-budget.js';
-import { holdsRunning, dueTeardown, runningOf, sameItem, stopReason, teardown, isUp, defaultDeps, stopSandbox } from './job-running.js';
+import { holdsRunning, dueTeardown, runningOf, stopReason, teardown, isUp, defaultDeps } from './job-running.js';
 export const shortError = (e) => {
   const first = String(e?.message || e).split('\n')[0], why = stderrLine(e);
   return (why && !first.includes(why) ? `${first}: ${why}` : first).slice(0, 240);
@@ -107,8 +107,8 @@ export class JobRunner {
   // What an agent left running for the human to try (job-running.js). A preview
   // is probed while its review is open, written only when up/down flips (the
   // graph rebuild reads the file). Whatever is due is torn down FIRST each tick,
-  // before cleanup removes the worktree its stop commands run in, and also at
-  // boot: a sub-job no longer in review owns nothing that should still answer.
+  // and also at boot: a sub-job no longer in review owns nothing that should
+  // still answer.
   // Teardown never fails the step it follows; a leftover is flagged on the card.
   async sweepRunning(id) {
     for (const initial of this.store.get(id).subJobs) {
@@ -118,11 +118,10 @@ export class JobRunner {
       const due = dueTeardown(job, sub);
       if (due.length) {
         let outcome;
-        try { outcome = await teardown(due, { cwd: sub.worktree?.path, sandbox: stopSandbox(job, sub), deps: this.running }); } catch (e) { outcome = { results: due.map((i) => ({ name: i.name, ok: false, detail: shortError(e) })), still: due.map((i) => i.name) }; }
+        try { outcome = await teardown(due, { deps: this.running }); } catch (e) { outcome = { results: due.map((i) => ({ name: i.name, ok: false, detail: shortError(e) })), still: due.map((i) => i.name) }; }
         const reason = stopReason(job, sub);
         this.patchSub(id, sub.id, (s) => {
-          const gone = (list) => (list || []).filter((i) => !due.some((d) => sameItem(i, d)));
-          s.running = { ...s.running, items: gone(s.running.items), owed: gone(s.running.owed), stopped: { at: this.now(), reason, results: outcome.results, still: outcome.still } };
+          s.running = { at: s.running.at, items: (s.running.items || []).filter((i) => !due.some((d) => d.name === i.name && d.pid === i.pid && !!d.replaced === !!i.replaced)), stopped: { at: this.now(), reason, results: outcome.results, still: outcome.still } };
         });
       }
       const now = this.store.get(id);
@@ -131,7 +130,7 @@ export class JobRunner {
       const items = runningOf(kept);
       const ups = await Promise.all(items.map((i) => isUp(i, this.running)));
       if (ups.some((up, n) => up !== items[n].up)) {
-        this.patchSub(id, sub.id, (s) => { for (const [n, i] of items.entries()) { const hit = s.running.items.find((x) => sameItem(x, i)); if (hit) hit.up = ups[n]; } });
+        this.patchSub(id, sub.id, (s) => { for (const [n, i] of items.entries()) { const hit = s.running.items.find((x) => !x.replaced && x.name === i.name && x.pid === i.pid); if (hit) hit.up = ups[n]; } });
       }
     }
   }
