@@ -221,6 +221,8 @@ export class JobRuntime {
         // second driver on the same branch.
         autoMergeOnPass: false,
         autoFixPrChecks: false,
+        // Shown and driven on the job page's Sessions (host API 1.41), never as a card on the board.
+        offBoard: true,
       });
       // The hook did not fire (an older host, or a spawn that never reached
       // dispatch's hook site): bind late rather than not at all.
@@ -361,6 +363,7 @@ export class JobRuntime {
       effort: job.effort || undefined,
       intent: resolvePrompt(notice, resolution),
       taskId: job.taskId || undefined,
+      offBoard: true,
     });
     return sessionId;
   }

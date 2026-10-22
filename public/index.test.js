@@ -14,7 +14,7 @@ function mountClient() {
   globalThis.document = window.document;
   const sent = [];
   const opened = [];
-  const diffs = [];
+  const mounted = [];
   const board = { selected: null };
   const contributions = [];
   const listeners = new Set();
@@ -27,9 +27,9 @@ function mountClient() {
   const el = window.document.createElement('div');
   host.appendChild(el);
   const c = contributions[0];
-  c.mount(el, { send: (f) => sent.push(f), openSession: (sid) => opened.push(sid), openDiff: (sid, opts) => diffs.push({ sid, ...opts }), selectedSessionId: () => board.selected, requestPanelRender: () => {}, agents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'opus', label: 'Opus 5.5', default: true }], efforts: [{ value: 'high', label: 'High' }] }], storage: null, version: '1.27.0' });
+  c.mount(el, { send: (f) => sent.push(f), openSession: (sid) => opened.push(sid), openDiff: (sid) => opened.push(sid), mountSession: (host, sid, opts) => { mounted.push({ host, sid, opts }); return { sessionId: sid, show() { return true; }, unmount() {} }; }, selectedSessionId: () => board.selected, requestPanelRender: () => {}, agents: () => [{ id: 'claude', label: 'Claude', models: [{ value: 'opus', label: 'Opus 5.5', default: true }], efforts: [{ value: 'high', label: 'High' }] }], storage: null, version: '1.42.0' });
   const dispatch = (frame) => { for (const fn of [...listeners]) fn({ type: 'ext:jobs', ...frame }); };
-  return { window, el, c, sent, opened, diffs, board, contributions, dispatch, listeners };
+  return { window, el, c, sent, opened, mounted, board, contributions, dispatch, listeners };
 }
 
 const graphWith = (jobs, sessions = []) => ({ sessions, jobs: { jobs, settings: { concurrency: 2, maxRepairs: 2, deploymentStaleMinutes: 30, paused: false } } });
@@ -266,76 +266,25 @@ test('a failure toasts as an error that outlasts a success and can be dismissed;
   assert.equal(el.querySelector('.jobs-toast b'), null, 'agent-written text is never markup');
 });
 
-// Core's onSession: select the card when the board has it, resume it first when
-// it does not. Both are api.openSession's job since host api 1.8; the view only
-// has to label the button right, off the graph's session list.
-test('Open/Restore session reads the board off the graph and hands the card to api.openSession', () => {
-  const { window, el, c, sent, opened } = mountClient();
-  c.update(el, null, graphWith([activeJob()], [{ sessionId: 's1', status: 'idle' }]));
+// Job sessions are off the board (host api 1.41): a step's Sessions shows the
+// board's own panel in place through api.mountSession (1.42), and never sends
+// the reader to the grid through openSession or openDiff.
+test('a step’s Sessions mount the latest card in the page through api.mountSession', () => {
+  const { window, el, c, sent, opened, mounted } = mountClient();
+  c.update(el, null, graphWith([activeJob({ worktree: { path: '/wt/api', branch: 'fix/api' } })], [{ sessionId: 's2', status: 'working', offBoard: 'jobs' }]));
   el.querySelector('[data-sub="api"]').dispatchEvent(new window.Event('click', { bubbles: true }));
   const page = el.querySelector('#job-page');
-  assert.equal(page.querySelector('#job-session').textContent, 'Restore session', 'the latest run is archived; an earlier one on the board does not count');
-  c.update(el, null, graphWith([activeJob()], [{ sessionId: 's2', status: 'working' }]));
-  assert.equal(page.querySelector('#job-session').textContent, 'Open session', 'the open detail re-labels on the next graph');
-  page.querySelector('#job-session').dispatchEvent(new window.Event('click', { bubbles: true }));
-  assert.deepEqual(opened, ['s2'], 'the latest run, live or archived');
-  assert.equal(page.hidden, false, 'the page stays, to come back to');
-  assert.deepEqual(sent, [], 'no frame of our own: the board navigates');
-});
-
-// Core's diff round trip (diff-return.js), now over api.openDiff: the panel opens
-// over the grid, and closing it comes back to this view with the same detail —
-// unless the reader went somewhere else on the way out.
-const tick = () => new Promise((r) => setTimeout(r));
-function reviewFromPage(sessions = []) {
-  const m = mountClient();
-  m.c.update(m.el, null, graphWith([activeJob({ worktree: { path: '/wt/api', branch: 'fix/api' } })], sessions));
-  m.el.querySelector('[data-sub="api"]').dispatchEvent(new m.window.Event('click', { bubbles: true }));
-  m.page = m.el.querySelector('#job-page');
-  m.page.querySelector('#job-diff').dispatchEvent(new m.window.Event('click', { bubbles: true }));
-  return m;
-}
-
-test('Review code in Wrangler opens the diff through api.openDiff, not openSession', () => {
-  const { page, diffs, opened, sent } = reviewFromPage([{ sessionId: 's1', status: 'idle' }]);
-  assert.equal(diffs.length, 1);
-  assert.equal(diffs[0].sid, 's1', 'the latest run on the board: s2 is archived');
-  assert.equal(typeof diffs[0].onClose, 'function');
-  assert.deepEqual(opened, []);
+  assert.doesNotMatch(page.textContent, /Open session|Restore session/);
+  page.querySelector('[data-sessions]').dispatchEvent(new window.Event('click', { bubbles: true }));
+  assert.equal(mounted.length, 1);
+  assert.equal(mounted[0].sid, 's2');
+  assert.ok(mounted[0].host === page.querySelector('.job-mc-host'));
+  assert.match(page.querySelector('[data-pick-session="s2"]').textContent, /Working$/, 'its state read off the graph, off-board card and all');
+  assert.match(page.querySelector('[data-pick-session="s1"]').textContent, /Archived/);
+  page.querySelector('[data-page-back]').click();
+  page.querySelector('#job-diff').dispatchEvent(new window.Event('click', { bubbles: true }));
+  assert.equal(mounted.at(-1).sid, 's2', 'Review code is the same Sessions, on the latest card');
+  assert.deepEqual(opened, [], 'never out to the board');
   assert.deepEqual(sent, []);
-  assert.equal(page.hidden, false, 'the page stays under the board');
-});
-
-test('closing the diff returns to the Jobs view and re-opens the same detail', async () => {
-  const { window, page, diffs, board } = reviewFromPage();
-  assert.equal(diffs[0].sid, 's2', 'nothing on the board: the latest run');
-  window.location.hash = '#session=s2'; board.selected = 's2';
-  diffs[0].onClose();
-  await tick();
-  assert.equal(window.location.hash, '#view=ext:jobs:board');
   assert.equal(page.hidden, false);
-  assert.match(page.querySelector('.job-page-main').textContent, /Deliver api/);
-});
-
-test('closing the diff by leaving the grid or picking another card stays where the reader went', async () => {
-  const left = reviewFromPage();
-  left.window.location.hash = '#view=search';
-  left.diffs[0].onClose();
-  await tick();
-  assert.equal(left.window.location.hash, '#view=search');
-
-  const other = reviewFromPage();
-  other.board.selected = 'elsewhere';
-  other.diffs[0].onClose();
-  await tick();
-  assert.notEqual(other.window.location.hash, '#view=ext:jobs:board');
-});
-
-test('a job gone by the time the diff closes returns to the Jobs board', async () => {
-  const { window, el, c, page, diffs } = reviewFromPage();
-  c.update(el, null, graphWith([]));
-  diffs[0].onClose();
-  await tick();
-  assert.equal(window.location.hash, '#view=ext:jobs:board');
-  assert.equal(page.hidden, true);
 });

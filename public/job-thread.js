@@ -31,7 +31,7 @@ export function threadState(job, sub) {
 const STATE_NOTE = { answering: 'working on what you sent', stopped: 'session stopped' };
 
 // The messages alone: where the session stands is the fold's summary line, and
-// Open session is the footer's.
+// the step's Sessions are the footer's.
 export function threadHtml(job, sub) {
   const st = threadState(job, sub);
   if (!st) return '';

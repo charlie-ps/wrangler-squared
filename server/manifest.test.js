@@ -21,7 +21,7 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   assert.deepEqual([...manifest.requires].sort(), [...declared.requires].sort(), 'the manifest may not be wider than what the human consented to');
   assert.ok(manifest.requires.includes('tasks:read'));
   assert.ok(manifest.requires.includes('tasks:write'));
-  assert.equal(manifest.engines.wranglerApi, '^1.39.0', 'earlyAdopter and the client api.earlyAdopter arrived in 1.39');
+  assert.equal(manifest.engines.wranglerApi, '^1.42.0', 'offBoard spawns arrived in 1.41 and the client api.mountSession in 1.42');
   assert.deepEqual(manifest.earlyAdopter, { branch: 'next' });
   assert.deepEqual(declared.earlyAdopter, manifest.earlyAdopter, 'the early-adopter branch is part of what the human consented to');
   assert.ok(manifest.requires.includes('images:keep'));
@@ -245,6 +245,7 @@ test('a launch binds its run to the card id via onBeforeDispatch, and job_report
   assert.equal(spawned[0].worktree, undefined, 'planning runs in a scratch workspace, not a branch');
   assert.deepEqual(spawned[0].addDirs, checkoutsDir() ? [checkoutsDir()] : undefined, 'planning clones the repos it discovers, if this machine has a checkouts folder');
   assert.deepEqual([spawned[0].autoMergeOnPass, spawned[0].autoFixPrChecks], [false, false]);
+  assert.equal(spawned[0].offBoard, true, 'a job session lives on the job page, not the board');
 
   // The step protocol is only for a job step: hideTool vetoes spawning for the
   // bound card and skillsFor keeps job-worker for it alone.
@@ -379,6 +380,7 @@ test('a PR launch has the wrangler cut the worktree and keeps core off the job P
   assert.equal(opts.taskId, 'task_7');
   assert.deepEqual([opts.model, opts.effort], ['opus', 'high']);
   assert.deepEqual([opts.autoMergeOnPass, opts.autoFixPrChecks], [false, false], 'the runner drives this PR');
+  assert.equal(opts.offBoard, true);
   assert.deepEqual(prepared, ['s_1', {
     branch: placeholderBranch(job, sub), path: `/repos/thing-worktree-${placeholderBranch(job, sub)}`, repoRoot: '/repos/thing',
     cleanupHead: 'basehead',

@@ -23,8 +23,17 @@ function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value:
   globalThis.document = window.document; globalThis.FormData = window.FormData;
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
   const staging = { stage: async () => ({ name: 'paste-1700000000000-aaaa1111.png' }) };
-  const sent = [], usualSaves = [], sessions = [], diffs = [], diffContexts = [], onBoard = new Set();
-  const board = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => agents, onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s), ...extra });
+  const sent = [], usualSaves = [], mounts = [], cards = new Map();
+  // api.mountSession as core's slots hands it out: a handle that shows one card, swaps it, and lets go.
+  const embed = { handle: null };
+  const mountSession = (el, sid, opts) => {
+    const h = { el, opts, sessionId: sid, show(id) { h.sessionId = id; mounts.push(['show', id]); return true; }, unmount() { h.sessionId = null; mounts.push(['unmount']); } };
+    if (embed.handle) embed.handle.sessionId = null;
+    embed.handle = h; mounts.push(['mount', sid]);
+    return h;
+  };
+  const shown = () => embed.handle?.sessionId ?? null;
+  const board = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => agents, mountSession, sessionOf: (sid) => cards.get(sid) || null, ...extra });
   // Every update carries `held` as the graph contributor stamps it (server/job-red.js withHeld), in place.
   const view = { ...board, update: (d) => { for (const j of d.jobs) for (const s of j.subJobs || []) s.held = heldBy(j, s); board.update(d); } };
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; await window.happyDOM.close(); });
@@ -33,7 +42,7 @@ function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value:
   const q = (s) => document.querySelector(s);
   const event = (name) => new window.Event(name, { bubbles: true, cancelable: true });
   view.update(data);
-  return { window, view, data, staging, sent, usualSaves, q, event, sessions, diffs, diffContexts, onBoard };
+  return { window, view, data, staging, sent, usualSaves, q, event, mounts, cards, embed, shown };
 }
 
 test('every job is one tonal card in its state, and only jobs with attention items survive Needs me', (t) => {
@@ -226,7 +235,8 @@ test('a step waiting on a prompt is the human’s: it says so, and it counts und
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Prompt waiting');
   f.q('.job-plate-open').click(); assert.equal(f.q('#job-page [data-fab-session]'), null, 'no session to answer yet');
   job.subJobs[0].sessions = ['s9']; f.view.update(f.data);
-  f.q('#job-page [data-fab-session]').click(); assert.deepEqual(f.sessions, ['s9'], 'the job’s one button opens the prompt');
+  f.q('#job-page [data-fab-session]').click(); assert.equal(f.shown(), 's9', 'the job’s one button opens the prompt, in place');
+  assert.ok(f.q('#job-page .job-sessions'), 'on the step’s Sessions');
 });
 
 test('a planning session waiting on a prompt is one click away, from the plate and from the job', (t) => {
@@ -235,11 +245,13 @@ test('a planning session waiting on a prompt is one click away, from the plate a
   f.view.update(f.data);
   assert.equal(f.q('[data-board="job1"] .job-plate-detail').textContent, 'Planning');
   f.q('[data-board="job1"] .job-plate-go').click();
-  assert.deepEqual(f.sessions, ['plan-card'], 'Answer goes straight to the planning card');
+  assert.equal(f.shown(), 'plan-card', 'Answer goes straight to the planning card');
+  assert.match(f.q('#job-page .job-mc-scope').textContent, /Wrangler’s own runs on Sign-in/, 'no step owns it: the job’s own Sessions');
   f.q('.job-plate-open').click();
+  assert.equal(f.shown(), null, 'leaving Sessions gives the panel back');
   const fab = f.q('#job-page [data-fab-session]');
   assert.equal(fab.title, 'Planning · Prompt waiting');
-  fab.click(); assert.deepEqual(f.sessions, ['plan-card', 'plan-card']); assert.equal(!f.q("#job-page").hidden, true, "the page stays, to come back to");
+  fab.click(); assert.equal(f.shown(), 'plan-card'); assert.equal(!f.q("#job-page").hidden, true, "the page stays, to come back to");
 });
 
 test('the job’s button answers a waiting prompt before a merge, and says how many more wait', (t) => {
@@ -251,7 +263,7 @@ test('the job’s button answers a waiting prompt before a merge, and says how m
   assert.equal(f.q('#job-page [data-action="approve-merge"]'), null, 'the merge waits behind the prompt');
   const fab = f.q('#job-page [data-fab-session]');
   assert.equal(fab.title, 'Deliver docs · Prompt waiting · +1 more waiting');
-  fab.click(); assert.deepEqual(f.sessions, ['docs-card']);
+  fab.click(); assert.equal(f.shown(), 'docs-card');
 });
 
 test('the event box names what happened, escaped, and Add idea is the way to answer it', (t) => {
@@ -480,49 +492,92 @@ test('the plan review names no worktree branch, and a cut PR tile shows it; a su
   assert.equal(f.q('.job-detail-line .job-plan-branch'), null, 'no worktree yet, nothing to show');
 });
 
-test('a job session archived when its step stopped is offered as a restore, not a dead open', (t) => {
+test('a step’s Sessions button opens its sessions on the page, the latest shown in place', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
-  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1', 's2'] }];
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1', 's2', 's3'] }, { ...sub('web'), stage: 'pr', sessions: ['w1'] }];
+  job.runs = [{ id: 'r1', subJobId: 'api', phase: 'implementation', sessionId: 's1', startedAt: 1, stopped: true }, { id: 'r2', subJobId: 'api', phase: 'publish', sessionId: 's2', startedAt: 2, stopped: true },
+    { id: 'p1', subJobId: null, phase: 'planning', sessionId: 'plan', startedAt: 0, stopped: true }];
+  f.cards.set('s3', { sessionId: 's3', status: 'working' }); f.cards.set('s2', { sessionId: 's2', status: 'idle', managed: false });
   f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.equal(f.q('#job-session').textContent, 'Restore session');
-  f.onBoard.add('s2'); f.view.update(f.data);
-  assert.equal(f.q('#job-session').textContent, 'Open session');
-  f.q('#job-session').click(); assert.deepEqual(f.sessions, ['s2'], 'the latest run, live or archived');
+  assert.equal(f.q('#job-page #job-session'), null, 'no Open session');
+  assert.doesNotMatch(f.q('#job-page').textContent, /Open session|Restore session/);
+  const button = f.q('#job-page [data-sessions]');
+  assert.equal(button.textContent, 'Sessions 3');
+  button.click();
+  assert.equal(f.shown(), 's3', 'the latest run');
+  assert.ok(f.embed.handle.el === f.q('#job-page .job-mc-host'), 'mounted into the page’s own host');
+  assert.equal(typeof f.embed.handle.opts.onMaximize, 'function');
+  const rows = [...f.q('#job-page').querySelectorAll('[data-pick-session]')];
+  assert.deepEqual(rows.map((r) => r.dataset.pickSession), ['s3', 's2', 's1'], 'this step’s only, newest first');
+  assert.match(rows[0].textContent, /^Sessionrun 3.*Working$/);
+  assert.match(rows[1].textContent, /^Publishrun 2.*Dormant · opens resumed$/);
+  assert.match(rows[2].textContent, /^Implementationrun 1.*Archived · opens restored$/);
+  assert.equal(rows[0].getAttribute('aria-selected'), 'true');
+  assert.deepEqual([...f.q('#job-page .job-page-crumbs').querySelectorAll('li')].map((l) => l.textContent), ['Jobs', 'Sign-in', 'Deliver api', 'Sessions']);
+  assert.equal(f.q('#job-page [data-page-back]').textContent, 'Step');
+  rows[2].click();
+  assert.equal(f.shown(), 's1', 'a row swaps the card in the same panel');
+  assert.deepEqual(f.mounts, [['mount', 's3'], ['show', 's1']]);
+  const host = f.q('#job-page .job-mc-host');
+  f.cards.set('s1', { sessionId: 's1', status: 'needs-you', waitingFor: 'Allow Bash?' }); f.view.update(f.data);
+  assert.ok(f.q('#job-page .job-mc-host') === host, 'a tick never redraws the host the panel is lent to');
+  assert.match(f.q('[data-pick-session="s1"]').textContent, /Allow Bash\?$/, 'but the list follows the cards');
+  assert.deepEqual(f.mounts, [['mount', 's3'], ['show', 's1']], 'nor mounts it again');
+  f.q('#job-page [data-page-back]').click();
+  assert.deepEqual(f.mounts.at(-1), ['unmount'], 'leaving gives the panel back to the board');
+  assert.ok(f.q('#job-page [data-sessions]'), 'back on the step');
 });
 
-test('a step with several sessions lists each one in Open session\'s caret, newest first', (t) => {
+test('Sessions sits after Approve and Retry, and is the primary action only when nothing else is', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
-  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1', 's2', 's3'] }];
-  job.runs = [{ id: 'r1', subJobId: 'api', phase: 'implementation', sessionId: 's1', startedAt: 1, stopped: true }, { id: 'r2', subJobId: 'api', phase: 'publish', sessionId: 's2', startedAt: 2, stopped: true }];
-  f.onBoard.add('s3'); f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.equal(f.q('#job-session').textContent, 'Open session');
-  const items = [...f.q('#job-page').querySelectorAll('[data-step-session]')];
-  assert.deepEqual(items.map((b) => b.dataset.stepSession), ['s3', 's2', 's1']);
-  assert.match(items[0].textContent, /^Session 3Open$/, 'no run for it: numbered');
-  assert.match(items[1].textContent, /^Publish · .+Restore$/);
-  assert.match(items[2].textContent, /^Implementation · .+Restore$/);
-  f.q('#job-page [data-keep="session-menu"]').open = true; f.q('#job-page [data-keep="session-menu"]').dispatchEvent(new f.window.Event('toggle'));
-  f.view.update(f.data); assert.equal(f.q('#job-page [data-keep="session-menu"]').open, true, 'a tick leaves it open');
-  f.q('[data-step-session="s1"]').click(); assert.deepEqual(f.sessions, ['s1']);
-  assert.equal(!f.q("#job-page").hidden, true, "the page stays, to come back to");
+  const row = () => [...f.q('#job-page .job-actions').children].filter((b) => !b.matches('.job-details-toggle')).map((b) => (b.matches('[data-sessions]') ? 'sessions' : b.matches('.job-retry-split') ? 'retry' : b.matches('.job-approve-split, [data-action^="approve"]') ? 'approve' : b.className));
+  const primary = () => !!f.q('#job-page [data-sessions]').classList.contains('primary');
+  // A prompt waits and nothing else is to be done: Sessions is the way to answer it.
+  job.subJobs = [{ ...sub('api'), kind: 'session', stage: 'session', sessions: ['s1'] }];
+  job.runs = [{ id: 'r1', subJobId: 'api', phase: 'session', sessionId: 's1', startedAt: 1, stopped: false, status: 'needs-you' }];
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  assert.equal(primary(), true);
+  // Red with a prompt still up: Retry leads, Sessions follows it, plain.
+  job.subJobs[0].error = 'It stopped';
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  assert.deepEqual(row(), ['retry', 'sessions']);
+  assert.equal(primary(), false, 'a primary bare button is pulled in front of Retry');
+  // A result to approve: Approve leads.
+  job.subJobs[0] = { ...job.subJobs[0], error: undefined, stage: 'review', result: { receiptId: 'r1', checks: ['done'] } };
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  assert.equal(row()[0], 'approve');
+  assert.equal(primary(), false);
 });
 
-test('a step with one session keeps the plain Open session button', (t) => {
+test('Esc climbs from Sessions to its step, but never from inside the lent panel', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1'] }];
-  f.onBoard.add('s1'); f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.equal(f.q('#job-session').textContent, 'Open session');
-  assert.equal(f.q('#job-page .job-session-split'), null);
-  assert.equal(f.q('#job-page [data-step-session]'), null);
+  f.view.update(f.data); f.view.openDetail('job1', 'api', true);
+  assert.equal(f.shown(), 's1');
+  assert.ok(f.q('#job-page .job-mc').classList.contains('solo'), 'one session: no list beside it');
+  const host = f.q('#job-page .job-mc-host'), inside = document.createElement('button'); host.appendChild(inside);
+  inside.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(f.shown(), 's1', 'the session keeps its Esc');
+  document.body.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(f.shown(), null);
+  assert.ok(f.q('#job-page [data-sessions]'), 'up one level, to the step');
 });
 
-test('Review code in Wrangler opens the latest run already on the board, else the latest', (t) => {
+test('a step that has run no session offers no Sessions', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
-  job.subJobs = [{ ...sub('api'), stage: 'review', worktree: { path: '/wt/api' }, sessions: ['s1', 's2', 's3'] }];
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: [] }];
   f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
-  f.q('#job-diff').click(); assert.deepEqual(f.diffs, ['s3'], 'every run shares the worktree; nothing on the board, so the latest');
-  f.onBoard.add('s1'); f.onBoard.add('s2'); f.view.openDetail('job1', 'api');
-  f.q('#job-diff').click(); assert.equal(f.diffs.at(-1), 's2', 'an archived card would resume its agent just to show a diff');
+  assert.equal(f.q('#job-page [data-sessions]'), null);
+});
+
+test('the panel’s Fullscreen folds the list away and back', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', sessions: ['s1', 's2'] }];
+  f.view.update(f.data); f.view.openDetail('job1', 'api', 's1');
+  assert.equal(f.shown(), 's1', 'opened on the card asked for');
+  f.embed.handle.opts.onMaximize(true); assert.ok(f.q('#job-page .job-mc').classList.contains('max'));
+  f.view.update(f.data); assert.ok(f.q('#job-page .job-mc').classList.contains('max'), 'kept across a tick');
+  f.embed.handle.opts.onMaximize(false); assert.equal(f.q('#job-page .job-mc').classList.contains('max'), false);
 });
 
 test('a round-trip press is busy at once, a double-click sends once, and the next broadcast redraws it fresh', (t) => {
@@ -566,8 +621,8 @@ test('PR review shows green checks, what runs on merge, CI changes, and approves
   assert.match(hint(f), /Merging will override GitHub’s required review/);
   assert.equal(f.q('[data-action="approve-merge"]').textContent, 'Merge #1');
   f.q('[data-action="approve-merge"]').click(); assert.equal(f.sent.at(-1).head, 'head1');
-  // Reviewing the code is still a round trip out to the board's diff panel.
-  f.q('#job-diff').click(); assert.deepEqual(f.diffs, ['s1']); assert.deepEqual(f.diffContexts, [{ jobId: 'job1', subId: 'api' }]);
+  // Reviewing the code is the step's Sessions, on its latest card: the panel's Diff is there.
+  f.q('#job-diff').click(); assert.equal(f.shown(), 's1'); assert.ok(f.q('#job-page .job-sessions'));
   assert.equal(!f.q("#job-page").hidden, true, "the page stays, to come back to");
   f.view.openDetail('job1', 'api');
   assert.equal(!f.q('#job-page').hidden, true, 'the same detail re-opens on the return leg');
@@ -3326,8 +3381,8 @@ test('a Code review step with its session parked and nothing said draws no empty
   assert.equal(fold.open, false);
   assert.equal(fold.querySelector('summary').textContent, 'Conversation 1 message', 'a session waiting on review is what the state chip already says');
   assert.equal(fold.querySelector('.job-thread-head'), null, 'no inner header repeating the state chip');
-  assert.equal(f.q('#job-page [data-fab-session]'), null, 'Open session is the footer\'s alone');
-  assert.equal(document.querySelectorAll('#job-page #job-session').length, 1);
+  assert.equal(f.q('#job-page [data-fab-session]'), null, 'its Sessions are the footer\'s alone');
+  assert.equal(document.querySelectorAll('#job-page [data-sessions]').length, 1);
   job.runs[0].mailedAt = 2; job.subJobs[0].answering = { id: 'm1', round: 1 }; f.view.update(f.data);
   assert.match(f.q('#job-page .job-history summary').textContent, /Conversation 1 message · working on what you sent/);
   assert.ok(f.q('#job-page .job-history summary .icon-spin, #job-page .job-history summary svg'), 'the spinner moved up with it');
@@ -3921,8 +3976,9 @@ test('a checkout the fast-forward left alone is a notice on the job panel with i
   assert.equal(f.q('[data-main-resolve]'), null); assert.equal(f.q('[data-main-session]'), null);
   job.mainNotices[0].resolving.sessionId = 's_fix'; f.view.update(f.data); f.view.openDetail('job1');
   assert.match(f.q('.job-main-agent').textContent, /An agent is working on it: Move commits to a branch/);
+  assert.equal(f.q('[data-main-session]').textContent, 'Show session');
   f.q('[data-main-session]').click();
-  assert.deepEqual(f.sessions, ['s_fix']); assert.equal(!f.q("#job-page").hidden, true, "the page stays, to come back to");
+  assert.equal(f.shown(), 's_fix'); assert.match(f.q('#job-page .job-mc-row[aria-selected="true"]').textContent, /Local main fix/);
   job.mainNotices[0] = { ...job.mainNotices[0], resolving: null, resolveError: 'no such <dir>' }; f.view.update(f.data); f.view.openDetail('job1');
   assert.equal(f.q('.job-main-error').textContent, 'Could not start the agent: no such <dir>');
   assert.ok(f.q('[data-main-resolve="rebase"]'), 'the fixes are offered again');

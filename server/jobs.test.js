@@ -3321,6 +3321,7 @@ test('an unpushed commit on local main leaves merged sub-jobs done and one notic
   const [s] = spawned;
   assert.equal(s.cwd, notice.path);
   assert.equal(s.worktree, undefined, 'the human\'s own checkout, not a worktree');
+  assert.equal(s.offBoard, true, 'shown on the job page, not the board');
   assert.match(s.intent, /The human chose one fix: Rebase & push\. Do exactly that/);
   assert.match(s.intent, /git rebase --autostash origin\/main/);
   assert.match(s.intent, /Local commits not on origin \(1\):\n {2}- [0-9a-f]{12} "Unpushed work from another session"/);
