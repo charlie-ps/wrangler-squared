@@ -74,7 +74,7 @@ export function buildSubJob(plan, s) {
 }
 // What a job made from one of an idea's suggestions takes from the idea: everything
 // the human set on New idea, already resolved against their defaults.
-const IDEA_SETTINGS = ['repos', 'agent', 'model', 'effort', 'planningPrompt', ...Object.keys(REVIEW_DEFAULTS), 'base', 'taskId', 'images', 'shareImages', 'sandbox', 'writableDirs'];
+const IDEA_SETTINGS = ['repos', 'agent', 'model', 'effort', 'planningPrompt', ...Object.keys(REVIEW_DEFAULTS), 'base', 'images', 'shareImages', 'sandbox', 'writableDirs'];
 const ideaSettings = (j) => Object.fromEntries(IDEA_SETTINGS.filter((k) => j[k] !== undefined).map((k) => [k, structuredClone(j[k])]));
 function activate(j) {
   j.subJobs = j.plan.subJobs.map((s) => buildSubJob(j.plan, s));

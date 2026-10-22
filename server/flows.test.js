@@ -117,7 +117,7 @@ function board(t, { settings = {} } = {}) {
     },
     // New job → planner's plan → Approve plan, as the board and the planner do it.
     async start(plan, flags = {}) {
-      await handler('job-create').handler({ job: { title: 'Widgets', intent: 'Ship the widget changes', ...flags }, newTaskName: 'Widgets', start: true }, host);
+      await handler('job-create').handler({ job: { title: 'Widgets', intent: 'Ship the widget changes', ...flags }, start: true }, host);
       jobId = broadcasts.find((b) => b.event === 'job-created').jobId;
       await settle();
       await f.report(runOf(null, 'planning'), { kind: 'plan', plan: { context: 'A small Node service.', stories: [], ...plan } });

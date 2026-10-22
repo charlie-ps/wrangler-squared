@@ -18,7 +18,7 @@ import { ensureInbox } from './job-evidence.js';
 // façade is narrower than what core reached for is marked `TODO(host-api …)` and
 // listed in docs/PORTING.md with the capability that would close it.
 //
-// Host API 1.4: spawn takes the worktree, addDirs, task binding and PR-automation
+// Host API 1.4: spawn takes the worktree, addDirs and PR-automation
 // options core's dispatch took, so the wrangler cuts the sub-job's worktree and
 // stamps the entry again — this module only decides the base and keeps the
 // cleanup head, which is the one fact no host projection carries.
@@ -138,10 +138,6 @@ export class JobRuntime {
   }
 
   async launch(job, sub, run, prepared) {
-    if (job.taskId) {
-      const task = this.host.tasks.get(job.taskId);
-      if (!task || task.archived) throw new Error('The Job task is no longer active. Restore it before retrying.');
-    }
     // Planning discovers its repositories and a session sub-job has none: blank
     // cwd asks the wrangler for a fresh scratch workspace (dispatch's own rule),
     // without fetching or branching a repo.
@@ -214,13 +210,12 @@ export class JobRuntime {
         // folder on this machine, no grant: a missing --add-dir fails the launch.
         // The job's own extra folders ride along on every phase.
         ...(addDirs.length ? { addDirs } : {}),
-        // Binds task memory before the pane starts, which is the only ordering a
-        // Codex session honours (it resolves its writable root once, at launch).
-        taskId: job.taskId || undefined,
         // The runner drives this PR: core's nudge and auto-merge would be a
         // second driver on the same branch.
         autoMergeOnPass: false,
         autoFixPrChecks: false,
+        // Shown and driven on the job page's Sessions (host API 1.41), never as a card on the board.
+        offBoard: true,
       });
       // The hook did not fire (an older host, or a spawn that never reached
       // dispatch's hook site): bind late rather than not at all.
@@ -381,7 +376,7 @@ export class JobRuntime {
       model: job.model || undefined,
       effort: job.effort || undefined,
       intent: resolvePrompt(notice, resolution),
-      taskId: job.taskId || undefined,
+      offBoard: true,
     });
     return sessionId;
   }
