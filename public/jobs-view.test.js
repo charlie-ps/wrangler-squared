@@ -2316,12 +2316,12 @@ test('a plan change about a sub-job awaiting review freezes it: held, not needs-
   assert.equal(jobNeedsReview(job, job.subJobs[0]), true, 'an idea typed on the job holds no step');
   job.replan = { feedback: 'Rethink api', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'r1' } };
   f.view.update(f.data);
-  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Wrangling');
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Working on your feedback', 'the human answered its review: Wrangler has it (#295)');
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false); assert.equal(f.q('#jobs-review-count').textContent, '');
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   assert.equal(f.q('[data-action="approve-code"]'), null);
   assert.ok(f.q('.job-change textarea'), 'a question about it can still be asked: it holds nothing');
-  assert.match(f.q('#job-page').textContent, /Held for the plan change/);
+  assert.match(f.q('#job-page').textContent, /Working on your feedback/);
   job.runs = [{ id: 'w', subJobId: 'api', phase: 'implementation', stopped: false, status: 'running' }];
   assert.notEqual(jobStatus(job, job.subJobs[0]).text, 'Held for the plan change', 'a step already running carries on');
 });
@@ -3132,6 +3132,15 @@ test('the decision card pins only its head over the plan: kicker, heading and bo
   const section = head.parentElement;
   assert.ok(section.querySelector(':scope > .job-decision-body .job-decision-why'), 'the why scrolls with the card');
   assert.ok(section.querySelector(':scope > .job-diff-legend') && section.querySelector('.job-graph'), 'the plan diff shares the head\'s section, so the head stays pinned while it scrolls');
+});
+
+test('the job page bar and the decision head it pins under are opaque: no transparent fill, opacity or backdrop blur', async () => {
+  const css = (await import('node:fs')).readFileSync(new URL('./jobs.css', import.meta.url), 'utf8');
+  for (const sel of ['.job-page-bar', '.job-decision-head', '.job-decision-head::before', '.job-decision-head::after']) {
+    const rule = css.match(new RegExp(`^${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))[1];
+    assert.ok(!/transparent|opacity|backdrop-filter/.test(rule), `${sel} is opaque`);
+  }
+  assert.match(css.match(/^\.job-page-bar \{([^}]*)\}/m)[1], /background:var\(--surface\);/, 'the bar is the surface itself');
 });
 
 test('the decision card leads with the option: its label, why and what it leaves you; a red step names the step and its failure, never an ask', (t) => {

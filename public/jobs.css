@@ -349,14 +349,14 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 .job-dialog-close { position:absolute; z-index:1; top:16px; right:16px; width:40px; height:40px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:transparent; color:var(--fg-muted); font-size:20px; cursor:pointer; }
 .job-dialog-close:hover { background:var(--surface-2); }
 /* A job is a page in the view, in place of the board (jobs-view.js `page`): a sticky bar with the way
-   back and where you are, over the dialog's own surface. #jobs stops being a scroll container so the
-   bar sticks to core's .ext-view, which is what scrolls. */
+   back and where you are, on an opaque surface (never transparent or blurred: nothing shows through
+   it). #jobs stops being a scroll container so the bar sticks to core's .ext-view, which is what scrolls. */
 #jobs.jobs-paging { overflow:visible; padding-top:0; }
 #jobs.jobs-paging > :is(.jobs-mast,#jobs-boards) { display:none; }
 .job-page { --job-page-width:1600px; display:flex; flex-direction:column; gap:18px; min-width:0; }
 .job-page[hidden] { display:none; }
 /* Full-bleed, but its contents sit in .job-page-main's centred column (padding's 100% is .job-page's width). */
-.job-page-bar { position:sticky; top:0; z-index:6; display:flex; align-items:center; gap:10px; margin:0 -24px; padding:10px calc(24px + max(0px, (100% - var(--job-page-width)) / 2)); background:color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-bottom:1px solid var(--border-muted); color:var(--fg); font-family:var(--font); }
+.job-page-bar { position:sticky; top:0; z-index:6; display:flex; align-items:center; gap:10px; margin:0 -24px; padding:10px calc(24px + max(0px, (100% - var(--job-page-width)) / 2)); background:var(--surface); border-bottom:1px solid var(--border-muted); color:var(--fg); font-family:var(--font); }
 .job-page-back { flex:none; display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px 0 8px; border:1px solid var(--border); border-radius:var(--jt-radius-pill); background:var(--surface); color:var(--fg); font:500 12.5px var(--font); cursor:pointer; }
 .job-page-back .icon { font-size:16px; }
 .job-page-back:hover { background:var(--surface-2); }
@@ -638,6 +638,8 @@ button.job-write:focus-visible { outline:2px solid var(--c); outline-offset:1px;
 .job-write-toggle input { margin-top:2px; accent-color:var(--snooze); }
 .job-write-toggle span { display:flex; flex-direction:column; gap:2px; }
 .job-write-hint { display:flex; align-items:flex-start; gap:8px; font-size:12px; line-height:1.55; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
+.job-merge-method { display:flex; align-items:flex-start; gap:8px; font-size:12px; line-height:1.55; color:var(--fg) !important; background:var(--surface-2); padding:8px 12px; border-radius:10px; }
+.job-merge-method .icon { margin-top:2px; color:var(--fg-muted); }
 .job-write-hint .icon { margin-top:2px; color:var(--fg-muted); }
 .job-write-spec { margin:6px 0 16px; border:1px solid var(--border-muted); border-radius:12px; overflow:hidden; font-size:12px; }
 .job-write-spec>div { display:grid; grid-template-columns:96px minmax(0,1fr); gap:10px; padding:9px 12px; border-top:1px solid var(--border-muted); }
@@ -908,7 +910,7 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-decision-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; }
 .job-decision-row > .job-decision-title { flex:1 1 280px; min-width:0; }
 @media (max-width:700px) { .job-decision-head { top:-8px; } }
-/* On the job page core's .ext-view scrolls under the 53px sticky .job-page-bar (49px narrow): pin the head 12px below it. */
+/* On the job page core's .ext-view scrolls under the 53px sticky .job-page-bar (49px narrow): pin the head 12px below it, its ::after filling that gap. */
 .job-page .job-decision-head { top:65px; }
 @media (max-width:700px) { .job-page .job-decision-head { top:61px; } }
 :is(.job-dialog,.job-page) .job-decision-kicker { display:flex; align-items:center; gap:6px; min-width:0; margin:0; font-size:12px; color:var(--st-warn-fg); }

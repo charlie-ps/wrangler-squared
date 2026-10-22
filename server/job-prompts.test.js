@@ -59,7 +59,7 @@ test('the implementation prompt is one bounded step: context once, the brief, wh
   assert.match(text, /When the working tree is ready to review, job_report \{runId:"run1", kind:"ready", checks:\["what you verified", \{text:"<a Show me item, verbatim>"/);
   assert.doesNotMatch(text, /kind:"published"|Commit, push/, 'under code review nothing reaches origin from this session');
   const unreviewed = jobPrompt({ ...planned, reviewCode: false }, { ...briefed, check: 'Sign-in works in dev' }, run);
-  assert.match(unreviewed, /Commit, push, open the PR, then job_report \{runId:"run1", kind:"published", url:"<PR url>"\}/);
+  assert.match(unreviewed, /Commit, push, open the PR, then job_report \{runId:"run1", kind:"published", url:"<PR url>", merge\?:\{method, why\}\}/);
   assert.doesNotMatch(unreviewed, /UNCOMMITTED|kind:"ready"/);
   const publish = jobPrompt(planned, briefed, { ...run, phase: 'publish' });
   assert.match(publish, /^AUTH-1 · Sign-in$/m); assert.match(publish, /Context: The sign-in service is Java/);
@@ -67,7 +67,8 @@ test('the implementation prompt is one bounded step: context once, the brief, wh
   assert.match(publish, /reviewed the uncommitted changes in this worktree and approved them as they stand/);
   assert.match(publish, /Do not change the code/);
   assert.match(publish, /branch is fix\/AUTH-1-api; keep it/);
-  assert.match(publish, /Commit, push, open the PR, then job_report \{runId:"run1", kind:"published", url:"<PR url>"\}/);
+  assert.match(publish, /Wrangler squash-merges this PR\. Keep it that way unless there is an explicit reason not to/);
+  assert.match(publish, /Commit, push, open the PR, then job_report \{runId:"run1", kind:"published", url:"<PR url>", merge\?:\{method, why\}\}/);
   for (const text of [unreviewed, publish]) assert.match(text, /End the commit message and the PR description with exactly this line:\nMade with Agent Wrangler and the charlie-ps\/wrangler-squared extension\nCommit, push, open the PR/);
   assert.doesNotMatch(text, /Made with Agent Wrangler/, 'nothing is committed under code review');
   const onOpenPr = jobPrompt(planned, { ...briefed, pr: { url: 'https://github.com/org/repo/pull/1' } }, { ...run, phase: 'publish' });

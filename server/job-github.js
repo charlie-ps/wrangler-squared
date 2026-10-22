@@ -173,16 +173,21 @@ export class JobGithub {
       admin = current.mergeWithAdmin;
     }
     // An explicit body lands the PR description (and its attribution line)
-    // whichever squash message the repository is set to build.
-    const description = (JSON.parse(await this.run('gh', ['pr', 'view', sub.pr.url, '--json', 'body'], sub.repo)).body || '').trim();
-    const body = description.endsWith(ATTRIBUTION) ? description : [description, ATTRIBUTION].filter(Boolean).join('\n\n');
+    // whichever squash or merge-commit message the repository is set to build;
+    // a rebase makes no commit of its own to carry one.
+    const method = sub.merge?.method || 'squash';
+    let body = null;
+    if (method !== 'rebase') {
+      const description = (JSON.parse(await this.run('gh', ['pr', 'view', sub.pr.url, '--json', 'body'], sub.repo)).body || '').trim();
+      body = description.endsWith(ATTRIBUTION) ? description : [description, ATTRIBUTION].filter(Boolean).join('\n\n');
+    }
     if (!canMerge()) throw new Error('Job paused before merge');
     if (admin) {
       const { viewerPermission } = JSON.parse(await this.run('gh', ['repo', 'view', '--json', 'viewerPermission'], sub.repo));
       if (viewerPermission !== 'ADMIN') throw needsAdmin(`Merging this PR needs admin rights on the repository (you have ${String(viewerPermission || 'unknown').toLowerCase()} access). Merge it yourself, or have someone with admin rights do it.`);
     }
     try {
-      await this.run('gh', ['pr', 'merge', sub.pr.url, '--squash', ...(admin ? ['--admin'] : []), '--match-head-commit', sub.pr.head, '--body', body], sub.repo);
+      await this.run('gh', ['pr', 'merge', sub.pr.url, `--${method}`, ...(admin ? ['--admin'] : []), '--match-head-commit', sub.pr.head, ...(body === null ? [] : ['--body', body])], sub.repo);
     } catch (e) {
       if (admin && ADMIN_REFUSED.test(String(e.stderr || e.message))) throw needsAdmin('Merging this PR needs admin rights on the repository, and GitHub refused the bypass. Merge it yourself, or have someone with admin rights do it.');
       throw e;

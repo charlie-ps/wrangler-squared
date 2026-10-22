@@ -812,7 +812,7 @@ export class JobStore {
       // receipt carries its count: approval is pinned to exactly one of them.
       const receiptId = (r.readyCount || 1) > 1 ? `${r.id}#${r.readyCount}` : r.id;
       if (s.ready?.round && proof && r.parkedFor === 'ready') (s.earlier ||= []).push({ round: s.ready.round, checks: s.ready.checks, ...(s.ready.proof ? { proof: s.ready.proof } : {}), at: s.ready.at });
-      s.ready = { checks: report.checks.map(checkText), ...(proof?.proof.length ? { proof: proof.proof } : {}), ...(proof ? { round: proof.round } : {}), ...(meta.treeHash ? { treeHash: meta.treeHash } : {}), receiptId, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
+      s.ready = { checks: report.checks.map(checkText), ...(proof?.proof.length ? { proof: proof.proof } : {}), ...(proof ? { round: proof.round } : {}), ...(meta.treeHash ? { treeHash: meta.treeHash } : {}), ...(report.merge ? { merge: report.merge } : {}), receiptId, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
       if (proof) s.rounds = proof.round;
       answered(s);
       // What it left running is kept only while a human reviews it: approved at once
@@ -821,7 +821,7 @@ export class JobStore {
       if (r.parkedFor === 'ready' && proof?.round > 1) sayInThread(s, { id: `msg_${Date.now().toString(36)}r`, at: Date.now(), from: 'system', text: `Ready again with new proof.`, round: proof.round });
       if (!reviewCode(j)) { s.ready.approvedAt = s.ready.at; s.state = 'approved'; }
     }
-    if (report.kind === 'published') { s.pr = { url: report.url, checkStatus: 'pending' }; s.stage = 'pr'; s.state = 'watching'; s.mergeApprovedHead = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
+    if (report.kind === 'published') { s.pr = { url: report.url, checkStatus: 'pending' }; s.merge = report.merge || s.ready?.merge || null; s.stage = 'pr'; s.state = 'watching'; s.mergeApprovedHead = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
     if (report.kind === 'repaired') { s.repairs.push({ ...report, ...(r.conflict ? { conflict: true } : {}), at: Date.now() }); s.state = 'watching'; s.mergeApprovedHead = null; s.pr.checkStatus = 'pending'; s.fixRequested = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
     // A session's receipt is the whole deliverable; with review on it waits for a
     // human, otherwise cleanup (archive its session) takes it straight to done.

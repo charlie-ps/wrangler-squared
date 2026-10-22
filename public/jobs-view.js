@@ -109,7 +109,7 @@ function eventHtml(job, sub, more) {
   // Under the failure, what Wrangler did about it (job-red.js): looking at it, a fix
   // waiting for you, or given up on with what it tried and the decision it needs.
   const fix = !f ? '' : f.kind === 'fixing'
-    ? `<div class="job-event-fix fixing">${ICONS.spin}<span><b>${esc(f.title)}</b><small>try ${f.n}</small></span></div>`
+    ? `<div class="job-event-fix fixing">${ICONS.spin}<span><b>${esc(f.title)}</b>${f.n ? `<small>try ${f.n}</small>` : ''}</span></div>`
     : f.kind === 'ready'
       ? `<div class="job-event-fix ready">${ICONS.sparkle}<span><b>${esc(f.title)}</b>${esc(leadSentence(f.detail).head)}<small>${f.waits ? 'Waiting because Red steps is “You decide”' : 'Waiting for you: it changes the plan or claims something about the outside world'}</small></span></div>`
       : declaredHtml(ev, f, more, sub?.id || 'job');
@@ -888,6 +888,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // session reads last (server/job-prompts.js). A coordinator error has no session
   // to read it, so the job's own Retry stays plain.
   const retrySplitHtml = (primary) => `<span class="job-split job-retry-split"><button id="job-retry" ${primary ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button><details class="job-split-more" data-keep="retry-note" ${openMore.has('retry-note') ? 'open' : ''}><summary aria-label="Add a note for Retry to send" title="Add a note for Retry to send">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>Note sent with Retry<textarea data-retry-note maxlength="180" rows="2" placeholder="Optional. Shown on the card until the retried session reports"></textarea></label></div></details></span>`;
+  // Squash is the default and says nothing; only a worker's explicit suggestion is drawn.
+  const mergeMethodOf = (sub) => (sub.pr ? sub.merge : sub.ready?.merge) || null;
+  const MERGE_METHOD_LABEL = { merge: 'a merge commit', rebase: 'a rebase' };
+  const mergeMethodHtml = (sub) => { const m = mergeMethodOf(sub); return m ? `<p class="job-merge-method">${ICONS.merge}<span><strong>Lands by ${esc(MERGE_METHOD_LABEL[m.method] || m.method)}, not squash.</strong> ${esc(m.why)}</span></p>` : ''; };
   const approvalNoteFor = (sub) => sub.approvalNote ? `<h3>Context for later steps</h3><p class="job-approval-note">${esc(sub.approvalNote)}</p>` : '';
   // What a whole-job cancel did and what it left: the sub-job nodes say Dropped
   // one by one, this is the sentence that says why all of them do.
@@ -1527,11 +1531,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       actions = retry;
     } else {
       body = `${sub.ready ? (hasProof(sub) ? proofListHtml(job, sub, { isOpen: (k) => openMore.has(k), ask: sub.stage === 'review' }) : `<h3>${sub.stage === 'review' ? 'Ready for review' : 'Verified'}</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${stoppedHtml(sub)}${historyHtml(job, sub, { open: openMore.has('history') })}` : ''}
+        ${sub.stage !== 'done' ? mergeMethodHtml(sub) : ''}
         ${sub.pr?.checks?.length ? `<h3>Checks</h3><ul class="job-checks">${sub.pr.checks.map((c) => `<li class="${checkTone(c.state)}">${checkMark(c.state)} ${esc(c.name)} <small>${esc(c.state.toLowerCase())}</small></li>`).join('')}</ul>` : ''}
         ${sub.pr ? commentsHtml(sub, commentsShown) : ''}
         ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
         ${sub.deployed ? `<h3>Landed</h3>${receiptHtml(sub.deployed.checks)}` : ''}${noteFor(sub)}${approvalNoteFor(sub)}${refusalHtml(sub)}`;
-      actions = `${codeAwaitingReview(sub) && !sub.error && !held ? approveSplitHtml('approve-code', [hints.find((h) => h.startsWith('Uncommitted')) || '', sub.ready?.round ? `Approval is tied to round ${sub.ready.round}${sub.ready.treeHash ? ` and working tree ${sub.ready.treeHash.slice(0, 7)}` : ''}.` : ''].filter(Boolean).join(' · '), `Approve &amp; ${sub.pr ? 'push' : 'open PR'}`, 'pr') : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="Merge head ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
+      actions = `${codeAwaitingReview(sub) && !sub.error && !held ? approveSplitHtml('approve-code', [hints.find((h) => h.startsWith('Uncommitted')) || '', sub.ready?.round ? `Approval is tied to round ${sub.ready.round}${sub.ready.treeHash ? ` and working tree ${sub.ready.treeHash.slice(0, 7)}` : ''}.` : ''].filter(Boolean).join(' · '), `Approve &amp; ${sub.pr ? 'push' : 'open PR'}`, 'pr') : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="${mergeMethodOf(sub) ? `${esc(mergeMethodOf(sub).method === 'rebase' ? 'Rebase' : 'Merge-commit')} head` : 'Squash head'} ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
         ${sub.worktree && sub.stage !== 'done' ? reviewCodeHtml(sub) : ''}${retry}${session}${sub.cleanupRefusal && sub.cleanupRefusal.pinned !== false && sub.stage === 'cleanup' && !sub.discard ? `<button class="danger" id="job-discard">${ICONS.x}${sub.cleanupRefusal.cause === 'unremovable' ? 'Discard' : 'Discard anyway'}</button>` : ''}
         ${sub.recoveredBy ? `<button data-open-sub="${esc(sub.recoveredBy)}" title="${esc(hints.at(-1))}">${ICONS.wrench}Open fix sub-job</button>` : ''}`;
     }

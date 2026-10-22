@@ -513,6 +513,7 @@ export function eventFor(job, sub) {
   // The failure itself stays as the event; `fix` is what Wrangler has done about it.
   const base = { title: eventTitle(sub), detail: sub.error };
   // An escalation's error is its own summary cut short: the declaration alone says it, in full.
+  if (sub.error && !job.error && workingOnFeedback(job, sub)) return { ...base, fix: { kind: 'fixing', title: FEEDBACK_LABEL } };
   if (sub.error && !job.error && redDeclared(job, sub)) {
     const d = sub.red.declared;
     const fix = { kind: 'declared', title: 'Declared red', detail: d.summary, tried: d.tried || [], ask: d.ask || '', by: d.by || (d.auto ? 'auto' : 'planner'), options: !!job.replan?.proposal?.escalation };
@@ -539,6 +540,16 @@ export const redFixReady = (job, sub) => !!sub?.error && redReplan(job)?.sub ===
 // proposal the human approves or discards.
 export const replanPending = (job) => !!job.replan && !job.cancelledAt;
 export const replanProposed = (job) => replanPending(job) && !!job.replan.proposal;
+// An idea typed on this step that Wrangler has and has not yet answered or proposed
+// on: its conversation's wrangler still reading it (server/job-talk.js convo.pending),
+// a plan change drawn from it, or one queued behind another.
+export const ideaInFlight = (job, sub) => !!sub && !job.cancelledAt && (convosOf(job).some((c) => c.pending && c.pending.source?.sub === sub.id)
+  || (replanPending(job) && !job.replan.proposal && job.replan.source?.sub === sub.id)
+  || replanQueued(job).some((q) => q.source?.sub === sub.id));
+// The human answered the step's ask (a review, a declared red) with that idea: not
+// theirs again until Wrangler replies, proposes, or the session reports back.
+export const workingOnFeedback = (job, sub) => ideaInFlight(job, sub) && (redDeclared(job, sub) || (!sub.error && (codeAwaitingReview(sub) || (isSessionSub(sub) && sub.stage === 'review'))));
+export const FEEDBACK_LABEL = 'Working on your feedback';
 // Changes sent while the wrangler was drafting, each planned in its own round once
 // the one ahead is approved or discarded (server/job-replan.js requestReplan).
 export const replanQueued = (job) => job.cancelledAt ? [] : job.replanQueue || [];
@@ -560,10 +571,10 @@ export function touchedBy(proposal) {
 export const heldByReplan = (job, sub) => !!sub?.held;
 export function jobNeedsReview(job, sub) {
   if (job.error) return true;
-  if (sub?.error) return !redFixing(job, sub);
+  if (sub?.error) return !redFixing(job, sub) && !workingOnFeedback(job, sub);
   // A step waiting on a prompt is the human's, whatever else the job is doing.
   if (runStatus(job, sub) === 'needs-you') return true;
-  if (heldByReplan(job, sub)) return false;
+  if (heldByReplan(job, sub) || workingOnFeedback(job, sub)) return false;
   // A requested or running fix is the agent's turn on the PR: the merge and comment
   // gates it would otherwise show belong to the head the repair is about to replace.
   if (sub?.stage === 'pr' && (sub.fixRequested || liveRun(job, sub))) return false;
@@ -586,6 +597,7 @@ export const worktreeKept = (sub) => !!sub?.cleanupRefusal && !sub.discard && su
 export function jobStatus(job, sub) {
   if (!job.error && sub?.error && !sub.cancelledAt) {
     if (redFixing(job, sub)) return { tone: 'working', text: 'Fixing' };
+    if (workingOnFeedback(job, sub)) return { tone: 'working', text: FEEDBACK_LABEL };
     if (redFixReady(job, sub)) return { tone: 'needs', text: 'Fix ready' };
     if (redDeclared(job, sub)) return { tone: 'needs', text: 'Declared red' };
   }
@@ -609,6 +621,7 @@ export function jobStatus(job, sub) {
     if (run.mailedAt && !run.report) return { tone: 'working', text: 'Making the approved writes' };
     return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: run.ask ? 'Answering you' : job.stage === 'active' ? 'Wrangling' : 'Planning', implementation: reviewCode(job) ? 'Working' : 'Working on the PR', publish: 'Committing & opening the PR', repair: 'Fixing the PR', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };
   }
+  if (workingOnFeedback(job, sub)) return { tone: 'working', text: FEEDBACK_LABEL };
   if (sub && heldByReplan(job, sub)) return { tone: 'muted', text: job.replan.red ? 'Held for the fix' : 'Held for the plan change' };
   // The human said they had started; no agent and no clock runs against it, so
   // this outranks the prerequisite line a waiting one would show.
