@@ -17,7 +17,7 @@ import { jobReportTool, getJobContextTool } from './tools.js';
 import { changeView } from './job-change.js';
 import { say, openConvo } from './job-talk.js';
 import { requestReplan } from './job-replan.js';
-import { settingsSchema } from './jobs-schema.js';
+import { settingsSchema, reviewOf } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 
 // Never a real Haiku run: a conversation an idea opens is named after the action.
@@ -498,29 +498,45 @@ test('an approval with no note, or a blank one, is exactly the approval it was',
 
 const setReview = (f, field, you, extra = {}) => f.store.action(f.job.id, 'set-review', { field, you, ...extra });
 
-test('a code review switch counts from the next gate: waiting diffs stay until released, and a ready receipt under Auto is approved as it lands', async (t) => {
+test('a code review switch to Auto releases the diffs waiting, refuses an unconfirmed one, and approves a ready receipt as it lands', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api'));
-  setReview(f, 'reviewCode', false);
+  assert.throws(() => setReview(f, 'reviewCode', false), /One is waiting at Local verification\. Switch again to let it through/, 'a board a tick behind never lets a diff through unseen');
   let job = f.store.get(f.job.id);
-  assert.equal(job.reviewCode, false);
-  assert.deepEqual([job.subJobs[0].stage, job.subJobs[0].state], ['review', 'verified'], 'a diff already waiting is not let through unasked');
-  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['set-review', null, 'Switched Local verification to Auto']]);
+  assert.deepEqual([job.reviewCode, job.subJobs[0].state, job.moves.length], [true, 'verified', 0], 'the refused switch changes nothing');
+  setReview(f, 'reviewCode', false, { release: true });
+  job = f.store.get(f.job.id);
+  assert.deepEqual([job.reviewCode, f.sub().state, !!f.sub().ready.approvedAt], [false, 'approved', true]);
+  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['approve-code', 'api', 'Approved the working tree of “Deliver api”'], ['set-review', null, 'Switched Local verification to Auto, releasing what was waiting']]);
+  assert.deepEqual([job.moves[0].note, f.sub().approvalNote], [null, null], 'a bulk release carries no words');
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('web'));
   assert.equal(f.sub(1).state, 'approved', 'the run kept its uncommitted prompt; its receipt is approved as it lands');
   assert.ok(f.sub(1).ready.approvedAt);
   await f.tick();
-  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['web', 'publish']);
-  setReview(f, 'reviewCode', false, { release: true });
-  assert.deepEqual([f.sub().state, !!f.sub().ready.approvedAt], ['approved', true]);
-  assert.deepEqual(f.store.get(f.job.id).moves.slice(-2).map((m) => [m.move, m.subJobId]), [['approve-code', 'api'], ['set-review', null]]);
-  assert.deepEqual([f.store.get(f.job.id).moves.at(-2).note, f.sub().approvalNote], [null, null], 'a bulk release carries no words');
+  assert.deepEqual(f.launched.filter((w) => w.run.phase === 'publish').map((w) => w.sub.id).sort(), ['api', 'web']);
   const revision = f.store.get(f.job.id).revision;
   setReview(f, 'reviewCode', false);
-  assert.equal(f.store.get(f.job.id).moves.length, 3, 'switching to what it already is records nothing');
+  assert.equal(f.store.get(f.job.id).moves.length, 2, 'switching to what it already is records nothing');
   assert.ok(f.store.get(f.job.id).revision > revision);
   setReview(f, 'reviewCode', true);
   assert.equal(f.store.get(f.job.id).reviewCode, true);
+});
+
+test('an old job with reviewMerge unset is gated the same way by flagOf and the runner\'s merge check', async (t) => {
+  const f = fixture(t, { ...input, reviewMerge: undefined });
+  f.store.update(f.job.id, (j) => { delete j.reviewMerge; });
+  await f.approve();
+  assert.equal('reviewMerge' in f.store.get(f.job.id), false, 'saved before the flag existed');
+  assert.equal(reviewOf(f.store.get(f.job.id), 'reviewMerge'), true, 'unset reads as REVIEW_DEFAULTS: You review');
+  f.report({ kind: 'published', url: PR_URL }); f.setPr({ checkStatus: 'passing' });
+  await f.tick(); await f.tick();
+  assert.deepEqual(f.merged, [], 'the runner waits for Approve merge, as the board\'s tile says');
+  setReview(f, 'reviewMerge', true);
+  assert.equal(f.store.get(f.job.id).moves.at(-1)?.move, undefined, 'already You review: flagOf agrees, so the switch records nothing');
+  setReview(f, 'reviewMerge', false);
+  assert.equal(f.store.get(f.job.id).moves.at(-1).detail, 'Switched Merge to Auto');
+  await f.tick();
+  assert.deepEqual(f.merged, ['head1']);
 });
 
 test('a set-review switch is validated: an unknown checkpoint, a non-boolean, an approved plan and a cancelled job are refused', async (t) => {
@@ -541,9 +557,8 @@ test('Plan switched to Auto: while planning the receipt approves itself, and a d
 
   const g = fixture(t);
   g.store.action(g.job.id, 'start'); await g.tick(); g.report({ kind: 'plan', plan: plan() }); await g.tick();
-  setReview(g, 'reviewPlan', false);
-  assert.equal(g.store.get(g.job.id).stage, 'planning', 'a drafted plan waits unless released');
-  setReview(g, 'reviewPlan', true);
+  assert.throws(() => setReview(g, 'reviewPlan', false), /One is waiting at Plan/, 'a drafted plan is let through only when confirmed');
+  assert.equal(g.store.get(g.job.id).stage, 'planning');
   const { revision } = g.store.get(g.job.id);
   assert.throws(() => setReview(g, 'reviewPlan', false, { release: true, revision: revision - 1 }), /plan changed/);
   const edited = plan([spec('api', [], { title: 'Deliver the API' })]);
@@ -1565,7 +1580,7 @@ test('Writes switched to Auto with drafts waiting: release approves each without
   const g = fixture(t, { ...noSessionReview, reviewWrites: true });
   await g.approve(plan([notifier('n'), write('move', 'n', moveTo('In Review'))]));
   g.report({ kind: 'drafts', drafts: [{ id: 'move', to: 'In Review' }] }, g.workerFor('n'));
-  g.store.action(g.job.id, 'set-review', { field: 'reviewWrites', you: false });
+  assert.throws(() => g.store.action(g.job.id, 'set-review', { field: 'reviewWrites', you: false }), /One is waiting at Writes/);
   assert.equal(g.store.get(g.job.id).subJobs[1].stage, 'review', 'a draft already waiting is not let through unasked');
   await g.tick();
   assert.deepEqual(g.mailed, []);

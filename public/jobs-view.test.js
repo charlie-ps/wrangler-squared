@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isChatSendKey, isPrimaryActionKey, primaryAction } from './jobs-view.js';
-import { wranglerUnread, CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
+import { wranglerUnread, CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, mergeApprovable, youReview, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml, plateAsk } from './job-plates.js';
@@ -677,6 +677,34 @@ test('switching to Auto while work waits at the checkpoint asks first, and only 
   assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: false, release: true });
   assert.match(footerHint(f), /Local verification: Auto 2 diffs are being committed and opened as PRs\. Released work can’t be pulled back\./);
   assert.equal(f.q('[data-review-undo]'), null, 'released work has no Undo');
+});
+
+test('a board a tick behind is refused, snaps back, and asks once the tick shows what waits; a parked step answering mail counts', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation' }];
+  f.view.update(f.data); f.view.openDetail('job1');
+  footerButton(f, 'reviewCode').click();
+  assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: false }, 'nothing waits on this board, so no question');
+  f.view.reviewFailed({ event: 'job-action-failed', jobId: 'job1', action: 'set-review', field: 'reviewCode', error: 'One is waiting at Local verification. Switch again to let it through.' });
+  assert.equal(footerButton(f, 'reviewCode').getAttribute('aria-pressed'), 'true', 'the server saw a diff waiting: still You review');
+  assert.match(footerHint(f), /Switch again to let it through/);
+  job.subJobs = [{ ...sub('api'), stage: 'review', state: 'verified', ready: { checks: ['Tests pass'], receiptId: 'run_1' }, answering: { id: 'm1', kind: 'ask', round: 1 } }];
+  f.view.update(f.data);
+  const before = f.sent.length;
+  footerButton(f, 'reviewCode').click();
+  assert.equal(f.sent.length, before);
+  assert.match(f.q('#job-review-confirm').textContent, /Switch Local verification to Auto\?/);
+  f.q('#job-review-confirm').dispatchEvent(f.event('submit'));
+  assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: false, release: true });
+});
+
+test('a job saved before Merge existed reads it as You review, like the runner: its tile, Needs you and the Merge button', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active'; delete job.reviewMerge;
+  job.subJobs = [{ ...sub('api'), stage: 'pr', state: 'watching', pr: { url: 'https://github.com/o/r/pull/7', head: 'h1', checkStatus: 'passing', checks: [] } }];
+  assert.deepEqual([youReview(job, 'reviewMerge'), mergeApprovable(job, job.subJobs[0]), mergeHeldByComments(job, job.subJobs[0]), jobNeedsReview(job, job.subJobs[0])], [true, true, false, true]);
+  f.view.update(f.data); f.view.openDetail('job1');
+  assert.equal(footerButton(f, 'reviewMerge').getAttribute('aria-pressed'), 'true');
+  assert.ok(f.q('[data-action="approve-merge"]'), 'the PR waits for Approve merge');
 });
 
 test('Plan switched to Auto on a drafted plan approves the draft on display; a delivered job has no checkpoints left to switch', (t) => {

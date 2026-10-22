@@ -1,7 +1,7 @@
 import { allowFiles } from './job-files.js';
 import { runnable, dependencySatisfied, dependenciesSatisfied, MERGE_IS_DELIVERY } from './job-store.js';
 import { summariseComments, commentsBlockMerge } from './job-comments.js';
-import { awaitsTicket, settingsSchema } from './jobs-schema.js';
+import { awaitsTicket, settingsSchema, reviewOf } from './jobs-schema.js';
 import { logWarn } from './log.js';
 import { isFrozen, startQueued, queuedReady, replanQueue } from './job-replan.js';
 import { heldBy, needsTriage, triesOn, triesAllowed, startRed, failRedReplan } from './job-red.js';
@@ -431,7 +431,7 @@ export class JobRunner {
             // --admin merge cannot be relied on for it, so it is updated and
             // carryApproval moves the acceptance to the new head.
             if (!heldBy(job, sub) && dependenciesSatisfied(job, sub)) await this.updateBranch(id, sub, pr);
-          } else if (!heldBy(job, sub) && (pr.checkStatus === 'passing' || sub.acceptedRed?.ref === pr.head) && dependenciesSatisfied(job, sub) && (sub.mergeApprovedHead === pr.head || (!job.reviewMerge && !commentsBlockMerge(sub)))) {
+          } else if (!heldBy(job, sub) && (pr.checkStatus === 'passing' || sub.acceptedRed?.ref === pr.head) && dependenciesSatisfied(job, sub) && (sub.mergeApprovedHead === pr.head || (!reviewOf(job, 'reviewMerge') && !commentsBlockMerge(sub)))) {
             // An accepted-red head merges whatever its checks say — the move
             // pinned both the acceptance and the merge approval to this head.
             // Match-head on GitHub closes the push-vs-merge race; re-poll after

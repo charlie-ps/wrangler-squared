@@ -336,7 +336,22 @@ text as public as the rest of this repo.
   (history and the old list read it); the proof lives beside it as `ready.proof`.
   The board gets bytes only as `job-evidence` frames (thumbnails via `sips`), cached
   in `public/job-proof.js`. A sub-job with `show` items reports `ready` even with
-  Code on Auto (`leavesUncommitted`), so the proof is kept.
+  Code on Auto (`leavesUncommitted`), so the proof is kept per round, but **Auto means
+  auto**: that receipt never parks, approves itself as it lands (as does one from a session
+  launched under You review whose Code went to Auto mid-run), and on the next tick whatever it listed as
+  running is killed and the publish session starts. Nothing waits in review.
+- **Switching a checkpoint to Auto lets through what waits at it** (`job-store.js setReview`,
+  `waitingAt`, `releaseWaiting`). The board asks first (`public/jobs-view.js`, counted by
+  `checkpointWaiting`) and sends `release`; a switch WITHOUT `release` while something waits
+  is refused, so a board a tick behind never releases what nobody saw, and Auto never sits
+  beside work stuck behind it. Released under Code, a step parked on `ready` is approved, its
+  session ends quietly and what it left running is torn down; one still answering mail
+  (`sub.answering`) is left to land its answer, and that `reply` (or new round) lands approved.
+  Kept on purpose: a write's own `review: true` beats Auto, a pending replan refuses a release,
+  Plan locks once approved, and only the single `approve-code` is pinned to `treeHash` (a bulk
+  release has no tree the human read). An unset flag is read through `reviewOf`
+  (`jobs-schema.js`, mirrored in `public/jobs.js`) everywhere: its `REVIEW_DEFAULTS` value, so an
+  old job with no `reviewMerge` waits for Approve merge in the store, the runner and the board.
 - **Fast-forward main never blocks a sub-job** (`server/job-main.js`). The global
   `settings.updateMain` ("Keep local main updated", on by default; a job's old `updateMain` is
   ignored) is handed to cleanup by the runner, and the update returns, never throws: a clean
