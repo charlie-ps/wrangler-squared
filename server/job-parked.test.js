@@ -369,7 +369,7 @@ test('the planner is told the step\'s session is open and where the idea was typ
   const planner = f.launched.at(-1);
   const prompt = jobPrompt(f.store.get(f.job.id), null, planner.run);
   assert.match(prompt, /- api \(pr\) "Audit page": review\/verified · its session is OPEN on review round 1 \(forward feedback to it\)/);
-  assert.match(prompt, /The latest idea was typed on its code review of api "Audit page" \(pinned to run_\w+\)\./);
+  assert.match(prompt, /The latest idea was typed on api "Audit page"\. When the idea was typed: its code review \(run_\w+, review\/verified\); now: its code review \(run_\w+, review\/verified\)\.\n/, 'nothing moved, so nothing to judge');
   assert.match(prompt, /\{type:"forward",sub,note\}/);
   f.store.report(planner.sid, planner.run.id, { kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'Is the empty state covered?' }] });
   await f.tick();

@@ -459,9 +459,9 @@ export const convoNumber = (job, convo) => convosOf(job).indexOf(convo) + 1;
 export const convoRunning = (job, convo) => job.runs.some((r) => !r.stopped && r.convo === convo.id);
 // A planning run that is a question's (an ask run) holds nothing and approves nothing.
 export const planningRun = (job) => job.runs.some((r) => !r.stopped && !r.subJobId && !r.ask);
-// What the human is looking at, and the exact thing in it, which Request changes
-// pins its idea to. Mirrors server/job-change.js changeView: the server refuses a
-// request whose pin no longer matches. Null means nothing is left to change.
+// What the human is looking at, and the exact thing in it, which places the Add
+// idea box. Mirrors server/job-actions.js changeView, which routes the idea but
+// never refuses it as stale. Null means nothing is left to change.
 export function changeView(job, sub) {
   if (job.cancelledAt) return null;
   if (!sub) {

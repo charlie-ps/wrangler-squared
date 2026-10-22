@@ -62,8 +62,10 @@ other action, no alternatives) is sent at once without an approval.
 
 Every idea the human types, in the job's box or a step's, goes to the planner:
 there is no other route. A step's idea says which step and what was on screen
-(its code review, its result, its open PR), and an action on that step is
-refused if that view has moved by approval. A second idea while your proposal
+(its code review, its result, its open PR) when it was typed, beside what it
+is now. An idea is never refused as stale: if the step moved since, judge
+whether the idea still applies and write your actions against the step as it
+is now (each is still refused if its own pin moves by approval). A second idea while your proposal
 waits comes back with the first ("Earlier: … / Now: …") and your earlier
 actions: keep the ones that still stand.
 

@@ -32,13 +32,8 @@ const humanSpec = (id, after = []) => ({ id, kind: 'human', title: `Do ${id} you
 const plan = (subs = [spec('api')], stories = [{ id: 'story', key: 'AUTH-123', title: 'Reliable sign-in' }]) =>
   ({ context: 'The sign-in service is Java; deploys are Helm.', stories, subJobs: subs });
 const PR_URL = 'https://github.com/org/repo/pull/1';
-// The one way an idea comes in, pinned to what is on screen right now (job-change.js
-// changeView), as the board sends it.
-const change = (f, subId, text = 'Take another pass', convo) => {
-  const job = f.store.get(f.job.id);
-  const view = changeView(job, subId ? job.subJobs.find((s) => s.id === subId) : null);
-  return f.store.action(f.job.id, 'request-change', { subJobId: subId, at: view?.at, ref: view?.ref, text, ...(convo ? { convo } : {}) });
-};
+// The one way an idea comes in, as the board sends it: no pin, never refused as stale.
+const change = (f, subId, text = 'Take another pass', convo) => f.store.action(f.job.id, 'request-change', { subJobId: subId, text, ...(convo ? { convo } : {}) });
 // What the wrangler is reading in the conversation an idea opened, before it answers or proposes.
 const reading = (f) => f.store.get(f.job.id).convos.at(-1).pending;
 // A change Wrangler is drawing with no ask run before it, as one dequeued or sent
@@ -1025,27 +1020,28 @@ test('a blocked step is retried with a note; a request on a step with no agent o
   assert.deepEqual(movesOf(f).at(-1) && [movesOf(f).at(-1).subJobId, movesOf(f).at(-1).move, movesOf(f).at(-1).note], ['api', 'request-change', 'Also guard empty payloads']);
 });
 
-test('a request is pinned to what was viewed: a moved head, receipt, revision or proposal refuses it, and so does an idea with no words', async (t) => {
+test('an idea is never refused as stale: a moved head is accepted, and the planner is told the step as typed and as it is now', async (t) => {
   const f = fixture(t); await f.approve(); f.report({ kind: 'published', url: PR_URL }); await f.tick();
-  const view = changeView(f.store.get(f.job.id), f.sub());
-  assert.deepEqual(view, { at: 'pr', ref: 'head1' });
-  const send = (extra) => f.store.action(f.job.id, 'request-change', { subJobId: 'api', ...view, text: 'Rename the flag', ...extra });
-  assert.throws(() => send({ ref: 'head0' }), /changed since you looked/);
-  assert.throws(() => send({ at: 'code' }), /changed since you looked/);
+  assert.deepEqual(changeView(f.store.get(f.job.id), f.sub()), { at: 'pr', ref: 'head1' });
+  const send = (extra) => f.store.action(f.job.id, 'request-change', { subJobId: 'api', text: 'Rename the flag', ...extra });
   assert.throws(() => send({ text: '  ' }), /Explain the change/);
-  assert.throws(() => f.store.action(f.job.id, 'request-change', { subJobId: 'ghost', ...view, text: 'x' }), /Sub-job not found/);
+  assert.throws(() => f.store.action(f.job.id, 'request-change', { subJobId: 'ghost', text: 'x' }), /Sub-job not found/);
   assert.deepEqual(movesOf(f), [], 'a refused request leaves no trace');
-  send();
-  assert.equal(movesOf(f).length, 1);
+  send({ at: 'pr', ref: 'head0' });
+  assert.equal(movesOf(f).length, 1, 'an old board\'s stale pin is ignored');
+  const typed = reading(f).source;
+  assert.deepEqual([typed.at, typed.ref], ['pr', 'head1']);
+  f.setPr({ head: 'head2' }); await f.tick();
+  const prompt = jobPrompt(f.store.get(f.job.id), null, plannerOf(f).run);
+  assert.match(prompt, new RegExp(`When the idea was typed: its open PR \\(head1, ${typed.state}\\); now: its open PR \\(head2, pr/\\w+\\)\\. It has moved since: judge whether the idea still applies`));
 });
 
 test('an idea on a session result reaches its own session through the planner; the first plan is still redrawn', async (t) => {
   const g = fixture(t); await g.approve(plan([sessionSpec('spike')]));
   g.report({ kind: 'completed', checks: ['Answered'] }); await g.tick();
   assert.deepEqual(changeView(g.store.get(g.job.id), g.sub()), { at: 'session', ref: g.sub().result.receiptId });
-  assert.throws(() => g.store.action(g.job.id, 'request-change', { subJobId: 'spike', at: 'session', ref: 'run_stale', text: 'Also check staging' }), /changed since you looked/);
   change(g, 'spike', 'Also check staging');
-  assert.deepEqual([g.sub().stage, !!g.sub().result, reading(g).source], ['review', true, { sub: 'spike', at: 'session', ref: g.sub().result.receiptId }], 'nothing moves before the human approves');
+  assert.deepEqual([g.sub().stage, !!g.sub().result, reading(g).source], ['review', true, { sub: 'spike', at: 'session', ref: g.sub().result.receiptId, state: 'review/verified' }], 'nothing moves before the human approves');
   await g.tick();
   g.report({ kind: 'plan', plan: g.store.get(g.job.id).plan, actions: [{ type: 'rework', sub: 'spike', note: 'Also check staging' }] }, plannerOf(g));
   g.store.action(g.job.id, 'approve-replan', { proposalId: plannerOf(g).run.id });
@@ -1053,7 +1049,6 @@ test('an idea on a session result reaches its own session through the planner; t
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web')]) }); await f.tick();
   assert.deepEqual(changeView(f.store.get(f.job.id), null), { at: 'plan', ref: String(f.store.get(f.job.id).revision) });
-  assert.throws(() => f.store.action(f.job.id, 'request-change', { at: 'plan', ref: '0', text: 'x' }), /changed since you looked/);
   change(f, null, 'Just the API');
   assert.equal(f.store.get(f.job.id).feedback, 'Just the API'); assert.equal(f.store.get(f.job.id).plan, null);
 });
@@ -1070,7 +1065,6 @@ test('every idea has one way in: the planner, which takes a step\'s idea into th
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, sso); await f.tick();
   const proposal = f.store.get(f.job.id).replan.proposal;
   assert.deepEqual(changeView(f.store.get(f.job.id), null), { at: 'proposal', ref: proposal.id });
-  assert.throws(() => f.store.action(f.job.id, 'request-change', { at: 'proposal', ref: 'run_other', text: 'x' }), /changed since you looked/);
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, rename);
   const replan = f.store.get(f.job.id).replan;
   assert.equal(replan.previous.subJobs.length, 3, 'the planner reads the proposal it is asked to change');

@@ -45,7 +45,7 @@ test('reworkSub follows the code-review flag: back to work under review, a repai
   assert.deepEqual([direct.subJobs[0].stage, direct.subJobs[0].fixRequested.note, direct.subJobs[0].repairAllowance], ['pr', 'Rename it', 1]);
 });
 
-test('every idea goes to the planner, pinned to the step and view it was typed on', () => {
+test('every idea goes to the planner, noting the step and view it was typed on', () => {
   const at = (stage, extra = {}) => { const j = job(); Object.assign(j.subJobs[0], { stage, ...extra }); return j; };
   const code = at('review', { state: 'verified', ready: { checks: ['x'], receiptId: 'run_1', round: 2 } });
   code.runs.push({ id: 'run_1', subJobId: 'api', stopped: false, parkedFor: 'ready' });
@@ -54,14 +54,14 @@ test('every idea goes to the planner, pinned to the step and view it was typed o
   assert.equal(code.replan, undefined, 'the wrangler reads it first, holding nothing');
   assert.equal(code.convos[0].pending.asks.length, 1);
   handOver(code);
-  assert.deepEqual(code.replan.source, { sub: 'api', at: 'code', ref: 'run_1' });
+  assert.deepEqual(code.replan.source, { sub: 'api', at: 'code', ref: 'run_1', state: 'review/verified' });
   assert.deepEqual(code.replan.images, [{ sub: 'api', round: 2, file: 'ask-1.png', mime: 'image/png', path: '/rounds/2/ask-1.png' }]);
   assert.match(code.replan.feedback, /^About “Deliver api” \(api, review\/verified\): Tighten the spacing\n\(Pasted images, read them: "\/rounds\/2\/ask-1.png"\)$/);
   const open = at('pr', { state: 'watching', pr: { url: PR, head: 'h1' } });
   assert.equal(changeView(open, open.subJobs[0]).ref, 'h1');
   assert.equal(ask(open, 'api').route, 'planner');
   handOver(open);
-  assert.deepEqual([open.subJobs[0].stage, open.replan.source], ['pr', { sub: 'api', at: 'pr', ref: 'h1' }]);
+  assert.deepEqual([open.subJobs[0].stage, open.replan.source], ['pr', { sub: 'api', at: 'pr', ref: 'h1', state: 'pr/watching' }]);
   const result = job({ subs: [session('spike')] });
   Object.assign(result.subJobs[0], { stage: 'review', state: 'verified', result: { checks: ['x'], receiptId: 'run_2' } });
   assert.equal(ask(result, 'spike').route, 'planner');
@@ -77,8 +77,8 @@ test('every idea goes to the planner, pinned to the step and view it was typed o
   assert.match(merged.replan.feedback, /^About “Deliver api” \(api, deployment\/watching\): Rename it$/);
   for (const stage of ['cleanup', 'done']) assert.throws(() => ask(at(stage), 'api'), /Nothing is left to change/, stage);
   assert.throws(() => ask(at('pr', { cancelledAt: 5 }), 'api'), /Nothing is left to change/);
-  assert.throws(() => requestChange(open, open.subJobs[0], { at: 'pr', ref: 'h0', text: 'x' }, { now: 1 }), /changed since you looked/);
-  assert.throws(() => requestChange(open, open.subJobs[0], { at: 'pr', ref: 'h1', text: '  ' }, { now: 1 }), /Explain/);
+  assert.doesNotThrow(() => requestChange(open, open.subJobs[0], { text: 'Typed before h1 landed' }, { now: 1 }), 'a head that moved does not refuse it: the wrangler judges');
+  assert.throws(() => requestChange(open, open.subJobs[0], { text: '  ' }, { now: 1 }), /Explain/);
   const busy = job(); busy.runs.push({ id: 'run_p', subJobId: null, stopped: false });
   assert.equal(ask(busy, 'api').detail, 'Asked Wrangler about “Deliver api”');
   assert.deepEqual(handOver(busy), { queued: 1 }, 'its change queues behind the one Wrangler is drawing');

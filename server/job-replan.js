@@ -1,7 +1,7 @@
 import { isPrSub, isWriteSub, isStoryCreate, isMakeWrite, withStoryCreates } from './jobs-schema.js';
 import { dropSub, reworkSub, validatePlan, notStarted } from './job-sub-ops.js';
 import { milestoneReached } from './job-writes.js';
-import { stampActions, checkActions, applyActions, movedActions, landedAs, changeView } from './job-actions.js';
+import { stampActions, checkActions, applyActions, movedActions, landedAs } from './job-actions.js';
 import { parkedReadyRun } from './job-parked.js';
 import { noteProposal, closeProposal, noteQueued, noteDequeued } from './job-talk.js';
 import { replanAsks, replanAsked } from '../public/replan-asks.js';
@@ -201,17 +201,14 @@ function startReplan(job, text, now, red, { source, images, convo }) {
 }
 
 // The next queued change becomes the plan change, drawn against the plan as it
-// stands now, so its source is re-pinned to its step as it is now (as sendBack
-// does). Waits while a planner is still drafting (a discarded one stopping): the
+// stands now; its source still says what the step was when it was typed. Waits while a planner is still drafting (a discarded one stopping): the
 // runner tries again each tick.
 export const queuedReady = (job) => !job.replan && job.stage === 'active' && !job.cancelledAt && !!replanQueue(job).length && !drafting(job);
 export function startQueued(job, now) {
   if (!queuedReady(job)) return false;
   const [next, ...rest] = job.replanQueue;
   if (rest.length) job.replanQueue = rest; else delete job.replanQueue;
-  const step = next.source && job.subJobs.find((s) => s.id === next.source.sub);
-  const view = step && changeView(job, step);
-  startReplan(job, next.feedback, now, next.red || null, { source: view ? { sub: step.id, ...view } : next.source || null, images: next.images || [], convo: next.convo || null });
+  startReplan(job, next.feedback, now, next.red || null, { source: next.source || null, images: next.images || [], convo: next.convo || null });
   noteDequeued(job, next.convo, now);
   return true;
 }
@@ -364,16 +361,11 @@ function movedSince(job, chosen) {
 }
 
 // A proposal the job moved under goes back to the planner with the human's ideas
-// and source as they were, told what moved, rather than refusing every approval.
-// The source is re-pinned to its step as it is now: the human approved acting on
-// it, and the old pin would refuse the planner's next action there.
+// as they were, told what moved, rather than refusing every approval: the stale
+// action is never applied, and the planner judges what still stands.
 function sendBack(job, moved, now) {
   const what = moved.map(({ sub, how }) => `${quoted(sub.title)} (${sub.id}) ${how}`).join('; ');
-  const source = job.replan.source;
-  const step = source && job.subJobs.find((s) => s.id === source.sub);
-  const view = step && changeView(job, step);
-  requestReplan(job, `Wrangler, not the human: the human approved your last proposal, but it could not apply because the job moved under it: ${what}. Propose again against the job as it stands now; the human's ideas above still stand.`,
-    now, null, { source: view ? { sub: step.id, ...view } : source });
+  requestReplan(job, `Wrangler, not the human: the human approved your last proposal, but it could not apply because the job moved under it: ${what}. Propose again against the job as it stands now; the human's ideas above still stand.`, now);
   return { lines: moved.map(({ sub, how }) => ({ sub, detail: `${quoted(sub.title)} ${how} since the plan change was proposed, so it went back to Wrangler` })),
     detail: `Sent the plan change back to Wrangler: ${moved.map(({ sub, how }) => `${quoted(sub.title)} ${how}`).join(', ')} since it was proposed`, feedback: job.replan.feedback, sentBack: true };
 }
