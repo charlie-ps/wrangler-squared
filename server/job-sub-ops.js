@@ -1,4 +1,4 @@
-import { planSchema, isWriteSub, isHumanSub, MAX_BRIEF, MAX_HUMAN_BRIEF, isJiraWrite, isStoryCreate, reviewCode } from './jobs-schema.js';
+import { planSchema, isWriteSub, isHumanSub, MAX_BRIEF, MAX_HUMAN_BRIEF, isJiraWrite, isStoryCreate } from './jobs-schema.js';
 
 // What the runner, a plan change and request-change (job-change.js) share about
 // a sub-job: dropping one, reworking its code, validating a plan. Pure over the
@@ -32,13 +32,13 @@ export function dropSub(sub, now, job = null) {
   if (job && isStoryCreate(sub)) unlinkStory(job, sub.storyId, now);
 }
 // A red step started again as it is: the human's Retry, and the planner's retry
-// action once the human approves it (job-actions.js). Under review the only run
-// that can have failed is publish, and the tree the human approved is unchanged:
-// keep the approval so publish runs again. `queued` here would strand the card —
+// action once the human approves it (job-actions.js). Approved, the only run
+// that can have failed is the one landing it, and the tree the human approved is
+// unchanged: keep the approval so a publish session lands it. `queued` here would strand the card —
 // the runner launches only on `approved`, and approve-code refuses anything but
 // `verified`.
 export function retrySub(sub, note) {
-  sub.error = null; sub.blocked = null; sub.cleanupRefusal = null; sub.discard = null;
+  sub.error = null; sub.blocked = null; sub.cleanupRefusal = null; sub.discard = null; sub.conflict = null;
   sub.state = sub.cancelledAt ? 'cancelled' : sub.stage === 'review' ? (sub.ready?.approvedAt ? 'approved' : 'verified') : 'queued';
   sub.repairAllowance = (sub.repairAllowance || 0) + 1;
   // One more automatic try for a red step, and it wipes the human's "leave it"
@@ -76,24 +76,13 @@ function unlinkStory(job, storyId, now) {
 }
 // Rework code that already exists: an open PR or an uncommitted working tree.
 // Shared by request-change (job-change.js) and an approved plan change
-// (job-replan.js) that rewrites one.
-export function reworkSub(job, sub, note, now) {
+// (job-replan.js) that rewrites one. Whatever Code review is set to, a fix is the
+// same road as the first cut: back to work in the PR's worktree, left uncommitted,
+// and landed on the open PR once it passes the checkpoint (job-runner.js). An
+// approval already given is withdrawn.
+export function reworkSub(job, sub, note) {
   sub.error = null; sub.blocked = null; sub.mergeApprovedHead = null;
-  // Under code review a fix is the same road as the first cut: back to work in
-  // the PR's worktree, the human reads the uncommitted diff, and approval
-  // releases the publish session that pushes it to the open PR. A repair that
-  // commits straight to the branch would skip the very review the flag exists
-  // for. Without a PR nothing is committed either way, and an approval already
-  // given is withdrawn.
-  if (sub.stage === 'review' || reviewCode(job)) {
-    const wasPr = sub.stage === 'pr';
-    sub.note = note || null; sub.ready = null; sub.fixRequested = null; sub.stage = 'implementation'; sub.state = 'queued';
-    return wasPr ? `Sent ${quoted(sub.title)} back to work on its PR` : `Sent ${quoted(sub.title)} back to work`;
-  }
-  // Deliberately independent of checkStatus: the human has seen something
-  // green checks do not cover, so a repair launches anyway.
-  sub.fixRequested = { note: note || null, at: now };
-  sub.state = 'watching'; sub.nextPollAt = 0;
-  sub.repairAllowance = (sub.repairAllowance || 0) + 1;
-  return `Asked for a new commit on ${quoted(sub.title)}`;
+  const wasPr = sub.stage === 'pr';
+  sub.note = note || null; sub.ready = null; sub.fixRequested = null; sub.checkFix = null; sub.stage = 'implementation'; sub.state = 'queued'; sub.nextPollAt = 0;
+  return wasPr ? `Sent ${quoted(sub.title)} back to work on its PR` : `Sent ${quoted(sub.title)} back to work`;
 }

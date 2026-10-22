@@ -1,6 +1,6 @@
 import { esc, tildify } from './util.js';
 import { ICONS, wranglerMark } from './icons.js';
-import { convoGroups, convosOf, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, uncreatedSuggestions, ideaEditable, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel, leadSentence } from './jobs.js';
+import { conflictWaiting, convoGroups, convosOf, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, uncreatedSuggestions, ideaEditable, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel, leadSentence } from './jobs.js';
 import { talkHtml, convoTitle, latestConvo, unreadIn } from './job-talk.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml, ideaEditHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener, fieldName } from './job-graph.js';
@@ -81,7 +81,7 @@ function commentsHtml(sub, shown) {
 }
 
 const minutesSince = (at) => Math.max(1, Math.round((Date.now() - at) / 60000));
-const PHASE_LABEL = { implementation: 'Implementation', repair: 'Repair', publish: 'Publish', verify: 'Verify', session: 'Session', write: 'Write', planning: 'Planning' };
+const PHASE_LABEL = { implementation: 'Implementation', repair: 'Repair', sync: 'Sync', publish: 'Publish', verify: 'Verify', session: 'Session', write: 'Write', planning: 'Planning' };
 const when = (at) => at ? new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
 const staleHint = (sub) => {
   if (!deploymentStalled(sub)) return '';
@@ -973,6 +973,18 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (text) { text.focus(); text.setSelectionRange(text.value.length, text.value.length); }
   }
   // One control for reading the diff: Wrangler's own view, the desktop IDE in its menu.
+  // Each conflict the sync session parked on, with its ranked ways out; the first is
+  // its own pick and starts chosen. One Resolve sends a pick per conflict.
+  const conflictHtml = (sub) => {
+    const c = sub.conflict;
+    if (!c) return '';
+    if (c.decided) return `<h3>Conflict</h3><ul class="job-conflicts">${c.conflicts.map((x, i) => `<li><code>${esc(x.file)}</code> ${esc(x.options[c.decided.picks[i]]?.label || '')}</li>`).join('')}</ul>`;
+    return `<form id="job-conflict-form" class="job-conflict" data-run="${esc(c.runId)}"><h3>Conflict needs you</h3>${c.summary ? `<p>${esc(c.summary)}</p>` : ''}
+      ${c.conflicts.map((x, i) => `<fieldset class="job-options job-conflict-pick"><legend><code>${esc(x.file)}</code></legend><p class="job-conflict-what">${esc(x.what)}</p>
+        ${x.options.map((o, n) => `<label class="job-option"><input type="radio" name="c${i}" value="${n}" ${n === 0 ? 'checked' : ''}><span><b>${esc(o.label)}${n === 0 && x.options.length > 1 ? '<span class="job-option-rec">Recommended</span>' : ''}</b>${o.why ? `<small>${esc(o.why)}</small>` : ''}</span></label>`).join('')}</fieldset>`).join('')}
+      <label>Note for the session <small>optional</small><textarea name="note" maxlength="2000" rows="2"></textarea></label>
+      <div class="job-actions tone-warn"><button class="primary" type="submit" title="Sends your choices to the session, which finishes the merge, commits and pushes">${ICONS.check}Resolve</button></div></form>`;
+  };
   const reviewCodeHtml = (sub) => `<span class="job-split"><button id="job-diff" title="Review code in Wrangler">${ICONS.code}Review code</button>${sub.worktree?.path ? `<details class="job-split-more" data-keep="review-menu" ${openMore.has('review-menu') ? 'open' : ''}><summary aria-label="More ways to review code" title="More ways to review code">${ICONS.caret}</summary><div class="job-split-menu"><button id="job-ide" title="Review code in ${esc(ideApp())}">In ${esc(ideApp())}</button></div></details>` : ''}</span>`;
   const appbar = (title, chips, kicker = '', line = '') => `<header class="job-appbar">${kicker}<h2>${esc(title)}</h2><div class="job-chips job-detail-meta">${chips}</div>${line ? `<div class="job-detail-line">${line}</div>` : ''}</header>`;
   const costChip = (usd, estimated, title) => { const c = jobCostLabel(usd, estimated); return c ? chip('', c, { cls: 'job-detail-cost', title }) : ''; };
@@ -1372,7 +1384,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       sessionDormant(job, sub) ? `${triggerLine(job, sub)}: it is dropped itself once ${trigger?.title || sub.on.sub} lands.` : '',
       ...writeHints(job, sub, held),
       yours ? `No agent will ever run this one${sub.state === 'doing' ? '; you marked it in progress' : ''}. Marking it done is what releases the work waiting on it.` : '',
-      codeAwaitingReview(sub) ? `Uncommitted · approve to commit and ${sub.pr ? 'push to the open PR' : 'open the PR'}` : pr && sub.stage === 'review' && !sub.error && !held ? `Approved. A session commits and ${sub.pr ? 'pushes to the open PR' : 'pushes and opens the PR'} next.` : '',
+      codeAwaitingReview(sub) ? `Uncommitted · approve to commit and ${sub.pr ? 'push to the open PR' : 'open the PR'}` : pr && sub.stage === 'review' && !sub.error && !held ? `Approved. Its session commits and ${sub.pr ? 'pushes to the open PR' : 'pushes and opens the PR'} next.` : '',
+      conflictWaiting(sub) ? 'Merging the base into this PR hit a conflict the agent would not guess at. Pick one way to resolve each; its session finishes the merge, commits and pushes.' : sub.conflict?.decided ? 'Your choices went to the session: it finishes the merge, commits and pushes.' : '',
       mergeHeldByComments(job, sub) ? 'Comments read as blocking, so the automatic merge is on hold. Approve merge to override for this head.' : '',
       sub.stage === 'pr' && sub.pr?.mergeWithAdmin ? 'Checks have passed. Merging will override GitHub’s required review.' : '',
       sub.fixRequested ? `Fix requested${sub.fixRequested.note ? `: ${sub.fixRequested.note}` : ''}. A repair session starts ${pendingDependencies(job, sub).length ? 'once its prerequisites deploy' : 'on the next tick'}.` : '',
@@ -1440,7 +1453,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         ${yours ? `<form id="job-human-form" data-state="${esc(sub.state)}"><label>Result for dependent work <small title="Up to 8,000 characters, passed to dependent agents">optional</small><textarea name="output" maxlength="8000" rows="4"></textarea></label><div class="job-actions tone-${STATES[state].tone}"><button class="primary" type="submit" title="${esc(hints.find((h) => h.startsWith('No agent')) || '')}">${ICONS.check}Mark done</button>${sub.state === 'doing' ? '' : '<button type="button" data-action="start-human">Mark in progress</button>'}</div></form>` : ''}`;
       actions = retry;
     } else {
-      body = `${sub.ready ? (hasProof(sub) ? proofListHtml(job, sub, { isOpen: (k) => openMore.has(k), ask: sub.stage === 'review' }) : `<h3>${sub.stage === 'review' ? 'Ready for review' : 'Verified'}</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${stoppedHtml(sub)}${historyHtml(job, sub, { open: openMore.has('history') })}` : ''}
+      body = `${conflictHtml(sub)}${sub.ready ? (hasProof(sub) ? proofListHtml(job, sub, { isOpen: (k) => openMore.has(k), ask: sub.stage === 'review' }) : `<h3>${sub.stage === 'review' ? 'Ready for review' : 'Verified'}</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${stoppedHtml(sub)}${historyHtml(job, sub, { open: openMore.has('history') })}` : ''}
         ${sub.stage !== 'done' ? mergeMethodHtml(sub) : ''}
         ${sub.pr?.checks?.length ? `<h3>Checks</h3><ul class="job-checks">${sub.pr.checks.map((c) => `<li class="${checkTone(c.state)}">${checkMark(c.state)} ${esc(c.name)} <small>${esc(c.state.toLowerCase())}</small></li>`).join('')}</ul>` : ''}
         ${sub.pr ? commentsHtml(sub, commentsShown) : ''}
@@ -1656,6 +1669,15 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         action('edit-idea', { text: ideaForm.elements.text.value, ...(title !== job.title ? { title } : {}) }, null);
       };
     }
+    const conflictForm = dialog.querySelector('#job-conflict-form');
+    if (conflictForm) conflictForm.onsubmit = (e) => {
+      e.preventDefault();
+      if (!pressBusy(submitterOf(e))) return;
+      const form = new FormData(conflictForm);
+      const picks = [...conflictForm.querySelectorAll('fieldset')].map((_, i) => Number(form.get(`c${i}`) ?? 0));
+      const note = String(form.get('note') || '').trim();
+      action('resolve-conflict', { runId: conflictForm.dataset.run, picks, ...(note ? { note } : {}) });
+    };
     const humanForm = dialog.querySelector('#job-human-form');
     if (humanForm) humanForm.onsubmit = (e) => {
       e.preventDefault();
@@ -1941,7 +1963,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const panels = {
       general: section('Editor', `<label title="A macOS application name — IntelliJ IDEA, Visual Studio Code, Rider…">IDE<input name="ideApp" required maxlength="120" value="${esc(ideApp())}"></label>`, 'Review code’s “In IDE” opens a step’s worktree in this app.')
         + section('Local checkout', '<label class="job-toggle job-settings-main" title="Once a PR lands on the default branch, fast-forward your own checkout of it. A checkout with work of its own is left alone and the job tells you, with fixes an agent can make.">Keep local main updated<input type="checkbox" class="job-switch" name="updateMain" ' + (data.settings.updateMain === false ? '' : 'checked') + '></label>'),
-      automation: section('Repairs and replans', `<label>CI repairs per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to Wrangler this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label>`, 'These limits apply across all jobs.')
+      automation: section('Repairs and replans', `<label title="How many times a failing PR goes back to work to fix its checks. Merge conflicts are synced separately and never count.">Fixes for failing checks per PR<input type="number" name="maxRepairs" min="0" max="5" required value="${data.settings.maxRepairs}"></label><label title="Red steps set to “Wrangler replans” (or “You decide”) go to Wrangler this many times. 0 leaves every red step to you.">Replans per red step<input type="number" name="maxReplans" min="0" max="5" required value="${data.settings.maxReplans ?? 2}"></label>`, 'These limits apply across all jobs.')
         + section('Spend', `<label title="Dollars, cents allowed, $100 unless you change it. Empty for no limit. A job that reaches it is paused and its working sessions interrupted, until you add this much again on the job.">Job spend limit ($)<input type="number" name="spendLimit" min="0.01" max="100000" step="0.01" placeholder="No limit" value="${data.settings.spendLimit === undefined ? DEFAULT_SPEND_LIMIT : data.settings.spendLimit ?? ''}"></label>`, 'Each job may spend this much, plus this much again for every time you top it up. A new figure applies to jobs already running.')
         + section('Deployments', `<label>Deploy wait (min)<input type="number" name="deploymentStaleMinutes" min="5" max="1440" required value="${data.settings.deploymentStaleMinutes ?? 30}"></label>`, 'How long a merge may go without any deployment run before the job asks you.'),
       review: `<fieldset class="job-prop job-settings-review"><legend>Defaults for new jobs</legend>${reviewPointsHtml(reviewDefaultsOf(data.settings), { warn: true })}</fieldset>`,

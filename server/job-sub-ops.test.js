@@ -33,16 +33,15 @@ test('a plan edit is judged by the plan schema it was approved under, without pu
   assert.throws(() => validatePlan(edit(['web', { after: ['api'] }], ['api', { after: ['web'] }])), /cycles/);
 });
 
-test('reworkSub follows the code-review flag: back to work under review, a repair commit without it', () => {
-  const open = (extra = {}) => { const j = job(); Object.assign(j, extra); Object.assign(j.subJobs[0], { stage: 'pr', state: 'watching', pr: { url: PR, head: 'h1' }, ready: { checks: ['x'], receiptId: 'run_1' } }); return j; };
-  const reviewed = open();
-  assert.match(reworkSub(reviewed, reviewed.subJobs[0], 'Rename it', 1000), /back to work on its PR/);
-  assert.deepEqual([reviewed.subJobs[0].stage, reviewed.subJobs[0].state, reviewed.subJobs[0].note, reviewed.subJobs[0].fixRequested, reviewed.subJobs[0].ready],
-    ['implementation', 'queued', 'Rename it', null, null]);
-  assert.equal(reviewed.subJobs[0].pr.url, PR, 'the PR is kept: the approved tree is pushed to it');
-  const direct = open({ reviewCode: false });
-  assert.match(reworkSub(direct, direct.subJobs[0], 'Rename it', 1000), /new commit on/);
-  assert.deepEqual([direct.subJobs[0].stage, direct.subJobs[0].fixRequested.note, direct.subJobs[0].repairAllowance], ['pr', 'Rename it', 1]);
+test('reworkSub is one road whatever Code review is set to: back to work on the open PR, uncommitted', () => {
+  const open = (extra = {}) => { const j = job(); Object.assign(j, extra); Object.assign(j.subJobs[0], { stage: 'pr', state: 'watching', pr: { url: PR, head: 'h1' }, ready: { checks: ['x'], receiptId: 'run_1' }, checkFix: { head: 'h0' } }); return j; };
+  for (const reviewCode of [true, false]) {
+    const j = open({ reviewCode });
+    assert.match(reworkSub(j, j.subJobs[0], 'Rename it', 1000), /back to work on its PR/);
+    assert.deepEqual([j.subJobs[0].stage, j.subJobs[0].state, j.subJobs[0].note, j.subJobs[0].fixRequested, j.subJobs[0].ready, j.subJobs[0].checkFix],
+      ['implementation', 'queued', 'Rename it', null, null, null], `reviewCode ${reviewCode}`);
+    assert.equal(j.subJobs[0].pr.url, PR, 'the PR is kept: the approved tree is pushed to it');
+  }
 });
 
 test('every idea goes to the planner, noting the step and view it was typed on', () => {

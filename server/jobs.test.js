@@ -20,7 +20,8 @@ import { requestReplan } from './job-replan.js';
 import { settingsSchema, reviewOf } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 import { redFeedback } from './job-red.js';
-import { eventFor } from '../public/jobs.js';
+import { eventFor, jobStatus, jobNeedsReview } from '../public/jobs.js';
+import { historyLines } from './job-prompts.js';
 
 // Never a real Haiku run: a conversation an idea opens is named after the action.
 const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
@@ -71,6 +72,7 @@ const acceptRed = (f, subId, note = null) => f.store.update(f.job.id, (j) => {
   else s.acceptedRed = { ref: s.pr?.mergeCommit || null, note, at: Date.now() };
   s.error = null; s.blocked = null; s.state = 'watching'; s.nextPollAt = 0;
 });
+const historyLinesOf = (f) => historyLines(f.store.get(f.job.id), f.sub(), null).join('\n');
 function fixture(t, jobInput = input) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-jobs-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -344,13 +346,14 @@ test('reports require the assigned caller and the phase they were launched for',
 
 // --- Code review, then one PR ---
 
-test('with code review on the implementation leaves the tree uncommitted and reports ready; approval of that receipt launches the publish session', async (t) => {
+test('with code review on the implementation leaves the tree uncommitted and reports ready; approval mails that same session to commit and push it', async (t) => {
   const f = fixture(t); await f.approve();
   assert.equal(f.last().run.phase, 'implementation');
+  const work = f.last();
   f.report({ kind: 'ready', checks: ['Tests pass', 'Lint clean'] }); await f.tick();
   const sub = f.sub();
   assert.equal(sub.stage, 'review'); assert.equal(sub.state, 'verified');
-  assert.deepEqual([sub.ready.checks, sub.ready.receiptId], [['Tests pass', 'Lint clean'], f.last().run.id]);
+  assert.deepEqual([sub.ready.checks, sub.ready.receiptId], [['Tests pass', 'Lint clean'], work.run.id]);
   assert.equal(f.launched.length, 2, 'nothing runs while the human reads the diff');
   assert.deepEqual(f.stopped, [f.launched[0].run.id], 'only the planner is released: the implementation session waits, parked, for the human (job-parked.js)');
   assert.throws(() => f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: 'run_stale' }), /not ready to approve/);
@@ -358,12 +361,33 @@ test('with code review on the implementation leaves the tree uncommitted and rep
   assert.equal(f.sub().state, 'approved'); assert.ok(f.sub().ready.approvedAt);
   assert.throws(() => f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: sub.ready.receiptId }), /not ready/, 'approval is once');
   await f.tick();
-  assert.ok(f.stopped.includes(f.launched[1].run.id), 'approving stops the parked session');
+  assert.equal(f.launched.length, 2, 'no publish session: the session that wrote the tree lands it');
+  assert.ok(!f.stopped.includes(work.run.id));
+  assert.equal(f.mailed.at(-1).sid, work.sid);
+  assert.match(f.mailed.at(-1).text, /the human has approved your working tree \(round 1\) as it stands\. You are now asked to commit and push it/);
+  assert.match(f.mailed.at(-1).text, /kind:"published", url:"<PR url>"/);
+  const run = f.store.get(f.job.id).runs.find((r) => r.id === work.run.id);
+  assert.ok(run.landing && run.mailedAt);
+  await f.tick();
+  assert.equal(f.mailed.length, 1, 'mailed once');
+  assert.throws(() => f.report({ kind: 'ready', checks: ['x'] }, work), /commit and push it, then report published/);
+  f.report({ kind: 'published', url: PR_URL }, work); await f.tick();
+  assert.equal(f.sub().stage, 'pr'); assert.equal(f.sub().state, 'watching');
+  assert.ok(f.stopped.includes(work.run.id), 'landed, the session ends');
+});
+
+test('an approved tree whose session has gone is landed by a publish session in the same worktree', async (t) => {
+  const f = fixture(t); await f.approve();
+  f.report({ kind: 'ready', checks: ['Tests pass'] }); await f.tick();
+  f.alive.delete(f.last().sid);
+  f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await f.tick();
+  assert.deepEqual(f.mailed, [], 'nobody to mail');
   assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'publish']);
   assert.equal(f.last().sub.worktree.path, '/worktree/api', 'the publish session adopts the reviewed worktree');
+  assert.match(jobPrompt(f.store.get(f.job.id), f.last().sub, f.last().run), /You are asked to commit and push them/);
   assert.throws(() => f.report({ kind: 'ready', checks: ['x'] }), /must submit published/);
   f.report({ kind: 'published', url: PR_URL }); await f.tick();
-  assert.equal(f.sub().stage, 'pr'); assert.equal(f.sub().state, 'watching');
+  assert.equal(f.sub().stage, 'pr');
 });
 
 test('a merge method suggested on ready reaches the PR; a published one wins; an unknown method is refused', async (t) => {
@@ -392,7 +416,7 @@ test('Retry after a blocked publish keeps the approval: the tree the human appro
   // Runs and moves are stamped by the wall clock; a millisecond apart is enough
   // for the history to read in the order it happened.
   const later = () => new Promise((r) => setTimeout(r, 2));
-  f.report({ kind: 'ready', checks: ['Tests pass'] }); await f.tick(); await later();
+  f.report({ kind: 'ready', checks: ['Tests pass'] }); f.alive.delete(f.last().sid); await f.tick(); await later();
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await later(); await f.tick();
   assert.equal(f.last().run.phase, 'publish');
   f.report({ kind: 'blocked', summary: 'git add of config/example.env was denied' }); await f.tick(); await later();
@@ -427,7 +451,7 @@ test('an idea on code under review with its session gone: the planner reworks it
   f.report({ kind: 'plan', plan: f.store.get(f.job.id).plan, actions: [{ type: 'rework', sub: 'api', note: 'Take another pass' }] }, plannerOf(f));
   f.store.action(f.job.id, 'approve-replan', { proposalId: plannerOf(f).run.id });
   assert.equal(f.sub().stage, 'implementation');
-  await f.tick(); f.report({ kind: 'ready', checks: ['Again'] }); await f.tick();
+  await f.tick(); f.report({ kind: 'ready', checks: ['Again'] }); f.alive.delete(f.last().sid); await f.tick();
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await f.tick();
   assert.equal(f.last().run.phase, 'publish');
   const publish = f.last();
@@ -492,8 +516,7 @@ test('an approval note is kept on the step, recorded on its move and handed to e
   f.report({ kind: 'ready', checks: ['Tests pass'] }, api); await f.tick();
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub(1).ready.receiptId, note: 'Keep the flag off by default' }); await f.tick();
   assert.equal(f.sub(1).approvalNote, 'Keep the flag off by default');
-  const publish = f.workerFor('api', 'publish');
-  assert.match(jobPrompt(f.store.get(f.job.id), publish.sub, publish.run), /human approved the working tree: "Keep the flag off by default"/, 'the step\'s own history shows it');
+  assert.match(jobPrompt(f.store.get(f.job.id), f.sub(1), { id: 'run_publish', phase: 'publish' }), /human approved the working tree: "Keep the flag off by default"/, 'the step\'s own history shows it');
   const web = { ...f.sub(2) };
   const later = jobPrompt(f.store.get(f.job.id), web, { ...f.last().run, phase: 'implementation', subJobId: 'web' });
   assert.match(later, /"Run spike" \(spike\) ---\n"Use the v2 table, not v1\."/, 'a transitive step gets it too');
@@ -531,7 +554,9 @@ test('a code review switch to Auto releases the diffs waiting, refuses an unconf
   assert.equal(f.sub(1).state, 'approved', 'the run kept its uncommitted prompt; its receipt is approved as it lands');
   assert.ok(f.sub(1).ready.approvedAt);
   await f.tick();
-  assert.deepEqual(f.launched.filter((w) => w.run.phase === 'publish').map((w) => w.sub.id).sort(), ['api', 'web']);
+  assert.deepEqual(f.launched.filter((w) => w.run.phase === 'publish'), [], 'both sessions are still there to land what they wrote');
+  assert.deepEqual(f.mailed.map((m) => m.sid).sort(), [f.workerFor('api').sid, f.workerFor('web').sid].sort());
+  assert.ok(f.mailed.every((m) => /commit and push it/.test(m.text)));
   const revision = f.store.get(f.job.id).revision;
   setReview(f, 'reviewCode', false);
   assert.equal(f.store.get(f.job.id).moves.length, 2, 'switching to what it already is records nothing');
@@ -896,48 +921,153 @@ test('a closed PR blocks the sub-job', async (t) => {
   assert.equal(f.sub().error, 'PR was closed without merging');
 });
 
-test('failed CI wakes only bounded repair sessions, and the limit is an error the human retries', async (t) => {
+test('failing checks under You review go back to work and park at code review; approved, the same session pushes the fix', async (t) => {
   const f = fixture(t); f.store.settings({ maxRepairs: 1 }); await atPr(f);
-  f.setPr({ checkStatus: 'failing' }); await f.tick(); assert.equal(f.last().run.phase, 'repair');
-  await f.tick(); assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 1);
-  f.report({ kind: 'repaired', changes: ['Fixed flaky clock assertion'], checks: ['Clock test passes'] }); await f.tick();
-  assert.equal(f.sub().repairs.length, 1); assert.match(f.sub().error, /limit reached/);
+  f.setPr({ checkStatus: 'failing', checks: [{ name: 'unit', state: 'FAILURE' }] }); await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().state, f.sub().checkFix.head], ['implementation', 'queued', 'head1'], 'failing checks are work like any other');
+  await f.tick();
+  const work = f.last();
+  assert.deepEqual([work.run.phase, work.run.fixChecks], ['implementation', 'head1']);
+  assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 0, 'no repair commits behind the checkpoint');
+  assert.match(jobPrompt(f.store.get(f.job.id), work.sub, work.run), /its checks are failing at head1/);
+  f.report({ kind: 'ready', checks: ['Unit passes'] }, work); await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().state], ['review', 'verified'], 'parked at code review for the human');
+  assert.ok(f.store.get(f.job.id).runs.find((r) => r.id === work.run.id).parkedAt);
+  f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await f.tick();
+  assert.match(f.mailed.at(-1).text, /Commit, push to the open PR/);
+  f.report({ kind: 'published', url: PR_URL }, work); await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().checkFix], ['pr', null]);
+  f.store.update(f.job.id, (j) => { j.subJobs[0].nextPollAt = 0; });
+  f.setPr({ head: 'head2', checkStatus: 'failing' }); await f.tick();
+  assert.match(f.sub().error, /^Automatic repair limit reached/, 'bounded by maxRepairs');
   f.store.action(f.job.id, 'retry', { subJobId: 'api' }); await f.tick();
-  assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 2);
+  assert.equal(f.sub().stage, 'implementation', 'a retry allows one more');
+});
+
+test('failing checks on Auto go back to work and land without a park: the ready receipt approves itself and the same session pushes', async (t) => {
+  const f = fixture(t, { ...input, reviewCode: false }); f.store.settings({ maxRepairs: 1 }); await atPr(f);
+  f.setPr({ checkStatus: 'failing' }); await f.tick(); await f.tick();
+  const work = f.last();
+  assert.deepEqual([work.run.phase, work.run.fixChecks], ['implementation', 'head1']);
+  f.report({ kind: 'ready', checks: ['Unit passes'] }, work);
+  const run = f.store.get(f.job.id).runs.find((r) => r.id === work.run.id);
+  assert.deepEqual([f.sub().stage, f.sub().state, run.parkedAt ?? null, run.report], ['review', 'approved', null, null], 'approved as it lands, never parked');
+  await f.tick();
+  assert.equal(f.mailed.at(-1).sid, work.sid);
+  assert.match(f.mailed.at(-1).text, /Code is on Auto, so your ready receipt is approved as it stands/);
+  f.report({ kind: 'published', url: PR_URL }, work); await f.tick();
+  assert.equal(f.sub().stage, 'pr');
+  assert.equal(f.launched.filter((w) => w.run.phase === 'publish').length, 0);
 });
 
 // A receipt settles the PR for COMMENT_SETTLE_MS of wall time; these tests poll again at once.
 const repoll = (f) => f.store.update(f.job.id, (j) => { j.subJobs[0].nextPollAt = 0; });
-test('two conflict repairs then a failing check still launches a normal repair', async (t) => {
+test('a conflicting PR is synced by a session that only merges the base in, and syncs never count against maxRepairs', async (t) => {
   const f = fixture(t); f.store.settings({ maxRepairs: 1 }); await atPr(f);
   for (const head of ['head1', 'head2']) {
     f.setPr({ head, dirty: true, checkStatus: 'failing' }); await f.tick();
-    assert.equal(f.last().run.phase, 'repair'); assert.equal(f.last().run.conflict, head);
-    f.report({ kind: 'repaired', changes: [`Merged main into ${head}`], checks: ['Builds'] }); repoll(f);
+    assert.equal(f.last().run.phase, 'sync'); assert.equal(f.last().run.conflict, head);
+    assert.equal(f.sub().stage, 'pr', 'sync is no stage of its own, and no checkpoint');
+    f.report({ kind: 'synced', resolved: [`Kept both imports at ${head}`] }); repoll(f);
+    assert.deepEqual([f.sub().state, f.sub().pr.checkStatus, f.sub().syncs.length], ['watching', 'pending', head === 'head1' ? 1 : 2]);
   }
   f.setPr({ head: 'head3', dirty: false, checkStatus: 'failing', checks: [{ name: 'e2e', state: 'FAILURE' }] }); await f.tick();
-  assert.ok(!f.sub().error, 'conflict repairs left maxRepairs untouched');
-  assert.equal(f.last().run.phase, 'repair'); assert.equal(f.last().run.conflict, undefined);
-  assert.deepEqual(f.sub().repairs.map((r) => !!r.conflict), [true, true]);
-  f.report({ kind: 'repaired', changes: ['Fixed e2e'], checks: ['e2e passes'] }); repoll(f);
-  f.setPr({ head: 'head4', checkStatus: 'failing' }); await f.tick();
-  assert.match(f.sub().error, /^Automatic repair limit reached/, 'the one check repair is the one that counts');
-  assert.match(redFeedback(f.store.get(f.job.id), f.sub(), 1, 2), /CI repairs already tried: \(merge conflicts\) Merged main into head1 \| \(merge conflicts\) Merged main into head2 \| Fixed e2e/);
+  assert.ok(!f.sub().error, 'syncs left maxRepairs untouched');
+  assert.equal(f.sub().stage, 'implementation');
+  assert.match(historyLinesOf(f), /sync → synced with the base: Kept both imports at head1/);
 });
 
-test('repeated conflict repairs that never clear conflicts eventually stop', async (t) => {
+test('repeated syncs that never clear the conflict eventually stop', async (t) => {
   const f = fixture(t); f.store.settings({ maxRepairs: 0 }); await atPr(f);
   for (let i = 1; i <= 5; i++) {
     f.setPr({ head: `head${i}`, dirty: true, checkStatus: 'failing' }); await f.tick();
-    assert.equal(f.last().run.phase, 'repair', `conflict repair ${i} runs even with maxRepairs 0`);
-    f.report({ kind: 'repaired', changes: ['Tried to merge main'], checks: ['Still conflicts'] }); repoll(f);
+    assert.equal(f.last().run.phase, 'sync', `sync ${i} runs even with maxRepairs 0`);
+    f.report({ kind: 'synced' }); repoll(f);
   }
   f.setPr({ head: 'head6', dirty: true, checkStatus: 'failing' }); await f.tick();
-  assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 5);
+  assert.equal(f.launched.filter((w) => w.run.phase === 'sync').length, 5);
   assert.match(f.sub().error, /conflict repair limit reached/);
   assert.equal(eventFor(f.store.get(f.job.id), f.sub()).title, 'Conflicts on #1');
   f.store.action(f.job.id, 'retry', { subJobId: 'api' }); await f.tick();
-  assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 6, 'a retry allows one more');
+  assert.equal(f.launched.filter((w) => w.run.phase === 'sync').length, 6, 'a retry allows one more');
+});
+
+test('a dirty PR under You review launches a sync run, not implementation; work starts once the branch is level', async (t) => {
+  const f = fixture(t); await atPr(f);
+  await reworkVia(f, 'api', 'Rename the flag');
+  assert.deepEqual([f.sub().stage, f.sub().pr.url], ['implementation', PR_URL]);
+  f.setPr({ head: 'head2', dirty: true, checkStatus: 'failing' }); await f.tick();
+  assert.deepEqual([f.last().run.phase, f.last().run.conflict], ['sync', 'head2'], 'the base goes in first, so the review diff is only the work');
+  assert.equal(f.launched.filter((w) => w.sub?.id === 'api' && w.run.phase === 'implementation').length, 1, 'only the first cut so far');
+  const text = jobPrompt(f.store.get(f.job.id), f.last().sub, f.last().run);
+  assert.match(text, /This step only brings the branch .* up to date with origin\/main/);
+  f.report({ kind: 'synced', resolved: ['Took both sides of README'] });
+  assert.equal(f.sub().stage, 'implementation');
+  f.setPr({ head: 'head3', dirty: false, checkStatus: 'pending' }); await f.tick();
+  assert.equal(f.last().run.phase, 'implementation');
+  assert.equal(f.last().run.fixChecks, undefined);
+});
+
+test('a conflict PR whose worktree still holds unlanded work is worked first and synced after it lands', async (t) => {
+  const f = fixture(t); await atPr(f);
+  let clean = false;
+  f.runtime.treeClean = async () => clean;
+  await reworkVia(f, 'api', 'Rename the flag');
+  f.setPr({ head: 'head2', dirty: true, checkStatus: 'failing' }); await f.tick();
+  const work = f.last();
+  assert.equal(work.run.phase, 'implementation', 'sync never merges into a tree under review');
+  f.report({ kind: 'ready', checks: ['Renamed'] }, work); await f.tick();
+  f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await f.tick();
+  f.report({ kind: 'published', url: PR_URL }, work); clean = true; repoll(f); await f.tick();
+  assert.equal(f.last().run.phase, 'sync', 'landed first, then synced');
+});
+
+test('a sync parks on a conflict that needs a judgement call; the human picks per conflict and the picks are mailed', async (t) => {
+  const f = fixture(t); await atPr(f);
+  f.setPr({ dirty: true, checkStatus: 'failing' }); await f.tick();
+  const sync = f.last();
+  const conflicts = [
+    { file: 'src/limits.js', what: 'Base lowered the limit to 50; this PR made it configurable with a default of 100', options: [{ label: 'Configurable, default 50', why: 'keeps both' }, { label: 'Configurable, default 100' }] },
+    { file: 'README.md', what: 'Both rewrote the same paragraph', options: [{ label: 'Keep this PR\'s paragraph' }] },
+  ];
+  assert.throws(() => f.report({ kind: 'conflict', conflicts }, f.workerFor('api', 'implementation')), /different report|Only the session syncing/);
+  f.report({ kind: 'conflict', summary: 'Two files need a call', conflicts }, sync);
+  f.report({ kind: 'conflict', summary: 'Two files need a call', conflicts }, sync);
+  const run = () => f.store.get(f.job.id).runs.find((r) => r.id === sync.run.id);
+  assert.deepEqual([run().parkedFor, !!run().parkedAt, run().report], ['conflict', true, null]);
+  assert.equal(f.sub().conflict.runId, sync.run.id);
+  const job = f.store.get(f.job.id);
+  assert.deepEqual(jobStatus(job, f.sub()), { tone: 'needs', text: 'Conflict needs you' });
+  assert.equal(jobNeedsReview(job, f.sub()), true);
+  await f.tick(); await f.tick();
+  assert.deepEqual(f.mailed, [], 'nothing is sent before the human picks');
+  assert.ok(!f.stopped.includes(sync.run.id), 'parked, never reaped');
+  assert.throws(() => f.report({ kind: 'synced' }, sync), /wait for mail/);
+  assert.throws(() => f.store.action(f.job.id, 'resolve-conflict', { subJobId: 'api', runId: sync.run.id, picks: [0] }), /each conflict/);
+  assert.throws(() => f.store.action(f.job.id, 'resolve-conflict', { subJobId: 'api', runId: sync.run.id, picks: [0, 1] }), /each conflict/);
+  assert.throws(() => f.store.action(f.job.id, 'resolve-conflict', { subJobId: 'api', runId: 'run_old', picks: [0, 0] }), /moved on/);
+  f.store.action(f.job.id, 'resolve-conflict', { subJobId: 'api', runId: sync.run.id, picks: [1, 0], note: 'Product wants 100' });
+  assert.equal(f.store.get(f.job.id).moves.at(-1).detail, 'Chose how to resolve 2 conflicts on “Deliver api”');
+  assert.throws(() => f.store.action(f.job.id, 'resolve-conflict', { subJobId: 'api', runId: sync.run.id, picks: [1, 0] }), /No conflict is waiting/);
+  await f.tick();
+  assert.equal(f.mailed.length, 1);
+  assert.match(f.mailed[0].text, /- src\/limits.js: "Configurable, default 100"\n- README.md: "Keep this PR's paragraph"\nThey added: "Product wants 100"/);
+  assert.deepEqual(jobStatus(f.store.get(f.job.id), f.sub()), { tone: 'working', text: 'Resolving the conflict' });
+  await f.tick(); assert.equal(f.mailed.length, 1, 'mailed once');
+  f.report({ kind: 'synced', resolved: ['limits.js: configurable, default 100', 'README.md: kept this PR'] }, sync);
+  assert.deepEqual([f.sub().conflict, f.sub().syncs.at(-1).decided, f.sub().state], [null, true, 'watching']);
+});
+
+test('a session that closes while its conflict waits is red, and Retry syncs again', async (t) => {
+  const f = fixture(t); await atPr(f);
+  f.setPr({ dirty: true, checkStatus: 'failing' }); await f.tick();
+  f.report({ kind: 'conflict', conflicts: [{ file: 'a.js', what: 'x', options: [{ label: 'Ours' }] }] });
+  f.alive.delete(f.last().sid); await f.tick();
+  assert.match(f.sub().error, /merge conflict waited for you/);
+  f.store.action(f.job.id, 'retry', { subJobId: 'api' });
+  assert.equal(f.sub().conflict, null);
+  repoll(f); await f.tick();
+  assert.equal(f.last().run.phase, 'sync');
 });
 
 test('a merged sub-job with nothing deployed past the stale window is flagged; a slow run in progress is not', async (t) => {
@@ -1041,36 +1171,41 @@ test('Request changes on an open PR under code review goes back to work in the P
   assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 0, 'no repair commits behind the human’s back');
   const work = jobPrompt(f.store.get(f.job.id), f.last().sub, f.last().run);
   assert.match(work, /PR https:\/\/github.com\/org\/repo\/pull\/1 is already open from this worktree's branch/);
-  assert.match(work, /Leave every change UNCOMMITTED.*pushes it to the open PR/);
+  assert.match(work, /Leave every change UNCOMMITTED.*commit and push it to the open PR/);
   assert.match(work, /human requested changes: "Rename the flag to sign_in_v2"/);
   f.report({ kind: 'ready', checks: ['Flag renamed', 'Tests pass'] }); await f.tick();
   assert.deepEqual([f.sub().stage, f.sub().state], ['review', 'verified'], 'the human reads the diff before it reaches the PR');
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await f.tick();
-  assert.equal(f.last().run.phase, 'publish');
-  const publish = jobPrompt(f.store.get(f.job.id), f.last().sub, f.last().run);
-  assert.match(publish, /push to the open PR; do not open another/);
-  assert.match(publish, /Commit, push to the open PR, then job_report \{runId:"run_\w+", kind:"published", url:"https:\/\/github.com\/org\/repo\/pull\/1", merge\?:\{method, why\}\}/);
+  assert.equal(f.last().run.phase, 'implementation', 'the same session lands it');
+  const land = f.mailed.at(-1).text;
+  assert.match(land, /push to the open PR; do not open another/);
+  assert.match(land, /Commit, push to the open PR, then job_report \{runId:"run_\w+", kind:"published", url:"https:\/\/github.com\/org\/repo\/pull\/1", merge\?:\{method, why\}\}/);
   f.report({ kind: 'published', url: PR_URL }); await f.tick();
   assert.deepEqual([f.sub().stage, f.sub().state, f.sub().mergeApprovedHead], ['pr', 'watching', null], 'a new head: the old merge approval is spent');
 });
 
-test('Request changes on an open PR with code review off launches a repair whatever colour the checks are, and the repaired receipt clears it', async (t) => {
+test('Request changes on an open PR with code review off goes back to work on that PR, and the same session pushes it with no stop', async (t) => {
   const f = fixture(t, { ...input, reviewCode: false }); await f.approve();
   f.report({ kind: 'published', url: PR_URL }); await f.tick();
   f.setPr({ checkStatus: 'passing' }); await f.tick();
-  assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 0, 'green checks start nothing on their own');
+  const before = f.launched.length;
   await reworkVia(f, 'api', 'Rename the flag to sign_in_v2');
-  const requested = f.sub();
-  assert.equal(requested.fixRequested.note, 'Rename the flag to sign_in_v2');
-  assert.equal(requested.state, 'watching'); assert.equal(requested.nextPollAt, 0);
+  assert.deepEqual([f.sub().stage, f.sub().note], ['implementation', 'Rename the flag to sign_in_v2']);
   await f.tick();
-  assert.equal(f.last().run.phase, 'repair');
-  assert.equal(f.last().sub.fixRequested.note, 'Rename the flag to sign_in_v2', 'the prompt carries the note');
-  f.report({ kind: 'repaired', changes: ['Renamed the flag'], checks: ['Tests pass'] });
-  assert.equal(f.sub().fixRequested, null); assert.equal(f.sub().note, null);
-  assert.deepEqual(movesOf(f).map((m) => [m.subJobId, m.move, m.note]), [['api', 'request-change', 'Rename the flag to sign_in_v2'], [null, 'approve-replan', 'About “Deliver api” (api, pr/watching): Rename the flag to sign_in_v2'], ['api', 'replan', null]]);
-  assert.match(movesOf(f)[2].detail, /new commit on “Deliver api”/);
-  assert.match(movesOf(f)[0].id, /^mv_/);
+  const work = f.launched.slice(before).find((w) => w.run.phase === 'implementation');
+  assert.ok(work, 'a work run, not a repair');
+  f.report({ kind: 'ready', checks: ['Renamed'] }, work); await f.tick();
+  assert.match(f.mailed.at(-1).text, /Commit, push to the open PR/);
+  f.report({ kind: 'published', url: PR_URL }, work);
+  assert.deepEqual([f.sub().stage, f.sub().note], ['pr', null]);
+  assert.match(movesOf(f)[2].detail, /back to work on its PR/);
+});
+
+test('a fix requested before one work phase replaced repair is reworked on the next tick', async (t) => {
+  const f = fixture(t); await atPr(f);
+  f.store.update(f.job.id, (j) => { j.subJobs[0].fixRequested = { note: 'Old ask', at: 1 }; });
+  await f.tick();
+  assert.deepEqual([f.sub().stage, f.sub().note, f.sub().fixRequested], ['implementation', 'Old ask', null]);
 });
 
 test('a blocked step is retried with a note; a request on a step with no agent of its own goes to the planner', async (t) => {
@@ -2782,16 +2917,19 @@ test('a plan change that moves a green PR behind new work reworks it, and neithe
   f.store.action(f.job.id, 'approve-replan', { proposalId: f.last().run.id });
   const web = () => f.store.get(f.job.id).subJobs.find((s) => s.id === 'web');
   assert.equal(web().mergeApprovedHead, null);
-  assert.match(web().fixRequested.note, /^About “Deliver web” \(web, pr\/watching\): Web needs the new api\n\nNew brief: Implement web on the new api$/);
-  assert.equal(f.store.get(f.job.id).moves.at(-1).detail, 'Asked for a new commit on “Deliver web”');
-  assert.throws(() => f.store.action(f.job.id, 'approve-merge', { subJobId: 'web', head: 'head1' }), /prerequisites/);
+  assert.match(web().note, /^About “Deliver web” \(web, pr\/watching\): Web needs the new api\n\nNew brief: Implement web on the new api$/);
+  assert.deepEqual([web().stage, web().pr.url], ['implementation', PR_URL], 'back to work on its open PR, even with Code on Auto');
+  assert.equal(f.store.get(f.job.id).moves.at(-1).detail, 'Sent “Deliver web” back to work on its PR');
+  assert.throws(() => f.store.action(f.job.id, 'approve-merge', { subJobId: 'web', head: 'head1' }), /green checks first/);
+  const before = f.launched.length;
   await f.tick(); await f.tick();
-  assert.equal(f.workerFor('web', 'repair'), undefined, 'the new brief builds on api, which has not landed');
+  assert.equal(f.launched.length, before, 'the new brief builds on api, which has not landed');
   assert.deepEqual(f.merged, []);
   f.store.update(f.job.id, (j) => { j.subJobs[0].deployed = { at: 1, checks: ['Shipped'] }; });
   await f.tick();
-  assert.ok(f.workerFor('web', 'repair'));
-  assert.match(jobPrompt(f.store.get(f.job.id), web(), f.workerFor('web', 'repair').run), /the human asks: About “Deliver web” .*: Web needs the new api/);
+  const work = f.workerFor('web', 'implementation');
+  assert.ok(f.launched.indexOf(work) >= before);
+  assert.match(jobPrompt(f.store.get(f.job.id), web(), work.run), /Asked of this run \(JSON text; from the human, through Wrangler\): "About “Deliver web” .*Web needs the new api/);
 });
 
 test('an idea typed on a PR holds it from merging once Wrangler proposes a change to it, until that change is discarded', async (t) => {
@@ -2947,17 +3085,17 @@ test('a head change that was not ours does not inherit the approval', async (t) 
   assert.equal(f.sub().mergeApprovedHead, 'head1');
 });
 
-test('a conflicting update is treated as DIRTY and sent to repair; transient failures just retry', async (t) => {
+test('a conflicting update is treated as DIRTY and sent to sync; transient failures just retry', async (t) => {
   const f = fixture(t); await atPr(f);
   f.github.updateBranch = async () => { throw new Error('merge conflict between base and head'); };
   f.setPr({ checkStatus: 'pending', behind: true }); await f.tick();
   assert.match(f.sub().note, /conflict/);
   await f.tick();
-  assert.equal(f.last().run.phase, 'repair'); assert.equal(f.sub().pr.dirty, true);
+  assert.equal(f.last().run.phase, 'sync'); assert.equal(f.sub().pr.dirty, true);
   const g = fixture(t); await atPr(g);
   g.github.updateBranch = async () => { throw new Error('network down'); };
   g.setPr({ checkStatus: 'pending', behind: true }); await g.tick(); await g.tick();
-  assert.notEqual(g.last().run.phase, 'repair'); assert.equal(g.sub().branchUpdate.failedHead, undefined);
+  assert.notEqual(g.last().run.phase, 'sync'); assert.equal(g.sub().branchUpdate.failedHead, undefined);
 });
 
 test('a BEHIND accepted-red head is updated, not --admin merged, and the acceptance follows the new head', async (t) => {

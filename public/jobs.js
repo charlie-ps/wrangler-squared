@@ -219,7 +219,10 @@ export const writeWaiting = (job, sub) => isWriteSub(sub) && sub.stage === 'writ
 export const writeAwaitingReview = (sub) => isWriteSub(sub) && sub.stage === 'review' && !sub.error;
 // A session parked on drafts it sent, until every one is decided and it is told
 // which to make (server/job-writes.js).
-export const parkedRun = (job, sub) => { const run = liveRun(job, sub); return run?.parkedAt && !run.mailedAt && run.parkedFor !== 'ready' ? run : null; };
+export const parkedRun = (job, sub) => { const run = liveRun(job, sub); return run?.parkedAt && !run.mailedAt && !['ready', 'conflict'].includes(run.parkedFor) ? run : null; };
+// A sync session stopped on a merge conflict it will not guess at (server/job-sync.js):
+// the human picks one way out per conflict.
+export const conflictWaiting = (sub) => !!sub?.conflict && !sub.conflict.decided;
 export const draftsWaiting = (job, sub) => (parkedRun(job, sub)?.drafts || []).map((id) => job.subJobs.find((s) => s.id === id)).filter((w) => writeAwaitingReview(w));
 // "→ In Review", "Comment", "Post", "Make": a write in a few words, beside the
 // place's glyph that already says where.
@@ -307,7 +310,7 @@ export const noteReaders = (job, sub) => {
 };
 // A session parked on its ready receipt (server/job-parked.js) is only waiting on
 // the human, so it is not a running step until a message to it is in flight.
-const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null) && !(r.parkedFor === 'ready' && !sub?.answering) && !(r.parkedFor === 'idea' && ideaStage(job) !== 'thinking'));
+const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null) && !(r.parkedFor === 'ready' && !sub?.answering && !r.landing) && !(r.parkedFor === 'idea' && ideaStage(job) !== 'thinking'));
 // The open session behind a Code review step: parked, or answering what was sent.
 export const readyRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === sub?.id && r.parkedFor === 'ready') || null;
 // What the card says while that session works on a message. Only a kind the
@@ -355,7 +358,7 @@ export const hasWrites = (job) => (job.subJobs?.length ? job.subJobs : job.plan?
 export const jobCheckpoints = (job) => CHECKPOINTS.filter((cp) => (cp.field !== 'reviewSessions' || hasSessionSubs(job)) && (cp.field !== 'reviewWrites' || hasWrites(job)));
 export const reviewFlagsLabel = (job) => jobCheckpoints(job).filter((cp) => cp.field !== 'reviewPlan').map((cp) => checkpointLabel(cp, youReview(job, cp.field))).join(' · ');
 // The uncommitted working tree awaits the human: nothing is committed and no
-// agent runs until approve-code (server/job-store.js) releases the publish session.
+// agent runs until approve-code (server/job-store.js) has the same session land it.
 export const codeAwaitingReview = (sub) => isPrSub(sub) && sub?.stage === 'review' && sub.state === 'verified';
 // What the merge inference found for this PR's head (server job-deploys.js), in
 // the words the human reads on the card and in the detail: "Deploys on merge · …"
@@ -572,6 +575,7 @@ export const heldByReplan = (job, sub) => !!sub?.held;
 export function jobNeedsReview(job, sub) {
   if (job.error) return true;
   if (sub?.error) return !redFixing(job, sub) && !workingOnFeedback(job, sub);
+  if (conflictWaiting(sub)) return true;
   // A step waiting on a prompt is the human's, whatever else the job is doing.
   if (runStatus(job, sub) === 'needs-you') return true;
   if (heldByReplan(job, sub) || workingOnFeedback(job, sub)) return false;
@@ -616,10 +620,12 @@ export function jobStatus(job, sub) {
   if (run) {
     if (run.status === 'needs-you') return { tone: 'needs', text: 'Waiting on a prompt' };
     // Its drafts are each the human's to decide (the writes carry the needs-you).
+    if (run.parkedFor === 'conflict') return conflictWaiting(sub) ? { tone: 'needs', text: 'Conflict needs you' } : { tone: 'working', text: 'Resolving the conflict' };
+    if (run.landing) return { tone: 'working', text: sub.pr ? 'Committing & pushing' : 'Committing & opening the PR' };
     if (run.parkedFor === 'ready') return { tone: 'working', text: answeringLabel(sub) };
     if (parkedRun(job, sub)) { const n = draftsWaiting(job, sub).length; return n ? { tone: 'muted', text: `Paused · ${n} draft${n === 1 ? '' : 's'} to review` } : { tone: 'working', text: 'Drafts decided · resuming' }; }
     if (run.mailedAt && !run.report) return { tone: 'working', text: 'Making the approved writes' };
-    return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: run.ask ? 'Answering you' : job.stage === 'active' ? 'Wrangling' : 'Planning', implementation: reviewCode(job) ? 'Working' : 'Working on the PR', publish: 'Committing & opening the PR', repair: 'Fixing the PR', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };
+    return { tone: 'working', text: run.report ? 'Saving receipt' : ({ planning: run.ask ? 'Answering you' : job.stage === 'active' ? 'Wrangling' : 'Planning', implementation: sub?.checkFix ? 'Fixing failing checks' : 'Working', publish: sub?.pr ? 'Committing & pushing' : 'Committing & opening the PR', repair: 'Fixing the PR', sync: 'Syncing with the base', verify: 'Checking it landed', session: 'Working' }[run.phase] || 'Working') };
   }
   if (workingOnFeedback(job, sub)) return { tone: 'working', text: FEEDBACK_LABEL };
   if (sub && heldByReplan(job, sub)) return { tone: 'muted', text: job.replan.red ? 'Held for the fix' : 'Held for the plan change' };
@@ -631,7 +637,7 @@ export function jobStatus(job, sub) {
   if (sub?.stage === 'pr' && sub.fixRequested && !pendingDependencies(job, sub).length) return { tone: 'working', text: 'Fix requested' };
   if (deploymentStalled(sub)) return { tone: 'needs', text: 'No deployment run' };
   if (jobNeedsReview(job, sub)) return { tone: 'needs', text: sub ? isHumanSub(sub) ? 'Needs you' : isSessionSub(sub) || codeAwaitingReview(sub) ? 'Ready to review' : sub.stage === 'pr' ? mergeHeldByComments(job, sub) ? 'Comments block merging' : 'Ready to merge' : 'Needs you' : replanProposed(job) ? 'Plan change to review' : 'Plan ready to review' };
-  // Approved: the publish session starts on the runner's next tick.
+  // Approved: the session that wrote it is told to commit on the runner's next tick.
   if (sub?.stage === 'review' && isPrSub(sub)) return { tone: 'working', text: 'Approved · committing next' };
   if (!sub) return { tone: 'muted', text: job.stage === 'backlog' ? 'Ready when you are' : job.stage === 'done' ? 'Delivered' : 'Queued' };
   // A session or human prerequisite blocks the work from starting; a PR prerequisite

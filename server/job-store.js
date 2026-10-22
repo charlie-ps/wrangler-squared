@@ -7,6 +7,7 @@ import { migrateTheme } from '../public/theme-ids.js';
 import { adoptEvidence } from './job-evidence.js';
 import { parkedReadyRun, askAgent, answered, sayInThread } from './job-parked.js';
 import { setRunning, runningOf } from './job-running.js';
+import { parkConflict, resolveConflict, applySynced } from './job-sync.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub, retrySub } from './job-sub-ops.js';
@@ -537,6 +538,13 @@ export class JobStore {
         askAgent(s, { from: 'system', text: `The working tree changed after you reported ready (round ${s.ready.round}). Report ready again so the human can approve what is there now.`, kind: 'retell' }, Date.now());
         return;
       }
+      // The human's pick for each conflict the sync session parked on (job-sync.js);
+      // the runner mails the picks to it.
+      if (action === 'resolve-conflict') {
+        const detail = resolveConflict(s, payload);
+        record(j, s, 'resolve-conflict', s.conflict.decided.note, detail);
+        return;
+      }
       if (action === 'approve-code') {
         if (!s || !isPrSub(s) || s.stage !== 'review' || s.state !== 'verified' || !s.ready || s.ready.receiptId !== readyReceiptId || s.error) throw new Error('The code is not ready to approve');
         // The tree the agent reported ready, as the handler read it just now
@@ -646,12 +654,13 @@ export class JobStore {
         throw new Error('This run already submitted a different report');
       }
       if (r.stopped) throw new Error('This run has stopped');
-      // Implementation lands EITHER receipt: which one its prompt asked for
-      // depends on `reviewCode`, and a session launched before that flag flipped
-      // (or one that pushed anyway) must still be able to land what it did — a
-      // PR that exists is a PR, whatever the board expected. A `write` run is
-      // the batched writer's, which no longer exists: nothing it says is taken.
-      const expected = { planning: ['plan', 'reply'], write: [], implementation: ['ready', 'reply', 'published'], publish: ['published'], repair: ['repaired'], verify: ['deployed'], session: ['completed', 'drafts'] }[r.phase];
+      // Work reports ready, and the same session lands it once approved
+      // (`published`). A session launched before one work phase replaced the Auto
+      // road (or one that pushed anyway) must still be able to land what it did: a
+      // PR that exists is a PR, whatever the board expected. A `repair` run is from
+      // before that too. A `write` run is the batched writer's, which no longer
+      // exists: nothing it says is taken.
+      const expected = { planning: ['plan', 'reply'], write: [], implementation: ['ready', 'reply', 'published'], publish: ['published'], repair: ['repaired'], sync: ['synced', 'conflict'], verify: ['deployed'], session: ['completed', 'drafts'] }[r.phase];
       if (!expected.length) throw new Error('This run predates session-owned writes; stop now');
       // Going up one level is always open: blocked and escalate from any step, replan
       // from every step but the planner's own (which has no one above it but you).
@@ -672,6 +681,9 @@ export class JobStore {
         r.draftReport = report; r.parkedAt ??= Date.now();
         return;
       }
+      if (report.kind === 'conflict') { parkConflict(j, r, s, report, Date.now()); return; }
+      if (report.kind === 'synced' && r.parkedAt && !r.mailedAt) throw new Error('Your conflict is with the human: wait for mail with their choices, then resolve it');
+      if (r.landing && !['published', 'blocked', 'escalate', 'replan'].includes(report.kind)) throw new Error('The human approved your tree: commit and push it, then report published');
       if (report.kind === 'completed' && r.parkedAt && !r.mailedAt) throw new Error('Your drafts are with the human: wait for mail saying which writes to make, then complete');
       // A session parked on its ready receipt is answering the human. A reply
       // keeps it parked; a fresh ready is a new round of the same run.
@@ -689,18 +701,20 @@ export class JobStore {
       }
       if (report.kind === 'plan' && r.phase === 'planning' && inConversation(j) && unsentIdea(j).length) throw new Error(UNSENT_IDEA);
       const parked = r.parkedFor === 'ready' && r.parkedAt && !r.mailedAt;
-      if (parked && report.kind === 'ready' && JSON.stringify(r.readyReport) === JSON.stringify(report)) return;
+      if (r.parkedFor === 'ready' && report.kind === 'ready' && (parked || !r.mailedAt) && JSON.stringify(r.readyReport) === JSON.stringify(report)) return;
       if (parked && report.kind !== 'blocked') throw new Error('You already reported ready; wait for mail from the human');
       // The proof is checked and kept BEFORE anything is recorded, so a refused
       // receipt leaves no trace and the agent simply fixes it and reports again.
       const live = s && !j.cancelledAt && !s.cancelledAt;
       const proof = report.kind === 'ready' && live ? this._proofOf(j, r, s, report) : null;
-      const park = report.kind === 'ready' && live && isPrSub(s) && r.phase === 'implementation' && reviewCode(j);
+      const keep = report.kind === 'ready' && live && isPrSub(s) && r.phase === 'implementation';
       r.reportedAt = Date.now();
-      if (park) {
-        // Not `report`: that ends a run. With the human reviewing, the session
-        // waits for them instead (job-parked.js).
-        Object.assign(r, { readyReport: report, readyCount: (r.readyCount || 0) + 1, parkedFor: 'ready', parkedAt: Date.now(), mailedAt: null, idleSince: null });
+      if (keep) {
+        // Not `report`: that ends a run, and this session lands what it wrote once
+        // it is approved (job-runner.js). With the human reviewing it waits for them
+        // too, parked (job-parked.js); on Auto it is approved as it lands and told to
+        // commit on the runner's next tick, so it never parks.
+        Object.assign(r, { readyReport: report, readyCount: (r.readyCount || 0) + 1, parkedFor: 'ready', mailedAt: null, idleSince: null }, reviewCode(j) ? { parkedAt: Date.now() } : {});
       } else {
         r.report = report;
         if (r.parkedFor) r.parkedAt = null;
@@ -821,7 +835,8 @@ export class JobStore {
       if (r.parkedFor === 'ready' && proof?.round > 1) sayInThread(s, { id: `msg_${Date.now().toString(36)}r`, at: Date.now(), from: 'system', text: `Ready again with new proof.`, round: proof.round });
       if (!reviewCode(j)) { s.ready.approvedAt = s.ready.at; s.state = 'approved'; }
     }
-    if (report.kind === 'published') { s.pr = { url: report.url, checkStatus: 'pending' }; s.merge = report.merge || s.ready?.merge || null; s.stage = 'pr'; s.state = 'watching'; s.mergeApprovedHead = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
+    if (report.kind === 'published') { s.pr = { url: report.url, checkStatus: 'pending' }; s.merge = report.merge || s.ready?.merge || null; s.stage = 'pr'; s.state = 'watching'; s.mergeApprovedHead = null; s.note = null; s.checkFix = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
+    if (report.kind === 'synced') applySynced(s, report, Date.now());
     if (report.kind === 'repaired') { s.repairs.push({ ...report, ...(r.conflict ? { conflict: true } : {}), at: Date.now() }); s.state = 'watching'; s.mergeApprovedHead = null; s.pr.checkStatus = 'pending'; s.fixRequested = null; s.note = null; s.nextPollAt = Date.now() + COMMENT_SETTLE_MS; }
     // A session's receipt is the whole deliverable; with review on it waits for a
     // human, otherwise cleanup (archive its session) takes it straight to done.

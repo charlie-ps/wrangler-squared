@@ -185,13 +185,12 @@ test('a PR step: plan, approve, launch, ready, code review, published, merge app
 
   await f.approve('approve-code', { subJobId: 'api', readyReceiptId: f.sub('api').ready.receiptId });
   await f.tick();
-  const publish = f.runOf('api', 'publish');
-  assert.ok(publish?.sessionId, 'approving the tree launches the publish session');
-  assert.equal(f.sessions.get(impl.sessionId).archived, true, 'and retires the parked one');
-  assert.equal(f.spawned.at(-1).worktree.folderName, wt, 'publish adopts the reviewed worktree');
+  assert.equal(f.runOf('api', 'publish'), undefined, 'no publish session: the one that wrote the tree lands it');
+  assert.equal(f.mailed.at(-1).to, impl.sessionId);
+  assert.match(f.mailed.at(-1).text, /You are now asked to commit and push it/);
 
   const head = f.work('api', 'api.js', 'export const ok = true;\n', { push: true });
-  await f.report(publish, { kind: 'published', url: PR_URL });
+  await f.report(impl, { kind: 'published', url: PR_URL });
   f.openPr(head, { checkStatus: 'passing' });
   f.state.deploys = true;
   await f.tick();
@@ -266,41 +265,90 @@ test('a human step is marked started then done by the human, which releases the 
   assert.deepEqual(f.job().moves.map((m) => m.move), ['start-human', 'finish-human']);
 });
 
-test('red to repair: failing CI is repaired once, the limit turns it red, the planner proposes a rework, the human approves, and the repaired PR merges', async (t) => {
+test('red to fix: failing CI goes back to work once, the limit turns it red, the planner proposes a rework, the human approves, and the fixed PR merges', async (t) => {
   const f = board(t, { settings: { maxRepairs: 1, maxReplans: 1 } });
   await f.start({ subJobs: [pr('api', [], { repo: f.repo })] }, { reviewCode: false, reviewMerge: false });
   const failing = { checkStatus: 'failing', checks: [{ name: 'e2e', state: 'FAILURE' }] };
   await f.publish('api', f.runOf('api', 'implementation'), failing);
-  await f.tick();
-  const repair = f.runOf('api', 'repair');
-  assert.ok(repair?.sessionId, 'failing CI wakes a repair session');
+  await f.tick(); await f.tick();
+  const fix = f.runOf('api', 'implementation');
+  assert.ok(fix?.sessionId && fix.fixChecks, 'failing CI wakes a work run, not a repair');
+  assert.equal(f.runOf('api', 'repair'), undefined);
   assert.equal(f.spawned.at(-1).worktree.folderName, f.sub('api').worktree.path, 'in the PR\'s own worktree');
 
-  const second = f.work('api', 'api.js', 'export const api = 2;\n', { push: true });
-  await f.report(repair, { kind: 'repaired', changes: ['Waited for the stub'], checks: ['e2e passes locally'] });
-  f.openPr(second, failing);
+  f.work('api', 'api.js', 'export const api = 2;\n');
+  await f.report(fix, { kind: 'ready', checks: ['e2e passes locally'] });
   await f.tick();
-  assert.match(f.sub('api').error, /repair limit/, 'still failing after the last repair: red');
+  assert.match(f.mailed.at(-1).text, /Code is on Auto/, 'no park on Auto: the same session is told to push');
+  const second = f.work('api', 'api.js', 'export const api = 2;\n', { push: true });
+  await f.report(fix, { kind: 'published', url: PR_URL });
+  f.openPr(second, failing);
+  await f.tick(); await f.tick();
+  assert.match(f.sub('api').error, /repair limit/, 'still failing after the last fix: red');
   await f.tick();
   const planner = f.runOf(null, 'planning');
   assert.deepEqual([planner.red, f.job().replan.red], [{ sub: 'api' }, { sub: 'api', auto: false, n: 1 }], 'a red step goes to the planner before the human');
   await f.report(planner, { kind: 'plan', plan: f.job().plan, diagnosis: { summary: 'The e2e wait is too short' }, actions: [{ type: 'rework', sub: 'api', note: 'Raise the e2e wait' }] });
   await f.tick();
   assert.match(f.sub('api').error, /repair limit/, 'Red steps on You decide: nothing applies by itself');
-  assert.equal(f.runOf('api', 'repair').id, repair.id);
 
   await f.approve('approve-replan', { proposalId: planner.id });
   assert.equal(f.sub('api').error, null);
   await f.tick();
-  const rework = f.runOf('api', 'repair');
-  assert.notEqual(rework.id, repair.id, 'the approved rework runs as a repair past the limit');
+  const rework = f.runOf('api', 'implementation');
+  assert.notEqual(rework.id, fix.id, 'the approved rework is a work run past the limit');
+  f.work('api', 'api.js', 'export const api = 3;\n');
+  await f.report(rework, { kind: 'ready', checks: ['e2e passes'] });
+  await f.tick();
   const third = f.work('api', 'api.js', 'export const api = 3;\n', { push: true });
-  await f.report(rework, { kind: 'repaired', changes: ['Raised the e2e wait'], checks: ['e2e passes'] });
+  await f.report(rework, { kind: 'published', url: PR_URL });
   f.openPr(third, { checkStatus: 'passing' });
   await f.tick(); await f.tick(); await f.tick();
   assert.deepEqual(f.state.merged, [third], 'only the green head merges');
   assert.deepEqual([f.sub('api').stage, f.sub('api').deployed.checks.length], ['done', 1]);
   assert.equal(f.job().stage, 'done');
+});
+
+test('a work session that merged the base in has its ready refused while MERGE_HEAD is set; sync merges it instead, and work never does', async (t) => {
+  const f = board(t);
+  await f.start({ subJobs: [pr('api', [], { repo: f.repo })] }, { reviewCode: true, reviewMerge: true });
+  const impl = f.runOf('api', 'implementation');
+  const wt = f.sub('api').worktree.path;
+  // The base moves under the step, touching the same line the step does.
+  fs.writeFileSync(path.join(f.repo, 'README.md'), '# widgets, from main\n');
+  git(f.repo, 'commit', '-qam', 'Main moves'); git(f.repo, 'push', '-q', 'origin', 'HEAD:main');
+  fs.writeFileSync(path.join(wt, 'README.md'), '# widgets, from the step\n');
+  git(wt, 'commit', '-qam', 'Step edit'); git(wt, 'fetch', '-q', 'origin');
+  assert.throws(() => git(wt, 'merge', 'origin/main'), /CONFLICT|conflict|Command failed/);
+  const refused = await tool('job_report').handler({ host: f.host, caller: impl.sessionId }, { runId: impl.id, report: { kind: 'ready', checks: ['Tests pass'] } });
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /A merge is in progress in this worktree \(MERGE_HEAD is set\)/);
+  assert.equal(f.sub('api').stage, 'implementation', 'nothing recorded');
+  git(wt, 'merge', '--abort');
+  await f.report(impl, { kind: 'ready', checks: ['Tests pass'] });
+  await f.tick();
+  assert.equal(f.sub('api').stage, 'review');
+  await f.approve('approve-code', { subJobId: 'api', readyReceiptId: f.sub('api').ready.receiptId });
+  await f.tick();
+  git(wt, 'push', '-q', 'origin', `HEAD:refs/heads/${f.sub('api').worktree.branch}`);
+  const head = git(wt, 'rev-parse', 'HEAD');
+  await f.report(impl, { kind: 'published', url: PR_URL });
+  f.openPr(head, { checkStatus: 'failing', dirty: true });
+  await f.tick();
+  const sync = f.runOf('api', 'sync');
+  assert.ok(sync?.sessionId, 'a conflicting PR gets a sync session, not work');
+  assert.equal(f.spawned.at(-1).worktree.folderName, wt, 'in the PR\'s own worktree');
+  assert.match(f.spawned.at(-1).intent, /This step only brings the branch .* up to date with origin\/main/);
+  // The sync session's half: merge the base, resolve, commit the merge, push.
+  assert.throws(() => git(wt, 'merge', 'origin/main'), /Command failed/);
+  fs.writeFileSync(path.join(wt, 'README.md'), '# widgets, from main and the step\n');
+  git(wt, 'add', '-A'); git(wt, 'commit', '-q', '--no-edit');
+  git(wt, 'push', '-q', 'origin', `HEAD:refs/heads/${f.sub('api').worktree.branch}`);
+  await f.report(sync, { kind: 'synced', resolved: ['README.md: kept both lines'] });
+  f.openPr(git(wt, 'rev-parse', 'HEAD'), { checkStatus: 'passing' });
+  await f.tick();
+  assert.deepEqual([f.sub('api').stage, f.sub('api').syncs.length, f.sub('api').pr.dirty], ['pr', 1, undefined]);
+  assert.equal(f.runOf('api', 'sync').stopped, true);
 });
 
 test('a running job takes a plan change: the running step carries on, unstarted work is cancelled, the added step runs once its prerequisite lands', async (t) => {

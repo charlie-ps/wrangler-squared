@@ -288,6 +288,27 @@ export class JobRuntime {
     return !!s && !s.archived;
   }
 
+  // Whether the PR's worktree holds no uncommitted work (job-runner.js workOnPr):
+  // sync runs only into a clean one, so it never merges into a tree under review.
+  // A tree git cannot read is not clean.
+  async treeClean(sub) {
+    if (!sub?.worktree?.path || !fs.existsSync(sub.worktree.path)) return true;
+    const out = await this.run('git', ['status', '--porcelain'], sub.worktree.path).catch(() => null);
+    return out !== null && !String(out).trim();
+  }
+
+  // The worktree takes what its branch gained on origin (an update-branch, a sync
+  // pushed from elsewhere) before work starts on it, fast-forward only. Best-effort:
+  // a branch that cannot fast-forward is left for the work session to see.
+  async catchUp(sub) {
+    const wt = sub?.worktree;
+    if (!wt?.path || !wt.branch || !fs.existsSync(wt.path)) return;
+    try {
+      await this.run('git', ['fetch', 'origin', wt.branch], wt.path);
+      await this.run('git', ['merge', '--ff-only', 'FETCH_HEAD'], wt.path);
+    } catch (e) { this.host.log?.('worktree catch-up skipped', stderrLine(e) || e.message); }
+  }
+
   // The human's decisions on a parked session's drafts reach it as mail, which
   // the wrangler pastes in once the card is live and idle; a dormant card is
   // woken first (resume relaunches a live pane, so only a dormant one is).

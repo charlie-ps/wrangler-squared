@@ -38,16 +38,16 @@ test('an approved brief or landing-order change sends code already written back 
   const j = fresh(false);
   const { lines } = approveReplan(j, 'p1', { now: 5 });
   const b = at(j, 'b');
-  assert.equal(b.stage, 'pr'); assert.equal(b.mergeApprovedHead, null, 'the approval was for the old brief');
-  assert.deepEqual(b.fixRequested, { note: 'Land b after a\n\nNew brief: Build b on a', at: 5 });
+  assert.equal(b.stage, 'implementation', 'back to work on its PR, whatever Code review is set to'); assert.equal(b.mergeApprovedHead, null, 'the approval was for the old brief');
+  assert.deepEqual([b.note, b.pr.url], ['Land b after a\n\nNew brief: Build b on a', pr.url]);
   assert.equal(at(j, 'c').stage, 'implementation', 'an uncommitted tree goes back to work, its approval withdrawn');
   assert.equal(at(j, 'c').ready, null); assert.match(at(j, 'c').note, /New brief: Smaller c/);
   assert.equal(at(j, 'd').fixRequested, undefined, 'a new title asks nothing of the code');
   assert.equal(at(j, 'e').note, undefined, 'still being worked: the next session reads the new brief anyway');
-  assert.deepEqual(lines.map((l) => l.detail).filter((d) => !/^Plan change/.test(d)), ['Asked for a new commit on “Deliver b”', 'Sent “Deliver c” back to work']);
+  assert.deepEqual(lines.map((l) => l.detail).filter((d) => !/^Plan change/.test(d)), ['Sent “Deliver b” back to work on its PR', 'Sent “Deliver c” back to work']);
 
   const k = fresh(true); approveReplan(k, 'p1', { now: 5 });
-  assert.equal(at(k, 'b').stage, 'implementation', 'under code review the rework comes back through review');
+  assert.equal(at(k, 'b').stage, 'implementation', 'and the same under code review');
   assert.equal(at(k, 'b').fixRequested, null); assert.match(at(k, 'b').note, /^Land b after a/);
 });
 

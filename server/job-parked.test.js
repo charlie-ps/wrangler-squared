@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { JobStore, holdsSlot, TREE_MOVED } from './job-store.js';
 import { JobRunner } from './job-runner.js';
 import { changeView } from './job-change.js';
+import { parkedReadyRun } from './job-parked.js';
 import { ensureInbox, roundDir, ideasDir } from './job-evidence.js';
 import { workingTreeHash } from './git.js';
 import { threadMail, jobPrompt } from './job-prompts.js';
@@ -227,9 +228,10 @@ test('a change is reworked into a fresh ready: a new round, a new receipt, earli
   const parked = f.last().run.id;
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: sub.ready.receiptId });
   await f.tick();
-  assert.equal(f.stopped.includes(parked), true, 'approving stops the parked session');
-  assert.equal(f.last().run.phase, 'publish');
-  assert.match(jobPrompt(f.store.get(f.job.id), f.last().sub, f.last().run), /implementation → ready: /);
+  assert.equal(f.stopped.includes(parked), false, 'approving keeps the parked session: it lands what it wrote');
+  assert.match(f.mailed.at(-1).text, /approved your working tree \(round 2\) as it stands/);
+  assert.ok(f.run().landing);
+  assert.equal(parkedReadyRun(f.store.get(f.job.id), f.sub()), null, 'a landing session takes no more of the human\'s words');
 });
 
 test('approve-code is pinned to the working tree the agent reported', async (t) => {
@@ -289,22 +291,22 @@ test('workingTreeHash covers untracked files, ignores ignored ones, and leaves t
   assert.equal(git('status', '--porcelain').includes('A '), false, 'nothing was staged in the real index');
 });
 
-test('Code=Auto with show items saves proof in round-1 and goes on to publish without stopping in review', async (t) => {
+test('Code=Auto with show items saves proof in round-1 and goes on to land without stopping in review', async (t) => {
   const f = fixture(t); f.store.update(f.job.id, (j) => { j.reviewCode = false; });
   await f.start();
   const impl = f.last().run.id;
   ensureInbox(f.job.id, 'api'); fs.writeFileSync(path.join(ensureInbox(f.job.id, 'api'), 'list.png'), PNG);
   f.report({ kind: 'ready', checks: [shot()] });
   const run = f.store.get(f.job.id).runs.find((r) => r.id === impl);
-  assert.ok(run.report, 'the ready receipt ends the run: nothing parks');
-  assert.equal(run.parkedFor, undefined);
+  assert.deepEqual([run.report, run.parkedAt ?? null, holdsSlot(run)], [null, null, true], 'nothing parks: the session stays on to land it');
   assert.deepEqual([f.sub().stage, f.sub().state, f.sub().ready.round, f.sub().ready.approvedAt === f.sub().ready.at], ['review', 'approved', 1, true], 'approved as it lands, never verified');
   assert.deepEqual(f.sub().ready.proof.map((p) => [p.text, p.shots.map((s) => s.file)]), [['Lists sign-ins', ['list.png']]]);
   assert.ok(fs.existsSync(path.join(roundDir(f.job.id, 'api', 1), 'list.png')), 'the proof is kept in round-1, viewable on the step');
   await f.tick();
-  assert.equal(f.store.get(f.job.id).runs.find((r) => r.id === impl).stopped, true);
-  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'publish'], 'the publish session follows on the very next tick');
-  assert.equal(f.mailed.length, 0, 'nobody was asked anything');
+  assert.equal(f.store.get(f.job.id).runs.find((r) => r.id === impl).stopped, false);
+  assert.equal(f.launched.filter((w) => w.run.phase === 'publish').length, 0);
+  assert.equal(f.mailed.length, 1, 'the same session is told to commit and push on the very next tick');
+  assert.match(f.mailed[0].text, /Code is on Auto/);
 });
 
 test('switching Code to Auto mid-job releases a parked ready step and tears down what it left running', async (t) => {
@@ -317,13 +319,12 @@ test('switching Code to Auto mid-job releases a parked ready step and tears down
   assert.deepEqual([f.sub().state, !!f.sub().ready.approvedAt], ['approved', true]);
   await f.tick();
   const run = f.store.get(f.job.id).runs.find((r) => r.id === impl);
-  assert.deepEqual([run.stopped, !!run.error], [true, false], 'the parked session ends quietly');
+  assert.deepEqual([run.stopped, !!run.landing, !!run.error], [false, true, false], 'the parked session is told to land it');
   assert.deepEqual(f.running.kills, [48211], 'what it left running is torn down');
   assert.ok(f.sub().running.stopped, 'and recorded as stopped');
-  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'publish']);
 });
 
-test('a parked step still answering when Code goes to Auto is not cut off: its reply lands approved and publish follows', async (t) => {
+test('a parked step still answering when Code goes to Auto is not cut off: its reply lands approved and it is told to land it', async (t) => {
   const f = fixture(t); await f.start(); await f.ready();
   await f.ask('What does it show when nobody has signed in?');
   await f.tick();
@@ -336,7 +337,7 @@ test('a parked step still answering when Code goes to Auto is not cut off: its r
   assert.deepEqual([f.sub().state, !!f.sub().ready.approvedAt], ['approved', true]);
   assert.equal(f.store.get(f.job.id).moves.at(-1).detail, 'Approved the working tree of “Audit page”: Local verification is on Auto');
   await f.tick();
-  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'publish']);
+  assert.match(f.mailed.at(-1).text, /commit and push it/, 'and it is told to land it');
 });
 
 test('pasted images go to the evidence folder and the session is mailed their path', async (t) => {

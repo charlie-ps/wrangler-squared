@@ -5,13 +5,16 @@
 // claims it. Everything the human and the agent say lives on the sub-job's
 // `thread`; a message for the agent is mailed by the runner (job-runner.js).
 
-export const parkedReadyRun = (job, sub) => sub && job.runs.find((r) => !r.stopped && r.subJobId === sub.id && r.parkedFor === 'ready') || null;
+// Once approved the same session lands what it wrote (`landing`, job-runner.js):
+// it is no longer open for the human's words.
+export const parkedReadyRun = (job, sub) => sub && job.runs.find((r) => !r.stopped && r.subJobId === sub.id && r.parkedFor === 'ready' && !r.landing) || null;
 
-// Still what the human is looking at: the review is open on a receipt this run
-// made. Approved, dropped, reworked by a plan change or retried all end it.
+// Still this run's to finish: the review is open on a receipt it made, or approved
+// and waiting for it to commit and push. Dropped, reworked by a plan change or
+// retried all end it.
 export const waitsOnReview = (job, run) => {
   const sub = job.subJobs.find((s) => s.id === run.subJobId);
-  return !!sub && !sub.cancelledAt && sub.stage === 'review' && sub.state === 'verified' && String(sub.ready?.receiptId || '').startsWith(run.id);
+  return !!sub && !sub.cancelledAt && sub.stage === 'review' && ['verified', 'approved'].includes(sub.state) && String(sub.ready?.receiptId || '').startsWith(run.id);
 };
 
 // A message for the parked session. It is delivered on the runner's next tick
