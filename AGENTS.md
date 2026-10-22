@@ -143,8 +143,8 @@ text as public as the rest of this repo.
   human read (`changeView`, mirrored client-side in `public/jobs.js`): a moved
   head, receipt, revision or proposal refuses it. Every idea goes to ONE
   recipient, the planner (`requestReplan`, with `replan.source = {sub, at, ref}`
-  and the idea's `images`), unless it reads as a question (an ask run, below), and
-  except a first plan (redrawn via `job.feedback`); a
+  and the idea's `images`; on an active job an ask run first, below), except a
+  first plan (redrawn via `job.feedback`); a
   declared red still goes up with what was tried. The planner sorts it into
   actions on live steps (`forward` to a session parked on review, `rework`) and
   plan edits, and the human approves that proposal (one of `forward`s alone is
@@ -172,8 +172,8 @@ text as public as the rest of this repo.
   discarded, revised) `approveReplan`, `discardReplan` and `requestReplan` stamp.
   Several conversations answer AT ONCE, each with its own ASK run (`run.convo`,
   `run.ask`): `claim` lets one run per conversation stand beside the plan run, and
-  `activeFor`, `requestReplan` and `triageRed` look past ask runs. An idea that
-  `looksLikeQuestion` sets `convo.pending = {asks, source, images}`; ANYTHING said in
+  `activeFor`, `requestReplan` and `triageRed` look past ask runs. Every idea, question
+  or change alike (`job-change.js` never guesses which), sets `convo.pending = {asks, source, images}`; ANYTHING said in
   that conversation before its run replies is one more ask for the SAME run: queued
   before launch it rides in the prompt (`claim` marks it sent), after launch the
   runner mails it (`deliverAsks`, `askMail`), never a new run. An ask run never sets
@@ -268,7 +268,9 @@ text as public as the rest of this repo.
   it sets `run.readyReport`, `parkedFor: 'ready'`, `parkedAt` and clears `mailedAt`, like a
   drafts park (no slot, `settle()` holds it only to its card existing) but never matched by
   `draftsDecided`. The run waits on `waitsOnReview`; approve, a rework, drop or a retry end
-  it quietly and the publish run then claims the sub-job. An approved `forward {sub, note}`
+  it quietly and the publish run then claims the sub-job. While a message is in flight the card reads "Working on your message"
+  (`answering.kind` is only one a caller names: `retell`, `restart`); what it was shows from the
+  session's report. An approved `forward {sub, note}`
   action (pinned to `{at:'round', ref: ready.receiptId}`; one made while it is `answering` queues behind
   that reply, mailed one at a time to a waiting run, `answered` moving `answering` on; a `rework`
   of a parked step is refused in its favour) writes a `sub.thread` message (`askAgent`,
