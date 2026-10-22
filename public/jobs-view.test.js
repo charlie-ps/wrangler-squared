@@ -98,6 +98,12 @@ test('the board colours each segment by its sub-job, and a segment opens that su
   assert.equal(f.q('#job-page h2').textContent, 'Deliver web');
   f.q('[data-open-job]').click();
   assert.equal(f.q('#job-page h2').textContent, 'Sign-in', 'the sub-job leads back to its job');
+  const back = f.q('#job-page .job-appbar > .job-back[data-close-job]');
+  assert.equal(back.textContent, 'Jobs', 'the job leads back to the board, like a step to its job');
+  assert.equal(f.q('#job-page [data-open-job]'), null);
+  back.click();
+  assert.ok(f.q('#job-page').hidden, 'the board is back');
+  assert.equal(f.q('[data-close-job]'), null);
 });
 
 test('code review is a stop before anything is committed: the card asks for a read, approval is pinned to the receipt, and Add idea sends it back', (t) => {
