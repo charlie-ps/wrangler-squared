@@ -338,8 +338,8 @@ text as public as the rest of this repo.
   in `public/job-proof.js`. A sub-job with `show` items reports `ready` even with
   Code on Auto (`leavesUncommitted`), so the proof is kept per round, but **Auto means
   auto**: that receipt never parks, approves itself as it lands (as does one from a session
-  launched under You review whose Code went to Auto mid-run), so whatever it listed as running is killed
-  on the next tick, and the publish session starts on the next tick. Nothing waits in review.
+  launched under You review whose Code went to Auto mid-run), and on the next tick whatever it listed as
+  running is killed and the publish session starts. Nothing waits in review.
 - **Switching a checkpoint to Auto lets through what waits at it** (`job-store.js setReview`,
   `waitingAt`, `releaseWaiting`). The board asks first (`public/jobs-view.js`, counted by
   `checkpointWaiting`) and sends `release`; a switch WITHOUT `release` while something waits
