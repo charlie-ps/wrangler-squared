@@ -107,7 +107,7 @@ test('approving kills each recorded process group, and the approval goes through
   assert.deepEqual([running.items, running.stopped.reason, running.stopped.still], [[], 'approved', []]);
   assert.deepEqual(running.stopped.results.map((r) => [r.name, r.ok, r.detail]), [['vite dev server', true, 'process group 48211 killed'], ['postgres', true, 'process group 48300 killed']]);
   assert.ok(!f.sub().error, 'teardown is not a step failure');
-  assert.equal(f.launched.at(-1).run.phase, 'publish', 'and the approval went through');
+  assert.ok(f.store.get(f.job.id).runs.some((r) => r.landing), 'and the approval went through: the session is told to land it');
 });
 
 test('a group that ignores SIGTERM gets SIGKILL; one that will not die is flagged and never fails the approval', async (t) => {
@@ -120,7 +120,7 @@ test('a group that ignores SIGTERM gets SIGKILL; one that will not die is flagge
   assert.deepEqual(stopped.still, ['postgres'], 'vite died to SIGKILL; postgres outlived both');
   assert.match(stopped.results[1].detail, /process 48300 would not die/);
   assert.ok(!f.sub().error);
-  assert.equal(f.launched.at(-1).run.phase, 'publish');
+  assert.ok(f.store.get(f.job.id).runs.some((r) => r.landing));
 });
 
 test('an entry with only a url has nothing to kill, and says so', async () => {

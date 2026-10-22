@@ -516,6 +516,12 @@ export const suggestionsSchema = z.union([suggestionSchema, z.array(suggestionSc
 // which each observation replaces) and job-github.js merge() reads it.
 export const MERGE_METHODS = ['merge', 'rebase'];
 export const mergeSuggestionSchema = z.object({ method: z.enum(MERGE_METHODS), why: line }).strict();
+// A merge conflict the sync session could not resolve without a judgement call
+// (job-sync.js): each file with what clashes and up to three ranked ways out, the
+// first the session's own pick. The human chooses one per conflict.
+export const MAX_CONFLICTS = 10;
+export const conflictSchema = z.object({ file: line, what: z.string().trim().min(1).max(600),
+  options: z.array(z.object({ label: line, why: z.string().trim().max(400).optional() }).strict()).min(1).max(MAX_OPTIONS) }).strict();
 export const reportSchema = z.discriminatedUnion('kind', [
   receipt({ kind: z.literal('plan'), plan: planSchema, ...optionShape, label: line.optional(), diagnosis: diagnosisSchema.optional(),
     alternatives: z.array(alternativeSchema).max(MAX_OPTIONS - 1).optional() }),
@@ -528,7 +534,12 @@ export const reportSchema = z.discriminatedUnion('kind', [
   receipt({ kind: z.literal('reply'), text: z.string().trim().min(1).max(4000), shots: z.array(shotSchema).min(1).max(4).optional(), run: runProofSchema.optional(), running: runningSchema.optional(),
     suggest: suggestionsSchema.optional(), escalate: z.boolean().optional() }),
   receipt({ kind: z.literal('published'), url: prUrlSchema, merge: mergeSuggestionSchema.optional() }),
+  // From a run launched as a repair, before one work phase replaced it; still taken.
   receipt({ kind: z.literal('repaired'), changes: checksSchema, checks: checksSchema }),
+  // The sync session (job-sync.js): the base merged in and pushed, or a conflict it
+  // parks on for the human to pick a resolution.
+  receipt({ kind: z.literal('synced'), resolved: checksSchema.optional() }),
+  receipt({ kind: z.literal('conflict'), summary: z.string().trim().min(1).max(600).optional(), conflicts: z.array(conflictSchema).min(1).max(MAX_CONFLICTS) }),
   receipt({ kind: z.literal('deployed'), checks: checksSchema }),
   // A session answers for every write it owns, by id (job-writes.js applyWrites).
   receipt({ kind: z.literal('completed'), checks: checksSchema, writes: z.array(writeResultSchema).max(50).optional(), outputs: z.array(outputSchema).max(30).optional() }),

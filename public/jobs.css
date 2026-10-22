@@ -839,6 +839,12 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-option b { font-weight:600; }
 .job-option small { color:var(--fg-muted); font-size:12px; line-height:1.4; }
 .job-option.sel { border-color:var(--blue); background:color-mix(in srgb, var(--blue) 10%, var(--surface)); }
+.job-conflict fieldset.job-options { grid-template-columns:1fr; gap:6px; margin-bottom:16px; }
+.job-dialog .job-conflict label.job-option { margin:0; }
+.job-conflict .job-option:has(input:checked) { border-color:var(--blue); background:color-mix(in srgb, var(--blue) 10%, var(--surface)); }
+.job-conflict-what { grid-column:1 / -1; margin:0 0 2px; font-size:13px; color:var(--fg-muted); }
+.job-conflict legend code, .job-conflicts code { text-transform:none; letter-spacing:0; }
+.job-conflicts { margin:6px 0 12px; padding-left:18px; font-size:13px; }
 .job-option-rec { font-size:10.5px; font-weight:600; color:var(--blue-fg); margin-left:6px; }
 /* Every change is one row: what kind in a fixed column, then the step, so the
    titles line up whether or not the row opens to its field diff. */

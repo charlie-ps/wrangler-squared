@@ -195,7 +195,7 @@ test('a step waiting on a prompt is the human’s: it says so, and it counts und
   job.runs = [{ id: 'r1', subJobId: 'api', phase: 'implementation', stopped: false, status: 'working' }];
   f.view.update(f.data);
   assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Working' });
-  assert.deepEqual(jobStatus({ ...job, reviewCode: false }, job.subJobs[0]), { tone: 'working', text: 'Working on the PR' });
+  assert.deepEqual(jobStatus({ ...job, reviewCode: false }, job.subJobs[0]), { tone: 'working', text: 'Working' }, 'one work phase in both modes');
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false);
   job.runs[0].status = 'needs-you'; f.view.update(f.data);
   assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'needs', text: 'Waiting on a prompt' });
@@ -4086,4 +4086,30 @@ test('an answer whose conversation is gone is never unread', () => {
   const job = { id: 'j', subJobs: [], convos: [{ id: 'c2', at: 1, pending: null, seenAt: 0 }],
     talk: [{ id: 't1', at: 2, from: 'wrangler', kind: 'answer', text: 'Old', convo: 'c1' }, { id: 't2', at: 3, from: 'wrangler', kind: 'answer', text: 'New', convo: 'c2' }] };
   assert.deepEqual(wranglerUnread(job).map((m) => m.id), ['t2']);
+});
+
+test('a sync parked on a conflict is amber “Conflict needs you”, and its dialog lists each conflict with ranked options and sends one pick per conflict', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  const conflicts = [
+    { file: 'src/limits.js', what: 'Base lowered the limit to 50; this PR made it configurable', options: [{ label: 'Configurable, default 50', why: 'Keeps both changes' }, { label: 'Configurable, default 100', why: 'Keeps this PR\'s default' }] },
+    { file: 'README.md', what: 'Both rewrote the setup paragraph', options: [{ label: 'Keep this PR\'s paragraph' }] },
+  ];
+  job.subJobs = [{ ...sub('api'), stage: 'pr', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', checkStatus: 'failing', dirty: true }, conflict: { runId: 'run_s', summary: 'Two files need a call.', conflicts, at: 1 } }];
+  job.runs = [{ id: 'run_s', subJobId: 'api', phase: 'sync', stopped: false, parkedFor: 'conflict', parkedAt: 1, mailedAt: null }];
+  f.view.update(f.data);
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'needs', text: 'Conflict needs you' });
+  assert.equal(jobNeedsReview(job, job.subJobs[0]), true);
+  assert.equal(f.q('#jobs-review-count').textContent, '1');
+  f.view.openDetail('job1', 'api');
+  const form = f.q('#job-conflict-form');
+  assert.ok(form, 'the dialog asks for the decision');
+  assert.deepEqual([...form.querySelectorAll('legend')].map((l) => l.textContent), ['src/limits.js', 'README.md']);
+  assert.deepEqual([...form.querySelectorAll('fieldset')].map((fs) => fs.querySelectorAll('input[type="radio"]').length), [2, 1]);
+  assert.match(form.querySelector('.job-option-rec').closest('label').textContent, /Configurable, default 50/, 'the first option is the recommendation, and starts chosen');
+  form.querySelectorAll('input[name="c0"]')[1].checked = true;
+  form.querySelector('textarea[name="note"]').value = 'Product wants 100';
+  form.querySelector('button[type="submit"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'resolve-conflict', runId: 'run_s', picks: [1, 0], note: 'Product wants 100' });
+  job.subJobs[0].conflict.decided = { picks: [1, 0], at: 2 }; job.runs[0].mailedAt = 3; f.view.update(f.data);
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Resolving the conflict' });
 });

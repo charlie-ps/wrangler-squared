@@ -72,3 +72,15 @@ export async function workingTreeHash(cwd) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// A merge left in progress (MERGE_HEAD in the worktree's own git dir): the base is
+// staged into the tree, so a ready receipt over it would put the whole base in the
+// diff the human reviews. Unreadable reads as none, so a broken tree refuses nothing.
+export async function mergeInProgress(cwd) {
+  try {
+    const { stdout } = await exec('git', ['-C', cwd, 'rev-parse', '--absolute-git-dir']);
+    return fs.existsSync(path.join(stdout.trim(), 'MERGE_HEAD'));
+  } catch {
+    return false;
+  }
+}
