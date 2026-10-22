@@ -1872,6 +1872,35 @@ test('several conversations at once: one open at a time with the one box at its 
   assert.equal(where(), 'c2');
 });
 
+test('the chip\'s × carries what is typed, and its pictures, into the new conversation\'s box, leaving the old one empty', async (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Docs.', convo: 'c1' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }];
+  job.runs = [{ id: 'w1', subJobId: 'api', phase: 'implementation', stopped: false }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const box = () => f.q('#job-dialog .job-change');
+  const text = () => box().querySelector('textarea');
+  assert.equal(box().dataset.changeConvo, 'c1');
+  text().value = 'Actually, a new thing'; text().dispatchEvent(f.event('input'));
+  const e = f.event('paste'); e.clipboardData = { files: [new f.window.File(['x'], 'Screenshot.png', { type: 'image/png' })], items: [], types: ['Files'], getData: () => '' };
+  text().dispatchEvent(e);
+  await new Promise((r) => setTimeout(r, 0));
+  box().querySelector('[data-change-new]').click();
+  assert.deepEqual([box().dataset.changeConvo, text().value], ['', 'Actually, a new thing'], 'the words go with it');
+  assert.ok(text() === f.q('#job-dialog').ownerDocument.activeElement, 'focused');
+  assert.deepEqual([text().selectionStart, text().selectionEnd], [21, 21], 'caret at the end');
+  assert.equal(box().querySelectorAll('.job-change-tray li').length, 1, 'and so does the picture');
+  assert.equal(box().querySelector('[data-change-send]').disabled, false);
+  f.q('#job-dialog [data-convo="c1"] .job-talk-convo-head').click();
+  assert.deepEqual([box().dataset.changeConvo, text().value, box().querySelectorAll('.job-change-tray li').length], ['c1', '', 0], 'the old conversation\'s box is empty');
+  f.q('#job-dialog [data-convo="c1"] .job-talk-convo-head').click();
+  assert.equal(text().value, 'Actually, a new thing', 'and the new one kept it');
+  box().querySelector('[data-change-send]').click();
+  assert.deepEqual([f.sent.at(-1).convo, f.sent.at(-1).text, f.sent.at(-1).images], [undefined, 'Actually, a new thing', ['paste-1700000000000-aaaa1111.png']]);
+});
+
 test('a conversation is named by Haiku: a loader while it is pending, its title once it lands, Conversation N without one', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];

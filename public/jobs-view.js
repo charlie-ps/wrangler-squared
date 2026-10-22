@@ -930,7 +930,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // The one box an idea goes in through, on every step, review and proposal: at the
   // foot of the conversation it replies to, the only one open (job-talk.js), else
   // below them all for a new one. Its chip says who hears it and where, and its ×
-  // folds that conversation to start a new one instead. It is
+  // folds that conversation to start a new one instead, taking what is in the box. It is
   // never refused as stale: the wrangler judges a step that moved since. Not a <form>, so a
   // tick redraws it, carrying over what is typed (keepBoxes), never held by a box's presence.
   // At rest it is one line; focus, words or a picture open it.
@@ -963,10 +963,20 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     return open ? target ? talk : `${talk}${boxHtml(job, sub, view, '')}` : talk + askSentHtml(job, sub);
   }
   // Opens another conversation with the box at its foot (or none, for a new one),
-  // keeping what was typed for the last one.
-  function aimBox(sub, key) {
+  // keeping what was typed for the last one. `carry` (the chip's ×) takes the words
+  // and pictures along instead, after any draft already waiting there.
+  function aimBox(sub, key, carry = false) {
     const box = dialog.querySelector('.job-change[data-change-convo]:not([data-idea-composer])');
-    if (box) boxDrafts.set(`${sub?.id || ''}|${box.dataset.changeConvo || ''}`, box.querySelector('textarea').value);
+    if (box) {
+      const from = box.dataset.changeConvo || '', text = box.querySelector('textarea').value, id = sub?.id || '';
+      if (!carry || from === key) boxDrafts.set(`${id}|${from}`, text);
+      else {
+        const there = boxDrafts.get(`${id}|${key}`) || '';
+        boxDrafts.delete(`${id}|${from}`);
+        boxDrafts.set(`${id}|${key}`, there && text ? `${there}\n${text}` : there || text);
+        for (const i of askImages) if (i.box === from) i.box = key;
+      }
+    }
     replyTo.set(sub?.id || '', key);
     renderDetail();
     const text = dialog.querySelector('.job-change[data-change-convo]:not([data-idea-composer]) textarea');
@@ -1724,7 +1734,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     });
     // Pressing one must not blur the box: it would fold shut and shift the rows from under the pointer.
     dialog.querySelectorAll('[data-talk-target] [data-convo-fold], [data-talk-target] [data-convo-collapse], [data-change-new]').forEach((b) => b.onmousedown = (e) => e.preventDefault());
-    dialog.querySelectorAll('[data-change-new]').forEach((b) => b.onclick = () => aimBox(sub, ''));
+    dialog.querySelectorAll('[data-change-new]').forEach((b) => b.onclick = () => aimBox(sub, '', true));
     dialog.querySelectorAll('[data-open-idea-job]').forEach((b) => b.onclick = () => openDetail(b.dataset.openIdeaJob, ''));
     dialog.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { dialog.close(); onSession(b.dataset.fabSession); });
     wireGraph();
