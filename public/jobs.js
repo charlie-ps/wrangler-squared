@@ -55,7 +55,7 @@ export function ideaStage(job) {
   return liveSuggestion(job) ? 'suggested' : 'reply';
 }
 // Mirrors server/jobs-schema.js reviewCode: a job from before the flag reviews.
-export const reviewCode = (job) => job.reviewCode ?? true;
+export const reviewCode = (job) => reviewOf(job, 'reviewCode');
 // The six review checkpoints, in the one set of words the New job form, the
 // job's flags, the plan dialog and the intro all use: each is named for what you
 // review, and each state for who acts. Merge and Writes default off on a stored job.
@@ -85,7 +85,10 @@ export const checkpoint = (field) => CHECKPOINTS.find((c) => c.field === field);
 // `settings.reviewDefaults` existed still seeds New job the way it always did.
 export const REVIEW_DEFAULTS = { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true };
 export const reviewDefaultsOf = (settings) => Object.fromEntries(CHECKPOINTS.map(({ field }) => [field, typeof settings?.reviewDefaults?.[field] === 'boolean' ? settings.reviewDefaults[field] : REVIEW_DEFAULTS[field]]));
-export const youReview = (job, field) => field === 'reviewMerge' || field === 'reviewWrites' ? !!job[field] : field === 'reviewCode' ? reviewCode(job) : job[field] ?? true;
+// Mirrors server/jobs-schema.js reviewOf: an unset flag is its default in every
+// reader, so a job saved before Merge existed shows and gates as You review.
+export const reviewOf = (job, field) => job?.[field] ?? REVIEW_DEFAULTS[field];
+export const youReview = (job, field) => reviewOf(job, field);
 export const youWord = (cp) => cp.youWord || 'You review';
 export const autoWord = (cp) => cp.autoWord || 'Auto';
 export const checkpointLabel = (cp, you) => `${cp.name}: ${you ? youWord(cp) : autoWord(cp)}`;
@@ -343,9 +346,9 @@ export const redComments = (sub) => commentVerdict(sub)?.tone === 'red';
 // the stale window (server job-runner.js): nothing automatic will ever move it,
 // so it is the human's to act on, unlike an ordinary slow deploy.
 export const deploymentStalled = (sub) => sub?.stage === 'deployment' && !!sub.deploymentStale;
-export const mergeHeldByComments = (job, sub) => sub?.stage === 'pr' && !job.reviewMerge && sub.pr?.checkStatus === 'passing' && redComments(sub) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
+export const mergeHeldByComments = (job, sub) => sub?.stage === 'pr' && !reviewOf(job, 'reviewMerge') && sub.pr?.checkStatus === 'passing' && redComments(sub) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 // Mirrors server/job-store.js approve-merge: nothing merges before its prerequisites deploy.
-export const mergeApprovable = (job, sub) => sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && (job.reviewMerge || redComments(sub)) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
+export const mergeApprovable = (job, sub) => sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && (reviewOf(job, 'reviewMerge') || redComments(sub)) && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 export const hasWrites = (job) => (job.subJobs?.length ? job.subJobs : job.plan?.subJobs || []).some(isWriteSub);
 // The checkpoints a job's own flags show: Session results and Writes only where
 // the job has a sub-job they could stop.
@@ -589,7 +592,7 @@ export function jobNeedsReview(job, sub) {
   // Not yours again until it reports back: the answer or the new round is its turn.
   if (codeAwaitingReview(sub)) return !sub.answering;
   if (deploymentStalled(sub)) return true;
-  return sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && job.reviewMerge && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
+  return sub.stage === 'pr' && sub.pr?.checkStatus === 'passing' && reviewOf(job, 'reviewMerge') && sub.mergeApprovedHead !== sub.pr.head && !pendingDependencies(job, sub).length;
 }
 // One kind of prerequisite names itself; a mix is only ever "prerequisites".
 const waitingNoun = (list) => list.every(isSessionSub) ? 'session' : list.every(isHumanSub) ? 'human task' : list.every(isPrSub) ? 'deployment' : 'prerequisite';

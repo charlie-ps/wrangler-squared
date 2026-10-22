@@ -167,9 +167,9 @@ export const writeRefs = (sub) => [...`${sub.action?.comment || ''} ${sub.action
 // and approval launches a `publish` session that commits, pushes and opens the
 // PR. Off, one session does all of it. Read through this helper: a job created
 // before the flag existed has no field and reviews like a new one.
-export const reviewCode = (job) => job?.reviewCode ?? true;
+export const reviewCode = (job) => reviewOf(job, 'reviewCode');
 // Red steps: true (also what a job from before the flag reads) is "You decide".
-export const reviewRed = (job) => job?.reviewRed ?? true;
+export const reviewRed = (job) => reviewOf(job, 'reviewRed');
 // The one line every PR description and squash commit a job lands must end with.
 export const ATTRIBUTION = 'Made with Agent Wrangler and the charlie-ps/wrangler-squared extension';
 // A story either already exists in Jira (key) or is a proposal (no key, optional
@@ -386,6 +386,10 @@ const imageName = z.string().regex(/^paste-\d{1,20}-[a-f0-9]{4,32}\.(?:png|jpg|g
 // `reviewRed` is the sixth: true is "You decide" (a red step gets a fix proposed
 // and waits for you), false is "Wrangler replans" (job-red.js).
 export const REVIEW_DEFAULTS = { reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true };
+// Every reader of a checkpoint goes through this, so a job saved before a flag
+// existed is gated by the same default everywhere (the store's switch, the
+// runner's merge, the board's tiles): Merge unset is You review, never Auto.
+export const reviewOf = (job, field) => job?.[field] ?? REVIEW_DEFAULTS[field];
 export const SANDBOX_MODES = ['locked', 'auto', 'full'];
 export const jobInputSchema = z.object({
   title: line.optional(), intent: z.string().trim().min(1).max(16000),

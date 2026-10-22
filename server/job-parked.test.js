@@ -32,6 +32,14 @@ function hostFor(t, f, images = {}) {
 const plan = () => ({ context: 'ctx', stories: [], subJobs: [{ id: 'api', title: 'Audit page', repo: '/repo', after: [], brief: 'Build it', show: ['Lists sign-ins'] }] });
 const shot = (file = 'list.png') => ({ text: 'Lists sign-ins', shots: [{ file, url: 'http://localhost:5174/audit' }] });
 
+// What a session leaves running, faked: a kill takes the pid and its URL down.
+function fakeRunning() {
+  const procs = new Set([48211]), urls = new Set(['http://localhost:5174/audit']), kills = [];
+  return { procs, urls, kills, kill: (pid) => { kills.push(Math.abs(pid)); procs.delete(Math.abs(pid)); urls.clear(); }, alive: (pid) => procs.has(pid),
+    pgidOf: async (pid) => procs.has(pid) ? pid : null, answers: async (url) => urls.has(url), run: async () => '', sleep: async () => {}, exists: () => true, sandboxExec: '/usr/bin/sandbox-exec' };
+}
+const VITE = { name: 'vite dev server', url: 'http://localhost:5174/audit', pid: 48211 };
+
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-parked-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -46,7 +54,8 @@ function fixture(t) {
     async resumeWithMail(r, text) { mailed.push({ sid: r.sessionId, text }); },
     async cleanup() {}, async cleanupPlanning() {}, releaseImages() {}, attributeSpend() {},
   };
-  const runner = new JobRunner({ store, runtime, github: {}, now: () => clock });
+  const running = fakeRunning();
+  const runner = new JobRunner({ store, runtime, github: {}, now: () => clock, running });
   const job = store.create({ title: 'Audit log', intent: 'Add an audit log', repos: ['/repo'], reviewCode: true });
   const tick = async () => { clock += 61000; await runner.tick(); };
   // The step's own session, not a planner that ran since (every idea goes through one).
@@ -69,7 +78,7 @@ function fixture(t) {
   };
   async function ready(checks = [shot()], meta = {}) {
     ensureInbox(job.id, 'api'); fs.writeFileSync(path.join(ensureInbox(job.id, 'api'), 'list.png'), PNG);
-    report({ kind: 'ready', checks }, last());
+    report({ kind: 'ready', checks, ...(meta.running ? { running: meta.running } : {}) }, last());
     if (meta.treeHash) store.update(job.id, (j) => { j.subJobs[0].ready.treeHash = meta.treeHash; });
     await tick();
   }
@@ -78,7 +87,7 @@ function fixture(t) {
     report({ kind: 'plan', plan: plan() }, launched.at(-1)); await tick();
     store.approvePlan(job.id, store.get(job.id).revision); await tick();
   }
-  return { store, job, runner, launched, mailed, stopped, alive, tick, last, report, sub, run, ask, propose, ready, start };
+  return { store, job, runner, running, launched, mailed, stopped, alive, tick, last, report, sub, run, ask, propose, ready, start };
 }
 
 test('ready parks the run instead of ending it: no slot, no error, the session kept', async (t) => {
@@ -280,13 +289,54 @@ test('workingTreeHash covers untracked files, ignores ignored ones, and leaves t
   assert.equal(git('status', '--porcelain').includes('A '), false, 'nothing was staged in the real index');
 });
 
-test('Code on Auto does not park: the ready receipt ends the run as it always did', async (t) => {
+test('Code=Auto with show items saves proof in round-1 and goes on to publish without stopping in review', async (t) => {
   const f = fixture(t); f.store.update(f.job.id, (j) => { j.reviewCode = false; });
   await f.start();
   const impl = f.last().run.id;
-  await f.ready();
+  ensureInbox(f.job.id, 'api'); fs.writeFileSync(path.join(ensureInbox(f.job.id, 'api'), 'list.png'), PNG);
+  f.report({ kind: 'ready', checks: [shot()] });
   const run = f.store.get(f.job.id).runs.find((r) => r.id === impl);
-  assert.equal(run.stopped, true); assert.ok(run.report); assert.equal(run.parkedFor, undefined);
+  assert.ok(run.report, 'the ready receipt ends the run: nothing parks');
+  assert.equal(run.parkedFor, undefined);
+  assert.deepEqual([f.sub().stage, f.sub().state, f.sub().ready.round, f.sub().ready.approvedAt === f.sub().ready.at], ['review', 'approved', 1, true], 'approved as it lands, never verified');
+  assert.deepEqual(f.sub().ready.proof.map((p) => [p.text, p.shots.map((s) => s.file)]), [['Lists sign-ins', ['list.png']]]);
+  assert.ok(fs.existsSync(path.join(roundDir(f.job.id, 'api', 1), 'list.png')), 'the proof is kept in round-1, viewable on the step');
+  await f.tick();
+  assert.equal(f.store.get(f.job.id).runs.find((r) => r.id === impl).stopped, true);
+  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'publish'], 'the publish session follows on the very next tick');
+  assert.equal(f.mailed.length, 0, 'nobody was asked anything');
+});
+
+test('switching Code to Auto mid-job releases a parked ready step and tears down what it left running', async (t) => {
+  const f = fixture(t); await f.start();
+  const impl = f.last().run.id;
+  await f.ready([shot()], { running: [VITE] });
+  assert.deepEqual([f.run().parkedFor, f.sub().state, f.sub().running.items[0].up], ['ready', 'verified', true], 'parked for the human, its dev server up');
+  assert.throws(() => f.store.action(f.job.id, 'set-review', { field: 'reviewCode', you: false }), /One is waiting at Local verification/, 'the board asks first');
+  f.store.action(f.job.id, 'set-review', { field: 'reviewCode', you: false, release: true });
+  assert.deepEqual([f.sub().state, !!f.sub().ready.approvedAt], ['approved', true]);
+  await f.tick();
+  const run = f.store.get(f.job.id).runs.find((r) => r.id === impl);
+  assert.deepEqual([run.stopped, !!run.error], [true, false], 'the parked session ends quietly');
+  assert.deepEqual(f.running.kills, [48211], 'what it left running is torn down');
+  assert.ok(f.sub().running.stopped, 'and recorded as stopped');
+  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'publish']);
+});
+
+test('a parked step still answering when Code goes to Auto is not cut off: its reply lands approved and publish follows', async (t) => {
+  const f = fixture(t); await f.start(); await f.ready();
+  await f.ask('What does it show when nobody has signed in?');
+  await f.tick();
+  assert.ok(f.sub().answering, 'the question is with the session');
+  f.store.action(f.job.id, 'set-review', { field: 'reviewCode', you: false, release: true });
+  assert.deepEqual([f.sub().state, f.sub().ready.approvedAt], ['verified', undefined], 'its tree may be mid-change, so nothing is approved under it');
+  await f.tick();
+  assert.equal(f.run().stopped, false, 'and its session keeps working');
+  f.report({ kind: 'reply', text: 'An empty state that says so.' });
+  assert.deepEqual([f.sub().state, !!f.sub().ready.approvedAt], ['approved', true]);
+  assert.equal(f.store.get(f.job.id).moves.at(-1).detail, 'Approved the working tree of “Audit page”: Local verification is on Auto');
+  await f.tick();
+  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['api', 'publish']);
 });
 
 test('pasted images go to the evidence folder and the session is mailed their path', async (t) => {

@@ -288,8 +288,9 @@ const thisPr = (sub, job) => `This PR (${sub?.repo ? path.basename(sub.repo) : '
 // TODO(host-api spawn env): $JOB_EVIDENCE cannot be set on the session, so the
 // prompt tells the agent to export it.
 // Proof is required whatever Code is set to: with it on the human reads it; on
-// Auto a sub-job with Show me items still reports ready (the receipt approves
-// itself, job-store.js) so the proof is kept and a short step publishes.
+// Auto a sub-job with Show me items still reports ready so the proof is kept per
+// round on the step, but nothing waits for anyone: the receipt approves itself
+// (job-store.js) and the publish step starts on the runner's next tick.
 export const leavesUncommitted = (job, sub) => reviewCode(job) || !!sub?.show?.length;
 const SHOT_SHAPE = '{file:"name.png", url?:"where it was taken", viewport?:"1280x800", tool?:"Playwright"}';
 // What to do with what the agent started to capture proof. With the human reviewing
@@ -472,10 +473,10 @@ export function jobPrompt(job, sub, run) {
       // With code review on, the human reads the working tree on the board
       // before anything is committed; a later publish session commits and pushes,
       // so the branch rename waits for it too.
-      leavesUncommitted(job, sub) ? `Leave every change UNCOMMITTED: ${reviewCode(job) ? 'the human reviews the working tree before anything is committed, and a ' : 'a '}later step commits and pushes it${sub?.pr ? ' to the open PR' : ' and opens the PR'}. Do not commit, push or open a PR.` : branchNaming(job, sub),
+      leavesUncommitted(job, sub) ? `Leave every change UNCOMMITTED: ${reviewCode(job) ? 'the human reviews the working tree before anything is committed, and a ' : 'Code is on Auto, so nobody reviews it: your proof is kept on the step and a '}later step commits and pushes it${reviewCode(job) ? '' : ' straight after your receipt'}${sub?.pr ? ' to the open PR' : ' and opens the PR'}. Do not commit, push or open a PR.` : branchNaming(job, sub),
       reviewCode(job) ? 'After you report ready your session stays open, paused, so the human can write to you by mail: a question is answered with job_report kind:"reply" (text, shots?, run?, running?) and changes nothing; a change is made, re-verified and reported ready again as a new round. Do not end the session or clean up the worktree yourself.' : '',
       '',
-      leavesUncommitted(job, sub) ? report(`kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]${reviewCode(job) ? ', running?:[{name, url?, pid?, log?}]' : ''}`, 'When the working tree is ready to review, ') : publishLine,
+      leavesUncommitted(job, sub) ? report(`kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]${reviewCode(job) ? ', running?:[{name, url?, pid?, log?}]' : ''}`, reviewCode(job) ? 'When the working tree is ready to review, ' : 'When the work is done and every Show me item is proven, ') : publishLine,
     ),
     publish: lines(
       heading(job, sub),
