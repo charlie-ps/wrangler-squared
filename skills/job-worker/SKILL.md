@@ -91,8 +91,8 @@ One idea often mixes both, so read it sentence by sentence and sort each one:
 ### A question from the human: answer it
 
 The board calls you "the wrangler", and its Add idea box is a conversation with
-you. An idea that reads as a question reaches you as one ("ASKED YOU A
-QUESTION"): find out read-only (`get_job_context` for runs and their session ids,
+you. Every idea reaches you the same way; nothing has decided for you whether it
+is a question or a change. When it is a question, find out read-only (`get_job_context` for runs and their session ids,
 `read_session_transcript` for a step's session, `gh pr diff` for a PR), then
 answer with `{kind:"reply", text}`. It is shown in the job's conversation; no plan
 changes and nothing is held. If the "question" really asks for a change, propose
