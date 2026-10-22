@@ -1336,7 +1336,7 @@ test('a ticketless plan reviews with no stories, its sub-jobs carry No ticket an
   const f = fixture(t); const [job] = f.data.jobs;
   job.plan = structuredClone(plan); job.plan.stories = []; job.plan.subJobs.forEach((s) => { delete s.storyId; delete s.jiraKey; }); f.view.update(f.data);
   f.q('.job-plate-open[data-job=\"job1\"]').click();
-  assert.equal(f.q('.job-appbar .job-chip[title="This work has no Jira ticket"]').textContent, 'No ticket');
+  assert.equal(document.querySelector('.job-appbar .job-chip[title="This work has no Jira ticket"]'), null, 'an absent ticket is the normal case, so the job does not say so either');
   assert.equal(document.querySelectorAll('.job-story-key').length, 0);
   assert.deepEqual([...document.querySelectorAll('.job-node')].map((e) => e.title.split('\n')[1]), ['No ticket', 'No ticket']);
   assert.match(f.q('[data-action="approve-plan"]').title, /^Starts \d+ steps?$/);
