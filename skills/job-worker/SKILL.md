@@ -13,7 +13,8 @@ watching this job while you work.
 ## Stay inside your step
 
 - **Don't merge**, and don't watch CI after pushing. Wrangler polls the PR,
-  drives repairs and merges when the gates are satisfied.
+  sends failing checks back to work, keeps the branch level with its base and
+  merges when the gates are satisfied.
 - **Don't spawn sessions or agents, and don't schedule wake-ups.** A later step
   gets its own session with its own prompt.
 - **Don't do a later step's work.** If your step turns out to need something the
@@ -153,9 +154,22 @@ after it are held while you work.
 ## Working in a worktree (PR steps)
 
 - **If your prompt says to leave the changes uncommitted, do exactly that.** The
-  human reads the working tree on the board before anything is committed, and a
-  later step commits, pushes and opens the PR. No commit, no push, no PR, no
+  human reads the working tree on the board before anything is committed (or,
+  with Code on Auto, it passes straight through), and you are then mailed to
+  commit, push and open the PR. Until that mail: no commit, no push, no PR, no
   branch rename: report `ready` with what you verified.
+- **Work never merges or rebases the base branch in.** A `ready` receipt is
+  refused while a merge is in progress (`MERGE_HEAD` set): run
+  `git merge --abort` and report again. When a PR conflicts with its base,
+  Wrangler runs a sync session that does only that.
+- **A sync session** (its prompt says so) merges the base in, resolves the
+  conflicts and changes nothing else, then commits the merge, pushes and reports
+  `synced`. A conflict that needs a judgement call is not guessed at: leave the
+  merge in progress and report `{kind:"conflict", summary?, conflicts:[{file,
+  what, options:[{label, why?}]}]}`, up to three options per conflict, your
+  recommendation first, then wait for mail with the human's pick for each
+  (with Code and Merge review both on Auto, mail tells you to take your first
+  option at once, so rank carefully).
 - Your worktree branch is a **placeholder**. Before pushing, name it in *this
   repository's* convention: read its CLAUDE.md / AGENTS.md / CONTRIBUTING for a
   stated rule, and look at existing remote branches and recently merged PRs
@@ -251,7 +265,9 @@ after it are held while you work.
 - Pasted pictures arrive as **absolute file paths** in the mail: read them.
 - If the mail says the working tree changed after you reported, report `ready`
   again so the human can approve what is there now.
-- Approval stops this session. A short publish session commits and pushes.
+- Approval reaches this session as mail asking you to commit exactly the
+  approved tree and push it (naming the branch first if it is still a
+  placeholder), then report `published`. Change nothing before committing.
 
 ## Planning writes
 

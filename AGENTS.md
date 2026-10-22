@@ -106,11 +106,11 @@ text as public as the rest of this repo.
   rename hook, so `sub.worktree.branch` is kept in step by READING
   `host.sessions.get(caller).worktree.branch` back in `server/tools.js`
   (`syncBranch`, on both tools) and calling `noteBranchRename`. Every LATER
-  phase (publish, repair, retry) spawns with `cwd: existing.repoRoot` and
+  run (sync, work on an open PR, publish, a retry) spawns with `cwd: existing.repoRoot` and
   `worktree: { branch, folderName: existing.path, auto: false }`: spawn has no
   adopt option, but the wrangler's `createWorktree` classifies that pair as
-  `adopt` and stamps the record, which is what lets `name_branch` work on the
-  publish run (the one that pushes). `noteDispatch` discards the adopted record
+  `adopt` and stamps the record, which is what lets `name_branch` work on a
+  publish run (the fallback lander). `noteDispatch` discards the adopted record
   (`pendingLaunch.adopt`) so the store's copy keeps its `cleanupHead` and rename.
 - **A job's spend limit is `settings.spendLimit` × (1 + `job.topUps`), never stored**
   (`server/job-budget.js`). The runner's `enforceBudget` runs first each tick: over, it sets
@@ -235,7 +235,7 @@ text as public as the rest of this repo.
   `job.error`. On approval (`approveReplan`) a red step whose brief or `after`
   changed is re-queued (PR #220's hunk, kept byte-identical so the two merge cleanly), and an
   open PR whose only change is `after` CATCHES UP instead of a rework:
-  `sub.catchUp` stops repairs and merges until its new prerequisites land, then the
+  `sub.catchUp` stops check fixes, syncs and merges until its new prerequisites land, then the
   runner updates its branch once. Each proposal carries `then` (`thenOf`), the
   card's "Re-queued · starts after …" line, drawn in the thread and proposal view.
 - **A plan change is ONE decision card, and its words are written for it** (`public/jobs-view.js
@@ -282,12 +282,38 @@ text as public as the rest of this repo.
   then `alternatives` (max 2), each merged and stamped when the receipt lands, so
   one bad option refuses the whole receipt; approve takes `option`. An action is
   drawn as a mark on its graph node (`actionMark`).
+- **One pipeline for code: sync → work → checkpoint → land; Code review only decides where it
+  stops** (#301; `server/job-sync.js`, `job-runner.js workOnPr`/`sync`/`land`). Work (first cut,
+  rework, a fix for failing checks) is ONE `implementation` phase in both modes: always left
+  uncommitted, always `ready`, never merging the base (`tools.js MERGE_REFUSED` refuses a `ready`
+  while `MERGE_HEAD` is set). `reworkSub` no longer branches on `reviewCode`, and failing checks
+  move a PR back to `implementation` with `sub.checkFix` (the run stamped `fixChecks`, counted
+  against `maxRepairs` with old `repair` runs). A dirty PR (or a conflicted update-branch,
+  `conflicted`) launches a `sync` run, a session that only merges the base in, commits and pushes,
+  never through the checkpoint and never counted against `maxRepairs` (its own cap, `MAX_SYNCS`,
+  with old conflict repairs). Work on an open PR re-reads it first and syncs before it, unless the
+  worktree holds uncommitted work (`runtime.treeClean`): then the work lands first and sync
+  follows, so sync never merges into a tree under review; `runtime.catchUp` fast-forwards the
+  worktree to its origin branch before work. A conflict that needs a judgement call is a
+  `conflict {summary?, conflicts:[{file, what, options[≤3, ranked]}]}` receipt: the run parks
+  (`parkedFor: 'conflict'`, mid-merge, no slot), `sub.conflict` is the board's amber "Conflict
+  needs you", `resolve-conflict {runId, picks[], note?}` (one pick per conflict, pinned to the run)
+  stamps `decided`, and the runner mails the picks (`deliverConflict`, `conflictMail`) until
+  `synced` clears it. With Code and Merge review both on Auto (`conflictsAuto`) nobody is asked:
+  `parkConflict` stamps `decided: {picks: all 0, auto: true}` as the receipt lands, records an
+  `auto-resolve-conflict` move listing each file's pick (the step's history), and the same mail
+  tells the session to take its first option. `draftsDecided` matches only a park with no `parkedFor`. Land: an approved
+  step's session is mailed to commit and push (`land`, `landMail`, `run.landing`), and only when
+  that session has gone does a `publish` session stand in. `repair`, `repaired`, `fixRequested`
+  and `publish` runs from before are still read (history, receipts in flight; a stored
+  `fixRequested` becomes a rework on the next tick), never started.
 - **A session parks after `ready`, so the human can ask it things** (`server/job-parked.js`).
   With Code on You review the `ready` receipt does NOT set `run.report` (that ends a run):
   it sets `run.readyReport`, `parkedFor: 'ready'`, `parkedAt` and clears `mailedAt`, like a
   drafts park (no slot, `settle()` holds it only to its card existing) but never matched by
-  `draftsDecided`. The run waits on `waitsOnReview`; approve, a rework, drop or a retry end
-  it quietly and the publish run then claims the sub-job. While a message is in flight the card reads "Working on your message"
+  `draftsDecided`. The run waits on `waitsOnReview` (verified, or approved and landing); a rework,
+  drop or a retry end it quietly, and approval mails it to land what it wrote (`landing`, after
+  which `parkedReadyRun` no longer finds it). While a message is in flight the card reads "Working on your message"
   (`answering.kind` is only one a caller names: `retell`, `restart`); what it was shows from the
   session's report. An approved `forward {sub, note}`
   action (pinned to `{at:'round', ref: ready.receiptId}`; one made while it is `answering` queues behind
@@ -305,7 +331,8 @@ text as public as the rest of this repo.
   (`TODO(host-api mail:images)`). `ready.treeHash` (`git.js workingTreeHash`: `add -A` into a
   temp index, `write-tree`) is read by the tool handler at the receipt; `approve-code` is
   refused unless the `job-action` handler's fresh read matches (`TREE_MOVED` also queues a
-  `retell` message). Code on Auto never parks.
+  `retell` message). Code on Auto never parks: its `ready` keeps the run (`parkedFor: 'ready'`,
+  no `parkedAt`, holding its slot), approves itself, and the next tick mails it to land.
 - **An approval can carry words for later steps.** `approve-session` and `approve-code` take an
   optional `note` (a string, trimmed, at most 2,000 characters or refused; `job-store.js
   approvalNote`), kept as `sub.approvalNote` and recorded on the move, so the step's own history
@@ -358,17 +385,17 @@ text as public as the rest of this repo.
   bytes and capped at 5 MB, into `round-<n>`. `ready.checks` stays plain strings
   (history and the old list read it); the proof lives beside it as `ready.proof`.
   The board gets bytes only as `job-evidence` frames (thumbnails via `sips`), cached
-  in `public/job-proof.js`. A sub-job with `show` items reports `ready` even with
-  Code on Auto (`leavesUncommitted`), so the proof is kept per round, but **Auto means
-  auto**: that receipt never parks, approves itself as it lands (as does one from a session
-  launched under You review whose Code went to Auto mid-run), and on the next tick whatever it listed as
-  running is killed and the publish session starts. Nothing waits in review.
+  in `public/job-proof.js`. Every PR sub-job reports `ready`, Code on Auto included, so the
+  proof is kept per round, but **Auto means auto**: that receipt never parks, approves itself
+  as it lands (as does one from a session launched under You review whose Code went to Auto
+  mid-run), and on the next tick whatever it listed as running is killed and the same session
+  is told to land it. Nothing waits in review.
 - **Switching a checkpoint to Auto lets through what waits at it** (`job-store.js setReview`,
   `waitingAt`, `releaseWaiting`). The board asks first (`public/jobs-view.js`, counted by
   `checkpointWaiting`) and sends `release`; a switch WITHOUT `release` while something waits
   is refused, so a board a tick behind never releases what nobody saw, and Auto never sits
   beside work stuck behind it. Released under Code, a step parked on `ready` is approved, its
-  session ends quietly and what it left running is torn down; one still answering mail
+  session is mailed to land it and what it left running is torn down; one still answering mail
   (`sub.answering`) is left to land its answer, and that `reply` (or new round) lands approved.
   Kept on purpose: a write's own `review: true` beats Auto, a pending replan refuses a release,
   Plan locks once approved, and only the single `approve-code` is pinned to `treeHash` (a bulk

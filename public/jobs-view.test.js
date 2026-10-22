@@ -250,7 +250,7 @@ test('a step waiting on a prompt is the human’s: it says so, and it counts und
   job.runs = [{ id: 'r1', subJobId: 'api', phase: 'implementation', stopped: false, status: 'working' }];
   f.view.update(f.data);
   assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Working' });
-  assert.deepEqual(jobStatus({ ...job, reviewCode: false }, job.subJobs[0]), { tone: 'working', text: 'Working on the PR' });
+  assert.deepEqual(jobStatus({ ...job, reviewCode: false }, job.subJobs[0]), { tone: 'working', text: 'Working' }, 'one work phase in both modes');
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false);
   job.runs[0].status = 'needs-you'; f.view.update(f.data);
   assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'needs', text: 'Waiting on a prompt' });
@@ -1977,6 +1977,35 @@ test('several conversations at once: one open at a time with the one box at its 
   f.view.openDetail('job1', 'web');
   assert.deepEqual([...f.q('#job-page .job-talk').querySelectorAll('.job-talk-convo')].map((c) => c.dataset.convo), ['c2'], 'a step shows only what was said on it');
   assert.equal(where(), 'c2');
+});
+
+test('the chip\'s × carries what is typed, and its pictures, into the new conversation\'s box, leaving the old one empty', async (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
+  job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Docs.', convo: 'c1' }];
+  job.convos = [{ id: 'c1', at: 1, pending: null }];
+  job.runs = [{ id: 'w1', subJobId: 'api', phase: 'implementation', stopped: false }];
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-open').click();
+  const box = () => f.q('#job-page .job-change');
+  const text = () => box().querySelector('textarea');
+  assert.equal(box().dataset.changeConvo, 'c1');
+  text().value = 'Actually, a new thing'; text().dispatchEvent(f.event('input'));
+  const e = f.event('paste'); e.clipboardData = { files: [new f.window.File(['x'], 'Screenshot.png', { type: 'image/png' })], items: [], types: ['Files'], getData: () => '' };
+  text().dispatchEvent(e);
+  await new Promise((r) => setTimeout(r, 0));
+  box().querySelector('[data-change-new]').click();
+  assert.deepEqual([box().dataset.changeConvo, text().value], ['', 'Actually, a new thing'], 'the words go with it');
+  assert.ok(text() === f.q('#job-page').ownerDocument.activeElement, 'focused');
+  assert.deepEqual([text().selectionStart, text().selectionEnd], [21, 21], 'caret at the end');
+  assert.equal(box().querySelectorAll('.job-change-tray li').length, 1, 'and so does the picture');
+  assert.equal(box().querySelector('[data-change-send]').disabled, false);
+  f.q('#job-page [data-convo="c1"] .job-talk-convo-head').click();
+  assert.deepEqual([box().dataset.changeConvo, text().value, box().querySelectorAll('.job-change-tray li').length], ['c1', '', 0], 'the old conversation\'s box is empty');
+  f.q('#job-page [data-convo="c1"] .job-talk-convo-head').click();
+  assert.equal(text().value, 'Actually, a new thing', 'and the new one kept it');
+  box().querySelector('[data-change-send]').click();
+  assert.deepEqual([f.sent.at(-1).convo, f.sent.at(-1).text, f.sent.at(-1).images], [undefined, 'Actually, a new thing', ['paste-1700000000000-aaaa1111.png']]);
 });
 
 test('a conversation is named by Haiku: a loader while it is pending, its title once it lands, Conversation N without one', (t) => {
@@ -4174,4 +4203,30 @@ test('an answer whose conversation is gone is never unread', () => {
   const job = { id: 'j', subJobs: [], convos: [{ id: 'c2', at: 1, pending: null, seenAt: 0 }],
     talk: [{ id: 't1', at: 2, from: 'wrangler', kind: 'answer', text: 'Old', convo: 'c1' }, { id: 't2', at: 3, from: 'wrangler', kind: 'answer', text: 'New', convo: 'c2' }] };
   assert.deepEqual(wranglerUnread(job).map((m) => m.id), ['t2']);
+});
+
+test('a sync parked on a conflict is amber “Conflict needs you”, and its dialog lists each conflict with ranked options and sends one pick per conflict', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  const conflicts = [
+    { file: 'src/limits.js', what: 'Base lowered the limit to 50; this PR made it configurable', options: [{ label: 'Configurable, default 50', why: 'Keeps both changes' }, { label: 'Configurable, default 100', why: 'Keeps this PR\'s default' }] },
+    { file: 'README.md', what: 'Both rewrote the setup paragraph', options: [{ label: 'Keep this PR\'s paragraph' }] },
+  ];
+  job.subJobs = [{ ...sub('api'), stage: 'pr', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', checkStatus: 'failing', dirty: true }, conflict: { runId: 'run_s', summary: 'Two files need a call.', conflicts, at: 1 } }];
+  job.runs = [{ id: 'run_s', subJobId: 'api', phase: 'sync', stopped: false, parkedFor: 'conflict', parkedAt: 1, mailedAt: null }];
+  f.view.update(f.data);
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'needs', text: 'Conflict needs you' });
+  assert.equal(jobNeedsReview(job, job.subJobs[0]), true);
+  assert.equal(f.q('#jobs-review-count').textContent, '1');
+  f.view.openDetail('job1', 'api');
+  const form = f.q('#job-conflict-form');
+  assert.ok(form, 'the dialog asks for the decision');
+  assert.deepEqual([...form.querySelectorAll('legend')].map((l) => l.textContent), ['src/limits.js', 'README.md']);
+  assert.deepEqual([...form.querySelectorAll('fieldset')].map((fs) => fs.querySelectorAll('input[type="radio"]').length), [2, 1]);
+  assert.match(form.querySelector('.job-option-rec').closest('label').textContent, /Configurable, default 50/, 'the first option is the recommendation, and starts chosen');
+  form.querySelectorAll('input[name="c0"]')[1].checked = true;
+  form.querySelector('textarea[name="note"]').value = 'Product wants 100';
+  form.querySelector('button[type="submit"]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'resolve-conflict', runId: 'run_s', picks: [1, 0], note: 'Product wants 100' });
+  job.subJobs[0].conflict.decided = { picks: [1, 0], at: 2 }; job.runs[0].mailedAt = 3; f.view.update(f.data);
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Resolving the conflict' });
 });

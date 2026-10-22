@@ -7,7 +7,7 @@ import { JobStore } from './job-store.js';
 import { planSchema, reportSchema, proofSchema, unansweredShow } from './jobs-schema.js';
 import { inboxDir, roundDir, ensureInbox, adoptEvidence, thumbnailOf, readEvidence, sniffKind, evidenceName, EVIDENCE_MAX_BYTES } from './job-evidence.js';
 import { makeEvidenceHandler } from './handlers.js';
-import { jobPrompt, leavesUncommitted } from './job-prompts.js';
+import { jobPrompt } from './job-prompts.js';
 import { mergeReplan } from './job-replan.js';
 import { fakeHost } from './test-helpers.js';
 
@@ -218,17 +218,16 @@ test('the implementer is told to show each item working, where to save proof and
   assert.doesNotMatch(jobPrompt(job, sub, { id: 'run1', phase: 'publish' }), /JOB_EVIDENCE/, 'only the run that builds it shows it');
 });
 
-test('Code on Auto still asks for ready when there is something to show, so the proof is kept', () => {
+test('Code on Auto asks for ready whether or not there is something to show: one work phase, the same session lands it', () => {
   const sub = spec('api', { show: SHOW });
   const auto = { id: 'job_12345678', title: 'A', agent: 'claude', reviewCode: false, subJobs: [], runs: [], plan: { context: 'c' } };
-  assert.equal(leavesUncommitted(auto, sub), true);
-  assert.equal(leavesUncommitted(auto, spec('api')), false);
-  assert.equal(leavesUncommitted({ ...auto, reviewCode: true }, spec('api')), true);
   const text = jobPrompt(auto, sub, { id: 'run1', phase: 'implementation' });
-  assert.match(text, /Leave every change UNCOMMITTED: Code is on Auto, so nobody reviews it: your proof is kept on the step and a later step commits and pushes it straight after your receipt/);
+  assert.match(text, /Leave every change UNCOMMITTED: Code is on Auto, so nobody reviews it: your proof is kept on the step, and straight after your receipt you will be mailed to commit and push it and open the PR/);
   assert.doesNotMatch(text, /the human reviews the working tree/, 'nobody reads it first on Auto');
   assert.match(text, /kind:"ready"/);
-  assert.match(jobPrompt(auto, spec('api'), { id: 'run1', phase: 'implementation' }), /kind:"published"/);
+  const bare = jobPrompt(auto, spec('api'), { id: 'run1', phase: 'implementation' });
+  assert.match(bare, /kind:"ready"/);
+  assert.doesNotMatch(bare, /kind:"published"/, 'nothing is committed until the checkpoint passes it');
 });
 
 test('the planner is told to write show as things to see, and a replan may change it like check', () => {

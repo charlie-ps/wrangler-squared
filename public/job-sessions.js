@@ -8,8 +8,8 @@ import { ICONS } from './icons.js';
 // The job's own scope ('' sub) holds what no step owns: planning, the
 // wrangler's conversations and plan changes, and a local-main fix.
 
-const PHASE = { implementation: 'Implementation', repair: 'Repair', publish: 'Publish', verify: 'Verify', session: 'Session', write: 'Write' };
-const PHASE_ICON = { implementation: ICONS.terminal, repair: ICONS.wrench, publish: ICONS.send, planning: ICONS.idea, session: ICONS.robot, write: ICONS.edit };
+const PHASE = { implementation: 'Implementation', repair: 'Repair', sync: 'Sync', publish: 'Publish', verify: 'Verify', session: 'Session', write: 'Write' };
+const PHASE_ICON = { implementation: ICONS.terminal, repair: ICONS.wrench, sync: ICONS.merge, publish: ICONS.send, planning: ICONS.idea, session: ICONS.robot, write: ICONS.edit };
 
 const planningLabel = (run) => (run.ask || run.convo ? 'Wrangler conversation' : run.red ? 'Wrangler · red step' : 'Planning');
 

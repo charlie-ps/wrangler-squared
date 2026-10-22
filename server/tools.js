@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { isHumanSub, jobInputSchema, reportSchema } from './jobs-schema.js';
 import { runForSession } from './jobs.js';
 import { makeCreateJob } from './job-create.js';
-import { workingTreeHash } from './git.js';
+import { workingTreeHash, mergeInProgress } from './git.js';
 
 // MCP tools in the EXTENSION signature: `handler({ host, caller }, args)` — no
 // `deps` (agent-wrangler docs/superpowers/specs/2026-09-11-extensions-api-design.md,
@@ -29,23 +29,31 @@ function syncBranch(host, caller) {
   if (sub?.worktree && sub.worktree.branch !== branch) host.stores.jobs.noteBranchRename(caller, branch);
 }
 
-async function treeOf(host, caller, runId) {
+const worktreeOf = (host, caller, runId) => {
   const hit = runForSession(host.stores.jobs, caller);
   const sub = hit?.run.id === runId && hit.job.subJobs.find((s) => s.id === hit.run.subJobId);
-  if (!sub?.worktree?.path) return null;
-  try { return await workingTreeHash(sub.worktree.path); } catch (e) { host.log('tree hash failed', e); return null; }
+  return sub?.worktree?.path || null;
+};
+async function treeOf(host, path) {
+  if (!path) return null;
+  try { return await workingTreeHash(path); } catch (e) { host.log('tree hash failed', e); return null; }
 }
+// Work never merges (job-sync.js): a ready over a merge in progress is refused,
+// so the human never reviews the base as if it were the work.
+export const MERGE_REFUSED = 'A merge is in progress in this worktree (MERGE_HEAD is set), so the diff would hold the whole base branch. Work never merges the base in: run `git merge --abort`, keep only your own changes uncommitted, and report ready again. Wrangler brings the branch up to date with its base itself.';
 
 export const jobReportTool = {
   name: 'job_report',
-  description: 'Submit the receipt for your assigned Wrangler² step, then stop. One receipt per run: plan (a plan change may also carry diagnosis, actions pinned to a head, merge commit, stage or review round — forward to a session open on review, rework, accept-red, mark, recover, retry (a red step started again as it is; always waits for the human) — and up to three ranked options), ready (the working tree awaits the human\'s code review, nothing committed; with Code on You review your session then stays open, paused, for the human to write to you; each Show me item of your prompt is answered by a check of that exact text carrying shots, run or couldNot, and a receipt that leaves one out is refused), reply (text, shots?, run?: answers a human who wrote to your paused session; changes nothing, the session stays paused; from a new idea\'s planner it is a turn in the conversation, with suggest?:[{title, plan}] offering one job, or 2–4 when the idea is several jobs; from a planner asked a question about a running job it is the answer, shown in the job\'s conversation), published (the PR url), repaired, deployed or completed (with writes: one result per write your prompt lists — written, already, or failed with the place\'s own error — with its link, or a made output\'s location). A session whose prompt puts writes under review first sends drafts (each reviewed write as it would make it) and waits for mail with the human\'s decision before it completes. Checks are normally 1–3 bullets of a few words, e.g. "Build passed"; keep the detail in the transcript. Only the assigned session can report; identical retries are safe, and a terminal recap does not advance the job. If you cannot finish, go up one level: {kind:"blocked", summary:"one sentence"}, or {kind:"replan", summary, why?} when the work needs more than your step, both of which go to the planner first; {kind:"escalate", summary, tried?, ask} declares your step red for the human with what you found, what you tried and the decision you need (the planner may also attach up to three options). You never change the plan yourself.',
+  description: 'Submit the receipt for your assigned Wrangler² step, then stop. One receipt per run: plan (a plan change may also carry diagnosis, actions pinned to a head, merge commit, stage or review round — forward to a session open on review, rework, accept-red, mark, recover, retry (a red step started again as it is; always waits for the human) — and up to three ranked options), ready (the working tree awaits the human\'s code review, nothing committed; with Code on You review your session then stays open, paused, for the human to write to you; each Show me item of your prompt is answered by a check of that exact text carrying shots, run or couldNot, and a receipt that leaves one out is refused), reply (text, shots?, run?: answers a human who wrote to your paused session; changes nothing, the session stays paused; from a new idea\'s planner it is a turn in the conversation, with suggest?:[{title, plan}] offering one job, or 2–4 when the idea is several jobs; from a planner asked a question about a running job it is the answer, shown in the job\'s conversation), published (the PR url, once you are told to commit and push), synced or conflict (a sync session: the base merged in and pushed, or the conflicts that need the human\'s pick, each with up to three ranked options, after which you wait for mail), repaired, deployed or completed (with writes: one result per write your prompt lists — written, already, or failed with the place\'s own error — with its link, or a made output\'s location). A session whose prompt puts writes under review first sends drafts (each reviewed write as it would make it) and waits for mail with the human\'s decision before it completes. Checks are normally 1–3 bullets of a few words, e.g. "Build passed"; keep the detail in the transcript. Only the assigned session can report; identical retries are safe, and a terminal recap does not advance the job. If you cannot finish, go up one level: {kind:"blocked", summary:"one sentence"}, or {kind:"replan", summary, why?} when the work needs more than your step, both of which go to the planner first; {kind:"escalate", summary, tried?, ask} declares your step red for the human with what you found, what you tried and the decision you need (the planner may also attach up to three options). You never change the plan yourself.',
   inputSchema: { runId: z.string(), report: reportSchema },
   async handler({ host, caller }, { runId, report }) {
     try {
       syncBranch(host, caller);
       // Approval is pinned to the tree this receipt describes, read now while the
       // session is waiting for it. A tree git cannot read pins nothing.
-      const meta = report.kind === 'ready' ? { treeHash: await treeOf(host, caller, runId) } : {};
+      const path = report.kind === 'ready' && worktreeOf(host, caller, runId);
+      if (path && await mergeInProgress(path)) return errorResult(MERGE_REFUSED);
+      const meta = report.kind === 'ready' ? { treeHash: await treeOf(host, path) } : {};
       const job = host.stores.jobs.report(caller, runId, report, meta);
       allowFiles(host, [job]);
       await host.rebuild();
@@ -54,7 +62,9 @@ export const jobReportTool = {
       const parked = job.runs.find((r) => r.id === runId);
       const next = report.kind === 'drafts' ? 'End your turn and wait: mail will say which writes to make, with their final text. Make exactly those, then send kind:"completed".'
         : parked?.parkedFor === 'idea' && parked.parkedAt && !parked.mailedAt ? 'End your turn and wait: the human answers in the idea\'s conversation, and their answer arrives by mail. Do not stop the session yourself.'
-        : parked?.parkedFor === 'ready' && parked.parkedAt && !parked.mailedAt ? 'End your turn and wait: the human may write to you by mail (a question gets kind:"reply"; a change is made and reported ready again). Do not stop the session yourself.'
+        : parked?.parkedFor === 'ready' && parked.parkedAt && !parked.mailedAt ? 'End your turn and wait: the human may write to you by mail (a question gets kind:"reply"; a change is made and reported ready again), and once they approve, mail asks you to commit and push. Do not stop the session yourself.'
+        : parked?.parkedFor === 'ready' && !parked.report && !parked.mailedAt ? 'End your turn and wait: mail asks you to commit and push the approved tree in a moment. Do not stop the session yourself.'
+        : parked?.parkedFor === 'conflict' && parked.parkedAt && !parked.mailedAt ? 'End your turn and wait, leaving the merge in progress: the human picks how to resolve each conflict, and their choices arrive by mail. Do not stop the session yourself.'
         : 'Stop now. Wrangler coordinates the next step.';
       return result({ accepted: true, jobId: job.id, next });
     } catch (e) { return errorResult(e.message); }

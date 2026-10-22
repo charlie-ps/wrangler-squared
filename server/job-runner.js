@@ -7,10 +7,12 @@ import { startQueued, queuedReady, replanQueue } from './job-replan.js';
 import { heldBy, needsTriage, triesOn, triesAllowed, startRed, failRedReplan } from './job-red.js';
 import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from './job-writes.js';
 import { dropSub } from './job-sub-ops.js';
-import { draftsDecidedMail, threadMail, ideaMail, askMail } from './job-prompts.js';
+import { draftsDecidedMail, threadMail, ideaMail, askMail, landMail, conflictMail } from './job-prompts.js';
 import { inConversation, unsentIdea } from './job-idea.js';
 import { askFailed, replanFailed, convosOf, convoById, convoRun, unsentAsks } from './job-talk.js';
-import { waitsOnReview, unsentFor } from './job-parked.js';
+import { waitsOnReview, unsentFor, parkedReadyRun } from './job-parked.js';
+import { MAX_SYNCS, SYNC_LIMIT, syncAttempts, conflictRun } from './job-sync.js';
+import { isPrSub } from './jobs-schema.js';
 import { noteMain } from './job-main.js';
 import { stderrLine } from './git.js';
 import { budgetOf, liveCards, budgetContinueMail } from './job-budget.js';
@@ -21,8 +23,10 @@ export const shortError = (e) => {
 };
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
-const MAX_CONFLICT_REPAIRS = 5;
-const CONFLICT_LIMIT = `Merge conflicts still there after ${MAX_CONFLICT_REPAIRS} repairs (conflict repair limit reached). Review changes, then retry if needed.`;
+const CHECK_LIMIT = 'Automatic repair limit reached. Review changes, then retry if needed.';
+// Failing checks are fixed by a work run (`fixChecks`, the head it was sent for);
+// a repair from before one work phase counts the same.
+const checkFixes = (job, sub) => job.runs.filter((r) => r.subJobId === sub.id && ((r.phase === 'repair' && !r.conflict) || r.fixChecks)).length;
 // A failed post-merge run is red but still watched, more slowly: a re-run that
 // passes, or a later run containing the merge that does, clears it and the
 // sub-job climbs on as a green one would, with nobody pressing Retry. Read from
@@ -185,7 +189,9 @@ export class JobRunner {
         || (run.phase === 'planning' && job.stage === 'active' && (run.ask ? !convoById(job, run.convo)?.pending : !job.replan)) || run.phase === 'write'
         || (run.parkedFor === 'ready' && !run.report && (!waitsOnReview(job, run) || !(await this.runtime.exists(run))))
         // A new idea's planner is done talking once the idea is planned (its suggestion accepted).
-        || (run.parkedFor === 'idea' && !run.report && !inConversation(job));
+        || (run.parkedFor === 'idea' && !run.report && !inConversation(job))
+        // A sync parked on a conflict is over once that conflict is (retried, dropped).
+        || (run.parkedFor === 'conflict' && !run.report && job.subJobs.find((s) => s.id === run.subJobId)?.conflict?.runId !== run.id);
       if (!run.report && !cancelled) {
         if (!run.sessionId) error = 'Launch was interrupted. Check for an existing session/worktree before retrying.';
         // Parked on its drafts, a session sits idle (or goes dormant) by design
@@ -193,7 +199,9 @@ export class JobRunner {
         // away ends it.
         else if (run.parkedAt && !run.mailedAt) {
           if (await this.runtime.exists(run)) continue;
-          error = run.parkedFor === 'idea' ? 'Wrangler\'s session was closed while it waited for your reply. Retry to plan again.' : 'Session was closed while its drafts waited for review. Retry to run it again.';
+          error = run.parkedFor === 'idea' ? 'Wrangler\'s session was closed while it waited for your reply. Retry to plan again.'
+            : run.parkedFor === 'conflict' ? 'Session was closed while a merge conflict waited for you. Retry to sync again.'
+            : 'Session was closed while its drafts waited for review. Retry to run it again.';
         }
         else if (!(await this.runtime.isAlive(run))) error = 'Session stopped without a receipt. Open it to see why, then retry.';
         // Stopped at the spend limit, a session sits idle by design until a top-up.
@@ -272,6 +280,51 @@ export class JobRunner {
       this.patchSub(id, sub.id, (s) => { s.branchUpdate = { ...record, error: message, ...(conflict ? { failedHead: pr.head } : {}) }; s.note = `Updating the branch failed: ${message}`; });
     }
   }
+  // A head whose update-branch conflicted reads as DIRTY.
+  conflicted(sub, pr, redBehind = false) {
+    return (pr.behind || redBehind) && sub.branchUpdate?.failedHead === pr.head ? { ...pr, behind: false, dirty: true, checkStatus: 'failing' } : pr;
+  }
+  // A conflict means the base moved, not that the work is wrong: the sync session
+  // merges it in (job-sync.js), and stops only at its own generous cap, against one
+  // that never clears. It never counts against maxRepairs.
+  async sync(id, sub, pr) {
+    const job = this.store.get(id);
+    if (syncAttempts(job, sub) >= MAX_SYNCS + (sub.repairAllowance || 0)) { this.patchSub(id, sub.id, (s) => { s.error = SYNC_LIMIT; }); return; }
+    if (!heldBy(job, sub)) await this.launch(job, sub, 'sync', { conflict: pr.head });
+  }
+  // Work on an open PR starts from a branch level with its base. Its PR is read
+  // again (at most every 30s while it waits for a slot): a conflict is synced
+  // first, unless the worktree still holds uncommitted work, which is landed first
+  // and synced after, so sync never merges into a tree under review. Then the
+  // worktree takes whatever the branch gained on origin (update-branch, a sync)
+  // before the work session starts.
+  async workOnPr(id, sub) {
+    let pr = sub.pr;
+    if (!(sub.nextPollAt > this.now())) {
+      pr = this.conflicted(sub, { ...await this.github.pr(sub), url: sub.pr.url });
+      this.patchSub(id, sub.id, (s) => { s.pr = pr; s.observationError = null; s.nextPollAt = this.now() + 30000; });
+    }
+    const job = this.store.get(id), current = job.subJobs.find((s) => s.id === sub.id);
+    if (pr.state === 'OPEN' && pr.dirty && (!this.runtime.treeClean || await this.runtime.treeClean(current))) { await this.sync(id, current, pr); return; }
+    if (heldBy(job, current) || !this.allowed(id)) return;
+    await this.runtime.catchUp?.(current);
+    await this.launch(job, current, 'implementation', current.checkFix ? { fixChecks: current.checkFix.head } : undefined);
+  }
+  // The approved tree is committed and pushed by the session that wrote it. A
+  // failed send is tried again next tick; a card that has gone is settled away and
+  // a publish session lands the tree instead.
+  async land(id, run) {
+    const job = this.store.get(id);
+    const sub = job.subJobs.find((s) => s.id === run.subJobId);
+    try {
+      await this.runtime.resumeWithMail(run, landMail(job, run, sub));
+      this.patchRun(id, run.id, (r) => { r.landing = this.now(); r.mailedAt = this.now(); r.idleSince = null; });
+      this.patchSub(id, sub.id, (s) => { s.observationError = null; });
+    } catch (e) {
+      const note = `Could not tell the session to commit and push: ${shortError(e)}`;
+      if (sub.observationError !== note) this.patchSub(id, sub.id, (s) => { s.observationError = note; });
+    }
+  }
   triage(id, subId) {
     const sub = this.store.get(id)?.subJobs.find((s) => s.id === subId);
     const comments = sub?.prComments;
@@ -348,6 +401,10 @@ export class JobRunner {
       job = this.store.get(id);
       if (!this.allowed(id) || job.error) return;
       let sub = job.subJobs.find((s) => s.id === initial.id);
+      // Approved, the session that wrote the tree lands it: it is still open (parked
+      // under You review, waiting on Auto), so it is mailed rather than replaced.
+      const lander = sub.stage === 'review' && sub.state === 'approved' && isPrSub(sub) && !sub.error && !heldBy(job, sub) && parkedReadyRun(job, sub);
+      if (lander) { await this.land(id, lander); continue; }
       if (activeFor(job, sub)) continue;
       if (sub.error && !postMergeRed(sub, this.now())) continue;
       try {
@@ -372,23 +429,26 @@ export class JobRunner {
           // Tried on this tick's copy first: an idle tick must not rewrite the file.
           if (!heldBy(job, sub) && advanceWrite(job, sub, this.now())) this.store.update(id, (j) => advanceWrite(j, j.subJobs.find((s) => s.id === sub.id), this.now()));
         } else if (sub.stage === 'implementation') {
-          // One session per PR: work, commit, push, open the PR. Every
-          // prerequisite gates the start: the worktree is cut from the default
-          // branch at launch, so a PR prerequisite must have deployed for its
-          // code to be in the base.
-          if (!awaitsTicket(sub) && dependenciesSatisfied(job, sub)) await this.launch(job, sub, 'implementation');
+          // Work: a first cut, a rework or a fix for failing checks, always left
+          // uncommitted. Every prerequisite gates the start: the worktree is cut
+          // from the default branch at launch, so a PR prerequisite must have
+          // deployed for its code to be in the base. On an open PR, sync goes first.
+          if (!awaitsTicket(sub) && dependenciesSatisfied(job, sub)) {
+            if (sub.pr?.url) await this.workOnPr(id, sub);
+            else await this.launch(job, sub, 'implementation');
+          }
         } else if (sub.stage === 'review') {
-          // The human's approval of the uncommitted working tree is what starts
-          // the session that commits, pushes and opens the PR; until then the
-          // card just sits here, using no agent.
+          // Approved with no session left to land it (it closed, or it was from
+          // before landing by mail): a publish session commits and pushes the
+          // approved tree. Until approval the card just sits here, using no agent.
           if (sub.state === 'approved') await this.launch(job, sub, 'publish');
         } else if (sub.stage === 'pr') {
           if (sub.nextPollAt > this.now()) continue;
           let pr = await this.github.pr(sub);
-          // A failed update-branch (conflicts) on this head reads as DIRTY, so the
-          // repair path that already handles conflicts takes it from here.
+          // A failed update-branch (conflicts) on this head reads as DIRTY, so sync
+          // takes it from here.
           const redBehind = sub.acceptedRed?.ref === pr.head && pr.state === 'OPEN' && pr.mergeState === 'BEHIND' && !pr.dirty;
-          if ((pr.behind || redBehind) && sub.branchUpdate?.failedHead === pr.head) pr = { ...pr, behind: false, dirty: true, checkStatus: 'failing' };
+          pr = this.conflicted(sub, pr, redBehind);
           const comments = await this.github.comments(sub);
           // Whether this diff deploys is a property of the head, so it is read
           // once per head and again after every repair push.
@@ -417,19 +477,20 @@ export class JobRunner {
               this.patchSub(id, sub.id, (s) => { s.catchUp = null; });
             }
           } else if (sub.fixRequested) {
-            // The human saw something the checks do not cover; the repair runs
-            // whatever colour they are. A plan change can ask for one ahead of
-            // the prerequisites the new brief builds on; it waits for them.
-            if (dependenciesSatisfied(job, sub)) await this.launch(job, sub, 'repair');
+            // A fix the human asked for before one work phase replaced repair: it is
+            // a rework like any other now.
+            this.patchSub(id, sub.id, (s) => { s.note = s.fixRequested.note || 'Take another pass at it'; s.fixRequested = null; s.stage = 'implementation'; s.state = 'queued'; s.nextPollAt = 0; });
+          } else if (pr.dirty) {
+            // The base moved under the PR: sync merges it in before anything else.
+            await this.sync(id, sub, pr);
           } else if (pr.checkStatus === 'failing' && sub.acceptedRed?.ref !== pr.head) {
-            // A conflict means the base moved, not that the work is wrong, so its
-            // repairs (stamped `conflict` at launch) leave maxRepairs alone and stop
-            // only at their own generous cap, against one that never clears.
-            const conflict = !!pr.dirty;
-            const attempts = job.runs.filter((r) => r.subJobId === sub.id && r.phase === 'repair' && !!r.conflict === conflict).length;
-            const limit = (conflict ? MAX_CONFLICT_REPAIRS : this.store.data.settings.maxRepairs) + (sub.repairAllowance || 0);
-            if (attempts >= limit) this.patchSub(id, sub.id, (s) => { s.error = conflict ? CONFLICT_LIMIT : 'Automatic repair limit reached. Review changes, then retry if needed.'; });
-            else await this.launch(job, sub, 'repair', conflict ? { conflict: pr.head } : undefined);
+            // Failing checks are work like any other: fixed uncommitted, through the
+            // Code checkpoint (parked under You review, passed on Auto), then landed.
+            const limit = this.store.data.settings.maxRepairs + (sub.repairAllowance || 0);
+            if (checkFixes(job, sub) >= limit) this.patchSub(id, sub.id, (s) => { s.error = CHECK_LIMIT; });
+            else if (!heldBy(job, sub) && dependenciesSatisfied(job, sub)) {
+              this.patchSub(id, sub.id, (s) => { s.checkFix = { head: pr.head, at: this.now() }; s.mergeApprovedHead = null; s.stage = 'implementation'; s.state = 'queued'; s.nextPollAt = 0; });
+            }
           } else if (pr.behind && sub.acceptedRed?.ref !== pr.head || redBehind) {
             // Green but behind a base that requires up-to-date branches: bring it
             // up to date and keep watching, since the new head re-runs the checks.
@@ -508,11 +569,16 @@ export class JobRunner {
     }
     job = this.store.get(id);
     for (const run of job.runs.filter((r) => draftsDecided(job, r))) await this.resumeDrafted(id, run);
-    for (const run of job.runs.filter((r) => runnable(r) && r.parkedFor === 'ready')) {
+    for (const run of job.runs.filter((r) => runnable(r) && r.parkedFor === 'ready' && !r.landing)) {
       const sub = job.subJobs.find((s) => s.id === run.subJobId);
       // One message at a time, and only to a session waiting: one queued while it
       // answers goes once that reply is in, so each reply answers one message.
       if (!run.mailedAt && unsentFor(sub).length) await this.deliverThread(id, run);
+    }
+    job = this.store.get(id);
+    for (const sub of job.subJobs.filter((s) => s.conflict?.decided)) {
+      const run = conflictRun(job, sub);
+      if (run && run.parkedAt && !run.mailedAt) await this.deliverConflict(id, run, sub);
     }
     job = this.store.get(id);
     if (job.subJobs.length && job.subJobs.every((s) => s.stage === 'done') && (job.cancelledAt || !talking(job))) await this.finish(id);
@@ -574,6 +640,18 @@ export class JobRunner {
       this.patchSub(id, sub.id, (s) => { for (const m of s.thread) if (batch.some((b) => b.id === m.id)) m.sentAt = now; s.observationError = null; });
     } catch (e) {
       const note = `Could not send your message to the session: ${shortError(e)}`;
+      if (sub.observationError !== note) this.patchSub(id, sub.id, (s) => { s.observationError = note; });
+    }
+  }
+  // The human picked how to resolve each conflict the sync session parked on:
+  // mail it the picks, waking its card first if it went dormant.
+  async deliverConflict(id, run, sub) {
+    try {
+      await this.runtime.resumeWithMail(run, conflictMail(this.store.get(id), run, sub));
+      this.patchRun(id, run.id, (r) => { r.mailedAt = this.now(); r.idleSince = null; });
+      this.patchSub(id, sub.id, (s) => { s.observationError = null; });
+    } catch (e) {
+      const note = `Could not send your choices to the session: ${shortError(e)}`;
       if (sub.observationError !== note) this.patchSub(id, sub.id, (s) => { s.observationError = note; });
     }
   }

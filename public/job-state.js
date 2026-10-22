@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, workingOnFeedback, FEEDBACK_LABEL, budgetHeld, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, touchedBy, wranglerUnread, ideaStage, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber, worktreeKept, promptsWaiting } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, workingOnFeedback, FEEDBACK_LABEL, budgetHeld, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, touchedBy, wranglerUnread, ideaStage, pendingDependencies, deploymentStalled, codeAwaitingReview, conflictWaiting, runStatus, prNumber, worktreeKept, promptsWaiting } from './jobs.js';
 
 // The one state vocabulary every surface draws: a tone (the colour, see the
 // .tone-* rules in jobs.css), a glyph and a short name. Every stage, run status,
@@ -93,6 +93,7 @@ export function subLabel(job, sub) {
     if (sub.cancelledAt) return jobStatus(job, sub).text;
     if (redFixReady(job, sub)) return 'Fix ready';
     if (runStatus(job, sub) === 'needs-you') return 'Prompt waiting';
+    if (conflictWaiting(sub)) return 'Conflict needs you';
     if (deploymentStalled(sub)) return 'Nothing deployed';
     if (codeAwaitingReview(sub)) return 'Review code';
     if (isSessionSub(sub)) return 'Review result';

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jobPrompt, historyLines, HISTORY_MAX_LINES, draftsDecidedMail } from './job-prompts.js';
+import { jobPrompt, historyLines, HISTORY_MAX_LINES, draftsDecidedMail, landMail, conflictMail } from './job-prompts.js';
 
 // The prompt half of agent-wrangler's job-runtime.test.js (`job-system` branch).
 // It never touched a SessionManager — the prompts are pure functions of the
@@ -19,15 +19,14 @@ const planned = {
 };
 const briefed = { ...sub, title: 'Deliver api', brief: 'Retry the token exchange once', after: ['proto'], worktree: { branch: 'fix/AUTH-1-api' } };
 
-test('the implementer is told to name its placeholder branch in the repo\'s convention via name_branch, and to keep a name it already gave', () => {
-  // The rename happens where the branch reaches origin: the implementation
-  // session when it publishes itself, the publish session under code review.
-  const unreviewed = { ...job, reviewCode: false };
-  assert.doesNotMatch(jobPrompt(job, { ...sub, worktree: { branch: 'job-12345678-api' } }, run), /placeholder|name_branch/, 'a reviewed implementation neither pushes nor renames');
-  const fresh = jobPrompt(unreviewed, { ...sub, worktree: { branch: 'job-12345678-api' } }, run);
+test('the session that lands the tree is told to name its placeholder branch in the repo\'s convention via name_branch, and to keep a name it already gave', () => {
+  // The rename happens where the branch reaches origin: the land mail to the
+  // session that wrote it, or the publish session standing in for it.
+  assert.doesNotMatch(jobPrompt(job, { ...sub, worktree: { branch: 'job-12345678-api' } }, run), /placeholder|name_branch/, 'work neither pushes nor renames');
+  assert.doesNotMatch(jobPrompt({ ...job, reviewCode: false }, { ...sub, worktree: { branch: 'job-12345678-api' } }, run), /placeholder|name_branch/, 'nor on Auto');
+  const fresh = landMail(job, run, { ...sub, worktree: { branch: 'job-12345678-api' }, ready: { round: 1 } });
   assert.match(fresh, /job-12345678-api\) is a placeholder/); assert.match(fresh, /branch-naming convention/); assert.match(fresh, /Jira key is AUTH-1/);
   assert.match(fresh, /name_branch MCP tool \(never git branch -m\)/);
-  assert.match(jobPrompt(unreviewed, sub, run), /is a placeholder/, 'a sub-job whose worktree is not yet recorded is still told to rename');
   const named = jobPrompt(job, { ...sub, worktree: { branch: 'fix/AUTH-1-deliver-api' } }, { ...run, phase: 'publish' });
   assert.match(named, /branch is fix\/AUTH-1-deliver-api; keep it/); assert.doesNotMatch(named, /is a placeholder/);
   assert.match(jobPrompt(job, { ...sub, worktree: { branch: 'job-12345678-api' } }, { ...run, phase: 'publish' }), /is a placeholder/, 'publish repeats it: that is where the name reaches origin');
@@ -36,7 +35,7 @@ test('the implementer is told to name its placeholder branch in the repo\'s conv
 });
 
 test('every phase ends with its own receipt call, naming this run and the blocked shape', () => {
-  for (const phase of ['planning', 'write', 'implementation', 'publish', 'repair', 'verify', 'session']) {
+  for (const phase of ['planning', 'write', 'implementation', 'publish', 'sync', 'verify', 'session']) {
     const text = jobPrompt(planned, { ...briefed, pr: { url: 'https://github.com/org/repo/pull/1', mergeCommit: 'abc123' }, check: 'Sign-in works in dev' }, { ...run, phase });
     assert.match(text, /job_report \{runId:"run1"/, phase);
     assert.match(text, /Blocked: \{kind:"blocked", summary:"one sentence"\}/, phase);
@@ -56,21 +55,27 @@ test('the implementation prompt is one bounded step: context once, the brief, wh
   assert.match(text, /History of this sub-job, oldest first:\n- \d\d:\d\d human requested changes: "Call the flag sign_in_v2"/);
   assert.doesNotMatch(text, /worktree already holds the work/, 'a note with no earlier run promises nothing about the tree');
   assert.match(text, /Leave every change UNCOMMITTED/);
+  assert.match(text, /Never merge or rebase the base branch in/);
   assert.match(text, /When the working tree is ready to review, job_report \{runId:"run1", kind:"ready", checks:\["what you verified", \{text:"<a Show me item, verbatim>"/);
   assert.doesNotMatch(text, /kind:"published"|Commit, push/, 'under code review nothing reaches origin from this session');
+  // One work phase: Auto changes only whether it stops, never what it is asked to do.
   const unreviewed = jobPrompt({ ...planned, reviewCode: false }, { ...briefed, check: 'Sign-in works in dev' }, run);
-  assert.match(unreviewed, /Commit, push, open the PR, then job_report \{runId:"run1", kind:"published", url:"<PR url>", merge\?:\{method, why\}\}/);
-  assert.doesNotMatch(unreviewed, /UNCOMMITTED|kind:"ready"/);
+  assert.match(unreviewed, /UNCOMMITTED/); assert.match(unreviewed, /kind:"ready"/);
+  assert.doesNotMatch(unreviewed, /kind:"published"|Commit, push/);
   const publish = jobPrompt(planned, briefed, { ...run, phase: 'publish' });
   assert.match(publish, /^AUTH-1 · Sign-in$/m); assert.match(publish, /Context: The sign-in service is Java/);
   assert.match(publish, /This PR \(repo\): Retry the token exchange once/);
-  assert.match(publish, /reviewed the uncommitted changes in this worktree and approved them as they stand/);
+  assert.match(publish, /uncommitted changes in this worktree are approved as they stand \(the human reviewed them\)\. You are asked to commit and push them/);
   assert.match(publish, /Do not change the code/);
   assert.match(publish, /branch is fix\/AUTH-1-api; keep it/);
   assert.match(publish, /Wrangler squash-merges this PR\. Keep it that way unless there is an explicit reason not to/);
   assert.match(publish, /Commit, push, open the PR, then job_report \{runId:"run1", kind:"published", url:"<PR url>", merge\?:\{method, why\}\}/);
-  for (const text of [unreviewed, publish]) assert.match(text, /End the commit message and the PR description with exactly this line:\nMade with Agent Wrangler and the charlie-ps\/wrangler-squared extension\nCommit, push, open the PR/);
-  assert.doesNotMatch(text, /Made with Agent Wrangler/, 'nothing is committed under code review');
+  const land = landMail(planned, run, { ...briefed, ready: { round: 2, at: 1, approvedAt: 2 } });
+  assert.match(land, /the human has approved your working tree \(round 2\) as it stands\. You are now asked to commit and push it/);
+  assert.match(land, /Wrangler squash-merges this PR\./);
+  assert.match(text, /Wrangler squash-merges this PR\./, 'work may name a merge method with its ready');
+  for (const t of [land, publish]) assert.match(t, /End the commit message and the PR description with exactly this line:\nMade with Agent Wrangler and the charlie-ps\/wrangler-squared extension\nCommit, push, open the PR/);
+  assert.doesNotMatch(text, /Made with Agent Wrangler/, 'nothing is committed by work');
   const onOpenPr = jobPrompt(planned, { ...briefed, pr: { url: 'https://github.com/org/repo/pull/1' } }, { ...run, phase: 'publish' });
   assert.match(onOpenPr, /End the commit message with exactly this line[^\n]*\nMade with Agent Wrangler and the charlie-ps\/wrangler-squared extension\nCommit, push to the open PR/);
   const plainest = jobPrompt(planned, { ...briefed, after: [] }, run);
@@ -106,7 +111,7 @@ test('a relaunched step reads what already happened: every earlier run with its 
   assert.match(text, /History of this sub-job, oldest first:\n- (?:\d{1,2} \w+ )?\d\d:\d\d implementation · opus → ready: Tests pass · Lint clean\n/);
   assert.match(text, /The worktree already holds the work above\. Pick up from the last line; do not redo or re-verify/);
   assert.doesNotMatch(text, /Built|not mine/, 'a sibling sub-job\'s history is not this worker\'s');
-  for (const phase of ['implementation', 'repair', 'verify']) {
+  for (const phase of ['implementation', 'sync', 'verify']) {
     assert.match(jobPrompt(job, { ...briefed, pr: { url: 'https://github.com/org/repo/pull/1', mergeCommit: 'abc' }, check: 'x' }, { ...run, id: 'r4', phase }), /History of this sub-job/, phase);
   }
   // Legacy runs carry no model at all.
@@ -122,13 +127,30 @@ test('a relaunched step reads what already happened: every earlier run with its 
   assert.match(spanning[0], /^- 15 Sept? 17:02 implementation/);
 });
 
-test('a repair carries the human\'s note when there is one, and the checks otherwise', () => {
+test('work on an open PR with failing checks is told to fix them; one the human asked for carries the history', () => {
   const pr = { url: 'https://github.com/org/repo/pull/7' };
-  const asked = jobPrompt(planned, { ...briefed, pr, fixRequested: { note: 'Rename the flag' } }, { ...run, phase: 'repair' });
-  assert.match(asked, /Fix PR https:\/\/github.com\/org\/repo\/pull\/7 on this worktree branch: the human asks: Rename the flag/);
-  const failing = jobPrompt(planned, { ...briefed, pr }, { ...run, phase: 'repair' });
-  assert.match(failing, /failing checks, merge conflicts or requested changes/);
-  for (const text of [asked, failing]) assert.match(text, /Never weaken checks; never merge/);
+  const failing = jobPrompt(planned, { ...briefed, pr, checkFix: { head: 'abcdef0123456789' } }, run);
+  assert.match(failing, /PR https:\/\/github.com\/org\/repo\/pull\/7 is already open from this worktree's branch, and its checks are failing at abcdef012345/);
+  assert.match(failing, /Never weaken checks/);
+  assert.match(failing, /Leave every change UNCOMMITTED/);
+  const asked = jobPrompt(planned, { ...briefed, pr }, run);
+  assert.match(asked, /this is a fix to it, requested by the human/);
+});
+
+test('a sync session merges the base in and changes nothing else; a judgement call parks as a conflict, and the picks come back by mail', () => {
+  const pr = { url: 'https://github.com/org/repo/pull/7', base: 'main' };
+  const text = jobPrompt(planned, { ...briefed, pr }, { ...run, phase: 'sync' });
+  assert.match(text, /conflicts with its base, main\. This step only brings the branch fix\/AUTH-1-api up to date with origin\/main/);
+  assert.match(text, /change nothing else/);
+  assert.match(text, /git merge --abort/);
+  assert.match(text, /you are asked to commit the merge .* and push it to origin fix\/AUTH-1-api, then job_report \{runId:"run1", kind:"synced"/);
+  assert.match(text, /kind:"conflict", summary\?:.*conflicts:\[\{file:"path", what:.*options:\[\{label:/);
+  assert.match(text, /your recommendation first/);
+  const sub = { ...briefed, pr, conflict: { runId: 'run1', conflicts: [{ file: 'src/a.js', what: 'Both renamed it', options: [{ label: 'Keep ours' }, { label: 'Keep theirs' }] }], decided: { picks: [1], note: 'theirs is newer' } } };
+  const mail = conflictMail(planned, run, sub);
+  assert.match(mail, /- src\/a.js: "Keep theirs"/);
+  assert.match(mail, /They added: "theirs is newer"/);
+  assert.match(mail, /kind:"synced"/);
 });
 
 test('a verify session exists only for the plan\'s one check, and stays off production data', () => {
@@ -231,7 +253,7 @@ test('the planner is told stories are optional, and a ticketless sub-job is told
   const text = jobPrompt({ ...planned, plan: null }, null, { ...run, phase: 'planning' });
   assert.match(text, /Stories are optional/); assert.match(text, /never an invented one/);
   assert.match(text, /storyId\?,jiraKey\?/, 'the receipt shape marks both as optional');
-  const ticketless = jobPrompt({ ...job, reviewCode: false }, { ...briefed, jiraKey: undefined, worktree: { branch: 'job-12345678-api' } }, run);
+  const ticketless = landMail({ ...job, reviewCode: false }, run, { ...briefed, jiraKey: undefined, worktree: { branch: 'job-12345678-api' } });
   assert.match(ticketless, /has no Jira ticket, so use the convention's ticketless form/); assert.doesNotMatch(ticketless, /Jira key is|undefined|null/);
 });
 
@@ -328,8 +350,8 @@ test('a PR\'s own base overrides the job\'s in its prompts, and the planner is t
   const unreviewed = { ...job, reviewCode: false, base: 'next' };
   const own = { ...sub, base: 'release/2.x' };
   assert.match(jobPrompt(unreviewed, own, run), /This PR \(repo, landing on release\/2\.x\)/);
-  assert.match(jobPrompt(unreviewed, own, run), /--base release\/2\.x` \(this PR lands on release\/2\.x/);
-  assert.match(jobPrompt({ ...job, reviewCode: false }, own, run), /--base release\/2\.x/, 'with no job base too');
+  assert.match(landMail(unreviewed, run, own), /--base release\/2\.x` \(this PR lands on release\/2\.x/);
+  assert.match(landMail({ ...job, reviewCode: false }, run, own), /--base release\/2\.x/, 'with no job base too');
   const planning = jobPrompt(job, null, { ...run, phase: 'planning' });
   assert.match(planning, /set `base:"<branch>"` on each PR that is meant to land elsewhere than the repository's default branch/);
   assert.match(planning, /Do not leave that intent in prose only/);
@@ -344,23 +366,25 @@ test('a job with a base tells the planner and the publisher; one without is unch
   const unreviewed = { ...job, reviewCode: false };
   const based = { ...unreviewed, base: 'next' };
   assert.doesNotMatch(jobPrompt(unreviewed, sub, run), /--base|landing on/);
+  assert.doesNotMatch(landMail(unreviewed, run, sub), /--base/);
   assert.doesNotMatch(jobPrompt(job, null, { ...run, phase: 'planning' }), /lands on the branch/);
   assert.match(jobPrompt(based, null, { ...run, phase: 'planning' }), /Every PR in this job lands on the branch `next`/);
-  assert.match(jobPrompt(based, sub, run), /open the PR with `gh pr create --base next`/);
+  assert.match(landMail(based, run, sub), /open the PR with `gh pr create --base next`/);
   assert.match(jobPrompt(based, sub, run), /This PR \(repo, landing on next\)/);
   assert.match(jobPrompt(based, sub, { ...run, phase: 'publish' }), /gh pr create --base next/);
   const open = { ...sub, pr: { url: 'https://github.com/org/repo/pull/1' } };
-  assert.doesNotMatch(jobPrompt(based, open, { ...run, phase: 'repair' }), /--base/, 'a repair pushes to the existing PR');
+  assert.doesNotMatch(landMail(based, run, open), /--base/, 'a fix pushes to the existing PR');
   assert.doesNotMatch(jobPrompt(based, open, run), /gh pr create/);
 });
 
-test('Code on Auto with Show me items asks for proof and a ready receipt, but never for a review: publish follows at once', () => {
+test('Code on Auto with Show me items asks for proof and a ready receipt, but never for a review: the same session lands it at once', () => {
   const shown = { ...briefed, show: ['Lists sign-ins'] };
   const auto = jobPrompt({ ...planned, reviewCode: false }, shown, run);
-  assert.match(auto, /Code is on Auto, so nobody reviews it: your proof is kept on the step and a later step commits and pushes it straight after your receipt and opens the PR/);
+  assert.match(auto, /Code is on Auto, so nobody reviews it: your proof is kept on the step, and straight after your receipt you will be mailed to commit and push it and open the PR/);
   assert.match(auto, /When the work is done and every Show me item is proven, job_report \{runId:"run1", kind:"ready"/);
   assert.match(auto, /Stop everything you started before you report/);
   assert.doesNotMatch(auto, /ready to review|the human reviews|stays open, paused|running\?:/);
+  assert.match(landMail({ ...planned, reviewCode: false }, run, { ...shown, ready: { at: 5, approvedAt: 5 } }), /Code is on Auto, so your ready receipt is approved as it stands/);
   const reviewed = jobPrompt(planned, shown, run);
   assert.match(reviewed, /When the working tree is ready to review, job_report/);
   assert.match(reviewed, /the human reviews the working tree before anything is committed/);
