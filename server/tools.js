@@ -102,15 +102,16 @@ export function makeCreateJobTool(deps) {
   const createJob = makeCreateJob(deps);
   return {
     name: 'create_job',
-    description: 'Create a Wrangler² job from a description of the outcome you want, the way a human does through the Jobs view\'s New job form. intent is the description (a title is generated from it unless you pass one); repos are absolute repository paths the planner should start from (leave empty to let it discover them); agent/model/effort choose what runs each step (leave one out to use the human\'s usual pick from New job; an empty model or effort is the agent\'s own default). For a Codex job, sandbox is locked (writes only inside the worktree), auto (the default: --approve-for-me, a reviewer model approves stepping outside) or full (no sandbox, no approvals); base is the branch the job\'s PRs land on when it is not the repository\'s default (an integration branch such as next; it must exist on origin); writableDirs are extra folders (absolute or ~/) every Codex step may also write, such as ~/.docker. Put the job in an existing Task with taskId, or create one with newTaskName, not both; leave both out for an unassigned job. start:true starts planning straight away; otherwise the job waits in the backlog for a human to start it. Planning stops for the human to approve the plan unless reviewPlan is false, which starts the work as soon as the plan is in. Leave a review flag out to use the human\'s review defaults from Automation settings. Returns the jobId.',
+    description: 'Create a Wrangler² job from a description of the outcome you want, the way a human does through the Jobs view\'s New job form. intent is the description (a title is generated from it unless you pass one); repos are absolute repository paths the planner should start from (leave empty to let it discover them); agent/model/effort choose what runs each step (leave one out to use the human\'s usual pick from New job; an empty model or effort is the agent\'s own default). For a Codex job, sandbox is locked (writes only inside the worktree), auto (the default: --approve-for-me, a reviewer model approves stepping outside) or full (no sandbox, no approvals); base is the branch the job\'s PRs land on when it is not the repository\'s default (an integration branch such as next; it must exist on origin); writableDirs are extra folders (absolute or ~/) every Codex step may also write, such as ~/.docker. start:true starts planning straight away; otherwise the job waits in the backlog for a human to start it. Planning stops for the human to approve the plan unless reviewPlan is false, which starts the work as soon as the plan is in. Leave a review flag out to use the human\'s review defaults from Automation settings. Returns the jobId.',
     inputSchema: {
-      ...jobInputSchema.shape,
-      newTaskName: z.string().optional(),
+      // A job has no Task: its sessions are off the board (job-runtime.js), so a
+      // Task would only count them where nobody can see them.
+      ...jobInputSchema.omit({ taskId: true }).shape,
       start: z.boolean().default(false),
     },
-    async handler({ host }, { newTaskName, start, ...job }) {
+    async handler({ host }, { start, ...job }) {
       try {
-        const created = await createJob(host, { job, newTaskName, start });
+        const created = await createJob(host, { job, start });
         return result({ jobId: created.id, title: created.title, stage: host.stores.jobs.get(created.id).stage });
       } catch (e) { return errorResult(e?.issues?.[0]?.message || e?.message || String(e)); }
     },

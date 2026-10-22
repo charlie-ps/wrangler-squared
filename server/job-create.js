@@ -1,4 +1,4 @@
-import { jobInputSchema, line } from './jobs-schema.js';
+import { jobInputSchema } from './jobs-schema.js';
 import { generateTitle } from './job-title.js';
 import { runHeadlessClaude } from './headless-claude.js';
 import { runnerFor } from './jobs.js';
@@ -9,9 +9,9 @@ import { runnerFor } from './jobs.js';
 export const kick = (host) => runnerFor(host).tick();
 
 // One create path for the New idea form (`job-create`) and an agent's
-// `create_job`: validate, settle the Task, create, optionally start, rebuild,
-// kick. A throw means nothing was created; each caller reports it its own way
-// (a broadcast for the form, an MCP error for the tool).
+// `create_job`: validate, create, optionally start, rebuild, kick. A throw
+// means nothing was created; each caller reports it its own way (a broadcast
+// for the form, an MCP error for the tool).
 //
 // The form sends only a description, so the job is created under a fallback
 // title and Haiku's replaces it after the fact: naming never delays or fails a
@@ -26,20 +26,8 @@ export function makeCreateJob({ run = runHeadlessClaude } = {}) {
   };
   // `idea`: made from New idea, so planning may talk it through first (job-idea.js).
   // Only the board's form sets it; an agent's create_job plans straight away.
-  return async (host, { job: raw, newTaskName, start, idea = false }) => {
+  return async (host, { job: raw, start, idea = false }) => {
     const input = jobInputSchema.parse(raw);
-    let taskId = input.taskId;
-    if (newTaskName !== undefined) {
-      if (taskId) throw new Error('Choose an existing task or create a new one, not both');
-      if (typeof newTaskName !== 'string') throw new Error('Enter a task name of up to 180 characters on one line');
-      const name = newTaskName.trim();
-      if (!name) throw new Error('Enter a name for the new task');
-      if (!line.safeParse(name).success) throw new Error('Enter a task name of up to 180 characters on one line');
-      taskId = host.tasks.create({ name }).id;
-    } else if (taskId) {
-      const task = host.tasks.get(taskId);
-      if (!task || task.archived) throw new Error('The selected task is no longer available');
-    }
     // The job keeps its own copies: a staged file is single-use and pruned after a
     // week, and every spawn of the job needs the same pictures.
     const kept = [];
@@ -48,7 +36,7 @@ export function makeCreateJob({ run = runHeadlessClaude } = {}) {
       else { for (const k of kept) host.images.remove(k); throw new Error('An attached image is no longer available. Attach it again.'); }
     }
     // `titlePending` until Haiku answers either way; the board draws a loader for it.
-    const job = host.stores.jobs.create({ ...input, taskId }, { ...(idea && { idea: { thread: [] } }), ...(!raw?.title && { titlePending: true }) });
+    const job = host.stores.jobs.create(input, { ...(idea && { idea: { thread: [] } }), ...(!raw?.title && { titlePending: true }) });
     if (start) host.stores.jobs.action(job.id, 'start', {});
     await host.rebuild();
     if (start) kick(host).catch((e) => host.log('job-create tick failed', e));

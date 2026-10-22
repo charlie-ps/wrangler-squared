@@ -29,15 +29,13 @@ missing `--add-dir` would fail the launch. Only job sessions get the policy, and
 Claude jobs ignore it because Claude has no OS sandbox. A job saved before this
 existed stays locked.
 
-When a Job is created it can stay Unassigned, use an active Task, or create a
-new Task. Every agent session launched for that Job uses the same Task and its
-shared memory. Archiving that Task stops its active sessions; restore it before
-retrying the Job so later sessions do not lose the Task context.
+A Job has no Task. Its sessions live on the job page, off the board, so a Task
+would only hold sessions nobody can see there, and archiving it would stop a
+job's parked steps. A job saved with a `taskId` still loads; nothing reads it.
 
 Agents can create jobs too: any ordinary agent session gets a `create_job` tool
 taking what the New job form takes (the description as `intent`, `repos`,
-`agent`/`model`/`effort`, `sandbox`/`writableDirs`, an optional `taskId` or
-`newTaskName`, and `start`).
+`agent`/`model`/`effort`, `sandbox`/`writableDirs` and `start`).
 It returns the `jobId`; without `start` the job waits in the backlog, and with it
 planning still stops for a human to approve the plan. Job-step sessions do not
 see the tool, so a job cannot start further jobs.
@@ -60,7 +58,7 @@ so a job can finish over its limit by up to one turn.
 ## Status
 
 Functionally complete against host API **1.42.0**: 1.4 added the worktree,
-`addDirs`, `taskId` and PR-automation spawn options this extension depends on,
+`addDirs` and PR-automation spawn options this extension depends on,
 1.6 the `usage:read` and `sessions:bill` capabilities behind the per-job price,
 1.7 the `view` badge that puts the needs-you count on the rail button, 1.12 the `codexPolicy` hook behind a Codex job's sandbox mode, 1.25 the client `api.agents()` the New job form reads its models and efforts from, 1.31 the `images:keep` capability and `images` spawn option behind a job's attached images, and 1.38 the `files:view` capability and client `api.openFile` / `api.files` behind Open on a file place, and 1.39 the `earlyAdopter` manifest branch and client `api.earlyAdopter` behind the hidden early-adopter switch, 1.41 the `offBoard` spawn option that keeps every job session off the board, and 1.42 the client `api.mountSession` that shows a step's sessions, the board's own session panel, inside the job page. Every feature the in-core system had is either wired
 through the extension `host` façade or is one of the open host-API gaps listed in
@@ -74,15 +72,8 @@ Requires an agent-wrangler on `main` (host API `^1.42.0`). In the wrangler's
 Extensions tab, install from this repository's git URL, consent to the
 capabilities disclosed in `package.json`'s `wranglerExtension` block, then
 restart the wrangler. The extension asks for `sessions:read`, `sessions:spawn`,
-`sessions:archive`, `sessions:bill`, `sessions:wake`, `sessions:interrupt`, `tasks:read`, `tasks:write`, `usage:read`,
-`board:rebuild` and `board:broadcast`.
-
-Adding Task support widens the extension's requested capabilities. Updating an
-existing installation therefore requires fresh consent in the Extensions tab;
-a development copy with older consent is quarantined until it is reinstalled.
-The host currently groups Task creation with rename and session assignment under
-the broad `tasks:write` capability, although this extension uses it only to
-create the Task requested in the New job form or by `create_job`.
+`sessions:archive`, `sessions:bill`, `sessions:wake`, `sessions:interrupt`, `mail:send`, `usage:read`,
+`board:rebuild`, `board:broadcast`, `images:keep` and `files:view`.
 
 For development, **copy** (never symlink — discovery only sees real directories)
 a checkout, `node_modules` included, to `<AW_DATA_DIR>/extensions/jobs` of a

@@ -365,7 +365,7 @@ export function primaryAction(surface) {
 }
 
 const MAX_ASK_IMAGES = 4;
-export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], mountSession = null, sessionOf = () => null, onIntro = () => {}, onThemeChoice = () => {}, now = () => Date.now(), files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
+export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, mountSession = null, sessionOf = () => null, onIntro = () => {}, onThemeChoice = () => {}, now = () => Date.now(), files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
   setFileOpener(files ? (path) => files.canOpen(path) : null);
   const root = document.getElementById('jobs');
   // New idea, Automation settings and an idea not yet a job are modal; a job is a page in the view (`page`, below).
@@ -1965,11 +1965,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   function createJob() {
     picker?.dispose(); picker = null;
     const agents = getAgents();
-    const tasks = getTasks().filter((t) => !t.archived && !t.archivedAt);
     const toggle = (name, label, consequence, checked) => `<label class="job-toggle"><span${consequence ? ` title="${consequence}"` : ''}>${label}</span><input type="checkbox" class="job-switch" name="${name}" ${checked ? 'checked' : ''}></label>`;
     showModal(`<form id="job-create-form" class="job-create">
       <div class="job-create-brief"><h2>New idea</h2><div class="job-outcome"><label>Idea<textarea name="intent" required rows="8" maxlength="16000" placeholder="What should exist that doesn’t yet?"></textarea></label>${imagesPanelHtml()}</div><fieldset class="job-prop job-review-grid"><legend>Review checkpoints</legend><div class="job-review-tiles">${reviewPointsHtml(reviewDefaultsOf(data.settings))}</div></fieldset></div>
-      <aside class="job-create-props"><fieldset class="job-prop"><legend>Task</legend><select name="taskId" aria-label="Task"><option value="">Unassigned</option>${tasks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}<option value="__new__">＋ New task</option></select><input name="newTaskName" maxlength="180" placeholder="New task name" aria-label="New task name" hidden></fieldset><fieldset class="job-prop job-pick" id="job-pick"><legend>Agent</legend></fieldset><input type="hidden" name="agent"><input type="hidden" name="model"><input type="hidden" name="effort"><fieldset class="job-prop job-sandbox" id="job-sandbox"></fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset></aside>
+      <aside class="job-create-props"><fieldset class="job-prop job-pick" id="job-pick"><legend>Agent</legend></fieldset><input type="hidden" name="agent"><input type="hidden" name="model"><input type="hidden" name="effort"><fieldset class="job-prop job-sandbox" id="job-sandbox"></fieldset><fieldset class="job-prop" id="job-share-images" hidden><legend>Images</legend>${toggle('shareImages', 'Share with sub-jobs', 'every session on the job sees them, not just planning', true)}</fieldset></aside>
       <footer class="job-create-foot"><div class="job-actions"><button class="primary" name="destination" value="start">Start planning</button><button name="destination" value="backlog">Add to backlog</button></div></footer></form>`);
     const form = modal.querySelector('form');
     let images;
@@ -1995,19 +1994,13 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       onChange: (pick) => { for (const k of ['agent', 'model', 'effort']) form.elements[k].value = pick[k]; sandbox.setAgent(pick.agent); },
     });
     modal.addEventListener('close', () => { picker?.dispose(); picker = null; }, { once: true });
-    form.elements.taskId.onchange = () => {
-      const creating = form.elements.taskId.value === '__new__';
-      form.elements.newTaskName.hidden = !creating;
-      form.elements.newTaskName.required = creating;
-    };
     bindReviewPoints(form);
     form.onsubmit = (e) => {
       e.preventDefault(); if (images.busy()) return;
       if (!pressBusy(submitterOf(e), { also: form.querySelectorAll('.job-create-foot button') })) return;
       const values = new FormData(form);
-      const taskId = values.get('taskId');
       // Enter and the primary button both start planning; only the grey button parks it.
-      send({ type: 'job-create', idea: true, start: e.submitter?.value !== 'backlog', ...only({ newTaskName: taskId === '__new__' ? String(values.get('newTaskName')).trim() : '' }), job: { intent: values.get('intent'), agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', ...reviewFlagsOf(values), ...sandbox.value(), images: images.names(), shareImages: values.has('shareImages'), taskId: taskId && taskId !== '__new__' ? taskId : null } });
+      send({ type: 'job-create', idea: true, start: e.submitter?.value !== 'backlog', job: { intent: values.get('intent'), agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', ...reviewFlagsOf(values), ...sandbox.value(), images: images.names(), shareImages: values.has('shareImages') } });
       const usualPick = { agent: String(values.get('agent')), model: String(values.get('model')), effort: String(values.get('effort')) };
       if (usualPick.agent && usualPick.model) send({ type: 'job-settings', patch: { usualPick } });
     };

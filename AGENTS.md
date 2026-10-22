@@ -42,14 +42,15 @@ text as public as the rest of this repo.
   human consents to BEFORE any code runs, so it and `server/manifest.js` are
   duplicated by design and must agree (`id`, and `requires` in the manifest may
   not be WIDER than the block's). `requires` is the six `sessions:*` (read, spawn,
-  archive, bill, wake, interrupt) plus `mail:send`, `tasks:read`/`tasks:write`, `usage:read`,
-  `board:rebuild`/`board:broadcast`, `images:keep` and `files:view`. Task read/write lets New job validate a
-  selected Task or create one; spawn's `taskId` still binds task memory and
-  assigns the card itself. `mail:send` and `sessions:wake` (both host API 1.0)
-  resume a session parked on its drafts once the human has decided them:
-  mail carries the final writes, and a card gone dormant meanwhile is woken
+  archive, bill, wake, interrupt) plus `mail:send`, `usage:read`,
+  `board:rebuild`/`board:broadcast`, `images:keep` and `files:view`. A job has
+  no Task: its sessions are off the board, so a Task would only count them where
+  nobody sees them (and archiving it would kill parked steps); no spawn passes
+  `taskId`, and `jobs-schema.js` keeps the field only so old jobs parse.
+  `mail:send` and `sessions:wake` (both host API 1.0) resume a session parked
+  on its drafts once the human has decided them: mail carries the final writes, and a card gone dormant meanwhile is woken
   first. `engines.wranglerApi` is
-  `^1.42.0`: 1.4 added the worktree/`addDirs`/`taskId`/PR-automation spawn
+  `^1.42.0`: 1.4 added the worktree/`addDirs`/PR-automation spawn
   options this repo depends on, 1.6 the `usage:read`/`sessions:bill` pair the
   Jobs board's prices and triage billing depend on, 1.7 the `view` `badge()` core draws the needs-you count from, 1.25 the
   client `api.agents()` the New job form reads its models and efforts from,

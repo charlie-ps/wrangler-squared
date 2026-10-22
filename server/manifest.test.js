@@ -19,8 +19,7 @@ test('the manifest declares what package.json disclosed, and only known hook nam
   const declared = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).wranglerExtension;
   assert.equal(manifest.id, declared.id);
   assert.deepEqual([...manifest.requires].sort(), [...declared.requires].sort(), 'the manifest may not be wider than what the human consented to');
-  assert.ok(manifest.requires.includes('tasks:read'));
-  assert.ok(manifest.requires.includes('tasks:write'));
+  assert.deepEqual(manifest.requires.filter((c) => c.startsWith('tasks:')), [], 'a job has no Task');
   assert.equal(manifest.engines.wranglerApi, '^1.42.0', 'offBoard spawns arrived in 1.41 and the client api.mountSession in 1.42');
   assert.deepEqual(manifest.earlyAdopter, { branch: 'next' });
   assert.deepEqual(declared.earlyAdopter, manifest.earlyAdopter, 'the early-adopter branch is part of what the human consented to');
@@ -112,86 +111,24 @@ test('a codex job ignores a claude usual pick\'s model', async () => {
   assert.deepEqual(pick(await created(host, { agent: 'claude' })), { agent: 'claude', model: '', effort: '' });
 });
 
-test('job-create creates a named task and stores it on the job', async () => {
+test('job-create makes no Task: a task name or id from an older board is not acted on', async () => {
   _resetForTests();
-  const { host, tasks } = fakeHost();
+  const { host, tasks, broadcasts } = fakeHost();
   runnerFor(host).tick = async () => {};
   await handler('job-create').handler({ job: newJob, newTaskName: 'Ship it together', start: false }, host);
   const [job] = host.stores.jobs.snapshot().jobs;
-  assert.deepEqual(tasks, [{ id: 't_1', name: 'Ship it together', links: [] }]);
-  assert.equal(job.taskId, 't_1');
+  assert.deepEqual(tasks, []);
+  assert.equal(job.taskId, null);
+  assert.equal(broadcasts[0].event, 'job-created');
 });
 
-test('job-create stores an available selected task without creating another', async () => {
-  _resetForTests();
-  const { host, tasks } = fakeHost();
-  tasks.push({ id: 't_existing', name: 'Existing work', links: [] });
-  runnerFor(host).tick = async () => {};
-  await handler('job-create').handler({ job: { ...newJob, taskId: 't_existing' }, start: false }, host);
-  assert.equal(host.stores.jobs.snapshot().jobs[0].taskId, 't_existing');
-  assert.equal(tasks.length, 1);
-});
-
-test('job-create refuses a task that is no longer available', async () => {
+test('job-create validates the job before creating anything', async () => {
   _resetForTests();
   const { host, broadcasts } = fakeHost();
   runnerFor(host).tick = async () => {};
-  await handler('job-create').handler({ job: { ...newJob, taskId: 't_missing' }, start: false }, host);
-  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
-  assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'The selected task is no longer available' }]);
-});
-
-test('job-create refuses an archived selected task', async () => {
-  _resetForTests();
-  const { host, broadcasts, tasks } = fakeHost();
-  tasks.push({ id: 't_archived', name: 'Old work', links: [], archivedAt: Date.now() });
-  runnerFor(host).tick = async () => {};
-  await handler('job-create').handler({ job: { ...newJob, taskId: 't_archived' }, start: false }, host);
-  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
-  assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'The selected task is no longer available' }]);
-});
-
-test('job-create requires a name when creating a task', async () => {
-  _resetForTests();
-  const { host, broadcasts, tasks } = fakeHost();
-  runnerFor(host).tick = async () => {};
-  await handler('job-create').handler({ job: newJob, newTaskName: '   ', start: false }, host);
-  assert.deepEqual(tasks, []);
-  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
-  assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'Enter a name for the new task' }]);
-});
-
-test('job-create validates the job before creating its requested task', async () => {
-  _resetForTests();
-  const { host, broadcasts, tasks } = fakeHost();
-  runnerFor(host).tick = async () => {};
-  await handler('job-create').handler({ job: { title: '', intent: '' }, newTaskName: 'Orphan', start: false }, host);
-  assert.deepEqual(tasks, []);
+  await handler('job-create').handler({ job: { title: '', intent: '' }, start: false }, host);
   assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
   assert.equal(broadcasts[0].event, 'job-create-failed');
-});
-
-test('job-create accepts only a short one-line string for a new task name', async () => {
-  for (const newTaskName of [null, false, 'x'.repeat(181), 'two\nlines']) {
-    _resetForTests();
-    const { host, broadcasts, tasks } = fakeHost();
-    runnerFor(host).tick = async () => {};
-    await handler('job-create').handler({ job: newJob, newTaskName, start: false }, host);
-    assert.deepEqual(tasks, [], `rejected ${JSON.stringify(newTaskName)}`);
-    assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
-    assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'Enter a task name of up to 180 characters on one line' }]);
-  }
-});
-
-test('job-create rejects selecting and creating a task at the same time', async () => {
-  _resetForTests();
-  const { host, broadcasts, tasks } = fakeHost();
-  tasks.push({ id: 't_existing', name: 'Existing work', links: [] });
-  runnerFor(host).tick = async () => {};
-  await handler('job-create').handler({ job: { ...newJob, taskId: 't_existing' }, newTaskName: 'Another task', start: false }, host);
-  assert.equal(tasks.length, 1);
-  assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
-  assert.deepEqual(broadcasts, [{ event: 'job-create-failed', error: 'Choose an existing task or create a new one, not both' }]);
 });
 
 test('create_job lets an agent create and start a job, kicks the runner and broadcasts nothing', async () => {
@@ -208,27 +145,23 @@ test('create_job lets an agent create and start a job, kicks the runner and broa
   assert.deepEqual(broadcasts, [], 'a job-created frame would close a human\'s open New job form');
 });
 
-test('create_job shares the form\'s task handling and leaves an unstarted job in the backlog', async () => {
+test('create_job has no Task parameters and leaves an unstarted job in the backlog', async () => {
   _resetForTests();
   const { host, tasks } = fakeHost();
   runnerFor(host).tick = async () => { throw new Error('a backlogged job must not kick the runner'); };
-  const res = await tool('create_job').handler({ host, caller: 'an-agent' }, { ...newJob, newTaskName: 'Agent work' });
+  const { inputSchema } = tool('create_job');
+  assert.deepEqual(['taskId', 'newTaskName'].filter((k) => k in inputSchema), []);
+  const res = await tool('create_job').handler({ host, caller: 'an-agent' }, newJob);
   const job = host.stores.jobs.get(res.structuredContent.jobId);
   assert.equal(job.stage, 'backlog');
-  assert.deepEqual([tasks.map((t) => t.name), job.taskId], [['Agent work'], 't_1']);
+  assert.deepEqual([tasks, job.taskId], [[], null]);
 });
 
 test('create_job refuses invalid input as a tool error and creates nothing', async () => {
   _resetForTests();
-  const { host, tasks } = fakeHost();
-  tasks.push({ id: 't_existing', name: 'Existing work', links: [] });
-  const both = await tool('create_job').handler({ host, caller: 'an-agent' }, { ...newJob, taskId: 't_existing', newTaskName: 'Another task' });
-  assert.deepEqual([both.isError, both.content[0].text], [true, 'Choose an existing task or create a new one, not both']);
-  const missing = await tool('create_job').handler({ host, caller: 'an-agent' }, { ...newJob, taskId: 't_missing' });
-  assert.deepEqual([missing.isError, missing.content[0].text], [true, 'The selected task is no longer available']);
+  const { host } = fakeHost();
   assert.equal((await tool('create_job').handler({ host, caller: 'an-agent' }, { intent: '' })).isError, true);
   assert.deepEqual(host.stores.jobs.snapshot().jobs, []);
-  assert.equal(tasks.length, 1);
 });
 
 test('a launch binds its run to the card id via onBeforeDispatch, and job_report is caller-gated', async () => {
@@ -361,8 +294,7 @@ function activeSub(store, { branch = 'job-abcd1234-api', sessionId = 's_1' } = {
 
 test('a PR launch has the wrangler cut the worktree and keeps core off the job PR', async () => {
   _resetForTests();
-  const { host, spawned, tasks } = fakeHost();
-  tasks.push({ id: 'task_7', name: 'Ship it', links: [] });
+  const { host, spawned } = fakeHost();
   const runtime = runnerFor(host).runtime;
   runtime.run = async (bin, args) => {
     if (bin === 'gh') return JSON.stringify({ defaultBranchRef: { name: 'main' } });
@@ -377,7 +309,7 @@ test('a PR launch has the wrangler cut the worktree and keeps core off the job P
   assert.equal(opts.cwd, '/repos/thing', 'Wrangler branches from the main checkout');
   assert.deepEqual(opts.worktree, { branch: placeholderBranch(job, sub), base: 'refs/remotes/origin/main', auto: true });
   assert.deepEqual(opts.addDirs, [inboxDir(job.id, sub.id)], 'only planning gets the repos parent; an implementation run gets its proof inbox');
-  assert.equal(opts.taskId, 'task_7');
+  assert.equal('taskId' in opts, false, 'a job saved with a Task still spawns into none: its sessions are off the board');
   assert.deepEqual([opts.model, opts.effort], ['opus', 'high']);
   assert.deepEqual([opts.autoMergeOnPass, opts.autoFixPrChecks], [false, false], 'the runner drives this PR');
   assert.equal(opts.offBoard, true);
