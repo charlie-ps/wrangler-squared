@@ -366,6 +366,27 @@ test('with code review on the implementation leaves the tree uncommitted and rep
   assert.equal(f.sub().stage, 'pr'); assert.equal(f.sub().state, 'watching');
 });
 
+test('a merge method suggested on ready reaches the PR; a published one wins; an unknown method is refused', async (t) => {
+  const f = fixture(t); await f.approve();
+  assert.throws(() => f.report({ kind: 'ready', checks: ['Tests pass'], merge: { method: 'octopus', why: 'x' } }));
+  assert.throws(() => f.report({ kind: 'ready', checks: ['Tests pass'], merge: { method: 'rebase' } }), /why/);
+  const rebase = { method: 'rebase', why: 'Each commit is a separate migration' };
+  f.report({ kind: 'ready', checks: ['Tests pass'], merge: rebase }); await f.tick();
+  assert.deepEqual(f.sub().ready.merge, rebase);
+  f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId }); await f.tick();
+  f.report({ kind: 'published', url: PR_URL }); await f.tick();
+  assert.deepEqual(f.sub().merge, rebase);
+  await f.tick();
+  assert.ok(f.sub().pr.head, 'observed'); assert.deepEqual(f.sub().merge, rebase, 'an observation replaces sub.pr, never the suggestion');
+  const g = fixture(t); await g.approve();
+  g.store.update(g.job.id, (j) => { j.reviewCode = false; });
+  const sync = { method: 'merge', why: 'main to next sync keeps main in the ancestry' };
+  g.report({ kind: 'published', url: PR_URL, merge: sync }); await g.tick();
+  assert.deepEqual(g.sub().merge, sync);
+  const h = fixture(t); await atPr(h);
+  assert.equal(h.sub().merge, null, 'nothing suggested: squash');
+});
+
 test('Retry after a blocked publish keeps the approval: the tree the human approved is unchanged, so publish runs again', async (t) => {
   const f = fixture(t); await f.approve();
   // Runs and moves are stamped by the wall clock; a millisecond apart is enough
@@ -1028,7 +1049,7 @@ test('Request changes on an open PR under code review goes back to work in the P
   assert.equal(f.last().run.phase, 'publish');
   const publish = jobPrompt(f.store.get(f.job.id), f.last().sub, f.last().run);
   assert.match(publish, /push to the open PR; do not open another/);
-  assert.match(publish, /Commit, push to the open PR, then job_report \{runId:"run_\w+", kind:"published", url:"https:\/\/github.com\/org\/repo\/pull\/1"\}/);
+  assert.match(publish, /Commit, push to the open PR, then job_report \{runId:"run_\w+", kind:"published", url:"https:\/\/github.com\/org\/repo\/pull\/1", merge\?:\{method, why\}\}/);
   f.report({ kind: 'published', url: PR_URL }); await f.tick();
   assert.deepEqual([f.sub().stage, f.sub().state, f.sub().mergeApprovedHead], ['pr', 'watching', null], 'a new head: the old merge approval is spent');
 });
@@ -2501,6 +2522,17 @@ test('the squash body is the PR description ending with the attribution line exa
     sub.pr.mergeWithAdmin = false;
     await gh.merge(sub);
     assert.deepEqual(calls.at(-1).slice(-2), ['--body', expected]);
+  }
+});
+
+test('a suggested merge method replaces --squash: a merge commit keeps the attribution body, a rebase takes none', async () => {
+  const line = 'Made with Agent Wrangler and the charlie-ps/wrangler-squared extension';
+  for (const [merge, tail] of [[{ method: 'merge', why: 'main to next sync' }, ['--merge', '--match-head-commit', 'head1', '--body', line]], [{ method: 'rebase', why: 'commits stay separate' }, ['--rebase', '--match-head-commit', 'head1']], [undefined, ['--squash', '--match-head-commit', 'head1', '--body', line]]]) {
+    const { gh, sub, calls } = reviewGithub({ ...rawPr, reviewDecision: 'APPROVED' });
+    sub.pr.mergeWithAdmin = false; sub.merge = merge;
+    await gh.merge(sub);
+    assert.deepEqual(calls.at(-1), ['pr', 'merge', rawPr.url, ...tail], merge?.method || 'squash');
+    assert.equal(calls.some((args) => args[1] === 'view' && args.includes('body')), merge?.method !== 'rebase');
   }
 });
 

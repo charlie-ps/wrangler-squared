@@ -510,10 +510,16 @@ export const alternativeSchema = z.object({ ...optionShape, plan: planSchema }).
 export const MAX_SUGGESTIONS = 4;
 export const suggestionSchema = z.object({ title: line, plan: planSchema }).strict();
 export const suggestionsSchema = z.union([suggestionSchema, z.array(suggestionSchema).min(1).max(MAX_SUGGESTIONS)]);
+// A PR lands by squash unless its worker names an explicit reason to keep its
+// commits (a branch sync, commits meant to stay separate, a repo that refuses
+// squash); job-store.js keeps it as `sub.merge` (beside `sub.pr`,
+// which each observation replaces) and job-github.js merge() reads it.
+export const MERGE_METHODS = ['merge', 'rebase'];
+export const mergeSuggestionSchema = z.object({ method: z.enum(MERGE_METHODS), why: line }).strict();
 export const reportSchema = z.discriminatedUnion('kind', [
   receipt({ kind: z.literal('plan'), plan: planSchema, ...optionShape, label: line.optional(), diagnosis: diagnosisSchema.optional(),
     alternatives: z.array(alternativeSchema).max(MAX_OPTIONS - 1).optional() }),
-  receipt({ kind: z.literal('ready'), checks: readyChecksSchema, running: runningSchema.optional() }),
+  receipt({ kind: z.literal('ready'), checks: readyChecksSchema, running: runningSchema.optional(), merge: mergeSuggestionSchema.optional() }),
   // Answers a human who wrote to a session parked on its ready receipt (job-store.js):
   // the run stays parked, the tree and the round unchanged. From a new idea's planner
   // it is a turn in the conversation instead (job-idea.js), and may suggest jobs.
@@ -521,7 +527,7 @@ export const reportSchema = z.discriminatedUnion('kind', [
   // the job (job-talk.js).
   receipt({ kind: z.literal('reply'), text: z.string().trim().min(1).max(4000), shots: z.array(shotSchema).min(1).max(4).optional(), run: runProofSchema.optional(), running: runningSchema.optional(),
     suggest: suggestionsSchema.optional(), escalate: z.boolean().optional() }),
-  receipt({ kind: z.literal('published'), url: prUrlSchema }),
+  receipt({ kind: z.literal('published'), url: prUrlSchema, merge: mergeSuggestionSchema.optional() }),
   receipt({ kind: z.literal('repaired'), changes: checksSchema, checks: checksSchema }),
   receipt({ kind: z.literal('deployed'), checks: checksSchema }),
   // A session answers for every write it owns, by id (job-writes.js applyWrites).

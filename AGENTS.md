@@ -375,6 +375,11 @@ text as public as the rest of this repo.
   release has no tree the human read). An unset flag is read through `reviewOf`
   (`jobs-schema.js`, mirrored in `public/jobs.js`) everywhere: its `REVIEW_DEFAULTS` value, so an
   old job with no `reviewMerge` waits for Approve merge in the store, the runner and the board.
+- **A PR lands by squash unless its worker says otherwise.** `ready` or `published` may carry
+  `merge: {method: 'merge'|'rebase', why}` (`jobs-schema.js MERGE_METHODS`; prompts' `MERGE_LINE`
+  says to keep squash without an explicit reason). It is kept as `sub.merge`, never on `sub.pr`,
+  which every observation replaces; `job-github.js merge()` passes `--merge`/`--rebase` in place of
+  `--squash`, and a rebase gets no `--body`. The board draws it on the step (`mergeMethodHtml`).
 - **Fast-forward main never blocks a sub-job** (`server/job-main.js`). The global
   `settings.updateMain` ("Keep local main updated", on by default; a job's old `updateMain` is
   ignored) is handed to cleanup by the runner, and the update returns, never throws: a clean

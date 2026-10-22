@@ -32,6 +32,8 @@ const blockedLine = 'Blocked: {kind:"blocked", summary:"one sentence"}.';
 const upLine = 'Needs more than this step (a plan change): {kind:"replan", summary:"one sentence", why?:"the reason"}. Only the human can decide it: {kind:"escalate", summary:"what you found", tried?:["what you tried"], ask:"the one decision you need"}.';
 // An escalation is drawn as a card (public/jobs-view.js eventHtml): the ask heads
 // it, the summary's first sentence sits under it, the rest behind a disclosure.
+// Squash stays the default: only a PR that means to keep its commits names another method.
+export const MERGE_LINE = 'Wrangler squash-merges this PR. Keep it that way unless there is an explicit reason not to, e.g. the PR deliberately preserves history (a main → next sync), its commits are meant to stay separate, or the repository disallows squash: only then add merge:{method:"merge"|"rebase", why:"one line"} to your receipt, and the human sees it before the merge.';
 export const ESCALATE_VOICE = 'An escalation is shown to the human as a card: `ask` is its heading and the summary\'s FIRST sentence is the only line under it; the rest sits behind a closed disclosure. So `ask` is the one decision you need, as a question they can answer with a yes/no or a pick. The summary\'s first sentence says what stopped you, in plain words; the rest holds only the facts they need to make that decision: cut how you got there. Commands and hashes go in tried, one line each, never repeated in the summary.';
 const lines = (...parts) => parts.filter(Boolean).join('\n');
 const afterLine = (job, sub) => `After: ${(sub?.after || []).map((id) => (job.subJobs || []).find((s) => s.id === id)?.title || id).join(' · ') || 'none'}.`;
@@ -428,7 +430,7 @@ export function jobPrompt(job, sub, run) {
   const attribution = `End the commit message${sub?.pr?.url ? '' : ' and the PR description'} with exactly this line:\n${ATTRIBUTION}`;
   const target = targetOf(job, sub);
   const baseFlag = target ? ` with \`gh pr create --base ${target}\` (this ${sub?.base ? 'PR' : 'job'} lands on ${target}, not the default branch)` : '';
-  const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}"`, `${attribution}\nCommit, push to the open PR, then `) : report('kind:"published", url:"<PR url>"', `${attribution}\nCommit, push, open the PR${baseFlag}, then `);
+  const publishLine = sub?.pr?.url ? report(`kind:"published", url:"${sub.pr.url}", merge?:{method, why}`, `${attribution}\nCommit, push to the open PR, then `) : report('kind:"published", url:"<PR url>", merge?:{method, why}', `${attribution}\nCommit, push, open the PR${baseFlag}, then `);
   const prompts = {
     planning: lines(
       `${run.ask ? 'Answer or act on an idea about this running job' : 'Plan this job'}: ${job.title}`,
@@ -480,9 +482,10 @@ export function jobPrompt(job, sub, run) {
       // before anything is committed; a later publish session commits and pushes,
       // so the branch rename waits for it too.
       leavesUncommitted(job, sub) ? `Leave every change UNCOMMITTED: ${reviewCode(job) ? 'the human reviews the working tree before anything is committed, and a ' : 'Code is on Auto, so nobody reviews it: your proof is kept on the step and a '}later step commits and pushes it${reviewCode(job) ? '' : ' straight after your receipt'}${sub?.pr ? ' to the open PR' : ' and opens the PR'}. Do not commit, push or open a PR.` : branchNaming(job, sub),
+      MERGE_LINE,
       reviewCode(job) ? 'After you report ready your session stays open, paused, so the human can write to you by mail: a question is answered with job_report kind:"reply" (text, shots?, run?, running?) and changes nothing; a change is made, re-verified and reported ready again as a new round. Do not end the session or clean up the worktree yourself.' : '',
       '',
-      leavesUncommitted(job, sub) ? report(`kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]${reviewCode(job) ? ', running?:[{name, url?, pid?, log?}]' : ''}`, reviewCode(job) ? 'When the working tree is ready to review, ' : 'When the work is done and every Show me item is proven, ') : publishLine,
+      leavesUncommitted(job, sub) ? report(`kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]${reviewCode(job) ? ', running?:[{name, url?, pid?, log?}]' : ''}, merge?:{method, why}`, reviewCode(job) ? 'When the working tree is ready to review, ' : 'When the work is done and every Show me item is proven, ') : publishLine,
     ),
     publish: lines(
       heading(job, sub),
@@ -496,6 +499,7 @@ export function jobPrompt(job, sub, run) {
       historyBlock(job, sub, run),
       `The human has reviewed the uncommitted changes in this worktree and approved them as they stand. Commit exactly that working tree (excluding secrets and unrelated or generated files), then push${sub?.pr ? ' to the open PR; do not open another' : ' and open the PR'}. Do not change the code: if something stops it building or committing, report blocked instead.`,
       branchNaming(job, sub),
+      MERGE_LINE,
       '',
       publishLine,
     ),
