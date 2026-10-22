@@ -35,6 +35,7 @@ import { replanAsks, latestAsk } from './replan-asks.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
 import { pressBusy, isBusy, submitterOf } from './busy-button.js';
 import { guardOpen } from './dialog-backdrop.js';
+import { sessionsOf, sessionsListHtml, sessionsButtonHtml, sessionsCountLabel } from './job-sessions.js';
 import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, shotBoxHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
 // Mirrors server/jobs-schema.js MAX_SHOW.
 const MAX_SHOW = 8;
@@ -81,7 +82,6 @@ function commentsHtml(sub, shown) {
 }
 
 const minutesSince = (at) => Math.max(1, Math.round((Date.now() - at) / 60000));
-const PHASE_LABEL = { implementation: 'Implementation', repair: 'Repair', publish: 'Publish', verify: 'Verify', session: 'Session', write: 'Write', planning: 'Planning' };
 const when = (at) => at ? new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
 const staleHint = (sub) => {
   if (!deploymentStalled(sub)) return '';
@@ -330,7 +330,7 @@ export function mainNoticeHtml(job) {
     ${commitList(`${n.incomingCount} new on origin/${esc(n.base)}`, n.incoming || [], n.incomingCount)}
     ${n.resolving ? `<p class="job-main-agent">${n.resolving.sessionId ? ICONS.robot : ICONS.spin}<span>${n.resolving.sessionId ? 'An agent is working on it' : 'Starting an agent'}: <b>${esc(n.resolutions?.find((r) => r.id === n.resolving.id)?.label || n.resolving.id)}</b>. This clears once local ${esc(n.base)} matches origin.</span></p>` : ''}
     ${n.resolveError ? `<p class="job-main-error">Could not start the agent: ${esc(n.resolveError)}</p>` : ''}
-    <div class="job-actions">${n.resolving?.sessionId ? `<button class="primary" data-main-session="${esc(n.resolving.sessionId)}">${ICONS.terminal}Open session</button>` : ''}${n.resolving ? '' : (n.resolutions || []).map((r, i) => `<button ${i ? '' : 'class="primary"'} data-main-resolve="${esc(r.id)}" title="${esc(r.title)}. Starts an agent in this checkout that does only this.">${ICONS.robot}${esc(r.label)}</button>`).join('')}<button ${n.resolving || n.resolutions?.length ? '' : 'class="primary"'} data-main-retry ${n.retrying ? 'disabled' : ''} title="Try the update again, after you have fixed it yourself">${n.retrying ? ICONS.spin : ICONS.wrench}${n.retrying ? 'Retrying' : 'Retry'}</button><button data-main-dismiss title="Leave this checkout as it is and forget this notice">${ICONS.x}Dismiss</button></div></section>`).join('');
+    <div class="job-actions">${n.resolving?.sessionId ? `<button class="primary" data-main-session="${esc(n.resolving.sessionId)}">${ICONS.terminal}Show session</button>` : ''}${n.resolving ? '' : (n.resolutions || []).map((r, i) => `<button ${i ? '' : 'class="primary"'} data-main-resolve="${esc(r.id)}" title="${esc(r.title)}. Starts an agent in this checkout that does only this.">${ICONS.robot}${esc(r.label)}</button>`).join('')}<button ${n.resolving || n.resolutions?.length ? '' : 'class="primary"'} data-main-retry ${n.retrying ? 'disabled' : ''} title="Try the update again, after you have fixed it yourself">${n.retrying ? ICONS.spin : ICONS.wrench}${n.retrying ? 'Retrying' : 'Retry'}</button><button data-main-dismiss title="Leave this checkout as it is and forget this notice">${ICONS.x}Dismiss</button></div></section>`).join('');
 }
 // Paused at its spend limit (server/job-budget.js): what it spent, and the one way on.
 export const budgetHtml = (job) => budgetHeld(job) ? `<section class="job-main-notice job-budget"><h3>${ICONS.pause}Paused for budget <small>${esc(budgetLine(job))}</small></h3>
@@ -365,7 +365,7 @@ export function primaryAction(surface) {
 }
 
 const MAX_ASK_IMAGES = 4;
-export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], onSession, onDiff, onBoard, onIntro = () => {}, onThemeChoice = () => {}, now = () => Date.now(), files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
+export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAgents, getTasks = () => [], mountSession = null, sessionOf = () => null, onIntro = () => {}, onThemeChoice = () => {}, now = () => Date.now(), files = null, onOpenFile = null, updates = null, storage = null, toast = () => {}, toastError = toast }) {
   setFileOpener(files ? (path) => files.canOpen(path) : null);
   const root = document.getElementById('jobs');
   // New idea, Automation settings and an idea not yet a job are modal; a job is a page in the view (`page`, below).
@@ -465,6 +465,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   wireDeps(pageMain);
   const markOpened = guardOpen(page, { now });
   let detail = pageMain, pageAt = null, boardScroll = 0;
+  // A step's Sessions (`pageAt.sessions`, job-sessions.js): the card picked in its list, the host's
+  // handle on the session panel it lends us (api.mountSession), and whether that panel's
+  // Fullscreen folded the list away. What the head and list were last drawn as, so a tick
+  // that changes neither leaves them (and a focused row) alone.
+  let sessionPick = null, embed = null, embedMax = false, sessionsDrawn = null;
+  const releaseEmbed = () => { embed?.unmount(); embed = null; embedMax = false; sessionsDrawn = null; };
   const paged = () => (detail === modal ? modal.open : !page.hidden);
   // Core's .ext-view scrolls the view (#jobs only grows); a test's window has neither, so it falls back to #jobs.
   const scroller = () => (detail === modal ? modal : root.closest('.ext-view') || root);
@@ -583,7 +589,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // Only an open form (a write, a cancel question) is left alone, being a decision in progress.
     const humanForm = detail.querySelector('#job-human-form');
     const currentSub = humanForm && data.jobs.find((j) => j.id === selected?.jobId)?.subJobs.find((s) => s.id === selected?.subId);
-    if (paged() && selected && !planDraft && !proofView && !detail.querySelector('form')
+    if (paged() && selected && pageAt?.sessions) renderDetail();
+    else if (paged() && selected && !planDraft && !proofView && !detail.querySelector('form')
       || humanForm && currentSub && (currentSub.stage !== 'human' || humanForm.dataset.state !== currentSub.state)) {
       const fields = keepFields(detail);
       keepBoxes(); renderDetail(); fields();
@@ -600,7 +607,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if (!replyTo.has(subId)) replyTo.set(subId, key);
     }
   }
-  function show(html) {
+  function show(html, { sessions = false } = {}) {
+    if (!sessions) releaseEmbed();
     detailShown = null;
     const job = ideaFiring?.jobId === pageAt?.jobId ? ideaFiring.job : data.jobs.find((j) => j.id === pageAt?.jobId);
     const want = job && !pageAt.subId && ideaOpen(job) ? modal : pageMain;
@@ -621,30 +629,38 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     keepMore();
     if (entering) { markOpened(); scroller().scrollTop = 0; bar.querySelector('[data-page-back]')?.focus({ preventScroll: true }); }
   }
-  // Back is one level up (a step to its job, the job to the board); the trail jumps to either.
+  // Back is one level up (Sessions to its step, a step to its job, the job to the board); the trail jumps to any.
+  const upTo = () => (pageAt?.sessions ? (pageAt.subId ? 'step' : 'job') : pageAt?.subId ? 'job' : 'board');
+  const BACK = { step: ['Step', 'Back to the step (Esc)'], job: ['Job', 'Back to the job (Esc)'], board: ['Jobs', 'Back to Jobs (Esc)'] };
   function paintBar() {
     const job = data.jobs.find((j) => j.id === pageAt?.jobId);
     const sub = job?.subJobs.find((s) => s.id === pageAt.subId);
-    const title = job?.title || 'Job';
-    const crumbs = [['board', 'Jobs'], ...(sub ? [['job', title], [null, sub.title]] : [[null, title]])];
-    bar.innerHTML = `<button type="button" class="job-page-back" data-page-back title="${sub ? 'Back to the job (Esc)' : 'Back to Jobs (Esc)'}">${ICONS.back}<span>${sub ? 'Job' : 'Jobs'}</span></button>
+    const title = job?.title || 'Job', sessions = !!pageAt?.sessions;
+    const crumbs = [['board', 'Jobs'], [sub || sessions ? 'job' : null, title], ...(sub ? [[sessions ? 'step' : null, sub.title]] : []), ...(sessions ? [[null, 'Sessions']] : [])];
+    const [label, hint] = BACK[upTo()];
+    const html = `<button type="button" class="job-page-back" data-page-back title="${hint}">${ICONS.back}<span>${label}</span></button>
       <ol class="job-page-crumbs">${crumbs.map(([to, t]) => `<li>${to ? `<button type="button" data-page-crumb="${to}" title="${esc(t)}">${esc(t)}</button>` : `<span aria-current="page" title="${esc(t)}">${esc(t)}</span>`}</li>`).join('')}</ol>`;
+    // Sessions repaints it on every tick; the same bar is left as it is, focus and all.
+    if (bar.dataset.drawn !== html) { bar.innerHTML = html; bar.dataset.drawn = html; }
   }
   bar.onclick = (e) => {
     const b = e.target.closest('[data-page-back], [data-page-crumb]');
     if (!b) return;
-    const to = b.dataset.pageCrumb || (pageAt?.subId ? 'job' : 'board');
-    if (to === 'job') { openDetail(pageAt.jobId, ''); bar.querySelector('[data-page-back]')?.focus(); } else closePage();
+    const to = b.dataset.pageCrumb || upTo();
+    if (to === 'board') return closePage();
+    openDetail(pageAt.jobId, to === 'step' ? pageAt.subId : '');
+    bar.querySelector('[data-page-back]')?.focus();
   };
   const keepMore = () => detail.querySelectorAll('details[data-keep]').forEach((d) => d.ontoggle = () => { if (d.open) openMore.add(d.dataset.keep); else openMore.delete(d.dataset.keep); });
   function forget() {
-    shotZoom?.close(); releaseSkies(detail);
+    shotZoom?.close(); releaseSkies(detail); releaseEmbed(); sessionPick = null;
     ideaEdit = null; ideaSent = null; ideaFiring = null; ideaSeen = null; selected = null; pageAt = null; planDraft = null; proofView = null; askDraft = null; replyTo.clear(); boxDrafts.clear(); clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags();
     detailShown = null;
   }
   function leavePage() {
     if (page.hidden) return;
-    pageMain.innerHTML = ''; bar.innerHTML = '';
+    releaseEmbed();
+    pageMain.innerHTML = ''; bar.innerHTML = ''; delete bar.dataset.drawn;
     page.hidden = true; root.classList.remove('jobs-paging');
     (root.closest('.ext-view') || root).scrollTop = boardScroll;
   }
@@ -675,8 +691,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   function action(name, extra = {}, subId = selected.subId) {
     send({ type: 'job-action', id: selected.jobId, subJobId: subId || undefined, action: name, ...extra });
   }
-  function openDetail(jobId, subId) {
-    selected = { jobId, subId }; pageAt = { jobId, subId: subId || '' }; ideaEdit = null; planDraft = null; proofView = null; askDraft = null; replyTo.clear(); boxDrafts.clear(); clearAskImages(); clearAskSent(); ideaSent = null; ideaFiring = null; ideaSeen = null; revision = null; writeEdit = null; storyDraft = null; commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(jobId);
+  // `sessions`: true opens the step's (or with no step the job's own) Sessions, a session id
+  // opens them on that one; otherwise the step or job itself.
+  function openDetail(jobId, subId, sessions = null) {
+    selected = { jobId, subId }; pageAt = { jobId, subId: subId || '', sessions: !!sessions }; sessionPick = typeof sessions === 'string' ? sessions : null; ideaEdit = null; planDraft = null; proofView = null; askDraft = null; replyTo.clear(); boxDrafts.clear(); clearAskImages(); clearAskSent(); ideaSent = null; ideaFiring = null; ideaSeen = null; revision = null; writeEdit = null; storyDraft = null; commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags(jobId);
     const job = data.jobs.find((j) => j.id === jobId);
     if (!subId && job?.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
     const sub = job?.subJobs.find((s) => s.id === subId);
@@ -870,13 +888,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // session reads last (server/job-prompts.js). A coordinator error has no session
   // to read it, so the job's own Retry stays plain.
   const retrySplitHtml = (primary) => `<span class="job-split job-retry-split"><button id="job-retry" ${primary ? 'class="primary"' : ''}>${ICONS.wrench}Retry</button><details class="job-split-more" data-keep="retry-note" ${openMore.has('retry-note') ? 'open' : ''}><summary aria-label="Add a note for Retry to send" title="Add a note for Retry to send">${ICONS.caret}</summary><div class="job-split-menu job-approve-pop"><label>Note sent with Retry<textarea data-retry-note maxlength="180" rows="2" placeholder="Optional. Shown on the card until the retried session reports"></textarea></label></div></details></span>`;
-  // Every run's session, newest first: a repair or publish run hides the implementation one behind it.
-  const sessionSplitHtml = (job, sub, primary) => {
-    const button = `<button id="job-session" ${primary ? 'class="primary"' : ''}>${ICONS.terminal}${onBoard(sub.sessions.at(-1)) ? 'Open session' : 'Restore session'}</button>`;
-    if (sub.sessions.length < 2) return button;
-    const items = sub.sessions.map((sid, i) => { const run = job.runs?.find((r) => r.sessionId === sid); return `<button type="button" data-step-session="${esc(sid)}">${ICONS.terminal}<span>${esc(PHASE_LABEL[run?.phase] || `Session ${i + 1}`)}${run?.startedAt ? ` · ${esc(when(run.startedAt))}` : ''}</span><span class="job-split-hint">${onBoard(sid) ? 'Open' : 'Restore'}</span></button>`; }).reverse().join('');
-    return `<span class="job-split job-session-split">${button}<details class="job-split-more" data-keep="session-menu" ${openMore.has('session-menu') ? 'open' : ''}><summary aria-label="Open an earlier session of this step" title="Open an earlier session of this step">${ICONS.caret}</summary><div class="job-split-menu">${items}</div></details></span>`;
-  };
   const approvalNoteFor = (sub) => sub.approvalNote ? `<h3>Context for later steps</h3><p class="job-approval-note">${esc(sub.approvalNote)}</p>` : '';
   // What a whole-job cancel did and what it left: the sub-job nodes say Dropped
   // one by one, this is the sentence that says why all of them do.
@@ -1186,7 +1197,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (!prompts.length) return '';
     const [p] = prompts, more = prompts.length - 1;
     const title = esc(`${promptWhere(job, p)} · Prompt waiting${more ? ` · +${more} more waiting` : ''}`);
-    return `<button class="primary" data-fab-session="${esc(p.sessionId)}" title="${title}">${ICONS.terminal}Answer prompt</button>`;
+    return `<button class="primary" data-fab-session="${esc(p.sessionId)}" data-fab-sub="${esc(p.sub?.id || '')}" title="${title}">${ICONS.terminal}Answer prompt</button>`;
   }
   function leadFab(job) {
     const prompt = promptFab(job);
@@ -1356,7 +1367,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const ask = changeBoxHtml(job, null);
     // The job's buttons and its checkpoints share one row; a delivered job has no checkpoints left to switch.
     const done = job.stage === 'done' && !job.cancelledAt;
-    const buttons = fab || extra || tail ? `<div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${tail}</div>` : '';
+    const own = ideaOpen(job) ? '' : sessionsButtonHtml(sessionsOf(job, ''), { step: false });
+    const buttons = fab || extra || own || tail ? `<div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${own}${tail}</div>` : '';
     return `${appbar(job.title, chips)}${eventHtml(job, null, more)}${budgetHtml(job)}${mainNoticeHtml(job)}${body}${conversationHtml(job)}${ask}
       ${buttons || !done ? `<div class="job-detail-tail">${buttons}${done ? '' : footerHtml(job)}</div>` : ''}`;
   }
@@ -1465,7 +1477,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       + (deploys ? chip(ICONS.rocket, sub.deploys.expected === false ? 'No deploy' : 'Deploys', { cls: 'job-deploys', title: deploys }) : '')
       + (sub.stage === 'review' ? runningChipHtml(sub, { open: openMore.has('running'), logs: runLogs.get(sub.id) }) : '');
     const kicker = `<button class="job-back" data-open-job title="Back to the job">${ICONS.back}<span>${esc(job.title)}</span></button>`;
-    const session = sub.sessions.length ? sessionSplitHtml(job, sub, runStatus(job, sub) === 'needs-you') : '';
+    // Primary only when a prompt waits and nothing else in the row is the step's next move: a bare
+    // primary button is pulled to the front (jobs.css), ahead of Approve or Retry.
+    const sessionRows = sessionsOf(job, sub.id);
+    const session = sessionsButtonHtml(sessionRows, { primary: runStatus(job, sub) === 'needs-you' });
     // Wrangler's own turn (Fixing) or a fix for you (Fix ready, a declared red's options)
     // outranks Retry as the primary action; Retry stays for a transient failure.
     const redAsk = sub.error && !job.error && (redFixReady(job, sub) || (redDeclared(job, sub) && job.replan?.proposal)) ? `<button class="primary" data-open-job title="Opens the job on the proposal">${ICONS.eye}${redFixReady(job, sub) ? 'Review fix' : 'Decide'}</button>` : '';
@@ -1502,7 +1517,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       };
       const writes = owned.length ? `<h3>Writes</h3><div class="job-chips">${owned.map(writeChip).join('')}</div>` : '';
       body = `${sub.feedback && !sub.result ? `<h3>Requested changes</h3><p>${esc(sub.feedback)}</p>` : ''}${sub.result ? `<h3>Reported</h3>${receiptHtml(sub.result.checks)}` : ''}${writes}${noteFor(sub)}${approvalNoteFor(sub)}`;
-      actions = `${sub.stage === 'review' && !sub.error && !held ? approveSplitHtml('approve-session', hints.find((h) => h.startsWith('Approving')) || '', 'Approve', noteReaders(job, sub).length ? 'later' : null) : ''}${session}${retry}`;
+      actions = `${sub.stage === 'review' && !sub.error && !held ? approveSplitHtml('approve-session', hints.find((h) => h.startsWith('Approving')) || '', 'Approve', noteReaders(job, sub).length ? 'later' : null) : ''}${retry}${session}`;
     } else if (isHumanSub(sub)) {
       // The brief is the instruction here, not background for an agent, so it is
       // the body of the dialog rather than a folded detail.
@@ -1517,13 +1532,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
         ${sub.deployed ? `<h3>Landed</h3>${receiptHtml(sub.deployed.checks)}` : ''}${noteFor(sub)}${approvalNoteFor(sub)}${refusalHtml(sub)}`;
       actions = `${codeAwaitingReview(sub) && !sub.error && !held ? approveSplitHtml('approve-code', [hints.find((h) => h.startsWith('Uncommitted')) || '', sub.ready?.round ? `Approval is tied to round ${sub.ready.round}${sub.ready.treeHash ? ` and working tree ${sub.ready.treeHash.slice(0, 7)}` : ''}.` : ''].filter(Boolean).join(' · '), `Approve &amp; ${sub.pr ? 'push' : 'open PR'}`, 'pr') : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="Merge head ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
-        ${sub.worktree && sub.stage !== 'done' ? reviewCodeHtml(sub) : ''}${session}${retry}${sub.cleanupRefusal && sub.cleanupRefusal.pinned !== false && sub.stage === 'cleanup' && !sub.discard ? `<button class="danger" id="job-discard">${ICONS.x}${sub.cleanupRefusal.cause === 'unremovable' ? 'Discard' : 'Discard anyway'}</button>` : ''}
+        ${sub.worktree && sub.stage !== 'done' ? reviewCodeHtml(sub) : ''}${retry}${session}${sub.cleanupRefusal && sub.cleanupRefusal.pinned !== false && sub.stage === 'cleanup' && !sub.discard ? `<button class="danger" id="job-discard">${ICONS.x}${sub.cleanupRefusal.cause === 'unremovable' ? 'Discard' : 'Discard anyway'}</button>` : ''}
         ${sub.recoveredBy ? `<button data-open-sub="${esc(sub.recoveredBy)}" title="${esc(hints.at(-1))}">${ICONS.wrench}Open fix sub-job</button>` : ''}`;
     }
     const details = `${metDepsHtml(job, sub)}${pr ? `<code>${esc(sub.worktree?.path || 'Worktree created on dispatch')}</code>` : ''}${isHumanSub(sub) || isWriteSub(sub) ? '' : `<p>${esc(sub.brief)}</p>`}${sub.why ? `<p>Why: ${esc(sub.why)}</p>` : ''}${sub.check ? `<p>Check after it lands: ${esc(sub.check)}</p>` : ''}${showMeHtml(sub)}
       ${workflows.length ? `<h4>What runs on merge <small>${workflows.filter((w) => w.triggers).length} of ${workflows.length}</small></h4><ul class="job-checks">${workflows.map((w) => `<li class="${w.triggers ? 'passed' : ''}">${w.triggers ? '✓' : '○'} ${esc(w.name)} <small>${esc(w.reason)}</small></li>`).join('')}</ul>` : ''}
       ${sub.repairs.length ? `<h4>Changes after failed checks</h4>${sub.repairs.map((r, i) => `<div class="job-repair"><b>Repair ${i + 1}</b>${receiptHtml(r.changes)}<details><summary>Re-verified</summary>${receiptHtml(r.checks)}</details></div>`).join('')}` : ''}`;
     const detailsOpen = openMore.has('details');
+    if (session && /class="primary"/.test(actions.replace(session, ''))) actions = actions.replace(session, sessionsButtonHtml(sessionRows));
     if (!isWriteSub(sub)) actions += `<button type="button" class="job-details-toggle" data-details-toggle aria-expanded="${detailsOpen}">${ICONS.doc}Details</button>`;
     return `${appbar(sub.title, chips, kicker, line)}${depsHtml(job, sub)}
       ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub, more)}
@@ -1662,10 +1678,53 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     for (const m of unread) seenSent.add(m.id);
     send({ type: 'job-talk-seen', id: job.id, convos: [...new Set(unread.map((m) => m.convo))] });
   }
+  // The page drawn once for its scope (a step, or the job's own), then only its head and list on a
+  // tick: the host element the session panel is lent to must never be redrawn under a human typing in it.
+  function paintSessions(job, sub) {
+    const rows = sessionsOf(job, sub?.id || '');
+    if (!rows.length) { pageAt.sessions = false; return renderDetail(); }
+    if (!rows.some((r) => r.sid === sessionPick)) sessionPick = rows.at(-1).sid;
+    const scope = `${job.id}|${sub?.id || ''}`, solo = rows.length === 1;
+    const state = sub ? subState(job, sub) : jobState(job);
+    const head = appbar('Sessions', stateChip(state, sub ? jobStatus(job, sub).text : jobLabel(job))
+      + chip(ICONS.terminal, sub ? sessionsCountLabel(rows.length) : `${rows.length} session${rows.length === 1 ? '' : 's'} · Wrangler’s own`, { cls: 'job-chip-quiet' }));
+    const list = sessionsListHtml(rows, { selected: sessionPick, sessionOf, title: sub?.title || job.title, step: !!sub });
+    let wrap = detail.querySelector('.job-sessions');
+    if (wrap?.dataset.scope !== scope) {
+      releaseEmbed();
+      show(`<section class="job-sessions" data-scope="${esc(scope)}"><div class="job-sessions-head"></div><div class="job-mc"><div class="job-mc-list"></div><div class="job-mc-host"></div></div></section>`, { sessions: true });
+      wrap = detail.querySelector('.job-sessions');
+      const listEl = wrap.querySelector('.job-mc-list');
+      listEl.onclick = (e) => { const b = e.target.closest('[data-pick-session]'); if (b) pickSession(b.dataset.pickSession); };
+      listEl.onkeydown = (e) => {
+        if (!['ArrowUp', 'ArrowDown'].includes(e.key)) return;
+        const rowsEl = [...listEl.querySelectorAll('[data-pick-session]')], at = rowsEl.indexOf(e.target.closest('[data-pick-session]'));
+        const next = rowsEl[at + (e.key === 'ArrowDown' ? 1 : -1)];
+        if (next) { e.preventDefault(); pickSession(next.dataset.pickSession); }
+      };
+    }
+    paintBar();
+    const mc = wrap.querySelector('.job-mc');
+    mc.classList.toggle('solo', solo); mc.classList.toggle('max', embedMax && !solo);
+    if (sessionsDrawn?.head !== head) wrap.querySelector('.job-sessions-head').innerHTML = head;
+    if (sessionsDrawn?.list !== list) wrap.querySelector('.job-mc-list').innerHTML = list;
+    sessionsDrawn = { head, list };
+    const host = wrap.querySelector('.job-mc-host');
+    if (!mountSession) { host.innerHTML = '<p class="job-mc-empty">This board cannot show a session here. Update Agent Wrangler (host API 1.42 or later).</p>'; return; }
+    // A handle gone inert (another mount took the panel) is mounted again, on the card picked.
+    if (!embed?.sessionId) embed = mountSession(host, sessionPick, { onMaximize: (on) => { embedMax = on; mc.classList.toggle('max', on && !mc.classList.contains('solo')); } });
+    else if (embed.sessionId !== sessionPick) embed.show(sessionPick);
+  }
+  function pickSession(sid) {
+    if (sid === sessionPick) return;
+    sessionPick = sid; renderDetail();
+    [...detail.querySelectorAll('[data-pick-session]')].find((b) => b.dataset.pickSession === sid)?.focus();
+  }
   function renderDetail() {
     const job = ideaFiring?.jobId === selected?.jobId ? ideaFiring.job : data.jobs.find((j) => j.id === selected?.jobId);
     if (!job) return;
     const sub = job.subJobs.find((s) => s.id === selected.subId);
+    if (pageAt?.sessions && detail === pageMain) return paintSessions(job, sub || null);
     if (!sub && !planDraft && job.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
     const focus = document.activeElement?.closest?.('.job-detail-footer [data-review]')?.dataset.review;
     const shotFocus = [...detail.querySelectorAll('.job-shot-open')].indexOf(document.activeElement);
@@ -1702,7 +1761,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       else action('mainDismiss' in b.dataset ? 'dismiss-main' : 'retry-main', { path }, null);
     });
     detail.querySelectorAll('[data-top-up]').forEach((b) => b.onclick = () => { if (pressBusy(b)) action('top-up', { topUps: job.topUps || 0 }, null); });
-    detail.querySelectorAll('[data-main-session]').forEach((b) => b.onclick = () => { onSession(b.dataset.mainSession); });
+    detail.querySelectorAll('[data-main-session]').forEach((b) => b.onclick = () => openDetail(job.id, '', b.dataset.mainSession));
+    detail.querySelectorAll('[data-sessions]').forEach((b) => b.onclick = () => openDetail(job.id, sub?.id || '', true));
     detail.querySelectorAll('[data-action]').forEach((b) => b.onclick = () => {
       if (!pressBusy(b)) return;
       const name = b.dataset.action;
@@ -1796,7 +1856,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     detail.querySelectorAll('[data-talk-target] [data-convo-fold], [data-talk-target] [data-convo-collapse], [data-change-new]').forEach((b) => b.onmousedown = (e) => e.preventDefault());
     detail.querySelectorAll('[data-change-new]').forEach((b) => b.onclick = () => aimBox(sub, ''));
     detail.querySelectorAll('[data-open-idea-job]').forEach((b) => b.onclick = () => openDetail(b.dataset.openIdeaJob, ''));
-    detail.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => { onSession(b.dataset.fabSession); });
+    detail.querySelectorAll('[data-fab-session]').forEach((b) => b.onclick = () => openDetail(job.id, b.dataset.fabSub || '', b.dataset.fabSession));
     wireGraph();
     hydrateStrips();
     wireWriteEditor();
@@ -1846,15 +1906,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         action('edit-write', { write: writeEditPayload(sub, f) });
       };
     });
-    bind('#job-session', () => { onSession(sub.sessions.at(-1)); });
-    detail.querySelectorAll('[data-step-session]').forEach((b) => b.onclick = () => { onSession(b.dataset.stepSession); });
-    // Reviewing the code is a round trip out to the board's diff panel, so hand over
-    // where the reader came FROM as well as what to show — index.js re-opens this
-    // same detail via openDetail once the panel closes. Every run of a sub-job
-    // shares its worktree (later phases adopt it), so any of its cards shows the
-    // same diff: the latest one already on the board, because opening an archived
-    // card resumes its agent just to read a diff; else the latest.
-    bind('#job-diff', () => { onDiff(sub.sessions.findLast(onBoard) || sub.sessions.at(-1), { jobId: job.id, subId: sub.id }); });
+    // Every run of a sub-job shares its worktree (later phases adopt it), so its latest
+    // card shows the diff, under its panel's Diff, in the step's Sessions.
+    // TODO(host-api mountSession view): a `view: 'diff'` option would open it on the diff, not on Chat.
+    bind('#job-diff', () => openDetail(job.id, sub.id, sub.sessions.at(-1) || true));
     // The IDE opens beside the board rather than instead of it, so the dialog
     // stays: approving is still done here once the code has been read.
     bind('#job-ide', () => { openMore.delete('review-menu'); const m = detail.querySelector('.job-split-more'); if (m) m.open = false; send({ type: 'job-open-ide', id: job.id, subJobId: sub.id }); });
@@ -1928,7 +1983,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const sub = job?.subJobs.find((s) => s.id === subId);
     if (!job) return;
     if (act === 'merge' && sub) return send({ type: 'job-action', id: job.id, subJobId: sub.id, action: 'approve-merge', head: sub.pr?.head, ...(sub.ready ? { readyReceiptId: sub.ready.receiptId } : {}) });
-    if (act === 'session' && session) return onSession(session);
+    if (act === 'session' && session) return openDetail(job.id, sub?.id || '', session);
     if (['approve-write', 'skip-write'].includes(act) && sub) return send({ type: 'job-action', id: job.id, subJobId: sub.id, action: act });
     openDetail(job.id, subId);
   }
@@ -2033,6 +2088,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     modal.querySelector('.update-section').onclick = (e) => { const b = e.target.closest('[data-update-id]'); if (b) { modal.close(); updates.open(b.dataset.updateId); } };
   };
   const onKey = (surface) => (e) => {
+    if (e.target.closest?.('.job-mc-host')) return;
     // A chat box is not a form: Enter in its textarea, or the chord anywhere in
     // it, is its Send. Plain Enter on its attach or Send button stays theirs.
     const box = e.target.closest?.('.job-change');
@@ -2045,22 +2101,24 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   };
   modal.addEventListener('keydown', onKey(modal));
   page.addEventListener('keydown', onKey(pageMain));
-  // Esc is Back: a step to its job, the job to the board. Text being typed keeps its Esc, and so
-  // does anything that already took it (a menu, a dialog); an open split popup closes first, and
-  // the idea's dialog closes itself. On the document, since a redraw under the pointer leaves focus
-  // on <body>; core hides the view's host (.hidden) while another view shows.
+  // Esc is Back: Sessions to its step, a step to its job, the job to the board. Text being typed keeps
+  // its Esc, and so does anything that already took it (a menu, a dialog); an open split popup closes
+  // first, and the idea's dialog closes itself. On the document, since a redraw under the pointer
+  // leaves focus on <body>; core hides the view's host (.hidden) while another view shows.
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || e.defaultPrevented || detail === modal || !paged() || !root.isConnected || root.closest('.hidden')) return;
-    if ((e.target !== document.body && !page.contains(e.target)) || e.target.closest?.('input, textarea, select')) return;
+    // The lent session panel is the session's: its terminal and chat keep every key.
+    if ((e.target !== document.body && !page.contains(e.target)) || e.target.closest?.('input, textarea, select, .job-mc-host')) return;
     e.preventDefault();
     const more = detail.querySelector('.job-split-more[open]');
     if (more) { more.open = false; openMore.delete(more.dataset.keep); return more.querySelector('summary')?.focus(); }
-    if (pageAt?.subId) { openDetail(pageAt.jobId, ''); bar.querySelector('[data-page-back]')?.focus(); } else closePage();
+    const to = upTo();
+    if (to === 'board') return closePage();
+    openDetail(pageAt.jobId, to === 'step' ? pageAt.subId : ''); bar.querySelector('[data-page-back]')?.focus();
   });
   render();
-  // openDetail and closeDetail are exposed for the return leg of the diff round trip only — it opens
-  // the same page a board card's click does, from a job/sub id pair index.js kept, or the board.
-  // newJob is the intro's last button.
+  // openDetail and closeDetail open a job, a step or its Sessions as a board card's click would, or go
+  // back to the board. newJob is the intro's last button.
   // A refused switch snaps back and the hint says why.
   function reviewFailed(msg) {
     if (msg.jobId !== flags.jobId || !flags.pending) return;
@@ -2130,6 +2188,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (detail.querySelector('#job-human-form') && !(msg?.event === 'job-action-complete' && msg.action === 'finish-human' && msg.jobId === selected?.jobId && msg.subJobId === selected?.subId)) return;
     if (msg?.action === 'cancel-job') modal.close();
     if (msg?.jobId && msg.jobId !== pageAt?.jobId) return;
+    // Nothing on Sessions sends an action; one finished elsewhere never pulls the human out of a session.
+    if (pageAt?.sessions) return;
     up();
   }, openDetail, closeDetail: closePage };
 }
