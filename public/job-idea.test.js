@@ -165,12 +165,20 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   assert.equal(panel.querySelector('.job-launch-label b').textContent, 'Create job');
   assert.match(panel.querySelector('.job-launch-fine').textContent, /Creating it approves this plan/);
   panel.querySelector('[data-accept-idea]').click();
-  assert.ok(f.q('.job-launch').classList.contains('firing'), 'the hole flares first');
-  assert.equal(f.sent.filter((m) => m.action === 'accept-idea').length, 0);
-  t.mock.timers.tick(900);
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3', index: 0 });
-  assert.ok(f.q('.job-launch').classList.contains('done'));
+  assert.ok(f.q('.job-launch').classList.contains('firing'), 'the hole flares');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3', index: 0 }, 'sent at once, beside the flare');
+  f.q('[data-accept-idea]').click();
+  assert.equal(f.sent.filter((m) => m.action === 'accept-idea').length, 1, 'a second press sends nothing');
+  const accepted = structuredClone(f.data.jobs[0]);
+  Object.assign(accepted, { title: suggest.title, plan: suggest.plan, stage: 'active' }); accepted.idea.thread[2].suggest = [{ ...suggest, createdAt: 5, jobId: 'idea1' }];
+  f.view.update({ ...f.data, jobs: [accepted] });
   f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
+  assert.ok(f.q('#job-dialog').open, 'a quick confirmation waits for the flare');
+  assert.ok(f.q('.job-launch').classList.contains('firing'), 'a tick that already holds the job does not cut the flare short');
+  t.mock.timers.tick(900);
+  assert.ok(f.q('#job-dialog').open && f.q('.job-launch').classList.contains('done'), 'then it turns green');
+  assert.ok(f.q('.job-launch-go .gx[data-tone="ok"]'));
+  t.mock.timers.tick(700);
   assert.equal(f.q('#job-dialog').open, false, 'the dialog closes onto the board, where the job forms');
   const subJobs = suggest.plan.subJobs.map((s) => ({ sessions: [], repairs: [], ...s, stage: 'queued' }));
   Object.assign(f.data.jobs[0], { title: suggest.title, plan: suggest.plan, stage: 'active', approvedAt: 5, subJobs, runs: [parked({ stopped: true })] });
@@ -181,6 +189,18 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   assert.equal(f.q('#job-page [data-action="approve-plan"]'), null, 'creating it approved the plan: nothing to approve again');
   assert.ok(f.q('#job-page details[data-keep="idea"] .job-launch.done'), 'the conversation is folded under the job');
   assert.notEqual(f.q('[data-board="idea1"] .job-status').textContent, 'Plan ready');
+});
+
+test('closing the dialog mid-flare still creates the job', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture(t, [ideaJob([{ id: 'm3', at: 4, from: 'planner', text: 'Here.', suggest }])]);
+  f.q('[data-board="idea1"] .job-plate-open').click();
+  f.q('[data-accept-idea]').click();
+  f.q('#job-dialog').close();
+  t.mock.timers.tick(900);
+  assert.deepEqual(f.sent.filter((m) => m.action === 'accept-idea'), [{ type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3', index: 0 }]);
+  f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
+  assert.equal(f.q('#job-dialog').open, false);
 });
 
 test('a refused Create job leaves the dialog open and stops flaring', (t) => {
@@ -220,7 +240,7 @@ test('two suggested jobs are two launch strips; pressing one creates it beside t
   assert.equal(f.q('[data-leave-idea]'), null, 'nothing created yet: Cancel, not Leave the rest');
   strips()[1].querySelector('[data-accept-idea]').click();
   assert.deepEqual(strips().map((p) => p.className.split(' ').at(-1)), ['live', 'firing'], 'only the pressed one flares');
-  t.mock.timers.tick(900);
+  t.mock.timers.tick(900); t.mock.timers.tick(700);
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3', index: 1 });
   assert.match(strips()[1].querySelector('.job-launch-fine').textContent, /beside this idea/);
   f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });
@@ -234,7 +254,7 @@ test('two suggested jobs are two launch strips; pressing one creates it beside t
   assert.equal(f.q('[data-accept-all]'), null, 'one left: no Create all');
   assert.match(f.q('[data-board="idea1"]').textContent, /Jobs suggested · 1 left/);
   strips()[0].querySelector('[data-accept-idea]').click();
-  t.mock.timers.tick(900);
+  t.mock.timers.tick(900); t.mock.timers.tick(700);
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'idea1', subJobId: undefined, action: 'accept-idea', messageId: 'm3', index: 0 });
   assert.match(strips()[0].querySelector('.job-launch-fine').textContent, /takes this idea's place/);
   f.view.created({ event: 'job-action-complete', jobId: 'idea1', action: 'accept-idea' });

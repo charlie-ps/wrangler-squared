@@ -610,9 +610,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   function show(html, { sessions = false } = {}) {
     if (!sessions) releaseEmbed();
     detailShown = null;
-    const job = data.jobs.find((j) => j.id === pageAt?.jobId);
+    const job = ideaFiring?.jobId === pageAt?.jobId ? ideaFiring.job : data.jobs.find((j) => j.id === pageAt?.jobId);
     const want = job && !pageAt.subId && ideaOpen(job) ? modal : pageMain;
     // An idea that became a job (or the other way) moves surface; the close handler sees `detail` already moved on.
+    // A launch still flaring stays in its dialog (`ideaFiring.job`) until it settles.
     if (want !== detail) { const was = detail; detail = want; if (was === modal) modal.close(); else leavePage(); }
     if (detail === modal) {
       modal.innerHTML = `<button class="job-dialog-close" aria-label="Close" title="Close">${ICONS.x}</button>${html}`;
@@ -630,7 +631,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   }
   // Back is one level up (Sessions to its step, a step to its job, the job to the board); the trail jumps to any.
   const upTo = () => (pageAt?.sessions ? (pageAt.subId ? 'step' : 'job') : pageAt?.subId ? 'job' : 'board');
-  const BACK = { step: ['Step', 'Back to the step (Esc)'], job: ['Job', 'Back to the job (Esc)'], board: ['Jobs', 'Back to Jobs'] };
+  const BACK = { step: ['Step', 'Back to the step (Esc)'], job: ['Job', 'Back to the job (Esc)'], board: ['Jobs', 'Back to Jobs (Esc)'] };
   function paintBar() {
     const job = data.jobs.find((j) => j.id === pageAt?.jobId);
     const sub = job?.subJobs.find((s) => s.id === pageAt.subId);
@@ -1181,11 +1182,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const legend = `<p class="job-diff-legend">${count(changes.added.length, 'added', 'new')}${count(changes.edited.length, 'edited', 'edited')}${count(changes.removed.length, 'removed', 'cancelled')}${count(actions.length, 'rework', actions.length === 1 ? 'action' : 'actions')}${count(kept, 'kept', 'unchanged')}<span class="job-diff-edges"><i class="added"></i>new link<i class="gone"></i>dropped link</span></p>`;
     const planHtml = `${legend}${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, editsOf: (id) => changes.edited.find((e) => e.id === id)?.fields || [], was: job.plan, openTickets, reviewWrites: job.reviewWrites, base: job.base })}
       <ul class="job-replan-changes">${items.join('')}</ul>${planMoreHtml(job, merged)}`;
-    return `<section class="job-decision${red ? ' is-red' : ''}" aria-label="Plan change waiting for you"><p class="job-decision-kicker">${ICONS.eye}<span>${esc(kicker)}</span>${queuedTag(job)}</p>
-      ${proposal.escalation?.ask ? `<p class="job-decision-ask">${esc(proposal.escalation.ask)}</p>` : ''}<h3 class="job-decision-title">${esc(heading)}${options.length > 1 && picked === 0 ? '<span class="job-option-rec">Recommended</span>' : ''}</h3>
-      ${why ? `<p class="job-decision-why">${esc(why)}</p>` : ''}${option.leaves ? `<p class="job-decision-leaves"><b>Leaves you</b> ${esc(option.leaves)}</p>` : ''}
-      <div class="job-actions job-proposal-cta tone-warn"><button class="primary" data-action="approve-replan" ${blocked ? 'disabled' : ''} title="${blocked ? 'Wrangler is still planning; approve once it stops' : 'Only the steps it changes wait until you approve or discard it'}">${ICONS.check}Approve</button><button data-action="discard-replan">${ICONS.x}Discard</button></div>
-      ${whyMore || others ? `<div class="job-decision-foot">${whyMore}${others}</div>` : ''}</section>${planHtml}`;
+    // Only the head (what it is, the heading, the buttons) pins while the rest of the card and the plan diff scroll under it.
+    const body = `${why ? `<p class="job-decision-why">${esc(why)}</p>` : ''}${option.leaves ? `<p class="job-decision-leaves"><b>Leaves you</b> ${esc(option.leaves)}</p>` : ''}${whyMore || others ? `<div class="job-decision-foot">${whyMore}${others}</div>` : ''}`;
+    return `<section class="job-decision${red ? ' is-red' : ''}" aria-label="Plan change waiting for you"><div class="job-decision-head"><p class="job-decision-kicker">${ICONS.eye}<span>${esc(kicker)}</span>${queuedTag(job)}</p>
+      ${proposal.escalation?.ask ? `<p class="job-decision-ask">${esc(proposal.escalation.ask)}</p>` : ''}<div class="job-decision-row"><h3 class="job-decision-title">${esc(heading)}${options.length > 1 && picked === 0 ? '<span class="job-option-rec">Recommended</span>' : ''}</h3>
+      <div class="job-actions job-proposal-cta tone-warn"><button class="primary" data-action="approve-replan" ${blocked ? 'disabled' : ''} title="${blocked ? 'Wrangler is still planning; approve once it stops' : 'Only the steps it changes wait until you approve or discard it'}">${ICONS.check}Approve</button><button data-action="discard-replan">${ICONS.x}Discard</button></div></div></div>
+      ${body ? `<div class="job-decision-body">${body}</div>` : ''}${planHtml}</section>`;
   }
   // The job dialog's one extended button: the single most urgent thing the job is
   // waiting on. A green PR awaiting approval merges from here, pinned to the head
@@ -1573,8 +1575,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     hydrateEvidence(detail, evidence, send, shot ? { full: { jobId: job.id, subId: sub.id, round: proofRound(sub), file: shot.file } } : {});
   }
   // The conversation's own controls. Enter sends (Shift+Enter is a new line); the
-  // launch strip's press flares the hole for a beat before the job is created, so the
-  // board's switch to the plan reads as its consequence.
+  // launch strip's press sends at once and flares the hole for a beat before the dialog
+  // closes, so the board's switch to the plan reads as its consequence.
   function wireIdea(job) {
     const n = ideaThread(job).length + (ideaSent?.jobId === job.id ? 1 : 0);
     if (ideaSeen?.jobId !== job.id || ideaSeen.n !== n) { scroller().scrollTop = scroller().scrollHeight; ideaSeen = { jobId: job.id, n }; }
@@ -1598,15 +1600,24 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const fire = (id, pick) => {
       if (ideaFiring) return;
       const left = uncreatedSuggestions(ideaThread(job).find((m) => m.id === id)).length;
-      ideaFiring = { jobId: job.id, id, ...pick, own: !!pick.all || left === 1, state: 'firing' };
+      // Sent at once, so closing the dialog mid-flare (which drops ideaFiring) never loses it;
+      // the dialog keeps drawing `job` as pressed until it settles, so a tick that already
+      // holds the created job cannot cut the flare short.
+      ideaFiring = { jobId: job.id, job: structuredClone(job), id, ...pick, own: !!pick.all || left === 1, state: 'firing' };
+      action('accept-idea', { messageId: id, ...pick }, '');
       renderDetail();
       detail.querySelectorAll(`.job-launch.firing [data-accept-idea="${CSS.escape(id)}"]`).forEach((go) => spinTo(go, 40));
       const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      // The flare, then the strip turns green for a beat, however soon the server confirmed.
       setTimeout(() => {
         if (ideaFiring?.id !== id) return;
         ideaFiring.state = 'sent';
-        action('accept-idea', { messageId: id, ...pick }, '');
         if (paged() && selected?.jobId === job.id) renderDetail();
+        setTimeout(() => {
+          if (ideaFiring?.id !== id) return;
+          ideaFiring.shown = true;
+          if (ideaFiring.confirmed) ideaSettled(job.id);
+        }, calm ? 0 : 700);
       }, calm ? 0 : 900);
     };
     detail.querySelectorAll('[data-accept-idea]').forEach((b) => b.onclick = () => {
@@ -1710,7 +1721,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     [...detail.querySelectorAll('[data-pick-session]')].find((b) => b.dataset.pickSession === sid)?.focus();
   }
   function renderDetail() {
-    const job = data.jobs.find((j) => j.id === selected?.jobId);
+    const job = ideaFiring?.jobId === selected?.jobId ? ideaFiring.job : data.jobs.find((j) => j.id === selected?.jobId);
     if (!job) return;
     const sub = job.subJobs.find((s) => s.id === selected.subId);
     if (pageAt?.sessions && detail === pageMain) return paintSessions(job, sub || null);
@@ -2090,15 +2101,20 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   };
   modal.addEventListener('keydown', onKey(modal));
   page.addEventListener('keydown', onKey(pageMain));
-  // Esc climbs from Sessions to its step, from a step to its job, and stops there: leaving the job is Back's, not a stray key's.
-  // Text being typed keeps its Esc, and so does anything that already took it (an open popup, a
-  // dialog). On the document, since a redraw under the pointer leaves focus on <body>; core hides
-  // the view's host (.hidden) while another view shows.
+  // Esc is Back: Sessions to its step, a step to its job, the job to the board. Text being typed keeps
+  // its Esc, and so does anything that already took it (a menu, a dialog); an open split popup closes
+  // first, and the idea's dialog closes itself. On the document, since a redraw under the pointer
+  // leaves focus on <body>; core hides the view's host (.hidden) while another view shows.
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || e.defaultPrevented || !paged() || upTo() === 'board' || !root.isConnected || root.closest('.hidden')) return;
+    if (e.key !== 'Escape' || e.defaultPrevented || detail === modal || !paged() || !root.isConnected || root.closest('.hidden')) return;
     // The lent session panel is the session's: its terminal and chat keep every key.
     if ((e.target !== document.body && !page.contains(e.target)) || e.target.closest?.('input, textarea, select, .job-mc-host')) return;
-    e.preventDefault(); openDetail(pageAt.jobId, upTo() === 'step' ? pageAt.subId : ''); bar.querySelector('[data-page-back]')?.focus();
+    e.preventDefault();
+    const more = detail.querySelector('.job-split-more[open]');
+    if (more) { more.open = false; openMore.delete(more.dataset.keep); return more.querySelector('summary')?.focus(); }
+    const to = upTo();
+    if (to === 'board') return closePage();
+    openDetail(pageAt.jobId, to === 'step' ? pageAt.subId : ''); bar.querySelector('[data-page-back]')?.focus();
   });
   render();
   // openDetail and closeDetail open a job, a step or its Sessions as a board card's click would, or go
@@ -2111,6 +2127,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     flags.pending = null;
     flags.note = { field: cp.field, head: job ? checkpointLabel(cp, youReview(job, cp.field)) : cp.name, body: msg.error, undo: false };
     paintFooter();
+  }
+  // A confirmed launch acts only once its flare and green have played: the last one closes onto the board.
+  function ideaSettled(jobId) {
+    if (!ideaFiring.own) { ideaFiring = null; if (paged() && selected?.jobId === jobId) renderDetail(); return; }
+    if (paged() && selected?.jobId === jobId) closePage();
   }
   // A refused idea goes back in its box, with why, so nothing typed is lost.
   // A refused reply goes back in the box; a refused launch stops flaring and the toast says why.
@@ -2157,9 +2178,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // so the board's forming animation plays in view; one the human has since navigated away from is left alone.
     if (msg?.action === 'idea-reply') { if (ideaSent?.jobId === msg.jobId) ideaSent.state = 'sent'; return; }
     if (msg?.action === 'accept-idea') {
-      if (ideaFiring?.jobId !== msg.jobId || ideaFiring.state !== 'sent') return;
-      if (!ideaFiring.own) { ideaFiring = null; if (paged() && selected?.jobId === msg.jobId) renderDetail(); return; }
-      if (paged() && selected?.jobId === msg.jobId) closePage();
+      if (ideaFiring?.jobId !== msg.jobId) return;
+      ideaFiring.confirmed = true;
+      if (ideaFiring.shown) ideaSettled(msg.jobId);
       return;
     }
     // An idea stays on screen as its bubble: the tick is the confirmation, not a closed dialog.

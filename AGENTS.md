@@ -326,7 +326,11 @@ text as public as the rest of this repo.
   (`JobStore.acceptIdea`, the idea's settings, `fromIdea`, stamped `createdAt`/`jobId`, sharing its
   images, which `JobRunner.finish` releases only once no unfinished job holds them); the last turns the
   idea itself into its job, and settle() then ends the parked run quietly because the job is no longer
-  `inConversation`. `leave-idea` cancels an idea once one job was created from it. A fresh planning run
+  `inConversation`. The board sends `accept-idea` the moment a strip is pressed (one press per dialog,
+  `ideaFiring`) and plays the 900ms flare alongside, then 700ms of green (`done`); only closing onto the board waits for
+  both (`ideaFiring.shown`, `ideaSettled`), so a dialog closed mid-flare never loses the accept. Until then the dialog draws the job
+  as pressed (`ideaFiring.job`), so a tick that already holds the created job cannot cut the flare short
+  or move it onto the job page (`show` picks the surface from the same job). `leave-idea` cancels an idea once one job was created from it. A fresh planning run
   (a retry) reads the whole thread from its prompt, so `claim` marks unsent messages sent. The chat
   dialog redraws on ticks whatever its reply box holds (`keepFields`); only new messages fade in.
   Before planning starts a Backlog idea's title and words are the human's: `edit-idea {title?, text}` (`editIdea`,
@@ -416,7 +420,7 @@ text as public as the rest of this repo.
 - **A job is a page, not a dialog** (`public/jobs-view.js` `page`, `#job-page` in
   `#jobs`): opening one hides the board (`#jobs.jobs-paging`) under a sticky bar
   with Back and the trail Jobs › job › step; Back and Esc go up one level (Esc
-  stops at the job), and a finished action that closed the old dialog goes up one
+  first closes an open split popup), and a finished action that closed the old dialog goes up one
   level too (`up`). `detail` is the old dialog body, so its CSS is
   `:is(.job-dialog,.job-page)`. An idea not yet a job (`ideaOpen`: in conversation or
   in the backlog, no plan) still opens on `#job-dialog`, as do New idea, Automation

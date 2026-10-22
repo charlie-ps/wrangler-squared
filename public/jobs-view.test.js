@@ -173,18 +173,41 @@ test('a job opens as a page in place of the board, not a dialog; Back, the trail
   assert.deepEqual([f.q('#job-page').hidden, f.q('#jobs').classList.contains('jobs-paging')], [false, true], 'the page takes the board\'s place');
   assert.deepEqual([crumbs(), f.q('[data-page-back]').textContent, f.q('#job-page .job-page-main h2').textContent], [['Jobs', 'Sign-in'], 'Jobs', 'Sign-in']);
   assert.equal(document.activeElement, f.q('[data-page-back]'), 'focus starts on the way back');
-  esc(f.q('#job-page')); assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'Esc stops at the job: leaving it is Back\'s');
+  assert.equal(f.q('[data-page-back]').title, 'Back to Jobs (Esc)');
   f.q('#job-page [data-node="api"]').dispatchEvent(f.event('click'));
   assert.deepEqual([crumbs(), f.q('[data-page-back]').textContent], [['Jobs', 'Sign-in', 'Deliver api'], 'Job'], 'a step is a level down');
   const box = f.q('#job-page .job-change textarea'); box.value = 'half typed'; esc(box);
   assert.deepEqual(crumbs(), ['Jobs', 'Sign-in', 'Deliver api'], 'Esc in a box is the box\'s');
   esc(document.body); assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'Esc climbs from a step to its job, focus lost to the body by a redraw included');
+  assert.equal(f.q('[data-page-back]').title, 'Back to Jobs (Esc)');
+  const jobBox = f.q('#job-page .job-change textarea'); jobBox.value = 'half typed'; esc(jobBox);
+  assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'Esc in the job\'s box is the box\'s too');
+  const taken = new f.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }); taken.preventDefault(); f.q('#job-page').dispatchEvent(taken);
+  assert.equal(f.q('#job-page').hidden, false, 'an Esc a popup already took leaves the page where it is');
+  esc(f.q('#job-page'));
+  assert.deepEqual([f.q('#job-page').hidden, f.q('#jobs').classList.contains('jobs-paging')], [true, false], 'and Esc on the job goes back to the board');
+  assert.ok(document.activeElement === f.q('[data-board="job1"] .job-plate-open'), 'on the plate it was opened from');
+  esc(document.body); assert.equal(f.q('#job-page').hidden, true, 'Esc on the board does nothing');
+  f.q('.job-plate-open').click();
   f.view.openDetail('job1', 'api'); f.q('[data-page-crumb="job"]').click(); assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'the trail jumps to the job');
   f.view.openDetail('job1', 'api'); f.q('[data-page-back]').click(); assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'Back is one level up');
   f.q('[data-page-back]').click();
   assert.deepEqual([f.q('#job-page').hidden, f.q('#jobs').classList.contains('jobs-paging'), f.q('.job-page-main').innerHTML], [true, false, ''], 'and from the job, back to the board');
   assert.equal(document.activeElement, f.q('[data-board="job1"] .job-plate-open'), 'on the plate it was opened from');
   f.q('.job-plate-open').click(); f.q('[data-page-crumb="board"]').click(); assert.equal(f.q('#job-page').hidden, true, 'Jobs in the trail leaves too');
+});
+
+test('Esc closes an open split popup on the page before it climbs a level', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', error: 'Worker blocked' }];
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  const crumbs = () => [...f.q('.job-page-crumbs').children].map((li) => li.textContent);
+  const esc = (on) => on.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  const more = f.q('.job-retry-split details'); more.open = true; more.dispatchEvent(f.event('toggle'));
+  esc(more.querySelector('summary'));
+  assert.deepEqual([f.q('.job-retry-split details').open, crumbs()], [false, ['Jobs', 'Sign-in', 'Deliver api']], 'the popup shuts and the step stays');
+  f.view.update(f.data); assert.equal(f.q('.job-retry-split details').open, false, 'and a tick leaves it shut');
+  esc(document.body); assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'the next Esc climbs');
 });
 
 test('a double-click that opens a job lands nothing in the new dialog; a press after half a second does', (t) => {
@@ -3073,8 +3096,8 @@ test('a plan change reads as one decision card holding both buttons; under it th
   assert.ok(card.querySelector('[data-action="approve-replan"]') && card.querySelector('[data-action="discard-replan"]'), 'the buttons sit on the card');
   assert.equal(document.querySelectorAll('#job-page [data-action="approve-replan"]').length, 1, 'not repeated in the footer');
   assert.equal(document.querySelectorAll('#job-page [data-action="discard-replan"]').length, 1);
-  assert.equal(card.querySelector('.job-graph'), null, 'the graph is not in the card');
-  assert.ok(card.compareDocumentPosition(f.q('#job-page .job-graph')) & 4, 'it is drawn right under it, always');
+  assert.ok(!card.querySelector('.job-decision-head .job-graph, .job-decision-body .job-graph'), 'the graph is not in the card');
+  assert.ok(card.querySelector('.job-decision-body').compareDocumentPosition(f.q('#job-page .job-graph')) & 4, 'it is drawn right under it, always');
   assert.ok(f.q('#job-page .job-plan-more'), 'and so are the plan details');
   card.querySelector('[data-action="approve-replan"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_p' });
@@ -3090,6 +3113,21 @@ test('a plan change reads as one decision card holding both buttons; under it th
   assert.deepEqual([rows.brief.querySelector('del').textContent, rows.brief.querySelector('ins').textContent], ['it', 'it, <b>paginate</b>'], 'only the changed words are marked');
   assert.equal(rows['show me'].querySelector('ins').textContent, '+ Pages of 50');
   assert.deepEqual([...rows['waits for'].children].map((e) => `${e.tagName} ${e.textContent}`), ['INS + Deliver cli', 'DEL − Deliver api']);
+});
+
+test('the decision card pins only its head over the plan: kicker, heading and both buttons stick, the why and the graph scroll under it (charlie-ps/wrangler-squared#267)', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued' }];
+  job.replan = { feedback: 'Add a CLI', at: 1, previous: null, proposal: { id: 'run_p', label: 'Add a CLI step', why: 'You asked for one.', leaves: 'Nothing.', plan: job.plan, merged: job.plan,
+    changes: { frozen: [], kept: ['api'], edited: [], added: [], removed: [] } } };
+  f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
+  const head = f.q('#job-page .job-decision > .job-decision-head');
+  assert.ok(head, 'the head is the decision\'s first child');
+  assert.deepEqual(['.job-decision-kicker', '.job-decision-title', '[data-action="approve-replan"]', '[data-action="discard-replan"]'].map((q) => !!head.querySelector(q)), [true, true, true, true]);
+  assert.deepEqual(['.job-decision-why', '.job-decision-leaves', '.job-decision-more', '.job-graph'].map((q) => !!head.querySelector(q)), [false, false, false, false], 'nothing long is pinned');
+  const section = head.parentElement;
+  assert.ok(section.querySelector(':scope > .job-decision-body .job-decision-why'), 'the why scrolls with the card');
+  assert.ok(section.querySelector(':scope > .job-diff-legend') && section.querySelector('.job-graph'), 'the plan diff shares the head\'s section, so the head stays pinned while it scrolls');
 });
 
 test('the decision card leads with the option: its label, why and what it leaves you; a red step names the step and its failure, never an ask', (t) => {
