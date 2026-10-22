@@ -133,7 +133,8 @@ test('the pictures an idea was created with sit on its first bubble, in the live
   assert.equal(f.q('dialog.job-image-zoom img').src, 'data:image/png;base64,Yg==', 'a thumbnail enlarges');
   f.q('dialog.job-image-zoom').click();
   Object.assign(f.data.jobs[0], { plan: suggest.plan, stage: 'review' }); f.view.update(f.data);
-  const past = f.q('#job-dialog .job-idea-past .job-sent');
+  assert.equal(f.q('#job-dialog').open, false, 'once it has a plan it is a job, on the page');
+  const past = f.q('#job-page .job-idea-past .job-sent');
   assert.match(past.textContent, /PRs sit green/);
   assert.deepEqual([...past.querySelectorAll('.job-sent-strip img')].map((i) => i.src), ['data:image/png;base64,YQ==', 'data:image/png;base64,Yg==']);
 });
@@ -176,9 +177,9 @@ test('a suggested job is a horizon strip: what it builds, the sub-jobs and repos
   f.data.jobs[0].idea.thread[2].acceptedAt = 5;
   f.view.update(f.data);
   f.q('[data-board="idea1"] .job-plate-open').click();
-  assert.equal(f.q('#job-dialog .job-idea'), null, 'the job takes over');
-  assert.equal(f.q('#job-dialog [data-action="approve-plan"]'), null, 'creating it approved the plan: nothing to approve again');
-  assert.ok(f.q('#job-dialog details[data-keep="idea"] .job-launch.done'), 'the conversation is folded under the job');
+  assert.equal(f.q('#job-page .job-idea'), null, 'the job takes over');
+  assert.equal(f.q('#job-page [data-action="approve-plan"]'), null, 'creating it approved the plan: nothing to approve again');
+  assert.ok(f.q('#job-page details[data-keep="idea"] .job-launch.done'), 'the conversation is folded under the job');
   assert.notEqual(f.q('[data-board="idea1"] .job-status').textContent, 'Plan ready');
 });
 
