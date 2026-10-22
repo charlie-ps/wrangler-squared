@@ -136,21 +136,23 @@ text as public as the rest of this repo.
   idle rule reach a parked run. A stored write with no `by` predates this and is
   failed on load (`job-store.js migrateSessionWrites`), never run;
   `validatePlan` looks past it so a plan edit still works on that job.
-- **One action brings an idea in: `request-change {subJobId?, at, ref, text}`**
+- **One action brings an idea in: `request-change {subJobId?, convo?, text}`**
   (`server/job-change.js`), from the Add idea box (`changeBoxHtml`, plain words
   plus pictures, no chips) on every step, review and proposal; it replaced `revise-session`, both `replan` forms, `fix-here`
-  and the seven moves (Retry stays a button). `at`/`ref` pin it to what the
-  human read (`changeView`, mirrored client-side in `public/jobs.js`): a moved
-  head, receipt, revision or proposal refuses it. Every idea goes to ONE
-  recipient, the planner (`requestReplan`, with `replan.source = {sub, at, ref}`
+  and the seven moves (Retry stays a button). It is NEVER refused as stale:
+  liveness is the planner's call. `changeView` (mirrored client-side in
+  `public/jobs.js`) only routes it (`plan` redraws, `code` keeps pictures by round)
+  and is kept as `replan.source = {sub, at, ref, state}`, what the step was when the
+  idea arrived, which the planner's prompt sets beside the step now
+  (`job-prompts.js sourceLine`: "When the idea was typed: …; now: …"). Every idea goes to ONE
+  recipient, the planner (`requestReplan`, with that source
   and the idea's `images`; on an active job an ask run first, below), except a
   first plan (redrawn via `job.feedback`); a
   declared red still goes up with what was tried. The planner sorts it into
   actions on live steps (`forward` to a session parked on review, `rework`) and
   plan edits, and the human approves that proposal (one of `forward`s alone is
-  applied at once, `forwardsOnly`): an action on the source step
-  is refused at stamp and approval once its view has moved (`job-actions.js
-  sourceHolds`). A second idea while a proposal waits adds to it (`Earlier: … /
+  applied at once, `forwardsOnly`). The one guard is each action's own pin (below),
+  checked at approval. A second idea while a proposal waits adds to it (`Earlier: … /
   Now: …`, `previousActions`); while the planner is drawing one, another change (or an ask run's hand-over) joins the FIFO
   `job.replanQueue` with its convo, source and images (`requestReplan` returns `{queued}`, its
   conversation says so), and `startQueued` makes the next one its own replan once the current one is
@@ -258,7 +260,11 @@ text as public as the rest of this repo.
   (merged/done, `evidence` required), `rework` and `recover {fix}` on a live
   sub-job. The server stamps each with a pin (PR head, merge commit, stage or, for
   a retry, the failure's `redRef`) at
-  proposal time and `approve-replan` refuses if it moved; the planner never
+  proposal time, and `checkActions` at `approve-replan` is the ONLY staleness check:
+  a moved pin is never applied. Approval then sends the proposal back to the
+  planner told what moved (`sendBack`, also for an edit under a step that has since
+  landed; the source is not re-pinned), so the human never has to re-ask; a refusal
+  nothing moved into (a step still running) stays the human's to read. The planner never
   writes a pin (the schema is strict). Options are the receipt's own plan first,
   then `alternatives` (max 2), each merged and stamped when the receipt lands, so
   one bad option refuses the whole receipt; approve takes `option`. An action is
