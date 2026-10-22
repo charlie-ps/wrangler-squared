@@ -6,7 +6,7 @@ import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, reviewOf, planSchema, 
 import { migrateTheme } from '../public/theme-ids.js';
 import { adoptEvidence } from './job-evidence.js';
 import { parkedReadyRun, askAgent, answered, sayInThread } from './job-parked.js';
-import { setRunning, owe, runningOf } from './job-running.js';
+import { setRunning, runningOf } from './job-running.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub, retrySub } from './job-sub-ops.js';
@@ -404,20 +404,12 @@ export class JobStore {
         record(j, s, 'dismiss-convo', null, 'Dismissed a conversation with Wrangler');
         return;
       }
-      // The preview the agent left running (job-running.js): Stop owes its teardown
-      // to the runner's next tick; Restart mails the parked session to start it again.
+      // The preview the agent left running (job-running.js): Stop all replaces the
+      // list with nothing, so the runner's next tick kills every group it recorded.
       if (action === 'stop-running') {
-        if (!s || !owe(s, payload.name || null)) throw new Error('Nothing is running for this step');
+        if (!s || !runningOf(s).length) throw new Error('Nothing is running for this step');
+        setRunning(s, [], Date.now());
         record(j, s, 'stop-running', null, `Stopped what the agent left running on ${quoted(s.title)}`);
-        return;
-      }
-      if (action === 'restart-running') {
-        const run = s && parkedReadyRun(j, s);
-        const down = s ? runningOf(s).filter((i) => i.up === false && (!payload.name || i.name === payload.name)) : [];
-        if (!run || !s.ready) throw new Error('Its session is no longer open to ask: start it by hand, or ask for a change');
-        if (!down.length) throw new Error('Everything it left running is up');
-        askAgent(s, { from: 'system', text: `${down.map((i) => i.name).join(', ')} ${down.length === 1 ? 'is' : 'are'} no longer running and the human wants to try it. Start ${down.length === 1 ? 'it' : 'them'} again as before (detached with setsid, free ports) and answer with job_report kind:"reply", text:"…", running:[every entry now up, with its url, pid and stop]. Change nothing else.`, kind: 'restart' }, Date.now());
-        record(j, s, 'restart-running', null, `Asked the session to start ${down.map((i) => i.name).join(', ')} again`);
         return;
       }
       // New idea's conversation (job-idea.js): the human's answer to the planner, and
@@ -735,7 +727,7 @@ export class JobStore {
     const [kept] = report.shots || report.run ? adoptEvidence({ jobId: j.id, subId: s.id, round, prefix: `${id}-`, proof: [{ text: report.text, shots: report.shots, run: report.run }] }) : [null];
     sayInThread(s, { id, at: now, from: 'agent', text: report.text, round, ...(kept?.shots ? { shots: kept.shots } : {}), ...(report.run ? { run: report.run } : {}) });
     answered(s);
-    if (report.running) setRunning(s, report.running, { round, keep: true, now });
+    if (report.running) setRunning(s, report.running, now);
     Object.assign(r, { lastReply: report, parkedAt: now, mailedAt: null, idleSince: null });
     // Code went to Auto while it answered: with nothing more queued for it, the
     // round it answered about goes on to publish as a ready under Auto would.
@@ -822,9 +814,9 @@ export class JobStore {
       s.ready = { checks: report.checks.map(checkText), ...(proof?.proof.length ? { proof: proof.proof } : {}), ...(proof ? { round: proof.round } : {}), ...(meta.treeHash ? { treeHash: meta.treeHash } : {}), receiptId, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
       if (proof) s.rounds = proof.round;
       answered(s);
-      // What it left running is kept only for a human to try: Code on Auto, or a
-      // receipt that did not park, owes it all straight to teardown.
-      if (report.running || runningOf(s).length) setRunning(s, report.running || [], { round: s.ready.round || 1, keep: reviewCode(j) && r.parkedFor === 'ready', now: Date.now() });
+      // What it left running is kept only while a human reviews it: approved at once
+      // (Code on Auto), the runner's next tick kills it all.
+      if (report.running || runningOf(s).length) setRunning(s, report.running || [], Date.now());
       if (r.parkedFor === 'ready' && proof?.round > 1) sayInThread(s, { id: `msg_${Date.now().toString(36)}r`, at: Date.now(), from: 'system', text: `Ready again with new proof.`, round: proof.round });
       if (!reviewCode(j)) { s.ready.approvedAt = s.ready.at; s.state = 'approved'; }
     }

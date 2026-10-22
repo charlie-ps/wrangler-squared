@@ -2113,7 +2113,7 @@ test('a forwarded idea is one line in the conversation, and the session\'s reply
   assert.ok(f.sent.some((m) => m.type === 'job-evidence' && m.subJobId === 'api' && m.round === 1), 'its shot is fetched');
 
   job.subJobs[0].thread.splice(1, 1);
-  job.subJobs[0].answering = { id: 'm1', at: 3, kind: 'change', round: 1 };
+  job.subJobs[0].answering = { id: 'm1', at: 3, round: 1 };
   f.view.update(f.data);
   assert.match(f.q('#job-dialog .job-talk-working').textContent, /Deliver api's session is working on it…/);
 });
@@ -3279,21 +3279,18 @@ test('a Code review step with its session parked and nothing said draws no empty
   assert.equal(fold.querySelector('.job-thread-head'), null, 'no inner header repeating the state chip');
   assert.equal(f.q('#job-dialog [data-fab-session]'), null, 'Open session is the footer\'s alone');
   assert.equal(document.querySelectorAll('#job-dialog #job-session').length, 1);
-  job.runs[0].mailedAt = 2; job.subJobs[0].answering = { id: 'm1', kind: 'change', round: 1 }; f.view.update(f.data);
+  job.runs[0].mailedAt = 2; job.subJobs[0].answering = { id: 'm1', round: 1 }; f.view.update(f.data);
   assert.match(f.q('#job-dialog .job-history summary').textContent, /Conversation 1 message · working on what you sent/);
   assert.ok(f.q('#job-dialog .job-history summary .icon-spin, #job-dialog .job-history summary svg'), 'the spinner moved up with it');
-  assert.match(f.q('#job-dialog .job-proof-verdict').textContent, /from round 1$/, 'the header says round 2, so the list says which round it is from');
-  job.subJobs[0].answering.kind = 'ask'; f.view.update(f.data);
-  assert.doesNotMatch(f.q('#job-dialog .job-proof-verdict').textContent, /round/, 'answering a question names no round, so neither does the list');
+  assert.doesNotMatch(f.q('#job-dialog .job-proof-verdict').textContent, /round/, 'a message in flight is no new round until the session reports one');
 });
 
 test('while the session works on a message the card says what it is doing and is not yours until it reports back', (t) => {
   const f = fixture(t);
-  const job = parkedJob(f, { mailedAt: 1700000001000, status: 'working' }, { answering: { id: 'm1', kind: 'ask', round: 1 } });
-  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Answering you' });
+  const job = parkedJob(f, { mailedAt: 1700000001000, status: 'working' }, { answering: { id: 'm1', round: 1 } });
+  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Working on your message' }, 'question or change, nothing guesses which');
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false);
-  job.subJobs[0].answering.kind = 'change'; f.view.update(f.data);
-  assert.deepEqual(jobStatus(job, job.subJobs[0]), { tone: 'working', text: 'Reworking · round 2' });
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Working on your message');
   job.subJobs[0].answering.kind = 'retell'; f.view.update(f.data);
   assert.equal(jobStatus(job, job.subJobs[0]).text, 'Rechecking the tree');
   assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Rechecking the tree');
@@ -3815,7 +3812,7 @@ test('a forward reads as the quote the session will be told, pinned to its round
   assert.deepEqual(actionLine(a, plan), { text: 'Sends your message to the agent that built “Design export button”', detail: '“Not enough spacing before the button.”' });
   assert.equal(pinLine(a.pin), 'Not applied if that review has moved on by the time you approve');
   const job = { id: 'job1', runs: [{ id: 'run_1', subJobId: 'api', stopped: false, parkedFor: 'ready', sessionId: 's1' }] };
-  const sub = { id: 'api', ready: { round: 2 }, answering: { kind: 'change', round: 2 }, thread: [{ id: 'm1', at: 1, from: 'human', via: 'planner', to: 'agent', text: 'Not enough <b>spacing</b>', round: 2, sentAt: null }] };
+  const sub = { id: 'api', ready: { round: 2 }, answering: { round: 2 }, thread: [{ id: 'm1', at: 1, from: 'human', via: 'planner', to: 'agent', text: 'Not enough <b>spacing</b>', round: 2, sentAt: null }] };
   const html = threadHtml(job, sub);
   assert.match(html, /<span class="job-msg-via">via Wrangler<\/span>/);
   assert.match(html, /Not enough &lt;b&gt;spacing&lt;\/b&gt;/, 'the words are escaped');

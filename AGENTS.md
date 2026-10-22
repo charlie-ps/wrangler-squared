@@ -143,8 +143,8 @@ text as public as the rest of this repo.
   human read (`changeView`, mirrored client-side in `public/jobs.js`): a moved
   head, receipt, revision or proposal refuses it. Every idea goes to ONE
   recipient, the planner (`requestReplan`, with `replan.source = {sub, at, ref}`
-  and the idea's `images`), unless it reads as a question (an ask run, below), and
-  except a first plan (redrawn via `job.feedback`); a
+  and the idea's `images`; on an active job an ask run first, below), except a
+  first plan (redrawn via `job.feedback`); a
   declared red still goes up with what was tried. The planner sorts it into
   actions on live steps (`forward` to a session parked on review, `rework`) and
   plan edits, and the human approves that proposal (one of `forward`s alone is
@@ -172,8 +172,8 @@ text as public as the rest of this repo.
   discarded, revised) `approveReplan`, `discardReplan` and `requestReplan` stamp.
   Several conversations answer AT ONCE, each with its own ASK run (`run.convo`,
   `run.ask`): `claim` lets one run per conversation stand beside the plan run, and
-  `activeFor`, `requestReplan` and `triageRed` look past ask runs. An idea that
-  `looksLikeQuestion` sets `convo.pending = {asks, source, images}`; ANYTHING said in
+  `activeFor`, `requestReplan` and `triageRed` look past ask runs. Every idea, question
+  or change alike (`job-change.js` never guesses which), sets `convo.pending = {asks, source, images}`; ANYTHING said in
   that conversation before its run replies is one more ask for the SAME run: queued
   before launch it rides in the prompt (`claim` marks it sent), after launch the
   runner mails it (`deliverAsks`, `askMail`), never a new run. An ask run never sets
@@ -268,7 +268,9 @@ text as public as the rest of this repo.
   it sets `run.readyReport`, `parkedFor: 'ready'`, `parkedAt` and clears `mailedAt`, like a
   drafts park (no slot, `settle()` holds it only to its card existing) but never matched by
   `draftsDecided`. The run waits on `waitsOnReview`; approve, a rework, drop or a retry end
-  it quietly and the publish run then claims the sub-job. An approved `forward {sub, note}`
+  it quietly and the publish run then claims the sub-job. While a message is in flight the card reads "Working on your message"
+  (`answering.kind` is only one a caller names: `retell`, `restart`); what it was shows from the
+  session's report. An approved `forward {sub, note}`
   action (pinned to `{at:'round', ref: ready.receiptId}`; one made while it is `answering` queues behind
   that reply, mailed one at a time to a waiting run, `answered` moving `answering` on; a `rework`
   of a parked step is refused in its favour) writes a `sub.thread` message (`askAgent`,
@@ -313,17 +315,18 @@ text as public as the rest of this repo.
   thread or runs, or is cancelled, caps text at `IDEA_TEXT_MAX`, keeps `images`, records a move and drops
   `titlePending` when the title changed; the board sends `title` only if the human changed it.
 - **What the agent leaves running is the agent's; tearing it down is ours** (`server/job-running.js`).
-  `ready` (and a restarting `reply`) may carry `running: [{name, url?, pid?, stop?, log?}]`, the
-  agent's own detached (`setsid`) dev server, database, worker; the extension never starts one. It is kept
-  as `sub.running` (`items` with a probed `up`, `owed` for entries a later round dropped, `stopped` after a
-  teardown). The runner's `sweepRunning` runs FIRST each tick (so before cleanup removes the worktree a
-  `stop` command runs in, and at boot): it tears down `dueTeardown` (owed, plus everything once
-  `holdsRunning` is false: approve, drop, cancel, replan, cleanup, retry), probes the rest, and writes only
-  when up/down flips. Teardown kills the pid's group (just the pid if it does not lead one; never our own
-  process), runs each `stop` in the worktree, then checks the URLs stopped answering, and NEVER fails an
-  approval: a leftover is `stopped.still`, drawn amber. Code on Auto owes everything at once. Logs reads only
-  from under the worktree or the proof inbox (symlinks resolved). `restart-running` mails the parked session
-  via `askAgent` (`kind: 'restart'`); `stop-running` just owes. The bar and dot are `public/job-running.js`.
+  `ready` (and a `reply`) may carry `running: [{name, url?, pid?, log?}]`, the agent's own detached
+  (`setsid`) dev server, database, worker; the extension never starts one. It is kept as `sub.running`
+  (`items` with a probed `up`, `stopped` after a teardown). A new list replaces the old: an old entry whose
+  pid it does not list again stays only as `replaced` (hidden), and Stop all (`stop-running`) replaces the
+  list with nothing. The runner's `sweepRunning` runs FIRST each tick and at boot: it kills `dueTeardown`
+  (the replaced entries, plus everything once `holdsRunning` is false: approve, drop, cancel, replan,
+  cleanup, retry), probes the rest, and writes only when up/down flips. Teardown is SIGTERM to the pid's
+  group (just the pid if it does not lead one; never our own pid or parent), a short wait, then SIGKILL,
+  and NEVER fails an approval: a survivor or a pid-less entry is `stopped.still`, drawn amber. Code on Auto
+  approves at once, so everything is killed on the next tick. Logs reads only from under the worktree or the
+  proof inbox (symlinks resolved). Fields an older save carries beyond these are ignored. The chip and dot are
+  `public/job-running.js`.
 - **A PR's `show` list is answered with proof, not claims** (`server/job-evidence.js`).
   The implementer saves files into one inbox per sub-job (`$JOB_EVIDENCE`, given in
   its prompt and granted as `addDirs`); the `ready` receipt names them per check
@@ -335,8 +338,8 @@ text as public as the rest of this repo.
   in `public/job-proof.js`. A sub-job with `show` items reports `ready` even with
   Code on Auto (`leavesUncommitted`), so the proof is kept per round, but **Auto means
   auto**: that receipt never parks, approves itself as it lands (as does one from a session
-  launched under You review whose Code went to Auto mid-run), owes whatever it listed as
-  running, and the publish session starts on the next tick. Nothing waits in review.
+  launched under You review whose Code went to Auto mid-run), so whatever it listed as running is killed
+  on the next tick, and the publish session starts on the next tick. Nothing waits in review.
 - **Switching a checkpoint to Auto lets through what waits at it** (`job-store.js setReview`,
   `waitingAt`, `releaseWaiting`). The board asks first (`public/jobs-view.js`, counted by
   `checkpointWaiting`) and sends `release`; a switch WITHOUT `release` while something waits

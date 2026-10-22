@@ -310,12 +310,11 @@ export const noteReaders = (job, sub) => {
 const liveRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === (sub?.id || null) && !(r.parkedFor === 'ready' && !sub?.answering) && !(r.parkedFor === 'idea' && ideaStage(job) !== 'thinking'));
 // The open session behind a Code review step: parked, or answering what was sent.
 export const readyRun = (job, sub) => job.runs.find((r) => !r.stopped && r.subJobId === sub?.id && r.parkedFor === 'ready') || null;
-// What the card says while that session works on a message. A question is
-// answered; a change is the next round; a tree that moved is checked again.
-const ANSWERING = { ask: 'Answering you', retell: 'Rechecking the tree', restart: 'Starting it again' };
-// The round a parked session is reworking toward, or null while it only answers.
-export const reworkRound = (sub) => sub?.answering && !ANSWERING[sub.answering.kind] ? (sub.ready?.round || 1) + 1 : null;
-export const answeringLabel = (sub) => ANSWERING[sub?.answering?.kind] || `Reworking · round ${reworkRound(sub)}`;
+// What the card says while that session works on a message. Only a kind the
+// sender named is known up front; whether a message was a question or a change
+// shows when the session reports a reply or a new round.
+const ANSWERING = { retell: 'Rechecking the tree', restart: 'Starting it again' };
+export const answeringLabel = (sub) => ANSWERING[sub?.answering?.kind] || 'Working on your message';
 // The live run's own card status, enriched onto the run server-side each graph
 // tick (server/index.js withRunStatus). 'needs-you' is the one the board acts on:
 // an automated step stuck on a prompt is nobody's but the human's.
