@@ -733,7 +733,7 @@ test('new-job form sends chosen model and the four review checkpoints', (t) => {
   form.elements.intent.value = 'Deliver something useful';
   form.dispatchEvent(f.event('submit'));
   const msg = f.sent[0]; assert.equal(msg.type, 'job-create');
-  assert.equal(msg.job.taskId, null, 'the form assigns no task');
+  assert.equal('taskId' in msg.job, false, 'a job has no Task');
   assert.equal(msg.job.model, 'sonnet'); assert.equal(msg.job.reviewPlan, true); assert.equal(msg.job.reviewCode, true); assert.equal(msg.job.reviewMerge, true); assert.equal(msg.job.reviewSessions, true);
   assert.equal(msg.job.effort, '', 'Default leaves effort to the agent');
   assert.deepEqual(Object.keys(msg.job).filter((k) => /amendment/.test(k)), []);
@@ -982,7 +982,7 @@ test('new idea is a brief beside a property sidebar, and the brief is the descri
   assert.equal(form.querySelector('.job-create-foot').textContent, 'Start planningAdd to backlog');
   form.elements.intent.value = 'Deliver it';
   form.dispatchEvent(f.event('submit'));
-  assert.deepEqual(f.sent[0], { type: 'job-create', idea: true, start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true, sandbox: 'auto', writableDirs: [], images: [], shareImages: true, taskId: null } });
+  assert.deepEqual(f.sent[0], { type: 'job-create', idea: true, start: true, job: { intent: 'Deliver it', agent: 'claude', model: 'sonnet', effort: '', reviewPlan: true, reviewCode: true, reviewMerge: true, reviewSessions: true, reviewWrites: false, reviewRed: true, sandbox: 'auto', writableDirs: [], images: [], shareImages: true } });
 });
 
 test('new jobs need only an outcome and leave repositories to planning', (t) => {
@@ -1443,7 +1443,7 @@ test('a ticketless plan reviews with no stories, its sub-jobs carry No ticket an
   const f = fixture(t); const [job] = f.data.jobs;
   job.plan = structuredClone(plan); job.plan.stories = []; job.plan.subJobs.forEach((s) => { delete s.storyId; delete s.jiraKey; }); f.view.update(f.data);
   f.q('.job-plate-open[data-job=\"job1\"]').click();
-  assert.equal(document.querySelector('.job-appbar .job-chip[title="This work has no Jira ticket"]'), null, 'an absent ticket is the normal case, so the job does not say so either');
+  assert.equal(f.q('.job-appbar .job-chip[title="This work has no Jira ticket"]').textContent, 'No ticket');
   assert.equal(document.querySelectorAll('.job-story-key').length, 0);
   assert.deepEqual([...document.querySelectorAll('.job-node')].map((e) => e.title.split('\n')[1]), ['No ticket', 'No ticket']);
   assert.match(f.q('[data-action="approve-plan"]').title, /^Starts \d+ steps?$/);

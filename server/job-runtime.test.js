@@ -172,13 +172,14 @@ test('launch refuses a missing worktree instead of recreating it on the base che
   assert.deepEqual(spawned, []);
 });
 
-test('launch refuses an archived job task before preparing a workspace or spawning', async () => {
+test('a job saved with an archived Task still launches, into no Task', async () => {
   const { host, spawned, tasks } = fakeHost();
   tasks.push({ id: 't_archived', name: 'Old work', links: [], archivedAt: Date.now() });
-  const runtime = runtimeWith(host, { run: async () => assert.fail('an archived task is rejected before repository setup') });
-  await assert.rejects(runtime.launch({ id: 'job_12345678', title: 'Sign-in', agent: 'claude', taskId: 't_archived' },
-    { id: 'api', repo: '/repo' }, { id: 'run_1', phase: 'implementation' }, () => {}), /Restore it before retrying/);
-  assert.deepEqual(spawned, []);
+  const runtime = runtimeWith(host, { run: async (bin, args) => bin === 'gh' ? JSON.stringify({ defaultBranchRef: { name: 'main' } }) : args[0] === 'rev-parse' ? 'basehead' : '' });
+  await runtime.launch({ id: 'job_12345678', title: 'Sign-in', agent: 'claude', taskId: 't_archived' },
+    { id: 'api', repo: '/repo' }, { id: 'run_1', phase: 'implementation' }, () => {});
+  assert.equal(spawned.length, 1);
+  assert.equal('taskId' in spawned[0], false);
 });
 
 const withCheckouts = async (dir, fn) => {

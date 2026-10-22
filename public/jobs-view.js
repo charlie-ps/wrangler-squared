@@ -1085,7 +1085,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const appbar = (title, chips, kicker = '', line = '') => `<header class="job-appbar">${kicker}<h2>${esc(title)}</h2><div class="job-chips job-detail-meta">${chips}</div>${line ? `<div class="job-detail-line">${line}</div>` : ''}</header>`;
   const costChip = (usd, estimated, title) => { const c = jobCostLabel(usd, estimated); return c ? chip('', c, { cls: 'job-detail-cost', title }) : ''; };
   function storyChips(stories) {
-    if (!stories.length) return '';
+    if (!stories.length) return chip(ICONS.story, 'No ticket', { cls: 'job-chip-quiet', title: 'This work has no Jira ticket' });
     const fresh = stories.filter((s) => !s.key).length;
     return stories.slice(0, 2).map((s) => chip(ICONS.story, storyLabel(s, stories), { title: `${s.title}${s.key ? '' : ' · new Jira story, created only after you approve'}` })).join('')
       + (stories.length > 2 ? chip('', `+${stories.length - 2}`, { title: `${stories.length} stories${fresh ? ` · ${fresh} new` : ''}` }) : '');
@@ -2000,7 +2000,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       if (!pressBusy(submitterOf(e), { also: form.querySelectorAll('.job-create-foot button') })) return;
       const values = new FormData(form);
       // Enter and the primary button both start planning; only the grey button parks it.
-      send({ type: 'job-create', idea: true, start: e.submitter?.value !== 'backlog', job: { intent: values.get('intent'), agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', ...reviewFlagsOf(values), ...sandbox.value(), images: images.names(), shareImages: values.has('shareImages'), taskId: null } });
+      send({ type: 'job-create', idea: true, start: e.submitter?.value !== 'backlog', job: { intent: values.get('intent'), agent: values.get('agent'), model: values.get('model') || '', effort: values.get('effort') || '', ...reviewFlagsOf(values), ...sandbox.value(), images: images.names(), shareImages: values.has('shareImages') } });
       const usualPick = { agent: String(values.get('agent')), model: String(values.get('model')), effort: String(values.get('effort')) };
       if (usualPick.agent && usualPick.model) send({ type: 'job-settings', patch: { usualPick } });
     };

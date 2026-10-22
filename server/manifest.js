@@ -55,7 +55,7 @@ export default {
   // `sessions:interrupt` stops a job's sessions at its spend limit (job-budget.js).
   requires: [
     'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:bill', 'sessions:wake', 'sessions:interrupt',
-    'mail:send', 'tasks:read', 'tasks:write',
+    'mail:send',
     'usage:read', 'board:rebuild', 'board:broadcast', 'images:keep', 'files:view',
   ],
   engines: { wranglerApi: '^1.42.0' },

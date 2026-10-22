@@ -16,7 +16,7 @@
     "homepage": "https://github.com/charlie-ps/wrangler-squared",
     "requires": [
       "sessions:read", "sessions:spawn", "sessions:archive", "sessions:bill", "sessions:wake", "sessions:interrupt",
-      "mail:send", "tasks:read", "tasks:write",
+      "mail:send",
       "usage:read", "board:rebuild", "board:broadcast", "images:keep", "files:view"
     ],
     "earlyAdopter": { "branch": "next" }

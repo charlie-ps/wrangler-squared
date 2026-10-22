@@ -60,7 +60,7 @@ test('a graph tick draws the job boards', () => {
   assert.match(el.querySelector('#jobs-boards').textContent, /Ship it/);
 });
 
-test('the new-job form offers no task and creates an unassigned job', (t) => {
+test('the new-job form has no Task field and sends no task', (t) => {
   const { window, el, c, sent } = mountClient();
   const previousFormData = globalThis.FormData;
   globalThis.FormData = window.FormData;
@@ -70,9 +70,10 @@ test('the new-job form offers no task and creates an unassigned job', (t) => {
   const form = window.document.getElementById('job-create-form');
   assert.equal(form.elements.taskId, undefined);
   assert.equal(form.elements.newTaskName, undefined);
+  assert.doesNotMatch(form.textContent, /Task|Unassigned/);
   form.elements.intent.value = 'Customers can access their accounts';
   form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  assert.equal(sent[0].job.taskId, null);
+  assert.equal('taskId' in sent[0].job, false);
   assert.equal('newTaskName' in sent[0], false);
 });
 
