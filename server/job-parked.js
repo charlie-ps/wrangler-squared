@@ -14,11 +14,10 @@ export const waitsOnReview = (job, run) => {
   return !!sub && !sub.cancelledAt && sub.stage === 'review' && sub.state === 'verified' && String(sub.ready?.receiptId || '').startsWith(run.id);
 };
 
-const QUESTION = /\?\s*$|^\s*(what|why|how|where|when|which|who|does|do|did|is|are|can|could|should|would|will)\b/i;
-export const looksLikeQuestion = (text) => QUESTION.test(String(text).trim());
-
 // A message for the parked session. It is delivered on the runner's next tick
-// (`sentAt` stays null until then); `answering` is what the board shows meanwhile.
+// (`sentAt` stays null until then); `answering` is what the board shows meanwhile,
+// its `kind` only one a caller named (retell, restart): what the session reports
+// back, a reply or a fresh round, says what it was.
 // `via: 'planner'` marks the human's words forwarded by an approved proposal
 // (job-actions.js), the only road an idea takes to a parked session. One written
 // while the session is still answering queues behind it (`answered`).
@@ -27,7 +26,7 @@ export function askAgent(sub, { from, text, kind, images, via }, now) {
   const id = `msg_${now.toString(36)}${(sub.thread?.length || 0).toString(36)}`;
   const queued = !!sub.answering;
   (sub.thread ||= []).push({ id, at: now, from, ...(via ? { via } : {}), to: 'agent', text, round, ...(images?.length ? { images } : {}), ...(queued && kind ? { kind } : {}), sentAt: null });
-  if (!queued) sub.answering = { id, at: now, kind: kind || (looksLikeQuestion(text) ? 'ask' : 'change'), round };
+  if (!queued) sub.answering = { id, at: now, ...(kind ? { kind } : {}), round };
   return id;
 }
 
@@ -44,5 +43,5 @@ export function sayInThread(sub, msg) {
 // session answers now.
 export function answered(sub) {
   const next = unsentFor(sub)[0];
-  sub.answering = next ? { id: next.id, at: next.at, kind: next.kind || (looksLikeQuestion(next.text) ? 'ask' : 'change'), round: next.round } : null;
+  sub.answering = next ? { id: next.id, at: next.at, ...(next.kind ? { kind: next.kind } : {}), round: next.round } : null;
 }
