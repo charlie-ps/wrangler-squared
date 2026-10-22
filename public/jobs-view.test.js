@@ -164,18 +164,41 @@ test('a job opens as a page in place of the board, not a dialog; Back, the trail
   assert.deepEqual([f.q('#job-page').hidden, f.q('#jobs').classList.contains('jobs-paging')], [false, true], 'the page takes the board\'s place');
   assert.deepEqual([crumbs(), f.q('[data-page-back]').textContent, f.q('#job-page .job-page-main h2').textContent], [['Jobs', 'Sign-in'], 'Jobs', 'Sign-in']);
   assert.equal(document.activeElement, f.q('[data-page-back]'), 'focus starts on the way back');
-  esc(f.q('#job-page')); assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'Esc stops at the job: leaving it is Back\'s');
+  assert.equal(f.q('[data-page-back]').title, 'Back to Jobs (Esc)');
   f.q('#job-page [data-node="api"]').dispatchEvent(f.event('click'));
   assert.deepEqual([crumbs(), f.q('[data-page-back]').textContent], [['Jobs', 'Sign-in', 'Deliver api'], 'Job'], 'a step is a level down');
   const box = f.q('#job-page .job-change textarea'); box.value = 'half typed'; esc(box);
   assert.deepEqual(crumbs(), ['Jobs', 'Sign-in', 'Deliver api'], 'Esc in a box is the box\'s');
   esc(document.body); assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'Esc climbs from a step to its job, focus lost to the body by a redraw included');
+  assert.equal(f.q('[data-page-back]').title, 'Back to Jobs (Esc)');
+  const jobBox = f.q('#job-page .job-change textarea'); jobBox.value = 'half typed'; esc(jobBox);
+  assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'Esc in the job\'s box is the box\'s too');
+  const taken = new f.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }); taken.preventDefault(); f.q('#job-page').dispatchEvent(taken);
+  assert.equal(f.q('#job-page').hidden, false, 'an Esc a popup already took leaves the page where it is');
+  esc(f.q('#job-page'));
+  assert.deepEqual([f.q('#job-page').hidden, f.q('#jobs').classList.contains('jobs-paging')], [true, false], 'and Esc on the job goes back to the board');
+  assert.ok(document.activeElement === f.q('[data-board="job1"] .job-plate-open'), 'on the plate it was opened from');
+  esc(document.body); assert.equal(f.q('#job-page').hidden, true, 'Esc on the board does nothing');
+  f.q('.job-plate-open').click();
   f.view.openDetail('job1', 'api'); f.q('[data-page-crumb="job"]').click(); assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'the trail jumps to the job');
   f.view.openDetail('job1', 'api'); f.q('[data-page-back]').click(); assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'Back is one level up');
   f.q('[data-page-back]').click();
   assert.deepEqual([f.q('#job-page').hidden, f.q('#jobs').classList.contains('jobs-paging'), f.q('.job-page-main').innerHTML], [true, false, ''], 'and from the job, back to the board');
   assert.equal(document.activeElement, f.q('[data-board="job1"] .job-plate-open'), 'on the plate it was opened from');
   f.q('.job-plate-open').click(); f.q('[data-page-crumb="board"]').click(); assert.equal(f.q('#job-page').hidden, true, 'Jobs in the trail leaves too');
+});
+
+test('Esc closes an open split popup on the page before it climbs a level', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', error: 'Worker blocked' }];
+  f.view.update(f.data); f.view.openDetail('job1', 'api');
+  const crumbs = () => [...f.q('.job-page-crumbs').children].map((li) => li.textContent);
+  const esc = (on) => on.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  const more = f.q('.job-retry-split details'); more.open = true; more.dispatchEvent(f.event('toggle'));
+  esc(more.querySelector('summary'));
+  assert.deepEqual([f.q('.job-retry-split details').open, crumbs()], [false, ['Jobs', 'Sign-in', 'Deliver api']], 'the popup shuts and the step stays');
+  f.view.update(f.data); assert.equal(f.q('.job-retry-split details').open, false, 'and a tick leaves it shut');
+  esc(document.body); assert.deepEqual(crumbs(), ['Jobs', 'Sign-in'], 'the next Esc climbs');
 });
 
 test('a double-click that opens a job lands nothing in the new dialog; a press after half a second does', (t) => {

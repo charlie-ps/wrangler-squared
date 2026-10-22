@@ -627,7 +627,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const sub = job?.subJobs.find((s) => s.id === pageAt.subId);
     const title = job?.title || 'Job';
     const crumbs = [['board', 'Jobs'], ...(sub ? [['job', title], [null, sub.title]] : [[null, title]])];
-    bar.innerHTML = `<button type="button" class="job-page-back" data-page-back title="${sub ? 'Back to the job (Esc)' : 'Back to Jobs'}">${ICONS.back}<span>${sub ? 'Job' : 'Jobs'}</span></button>
+    bar.innerHTML = `<button type="button" class="job-page-back" data-page-back title="${sub ? 'Back to the job (Esc)' : 'Back to Jobs (Esc)'}">${ICONS.back}<span>${sub ? 'Job' : 'Jobs'}</span></button>
       <ol class="job-page-crumbs">${crumbs.map(([to, t]) => `<li>${to ? `<button type="button" data-page-crumb="${to}" title="${esc(t)}">${esc(t)}</button>` : `<span aria-current="page" title="${esc(t)}">${esc(t)}</span>`}</li>`).join('')}</ol>`;
   }
   bar.onclick = (e) => {
@@ -2045,14 +2045,17 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   };
   modal.addEventListener('keydown', onKey(modal));
   page.addEventListener('keydown', onKey(pageMain));
-  // Esc climbs from a step to its job and stops there: leaving the job is Back's, not a stray key's.
-  // Text being typed keeps its Esc, and so does anything that already took it (an open popup, a
-  // dialog). On the document, since a redraw under the pointer leaves focus on <body>; core hides
-  // the view's host (.hidden) while another view shows.
+  // Esc is Back: a step to its job, the job to the board. Text being typed keeps its Esc, and so
+  // does anything that already took it (a menu, a dialog); an open split popup closes first, and
+  // the idea's dialog closes itself. On the document, since a redraw under the pointer leaves focus
+  // on <body>; core hides the view's host (.hidden) while another view shows.
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || e.defaultPrevented || !paged() || !pageAt?.subId || !root.isConnected || root.closest('.hidden')) return;
+    if (e.key !== 'Escape' || e.defaultPrevented || detail === modal || !paged() || !root.isConnected || root.closest('.hidden')) return;
     if ((e.target !== document.body && !page.contains(e.target)) || e.target.closest?.('input, textarea, select')) return;
-    e.preventDefault(); openDetail(pageAt.jobId, ''); bar.querySelector('[data-page-back]')?.focus();
+    e.preventDefault();
+    const more = detail.querySelector('.job-split-more[open]');
+    if (more) { more.open = false; openMore.delete(more.dataset.keep); return more.querySelector('summary')?.focus(); }
+    if (pageAt?.subId) { openDetail(pageAt.jobId, ''); bar.querySelector('[data-page-back]')?.focus(); } else closePage();
   });
   render();
   // openDetail and closeDetail are exposed for the return leg of the diff round trip only — it opens
