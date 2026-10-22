@@ -1467,8 +1467,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     hydrateEvidence(dialog, evidence, send, shot ? { full: { jobId: job.id, subId: sub.id, round: proofRound(sub), file: shot.file } } : {});
   }
   // The conversation's own controls. Enter sends (Shift+Enter is a new line); the
-  // launch strip's press flares the hole for a beat before the job is created, so the
-  // board's switch to the plan reads as its consequence.
+  // launch strip's press sends at once and flares the hole for a beat before the dialog
+  // closes, so the board's switch to the plan reads as its consequence.
   function wireIdea(job) {
     const n = ideaThread(job).length + (ideaSent?.jobId === job.id ? 1 : 0);
     if (ideaSeen?.jobId !== job.id || ideaSeen.n !== n) { dialog.scrollTop = dialog.scrollHeight; ideaSeen = { jobId: job.id, n }; }
@@ -1492,15 +1492,24 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const fire = (id, pick) => {
       if (ideaFiring) return;
       const left = uncreatedSuggestions(ideaThread(job).find((m) => m.id === id)).length;
-      ideaFiring = { jobId: job.id, id, ...pick, own: !!pick.all || left === 1, state: 'firing' };
+      // Sent at once, so closing the dialog mid-flare (which drops ideaFiring) never loses it;
+      // the dialog keeps drawing `job` as pressed until it settles, so a tick that already
+      // holds the created job cannot cut the flare short.
+      ideaFiring = { jobId: job.id, job: structuredClone(job), id, ...pick, own: !!pick.all || left === 1, state: 'firing' };
+      action('accept-idea', { messageId: id, ...pick }, '');
       renderDetail();
       dialog.querySelectorAll(`.job-launch.firing [data-accept-idea="${CSS.escape(id)}"]`).forEach((go) => spinTo(go, 40));
       const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      // The flare, then the strip turns green for a beat, however soon the server confirmed.
       setTimeout(() => {
         if (ideaFiring?.id !== id) return;
         ideaFiring.state = 'sent';
-        action('accept-idea', { messageId: id, ...pick }, '');
         if (dialog.open && selected?.jobId === job.id) renderDetail();
+        setTimeout(() => {
+          if (ideaFiring?.id !== id) return;
+          ideaFiring.shown = true;
+          if (ideaFiring.confirmed) ideaSettled(job.id);
+        }, calm ? 0 : 700);
       }, calm ? 0 : 900);
     };
     dialog.querySelectorAll('[data-accept-idea]').forEach((b) => b.onclick = () => {
@@ -1561,7 +1570,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     send({ type: 'job-talk-seen', id: job.id, convos: [...new Set(unread.map((m) => m.convo))] });
   }
   function renderDetail() {
-    const job = data.jobs.find((j) => j.id === selected?.jobId);
+    const job = ideaFiring?.jobId === selected?.jobId ? ideaFiring.job : data.jobs.find((j) => j.id === selected?.jobId);
     if (!job) return;
     const sub = job.subJobs.find((s) => s.id === selected.subId);
     if (!sub && !planDraft && job.stage === 'planning' && job.plan) { planDraft = structuredClone(job.plan); revision = job.revision; basePlan = JSON.stringify(job.plan); }
@@ -1958,6 +1967,11 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     flags.note = { field: cp.field, head: job ? checkpointLabel(cp, youReview(job, cp.field)) : cp.name, body: msg.error, undo: false };
     paintFooter();
   }
+  // A confirmed launch acts only once its flare and green have played: the last one closes onto the board.
+  function ideaSettled(jobId) {
+    if (!ideaFiring.own) { ideaFiring = null; if (dialog.open && selected?.jobId === jobId) renderDetail(); return; }
+    if (dialog.open && selected?.jobId === jobId) dialog.close();
+  }
   // A refused idea goes back in its box, with why, so nothing typed is lost.
   // A refused reply goes back in the box; a refused launch stops flaring and the toast says why.
   function ideaFailed(msg) {
@@ -1999,9 +2013,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     // so the board's forming animation plays in view; one the human has since navigated away from is left alone.
     if (msg?.action === 'idea-reply') { if (ideaSent?.jobId === msg.jobId) ideaSent.state = 'sent'; return; }
     if (msg?.action === 'accept-idea') {
-      if (ideaFiring?.jobId !== msg.jobId || ideaFiring.state !== 'sent') return;
-      if (!ideaFiring.own) { ideaFiring = null; if (dialog.open && selected?.jobId === msg.jobId) renderDetail(); return; }
-      if (dialog.open && selected?.jobId === msg.jobId) dialog.close();
+      if (ideaFiring?.jobId !== msg.jobId) return;
+      ideaFiring.confirmed = true;
+      if (ideaFiring.shown) ideaSettled(msg.jobId);
       return;
     }
     // An idea stays on screen as its bubble: the tick is the confirmation, not a closed dialog.
