@@ -1345,7 +1345,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const held = heldByReplan(job, sub);
     const yours = isHumanSub(sub) && sub.stage === 'human' && !held;
     const hints = [dropped, orphan,
-      held ? (job.replan?.red ? 'Held while Wrangler fixes a red step this one waits on: nothing here starts, merges or can be approved until the fix is in or you decide on it.' : 'Frozen while the plan is being changed: nothing here starts, merges or can be approved until you approve or discard the change on the job.') : '',
+      held ? (job.replan?.red?.sub === sub.id ? 'Held while Wrangler fixes it: nothing here starts, merges or can be approved until the fix is in or you decide on it.' : job.replan?.red ? 'Held while Wrangler fixes a red step this one waits on: nothing here starts, merges or can be approved until the fix is in or you decide on it.' : 'Frozen while the plan is being changed: nothing here starts, merges or can be approved until you approve or discard the change on the job.') : '',
       isSessionSub(sub) && sub.stage === 'review' ? 'Approving marks the session done and lets the work depending on it start.' : '',
       parkedRun(job, sub) ? (draftsWaiting(job, sub).length ? `Paused on ${draftsWaiting(job, sub).length} draft${draftsWaiting(job, sub).length === 1 ? '' : 's'} for your review. Approve, edit or skip each; once all are decided the session is told which to make and carries on.` : 'Every draft is decided: the session is being told which writes to make.') : '',
       sessionDormant(job, sub) ? `${triggerLine(job, sub)}: it is dropped itself once ${trigger?.title || sub.on.sub} lands.` : '',
