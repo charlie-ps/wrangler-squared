@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { createRedrawHold, keepScrollX } from './redraw-hold.js';
+import { createRedrawHold, keepFields, keepScrollX } from './redraw-hold.js';
 
 function page(t, html = '<div id="board"><p id="text">Some words to select</p><input id="field" value="typed"></div><p id="outside">Elsewhere</p>') {
   const window = new Window({ url: 'http://localhost:7878' });
@@ -81,4 +81,30 @@ test('scrollers redrawn keep their sideways offset, matched per plate', (t) => {
   assert.equal(host.querySelector('[data-board="a"] .job-graph-scroll').scrollLeft, 0);
   assert.equal(host.querySelector('[data-board="c"] .job-graph-scroll').scrollLeft, 0);
   assert.equal(host.querySelector('.job-msg-run').scrollLeft, 30);
+});
+
+test('fields redrawn keep what was typed, the cursor and focus, matched per box; untouched ones take the new markup', (t) => {
+  const box = (convo, draft = '') => `<div class="job-change" data-change-convo="${convo}"><textarea>${draft}</textarea></div>`;
+  const drawn = (status) => `<p>${status}</p>${box('c1')}${box('')}<details data-keep="approve-note"><textarea data-approve-note></textarea></details><input id="count" value="${status}"><input type="checkbox" id="tick">`;
+  const { window, doc, $ } = page(t, `<div id="host">${drawn('Running')}</div>`);
+  const host = $('#host'), inputs = [];
+  const c1 = () => host.querySelector('[data-change-convo="c1"] textarea');
+  c1().value = 'Half a thought'; c1().focus(); c1().setSelectionRange(2, 6);
+  host.querySelector('[data-approve-note]').value = 'Use the v2 table';
+  $('#tick').checked = true;
+  const restore = keepFields(host);
+  host.innerHTML = `<div class="job-change" data-change-convo="new"><textarea></textarea></div>${drawn('Passing')}`;
+  host.querySelectorAll('textarea').forEach((el) => el.addEventListener('input', () => inputs.push(el)));
+  restore();
+  assert.equal(host.querySelector('p').textContent, 'Passing', 'the status moved on');
+  assert.equal(c1().value, 'Half a thought', 'the words followed their conversation, not their place');
+  assert.equal(host.querySelector('[data-change-convo="new"] textarea').value, '');
+  assert.equal(host.querySelector('[data-change-convo=""] textarea').value, '');
+  assert.equal(doc.activeElement, c1(), 'focus is back in it');
+  assert.deepEqual([c1().selectionStart, c1().selectionEnd], [2, 6], 'with the cursor where it was');
+  assert.equal(host.querySelector('[data-approve-note]').value, 'Use the v2 table', 'a popup\'s note survives');
+  assert.equal($('#tick').checked, true);
+  assert.equal($('#count').value, 'Passing', 'a field nobody changed shows the new value');
+  assert.deepEqual(inputs, [c1(), host.querySelector('[data-approve-note]')], 'a restored box hears input, so it re-derives its Send');
+  assert.ok(window);
 });
