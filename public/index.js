@@ -41,7 +41,6 @@ export default {
     let toastTimer = null;
     let needsMe = 0;
     let sessions = [];
-    let tasks = [];
     let newJobOnMount = false;
 
     // One toast element at a time, inside the view's own host: the board exposes
@@ -172,7 +171,6 @@ export default {
           send: api.send,
           stageImage: (file) => api.images.stage(file),
           getAgents: () => api.agents(),
-          getTasks: () => tasks,
           // Archived cards are not in the graph's list; the panel restores one it is lent.
           sessionOf: (sid) => sessions.find((s) => s.sessionId === sid) || null,
           mountSession: typeof api.mountSession === 'function' ? (host, sid, opts) => api.mountSession(host, sid, opts) : null,
@@ -190,7 +188,6 @@ export default {
       update(el, session, graph) {
         if (!graph?.jobs) return;
         sessions = graph.sessions || [];
-        tasks = graph.tasks?.tasks || [];
         // The rail count is every job that needs a human, NOT the subset the
         // view is currently drawing: its filter, Needs me and Show finished are
         // one human's view of the board, while the badge is what is waiting
@@ -217,7 +214,6 @@ export default {
         viewHost = null;
         needsMe = 0;
         sessions = [];
-        tasks = [];
       },
     });
   },

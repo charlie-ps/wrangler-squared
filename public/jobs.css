@@ -422,9 +422,6 @@ body.light [data-scheme="dark"] [data-scheme="host"] { color-scheme:light; color
 /* ~ not +: the picker's hidden inputs sit between Agent and Review checkpoints. */
 :is(.job-dialog,.job-page) .job-prop~.job-prop { margin-top:12px; }
 .job-prop legend { padding:0; margin-bottom:8px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-subtle); }
-.job-create-props select { width:calc(100% + 6px); min-width:0; margin-left:-6px; padding:4px 6px; border-color:transparent; background:transparent; font-size:13px; cursor:pointer; }
-.job-create-props select:hover,.job-create-props select:focus-visible { border-color:var(--border); background:var(--field-bg); }
-.job-create-props input[name=newTaskName] { width:100%; padding:5px 8px; font-size:13px; }
 :is(.job-dialog,.job-page) .job-toggle { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0; padding:0; font-size:13px; cursor:pointer; }
 .job-prop:has(>.job-toggle) { gap:10px; }
 .job-create-foot { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; padding:12px 18px 12px 28px; border-top:1px solid var(--border-muted); }
