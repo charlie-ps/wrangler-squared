@@ -681,7 +681,7 @@ export class JobStore {
         r.draftReport = report; r.parkedAt ??= Date.now();
         return;
       }
-      if (report.kind === 'conflict') { parkConflict(j, r, s, report, Date.now()); return; }
+      if (report.kind === 'conflict') { const auto = parkConflict(j, r, s, report, Date.now()); if (auto) record(j, s, 'auto-resolve-conflict', null, auto); return; }
       if (report.kind === 'synced' && r.parkedAt && !r.mailedAt) throw new Error('Your conflict is with the human: wait for mail with their choices, then resolve it');
       if (r.landing && !['published', 'blocked', 'escalate', 'replan'].includes(report.kind)) throw new Error('The human approved your tree: commit and push it, then report published');
       if (report.kind === 'completed' && r.parkedAt && !r.mailedAt) throw new Error('Your drafts are with the human: wait for mail saying which writes to make, then complete');

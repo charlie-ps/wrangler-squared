@@ -303,7 +303,10 @@ text as public as the rest of this repo.
   (`parkedFor: 'conflict'`, mid-merge, no slot), `sub.conflict` is the board's amber "Conflict
   needs you", `resolve-conflict {runId, picks[], note?}` (one pick per conflict, pinned to the run)
   stamps `decided`, and the runner mails the picks (`deliverConflict`, `conflictMail`) until
-  `synced` clears it. `draftsDecided` matches only a park with no `parkedFor`. Land: an approved
+  `synced` clears it. With Code and Merge review both on Auto (`conflictsAuto`) nobody is asked:
+  `parkConflict` stamps `decided: {picks: all 0, auto: true}` as the receipt lands, records an
+  `auto-resolve-conflict` move listing each file's pick (the step's history), and the same mail
+  tells the session to take its first option. `draftsDecided` matches only a park with no `parkedFor`. Land: an approved
   step's session is mailed to commit and push (`land`, `landMail`, `run.landing`), and only when
   that session has gone does a `publish` session stand in. `repair`, `repaired`, `fixRequested`
   and `publish` runs from before are still read (history, receipts in flight; a stored

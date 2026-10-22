@@ -1,4 +1,5 @@
 import { COMMENT_SETTLE_MS } from './job-comments.js';
+import { reviewOf } from './jobs-schema.js';
 
 // Sync: an open PR whose branch conflicts with its base is brought up to date by a
 // session that does only that (job-runner.js), before any work runs on it. It merges
@@ -16,7 +17,10 @@ export const conflictRun = (job, sub) => (sub?.conflict && job.runs.find((r) => 
 
 // The session stops mid-merge and waits for mail (no slot, held only to its card
 // existing, as a drafts park is). A second conflict after the picks were mailed is
-// a new question on the same run.
+// a new question on the same run. With Code and Merge review both on Auto nobody
+// waits to pick: the session's own first option is taken at once, mailed on the
+// next tick like a human's picks, and the returned line goes in the step's history.
+export const conflictsAuto = (j) => !reviewOf(j, 'reviewCode') && !reviewOf(j, 'reviewMerge');
 export function parkConflict(j, r, s, report, now) {
   if (r.phase !== 'sync') throw new Error('Only the session syncing a branch with its base reports a conflict');
   if (r.parkedAt && !r.mailedAt) {
@@ -24,7 +28,11 @@ export function parkConflict(j, r, s, report, now) {
     throw new Error('You already reported this conflict; wait for mail with the human\'s choices');
   }
   Object.assign(r, { conflictReport: report, parkedFor: 'conflict', parkedAt: now, mailedAt: null, idleSince: null });
-  if (s && !j.cancelledAt && !s.cancelledAt) s.conflict = { runId: r.id, ...(report.summary ? { summary: report.summary } : {}), conflicts: report.conflicts, at: now };
+  if (!s || j.cancelledAt || s.cancelledAt) return null;
+  s.conflict = { runId: r.id, ...(report.summary ? { summary: report.summary } : {}), conflicts: report.conflicts, at: now };
+  if (!conflictsAuto(j)) return null;
+  s.conflict.decided = { picks: report.conflicts.map(() => 0), auto: true, at: now };
+  return `Resolved ${report.conflicts.length === 1 ? 'a merge conflict' : `${report.conflicts.length} merge conflicts`} on “${s.title}” with the recommended option, as Code and Merge review are on Auto: ${report.conflicts.map((x) => `${x.file}: ${x.options[0].label}`).join(' · ')}`;
 }
 
 // The human's pick for each conflict, pinned to the run that asked: a retry or a
@@ -46,7 +54,7 @@ export function resolveConflict(s, { runId, picks, note }) {
 // The base is in and pushed: a PR is watched afresh (the head moved, so a merge
 // approval lapses), and work waiting on the sync re-reads the PR and starts.
 export function applySynced(s, report, now) {
-  (s.syncs ||= []).push({ at: now, ...(report.resolved ? { resolved: report.resolved } : {}), ...(s.conflict?.decided ? { decided: true } : {}) });
+  (s.syncs ||= []).push({ at: now, ...(report.resolved ? { resolved: report.resolved } : {}), ...(s.conflict?.decided ? { decided: true, ...(s.conflict.decided.auto ? { auto: true } : {}) } : {}) });
   s.conflict = null; s.note = null; s.mergeApprovedHead = null;
   if (s.stage === 'pr') { s.state = 'watching'; if (s.pr) s.pr.checkStatus = 'pending'; s.nextPollAt = now + COMMENT_SETTLE_MS; } else s.nextPollAt = 0;
 }

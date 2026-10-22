@@ -1058,6 +1058,31 @@ test('a sync parks on a conflict that needs a judgement call; the human picks pe
   assert.deepEqual([f.sub().conflict, f.sub().syncs.at(-1).decided, f.sub().state], [null, true, 'watching']);
 });
 
+test('with Code and Merge review on Auto a judgement-call conflict takes the recommended option, is mailed and is in the step history', async (t) => {
+  const f = fixture(t, { ...input, reviewMerge: false, reviewCode: false }); await atPr(f);
+  f.setPr({ dirty: true, checkStatus: 'failing' }); await f.tick();
+  const sync = f.last();
+  assert.equal(sync.run.phase, 'sync');
+  assert.match(jobPrompt(sync.job, sync.sub, sync.run), /your first option is taken for each/);
+  const conflicts = [
+    { file: 'src/limits.js', what: 'Base lowered the limit to 50; this PR made it configurable', options: [{ label: 'Configurable, default 50' }, { label: 'Configurable, default 100' }] },
+    { file: 'README.md', what: 'Both rewrote the same paragraph', options: [{ label: 'Keep this PR\'s paragraph' }] },
+  ];
+  f.report({ kind: 'conflict', conflicts }, sync);
+  const job = f.store.get(f.job.id);
+  assert.deepEqual(f.sub().conflict.decided.picks, [0, 0]);
+  assert.equal(jobNeedsReview(job, f.sub()), false, 'nobody is asked');
+  assert.deepEqual(jobStatus(job, f.sub()), { tone: 'working', text: 'Resolving the conflict' });
+  assert.equal(job.moves.at(-1).move, 'auto-resolve-conflict');
+  assert.match(job.moves.at(-1).detail, /recommended option.*src\/limits.js: Configurable, default 50 · README.md: Keep this PR's paragraph/);
+  await f.tick();
+  assert.equal(f.mailed.length, 1);
+  assert.match(f.mailed[0].text, /Code and Merge review are both on Auto[\s\S]*- src\/limits.js: "Configurable, default 50"\n- README.md: "Keep this PR's paragraph"[\s\S]*push it to origin/);
+  f.report({ kind: 'synced', resolved: ['limits.js: configurable, default 50'] }, sync);
+  assert.deepEqual([f.sub().conflict, f.sub().syncs.at(-1).auto, f.sub().state], [null, true, 'watching']);
+  assert.ok(historyLines(f.store.get(f.job.id), f.sub(), null).some((l) => /wrangler resolved 2 merge conflicts/.test(l)));
+});
+
 test('a session that closes while its conflict waits is red, and Retry syncs again', async (t) => {
   const f = fixture(t); await atPr(f);
   f.setPr({ dirty: true, checkStatus: 'failing' }); await f.tick();

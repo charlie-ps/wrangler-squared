@@ -167,7 +167,9 @@ after it are held while you work.
   `synced`. A conflict that needs a judgement call is not guessed at: leave the
   merge in progress and report `{kind:"conflict", summary?, conflicts:[{file,
   what, options:[{label, why?}]}]}`, up to three options per conflict, your
-  recommendation first, then wait for mail with the human's pick for each.
+  recommendation first, then wait for mail with the human's pick for each
+  (with Code and Merge review both on Auto, mail tells you to take your first
+  option at once, so rank carefully).
 - Your worktree branch is a **placeholder**. Before pushing, name it in *this
   repository's* convention: read its CLAUDE.md / AGENTS.md / CONTRIBUTING for a
   stated rule, and look at existing remote branches and recently merged PRs

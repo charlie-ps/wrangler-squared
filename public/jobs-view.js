@@ -978,7 +978,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   const conflictHtml = (sub) => {
     const c = sub.conflict;
     if (!c) return '';
-    if (c.decided) return `<h3>Conflict</h3><ul class="job-conflicts">${c.conflicts.map((x, i) => `<li><code>${esc(x.file)}</code> ${esc(x.options[c.decided.picks[i]]?.label || '')}</li>`).join('')}</ul>`;
+    if (c.decided) return `<h3>${c.decided.auto ? 'Conflict · recommended option taken on Auto' : 'Conflict'}</h3><ul class="job-conflicts">${c.conflicts.map((x, i) => `<li><code>${esc(x.file)}</code> ${esc(x.options[c.decided.picks[i]]?.label || '')}</li>`).join('')}</ul>`;
     return `<form id="job-conflict-form" class="job-conflict" data-run="${esc(c.runId)}"><h3>Conflict needs you</h3>${c.summary ? `<p>${esc(c.summary)}</p>` : ''}
       ${c.conflicts.map((x, i) => `<fieldset class="job-options job-conflict-pick"><legend><code>${esc(x.file)}</code></legend><p class="job-conflict-what">${esc(x.what)}</p>
         ${x.options.map((o, n) => `<label class="job-option"><input type="radio" name="c${i}" value="${n}" ${n === 0 ? 'checked' : ''}><span><b>${esc(o.label)}${n === 0 && x.options.length > 1 ? '<span class="job-option-rec">Recommended</span>' : ''}</b>${o.why ? `<small>${esc(o.why)}</small>` : ''}</span></label>`).join('')}</fieldset>`).join('')}
@@ -1385,7 +1385,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       ...writeHints(job, sub, held),
       yours ? `No agent will ever run this one${sub.state === 'doing' ? '; you marked it in progress' : ''}. Marking it done is what releases the work waiting on it.` : '',
       codeAwaitingReview(sub) ? `Uncommitted · approve to commit and ${sub.pr ? 'push to the open PR' : 'open the PR'}` : pr && sub.stage === 'review' && !sub.error && !held ? `Approved. Its session commits and ${sub.pr ? 'pushes to the open PR' : 'pushes and opens the PR'} next.` : '',
-      conflictWaiting(sub) ? 'Merging the base into this PR hit a conflict the agent would not guess at. Pick one way to resolve each; its session finishes the merge, commits and pushes.' : sub.conflict?.decided ? 'Your choices went to the session: it finishes the merge, commits and pushes.' : '',
+      conflictWaiting(sub) ? 'Merging the base into this PR hit a conflict the agent would not guess at. Pick one way to resolve each; its session finishes the merge, commits and pushes.' : sub.conflict?.decided ? (sub.conflict.decided.auto ? 'Code and Merge review are on Auto, so the session’s recommended option was taken for each conflict: it finishes the merge, commits and pushes. History lists what was chosen.' : 'Your choices went to the session: it finishes the merge, commits and pushes.') : '',
       mergeHeldByComments(job, sub) ? 'Comments read as blocking, so the automatic merge is on hold. Approve merge to override for this head.' : '',
       sub.stage === 'pr' && sub.pr?.mergeWithAdmin ? 'Checks have passed. Merging will override GitHub’s required review.' : '',
       sub.fixRequested ? `Fix requested${sub.fixRequested.note ? `: ${sub.fixRequested.note}` : ''}. A repair session starts ${pendingDependencies(job, sub).length ? 'once its prerequisites deploy' : 'on the next tick'}.` : '',
