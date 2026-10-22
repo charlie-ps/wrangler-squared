@@ -2993,8 +2993,8 @@ test('a plan change reads as one decision card holding both buttons; under it th
   assert.ok(card.querySelector('[data-action="approve-replan"]') && card.querySelector('[data-action="discard-replan"]'), 'the buttons sit on the card');
   assert.equal(document.querySelectorAll('#job-dialog [data-action="approve-replan"]').length, 1, 'not repeated in the footer');
   assert.equal(document.querySelectorAll('#job-dialog [data-action="discard-replan"]').length, 1);
-  assert.equal(card.querySelector('.job-graph'), null, 'the graph is not in the card');
-  assert.ok(card.compareDocumentPosition(f.q('#job-dialog .job-graph')) & 4, 'it is drawn right under it, always');
+  assert.ok(!card.querySelector('.job-decision-head .job-graph, .job-decision-body .job-graph'), 'the graph is not in the card');
+  assert.ok(card.querySelector('.job-decision-body').compareDocumentPosition(f.q('#job-dialog .job-graph')) & 4, 'it is drawn right under it, always');
   assert.ok(f.q('#job-dialog .job-plan-more'), 'and so are the plan details');
   card.querySelector('[data-action="approve-replan"]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'approve-replan', proposalId: 'run_p' });
@@ -3010,6 +3010,21 @@ test('a plan change reads as one decision card holding both buttons; under it th
   assert.deepEqual([rows.brief.querySelector('del').textContent, rows.brief.querySelector('ins').textContent], ['it', 'it, <b>paginate</b>'], 'only the changed words are marked');
   assert.equal(rows['show me'].querySelector('ins').textContent, '+ Pages of 50');
   assert.deepEqual([...rows['waits for'].children].map((e) => `${e.tagName} ${e.textContent}`), ['INS + Deliver cli', 'DEL − Deliver api']);
+});
+
+test('the decision card pins only its head over the plan: kicker, heading and both buttons stick, the why and the graph scroll under it (charlie-ps/wrangler-squared#267)', (t) => {
+  const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'queued' }];
+  job.replan = { feedback: 'Add a CLI', at: 1, previous: null, proposal: { id: 'run_p', label: 'Add a CLI step', why: 'You asked for one.', leaves: 'Nothing.', plan: job.plan, merged: job.plan,
+    changes: { frozen: [], kept: ['api'], edited: [], added: [], removed: [] } } };
+  f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
+  const head = f.q('#job-dialog .job-decision > .job-decision-head');
+  assert.ok(head, 'the head is the decision\'s first child');
+  assert.deepEqual(['.job-decision-kicker', '.job-decision-title', '[data-action="approve-replan"]', '[data-action="discard-replan"]'].map((q) => !!head.querySelector(q)), [true, true, true, true]);
+  assert.deepEqual(['.job-decision-why', '.job-decision-leaves', '.job-decision-more', '.job-graph'].map((q) => !!head.querySelector(q)), [false, false, false, false], 'nothing long is pinned');
+  const section = head.parentElement;
+  assert.ok(section.querySelector(':scope > .job-decision-body .job-decision-why'), 'the why scrolls with the card');
+  assert.ok(section.querySelector(':scope > .job-diff-legend') && section.querySelector('.job-graph'), 'the plan diff shares the head\'s section, so the head stays pinned while it scrolls');
 });
 
 test('the decision card leads with the option: its label, why and what it leaves you; a red step names the step and its failure, never an ask', (t) => {
