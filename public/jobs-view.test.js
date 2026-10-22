@@ -260,6 +260,10 @@ test('a step waiting on a prompt is the human’s: it says so, and it counts und
   job.subJobs[0].sessions = ['s9']; f.view.update(f.data);
   f.q('#job-page [data-fab-session]').click(); assert.equal(f.shown(), 's9', 'the job’s one button opens the prompt, in place');
   assert.ok(f.q('#job-page .job-sessions'), 'on the step’s Sessions');
+  const back = f.q('#job-page .job-sessions [data-sessions-up]');
+  assert.equal(back.textContent, 'Deliver api', 'the card names the step it goes back to');
+  back.click(); assert.equal(f.q('#job-page .job-sessions'), null); assert.equal(f.shown(), null, 'back on the step, the panel given back');
+  assert.match(f.q('#job-page .job-appbar h2').textContent, /Deliver api/);
 });
 
 test('a planning session waiting on a prompt is one click away, from the plate and from the job', (t) => {

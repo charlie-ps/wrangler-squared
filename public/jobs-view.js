@@ -1686,14 +1686,16 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (!rows.some((r) => r.sid === sessionPick)) sessionPick = rows.at(-1).sid;
     const scope = `${job.id}|${sub?.id || ''}`, solo = rows.length === 1;
     const state = sub ? subState(job, sub) : jobState(job);
+    const kicker = `<button class="job-back" data-sessions-up title="Back to the ${sub ? 'step' : 'job'}">${ICONS.back}<span>${esc(sub?.title || job.title)}</span></button>`;
     const head = appbar('Sessions', stateChip(state, sub ? jobStatus(job, sub).text : jobLabel(job))
-      + chip(ICONS.terminal, sub ? sessionsCountLabel(rows.length) : `${rows.length} session${rows.length === 1 ? '' : 's'} · Wrangler’s own`, { cls: 'job-chip-quiet' }));
+      + chip(ICONS.terminal, sub ? sessionsCountLabel(rows.length) : `${rows.length} session${rows.length === 1 ? '' : 's'} · Wrangler’s own`, { cls: 'job-chip-quiet' }), kicker);
     const list = sessionsListHtml(rows, { selected: sessionPick, sessionOf, title: sub?.title || job.title, step: !!sub });
     let wrap = detail.querySelector('.job-sessions');
     if (wrap?.dataset.scope !== scope) {
       releaseEmbed();
       show(`<section class="job-sessions" data-scope="${esc(scope)}"><div class="job-sessions-head"></div><div class="job-mc"><div class="job-mc-list"></div><div class="job-mc-host"></div></div></section>`, { sessions: true });
       wrap = detail.querySelector('.job-sessions');
+      wrap.querySelector('.job-sessions-head').onclick = (e) => { if (e.target.closest('[data-sessions-up]')) openDetail(pageAt.jobId, pageAt.subId || ''); };
       const listEl = wrap.querySelector('.job-mc-list');
       listEl.onclick = (e) => { const b = e.target.closest('[data-pick-session]'); if (b) pickSession(b.dataset.pickSession); };
       listEl.onkeydown = (e) => {
