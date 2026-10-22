@@ -156,7 +156,7 @@ export function threadMail(job, run, sub, messages) {
     `${job.title}: you reported ready (round ${round}) and the human has written back. They see your proof and the working tree as you left them.`,
     ...said,
     `A QUESTION: answer it from what you know, changing nothing: ${reportCall(run, 'kind:"reply", text:"your answer", shots?:[...], run?:{cmd,out,exit}')} ${REPLY_RULES} Anything you capture to answer goes in $JOB_EVIDENCE (\`export JOB_EVIDENCE=${dir}\`).`,
-    `A CHANGE: make it in this worktree, leave it UNCOMMITTED, re-verify and answer every Show me item again for this new round: ${reportCall(run, 'kind:"ready", checks:[...], running?:[...]')} List what is running in running again: anything the new receipt leaves out is stopped, and a restart you do not list is not kept. If it needs more than this PR, say so in a reply instead.`,
+    `A CHANGE: make it in this worktree, leave it UNCOMMITTED, re-verify and answer every Show me item again for this new round: ${reportCall(run, 'kind:"ready", checks:[...], running?:[...]')} List what is running in running again: anything the new receipt leaves out is stopped. If it needs more than this PR, say so in a reply instead.`,
     'Then stop and wait: the session stays open for the next message.',
   );
 }
@@ -296,7 +296,7 @@ const SHOT_SHAPE = '{file:"name.png", url?:"where it was taken", viewport?:"1280
 // it is left up for them to try (the extension only tears it down); on Auto nobody
 // tries it, so nothing may be left running.
 const runningLine = (job) => reviewCode(job)
-  ? 'What your change needs to run (dev server, database, worker) you LEAVE RUNNING for the human to try, started detached so it survives your session going dormant (`setsid nohup <cmd> > "$JOB_EVIDENCE/<name>.log" 2>&1 &`, then `echo $!` is the pid of a process-group leader) on ports you checked were free. List each in the receipt as running:[{name, url?, pid?, stop?, log?}]: url is where to open it, pid the setsid leader, stop a command that tears it down from the worktree when a pid is not enough (`docker compose -p <name> down`; it runs sandboxed, writing only the worktree, $JOB_EVIDENCE, the job\'s extra writable folders and temp), log the file you redirected its output to (under the worktree or $JOB_EVIDENCE). Entries need a url, a pid or a stop. Wrangler tears every entry down when the human approves or drops the step, and anything a later round no longer lists; never start something you cannot list. A Codex sandbox that stops you listening on a port is a couldNot, not a failure.'
+  ? 'What your change needs to run (dev server, database, worker) you LEAVE RUNNING for the human to try, started detached so it survives your session going dormant (`setsid nohup <cmd> > "$JOB_EVIDENCE/<name>.log" 2>&1 &`, then `echo $!` is the pid of a process-group leader) on ports you checked were free. List each in the receipt as running:[{name, url?, pid?, log?}]: url is where to open it, pid the setsid leader, log the file you redirected its output to (under the worktree or $JOB_EVIDENCE). Entries need a url or a pid. Wrangler kills each pid\'s process group when the human approves or drops the step, and any a later round no longer lists; never start something you cannot stop that way. A Codex sandbox that stops you listening on a port is a couldNot, not a failure.'
   : 'Stop everything you started before you report: nothing may be left running, because no human reviews this step.';
 const proofBlock = (job, sub) => {
   if (!sub) return '';
@@ -475,7 +475,7 @@ export function jobPrompt(job, sub, run) {
       leavesUncommitted(job, sub) ? `Leave every change UNCOMMITTED: ${reviewCode(job) ? 'the human reviews the working tree before anything is committed, and a ' : 'a '}later step commits and pushes it${sub?.pr ? ' to the open PR' : ' and opens the PR'}. Do not commit, push or open a PR.` : branchNaming(job, sub),
       reviewCode(job) ? 'After you report ready your session stays open, paused, so the human can write to you by mail: a question is answered with job_report kind:"reply" (text, shots?, run?, running?) and changes nothing; a change is made, re-verified and reported ready again as a new round. Do not end the session or clean up the worktree yourself.' : '',
       '',
-      leavesUncommitted(job, sub) ? report(`kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]${reviewCode(job) ? ', running?:[{name, url?, pid?, stop?, log?}]' : ''}`, 'When the working tree is ready to review, ') : publishLine,
+      leavesUncommitted(job, sub) ? report(`kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]${reviewCode(job) ? ', running?:[{name, url?, pid?, log?}]' : ''}`, 'When the working tree is ready to review, ') : publishLine,
     ),
     publish: lines(
       heading(job, sub),
