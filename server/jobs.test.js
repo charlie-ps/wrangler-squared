@@ -19,6 +19,8 @@ import { say, openConvo } from './job-talk.js';
 import { requestReplan } from './job-replan.js';
 import { settingsSchema, reviewOf } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
+import { redFeedback } from './job-red.js';
+import { eventFor } from '../public/jobs.js';
 
 // Never a real Haiku run: a conversation an idea opens is named after the action.
 const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
@@ -881,6 +883,40 @@ test('failed CI wakes only bounded repair sessions, and the limit is an error th
   assert.equal(f.sub().repairs.length, 1); assert.match(f.sub().error, /limit reached/);
   f.store.action(f.job.id, 'retry', { subJobId: 'api' }); await f.tick();
   assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 2);
+});
+
+// A receipt settles the PR for COMMENT_SETTLE_MS of wall time; these tests poll again at once.
+const repoll = (f) => f.store.update(f.job.id, (j) => { j.subJobs[0].nextPollAt = 0; });
+test('two conflict repairs then a failing check still launches a normal repair', async (t) => {
+  const f = fixture(t); f.store.settings({ maxRepairs: 1 }); await atPr(f);
+  for (const head of ['head1', 'head2']) {
+    f.setPr({ head, dirty: true, checkStatus: 'failing' }); await f.tick();
+    assert.equal(f.last().run.phase, 'repair'); assert.equal(f.last().run.conflict, head);
+    f.report({ kind: 'repaired', changes: [`Merged main into ${head}`], checks: ['Builds'] }); repoll(f);
+  }
+  f.setPr({ head: 'head3', dirty: false, checkStatus: 'failing', checks: [{ name: 'e2e', state: 'FAILURE' }] }); await f.tick();
+  assert.ok(!f.sub().error, 'conflict repairs left maxRepairs untouched');
+  assert.equal(f.last().run.phase, 'repair'); assert.equal(f.last().run.conflict, undefined);
+  assert.deepEqual(f.sub().repairs.map((r) => !!r.conflict), [true, true]);
+  f.report({ kind: 'repaired', changes: ['Fixed e2e'], checks: ['e2e passes'] }); repoll(f);
+  f.setPr({ head: 'head4', checkStatus: 'failing' }); await f.tick();
+  assert.match(f.sub().error, /^Automatic repair limit reached/, 'the one check repair is the one that counts');
+  assert.match(redFeedback(f.store.get(f.job.id), f.sub(), 1, 2), /CI repairs already tried: \(merge conflicts\) Merged main into head1 \| \(merge conflicts\) Merged main into head2 \| Fixed e2e/);
+});
+
+test('repeated conflict repairs that never clear conflicts eventually stop', async (t) => {
+  const f = fixture(t); f.store.settings({ maxRepairs: 0 }); await atPr(f);
+  for (let i = 1; i <= 5; i++) {
+    f.setPr({ head: `head${i}`, dirty: true, checkStatus: 'failing' }); await f.tick();
+    assert.equal(f.last().run.phase, 'repair', `conflict repair ${i} runs even with maxRepairs 0`);
+    f.report({ kind: 'repaired', changes: ['Tried to merge main'], checks: ['Still conflicts'] }); repoll(f);
+  }
+  f.setPr({ head: 'head6', dirty: true, checkStatus: 'failing' }); await f.tick();
+  assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 5);
+  assert.match(f.sub().error, /conflict repair limit reached/);
+  assert.equal(eventFor(f.store.get(f.job.id), f.sub()).title, 'Conflicts on #1');
+  f.store.action(f.job.id, 'retry', { subJobId: 'api' }); await f.tick();
+  assert.equal(f.launched.filter((w) => w.run.phase === 'repair').length, 6, 'a retry allows one more');
 });
 
 test('a merged sub-job with nothing deployed past the stale window is flagged; a slow run in progress is not', async (t) => {

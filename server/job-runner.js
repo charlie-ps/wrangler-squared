@@ -21,6 +21,8 @@ export const shortError = (e) => {
 };
 const BRANCH_UPDATE_BACKOFF_MS = 120000;
 const MAX_BRANCH_UPDATES = 3;
+const MAX_CONFLICT_REPAIRS = 5;
+const CONFLICT_LIMIT = `Merge conflicts still there after ${MAX_CONFLICT_REPAIRS} repairs (conflict repair limit reached). Review changes, then retry if needed.`;
 // A failed post-merge run is red but still watched, more slowly: a re-run that
 // passes, or a later run containing the merge that does, clears it and the
 // sub-job climbs on as a green one would, with nobody pressing Retry. Read from
@@ -420,10 +422,14 @@ export class JobRunner {
             // the prerequisites the new brief builds on; it waits for them.
             if (dependenciesSatisfied(job, sub)) await this.launch(job, sub, 'repair');
           } else if (pr.checkStatus === 'failing' && sub.acceptedRed?.ref !== pr.head) {
-            const attempts = job.runs.filter((r) => r.subJobId === sub.id && r.phase === 'repair').length;
-            const limit = this.store.data.settings.maxRepairs + (sub.repairAllowance || 0);
-            if (attempts >= limit) this.patchSub(id, sub.id, (s) => { s.error = 'Automatic repair limit reached. Review changes, then retry if needed.'; });
-            else await this.launch(job, sub, 'repair');
+            // A conflict means the base moved, not that the work is wrong, so its
+            // repairs (stamped `conflict` at launch) leave maxRepairs alone and stop
+            // only at their own generous cap, against one that never clears.
+            const conflict = !!pr.dirty;
+            const attempts = job.runs.filter((r) => r.subJobId === sub.id && r.phase === 'repair' && !!r.conflict === conflict).length;
+            const limit = (conflict ? MAX_CONFLICT_REPAIRS : this.store.data.settings.maxRepairs) + (sub.repairAllowance || 0);
+            if (attempts >= limit) this.patchSub(id, sub.id, (s) => { s.error = conflict ? CONFLICT_LIMIT : 'Automatic repair limit reached. Review changes, then retry if needed.'; });
+            else await this.launch(job, sub, 'repair', conflict ? { conflict: pr.head } : undefined);
           } else if (pr.behind && sub.acceptedRed?.ref !== pr.head || redBehind) {
             // Green but behind a base that requires up-to-date branches: bring it
             // up to date and keep watching, since the new head re-runs the checks.
