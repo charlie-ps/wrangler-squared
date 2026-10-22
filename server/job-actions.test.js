@@ -232,16 +232,15 @@ test('a forwards-only proposal is noted as a forward with no prose, and its appr
   assert.deepEqual([mixed.forward, mixed.text], [undefined, 'Adds web2.'], 'a real plan change is still a card with its words');
 });
 
-test('a forward or rework on the step the idea came from is refused once that view has moved: a new round is not what the human read', () => {
+test('an idea typed on an older round is never refused as stale: the planner acts on the round as it is, and only the action\'s own pin guards approval', () => {
   const j = parkedJob();
-  j.replan = { feedback: 'x', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#1' } };
-  assert.throws(() => proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'x' }] }, 2), /moved since the idea about it was sent \(code run_i#1 is now code run_i#2\)/);
-  j.replan.source.ref = 'run_i#2';
+  j.replan = { feedback: 'x', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'run_i#1', state: 'review/verified' } };
   proposeReplan(j, { id: 'run_p' }, { kind: 'plan', plan: empty(j), actions: [{ type: 'forward', sub: 'api', note: 'x' }] }, 2);
+  assert.deepEqual(j.replan.proposal.actions[0].pin, { at: 'round', ref: 'run_i#2', round: 2 }, 'pinned to the round now, not the one the idea was typed on');
   Object.assign(subOf(j, 'api'), parkedOf(3));
-  assert.equal(approveReplan(j, 'run_p', { now: 3, buildSubJob }).sentBack, true);
-  assert.equal(subOf(j, 'api').thread, undefined);
-  assert.deepEqual(j.replan.source, { sub: 'api', at: 'code', ref: 'run_i#3' }, 'the planner may act on the round the human now has in front of them');
+  assert.equal(approveReplan(j, 'run_p', { now: 3, buildSubJob }).sentBack, true, 'its round moved by approval: it goes back to the planner');
+  assert.equal(subOf(j, 'api').thread, undefined, 'the stale forward is never applied');
+  assert.deepEqual(j.replan.source, { sub: 'api', at: 'code', ref: 'run_i#1', state: 'review/verified' }, 'the source still says what the human saw');
 });
 
 test('a retry pins to the failure it was written about, refuses a step that is not red, and starts it again as the human\'s Retry would', () => {
@@ -307,7 +306,7 @@ test('Unit test: brief edit on a PR that merges before approval goes back to the
   assert.deepEqual(j.replan.earlier, ['About “Deliver api” (api, pr/watching): Rename the flag'], 'the human\'s idea stays, once');
   assert.match(j.replan.feedback, /^Wrangler, not the human: .*“Deliver api” \(api\) has merged\./s);
   assert.equal(j.replan.previous.subJobs[0].brief, 'Implement api with the renamed flag', 'the planner reads what it proposed');
-  assert.deepEqual(j.replan.source, { sub: 'api', at: 'step', ref: 'deployment/watching' });
+  assert.deepEqual(j.replan.source, { sub: 'api', at: 'pr', ref: 'h1', state: 'pr/watching' }, 'what the human saw, kept as typed');
 
   const k = job([spec('api')], { api: openPrOf() });
   ideaOn(k, 'api', 'Tighten the error');
@@ -329,7 +328,7 @@ test('Unit test: mark-done on a deploying step that finishes goes back to the pl
   assert.match(back.detail, /“Deliver api” has landed since it was proposed/);
   assert.deepEqual(subOf(j, 'api').deployed.checks, ['Deploy passed'], 'the real delivery stands, not the mark');
   assert.match(j.replan.feedback, /“Deliver api” \(api\) has landed/);
-  assert.deepEqual(j.replan.source, { sub: 'api', at: 'step', ref: 'deployment/watching' }, 'a finished step has no view to re-pin to');
+  assert.deepEqual(j.replan.source, { sub: 'api', at: 'step', ref: 'deployment/watching', state: 'deployment/watching' }, 'what the human saw, kept as typed');
 });
 
 test('a proposal refused for a rule the job did not move into still refuses, and stays', () => {

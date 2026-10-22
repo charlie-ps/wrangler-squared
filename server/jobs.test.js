@@ -17,7 +17,7 @@ import { jobReportTool, getJobContextTool } from './tools.js';
 import { changeView } from './job-change.js';
 import { say, openConvo } from './job-talk.js';
 import { requestReplan } from './job-replan.js';
-import { settingsSchema } from './jobs-schema.js';
+import { settingsSchema, reviewOf } from './jobs-schema.js';
 import { dropSub, validatePlan } from './job-sub-ops.js';
 
 // Never a real Haiku run: a conversation an idea opens is named after the action.
@@ -32,13 +32,8 @@ const humanSpec = (id, after = []) => ({ id, kind: 'human', title: `Do ${id} you
 const plan = (subs = [spec('api')], stories = [{ id: 'story', key: 'AUTH-123', title: 'Reliable sign-in' }]) =>
   ({ context: 'The sign-in service is Java; deploys are Helm.', stories, subJobs: subs });
 const PR_URL = 'https://github.com/org/repo/pull/1';
-// The one way an idea comes in, pinned to what is on screen right now (job-change.js
-// changeView), as the board sends it.
-const change = (f, subId, text = 'Take another pass', convo) => {
-  const job = f.store.get(f.job.id);
-  const view = changeView(job, subId ? job.subJobs.find((s) => s.id === subId) : null);
-  return f.store.action(f.job.id, 'request-change', { subJobId: subId, at: view?.at, ref: view?.ref, text, ...(convo ? { convo } : {}) });
-};
+// The one way an idea comes in, as the board sends it: no pin, never refused as stale.
+const change = (f, subId, text = 'Take another pass', convo) => f.store.action(f.job.id, 'request-change', { subJobId: subId, text, ...(convo ? { convo } : {}) });
 // What the wrangler is reading in the conversation an idea opened, before it answers or proposes.
 const reading = (f) => f.store.get(f.job.id).convos.at(-1).pending;
 // A change Wrangler is drawing with no ask run before it, as one dequeued or sent
@@ -498,29 +493,45 @@ test('an approval with no note, or a blank one, is exactly the approval it was',
 
 const setReview = (f, field, you, extra = {}) => f.store.action(f.job.id, 'set-review', { field, you, ...extra });
 
-test('a code review switch counts from the next gate: waiting diffs stay until released, and a ready receipt under Auto is approved as it lands', async (t) => {
+test('a code review switch to Auto releases the diffs waiting, refuses an unconfirmed one, and approves a ready receipt as it lands', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('api'));
-  setReview(f, 'reviewCode', false);
+  assert.throws(() => setReview(f, 'reviewCode', false), /One is waiting at Local verification\. Switch again to let it through/, 'a board a tick behind never lets a diff through unseen');
   let job = f.store.get(f.job.id);
-  assert.equal(job.reviewCode, false);
-  assert.deepEqual([job.subJobs[0].stage, job.subJobs[0].state], ['review', 'verified'], 'a diff already waiting is not let through unasked');
-  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['set-review', null, 'Switched Local verification to Auto']]);
+  assert.deepEqual([job.reviewCode, job.subJobs[0].state, job.moves.length], [true, 'verified', 0], 'the refused switch changes nothing');
+  setReview(f, 'reviewCode', false, { release: true });
+  job = f.store.get(f.job.id);
+  assert.deepEqual([job.reviewCode, f.sub().state, !!f.sub().ready.approvedAt], [false, 'approved', true]);
+  assert.deepEqual(job.moves.map((m) => [m.move, m.subJobId, m.detail]), [['approve-code', 'api', 'Approved the working tree of “Deliver api”'], ['set-review', null, 'Switched Local verification to Auto, releasing what was waiting']]);
+  assert.deepEqual([job.moves[0].note, f.sub().approvalNote], [null, null], 'a bulk release carries no words');
   f.report({ kind: 'ready', checks: ['Tests pass'] }, f.workerFor('web'));
   assert.equal(f.sub(1).state, 'approved', 'the run kept its uncommitted prompt; its receipt is approved as it lands');
   assert.ok(f.sub(1).ready.approvedAt);
   await f.tick();
-  assert.deepEqual([f.last().sub.id, f.last().run.phase], ['web', 'publish']);
-  setReview(f, 'reviewCode', false, { release: true });
-  assert.deepEqual([f.sub().state, !!f.sub().ready.approvedAt], ['approved', true]);
-  assert.deepEqual(f.store.get(f.job.id).moves.slice(-2).map((m) => [m.move, m.subJobId]), [['approve-code', 'api'], ['set-review', null]]);
-  assert.deepEqual([f.store.get(f.job.id).moves.at(-2).note, f.sub().approvalNote], [null, null], 'a bulk release carries no words');
+  assert.deepEqual(f.launched.filter((w) => w.run.phase === 'publish').map((w) => w.sub.id).sort(), ['api', 'web']);
   const revision = f.store.get(f.job.id).revision;
   setReview(f, 'reviewCode', false);
-  assert.equal(f.store.get(f.job.id).moves.length, 3, 'switching to what it already is records nothing');
+  assert.equal(f.store.get(f.job.id).moves.length, 2, 'switching to what it already is records nothing');
   assert.ok(f.store.get(f.job.id).revision > revision);
   setReview(f, 'reviewCode', true);
   assert.equal(f.store.get(f.job.id).reviewCode, true);
+});
+
+test('an old job with reviewMerge unset is gated the same way by flagOf and the runner\'s merge check', async (t) => {
+  const f = fixture(t, { ...input, reviewMerge: undefined });
+  f.store.update(f.job.id, (j) => { delete j.reviewMerge; });
+  await f.approve();
+  assert.equal('reviewMerge' in f.store.get(f.job.id), false, 'saved before the flag existed');
+  assert.equal(reviewOf(f.store.get(f.job.id), 'reviewMerge'), true, 'unset reads as REVIEW_DEFAULTS: You review');
+  f.report({ kind: 'published', url: PR_URL }); f.setPr({ checkStatus: 'passing' });
+  await f.tick(); await f.tick();
+  assert.deepEqual(f.merged, [], 'the runner waits for Approve merge, as the board\'s tile says');
+  setReview(f, 'reviewMerge', true);
+  assert.equal(f.store.get(f.job.id).moves.at(-1)?.move, undefined, 'already You review: flagOf agrees, so the switch records nothing');
+  setReview(f, 'reviewMerge', false);
+  assert.equal(f.store.get(f.job.id).moves.at(-1).detail, 'Switched Merge to Auto');
+  await f.tick();
+  assert.deepEqual(f.merged, ['head1']);
 });
 
 test('a set-review switch is validated: an unknown checkpoint, a non-boolean, an approved plan and a cancelled job are refused', async (t) => {
@@ -541,9 +552,8 @@ test('Plan switched to Auto: while planning the receipt approves itself, and a d
 
   const g = fixture(t);
   g.store.action(g.job.id, 'start'); await g.tick(); g.report({ kind: 'plan', plan: plan() }); await g.tick();
-  setReview(g, 'reviewPlan', false);
-  assert.equal(g.store.get(g.job.id).stage, 'planning', 'a drafted plan waits unless released');
-  setReview(g, 'reviewPlan', true);
+  assert.throws(() => setReview(g, 'reviewPlan', false), /One is waiting at Plan/, 'a drafted plan is let through only when confirmed');
+  assert.equal(g.store.get(g.job.id).stage, 'planning');
   const { revision } = g.store.get(g.job.id);
   assert.throws(() => setReview(g, 'reviewPlan', false, { release: true, revision: revision - 1 }), /plan changed/);
   const edited = plan([spec('api', [], { title: 'Deliver the API' })]);
@@ -1025,27 +1035,28 @@ test('a blocked step is retried with a note; a request on a step with no agent o
   assert.deepEqual(movesOf(f).at(-1) && [movesOf(f).at(-1).subJobId, movesOf(f).at(-1).move, movesOf(f).at(-1).note], ['api', 'request-change', 'Also guard empty payloads']);
 });
 
-test('a request is pinned to what was viewed: a moved head, receipt, revision or proposal refuses it, and so does an idea with no words', async (t) => {
+test('an idea is never refused as stale: a moved head is accepted, and the planner is told the step as typed and as it is now', async (t) => {
   const f = fixture(t); await f.approve(); f.report({ kind: 'published', url: PR_URL }); await f.tick();
-  const view = changeView(f.store.get(f.job.id), f.sub());
-  assert.deepEqual(view, { at: 'pr', ref: 'head1' });
-  const send = (extra) => f.store.action(f.job.id, 'request-change', { subJobId: 'api', ...view, text: 'Rename the flag', ...extra });
-  assert.throws(() => send({ ref: 'head0' }), /changed since you looked/);
-  assert.throws(() => send({ at: 'code' }), /changed since you looked/);
+  assert.deepEqual(changeView(f.store.get(f.job.id), f.sub()), { at: 'pr', ref: 'head1' });
+  const send = (extra) => f.store.action(f.job.id, 'request-change', { subJobId: 'api', text: 'Rename the flag', ...extra });
   assert.throws(() => send({ text: '  ' }), /Explain the change/);
-  assert.throws(() => f.store.action(f.job.id, 'request-change', { subJobId: 'ghost', ...view, text: 'x' }), /Sub-job not found/);
+  assert.throws(() => f.store.action(f.job.id, 'request-change', { subJobId: 'ghost', text: 'x' }), /Sub-job not found/);
   assert.deepEqual(movesOf(f), [], 'a refused request leaves no trace');
-  send();
-  assert.equal(movesOf(f).length, 1);
+  send({ at: 'pr', ref: 'head0' });
+  assert.equal(movesOf(f).length, 1, 'an old board\'s stale pin is ignored');
+  const typed = reading(f).source;
+  assert.deepEqual([typed.at, typed.ref], ['pr', 'head1']);
+  f.setPr({ head: 'head2' }); await f.tick();
+  const prompt = jobPrompt(f.store.get(f.job.id), null, plannerOf(f).run);
+  assert.match(prompt, new RegExp(`When the idea was typed: its open PR \\(head1, ${typed.state}\\); now: its open PR \\(head2, pr/\\w+\\)\\. It has moved since: judge whether the idea still applies`));
 });
 
 test('an idea on a session result reaches its own session through the planner; the first plan is still redrawn', async (t) => {
   const g = fixture(t); await g.approve(plan([sessionSpec('spike')]));
   g.report({ kind: 'completed', checks: ['Answered'] }); await g.tick();
   assert.deepEqual(changeView(g.store.get(g.job.id), g.sub()), { at: 'session', ref: g.sub().result.receiptId });
-  assert.throws(() => g.store.action(g.job.id, 'request-change', { subJobId: 'spike', at: 'session', ref: 'run_stale', text: 'Also check staging' }), /changed since you looked/);
   change(g, 'spike', 'Also check staging');
-  assert.deepEqual([g.sub().stage, !!g.sub().result, reading(g).source], ['review', true, { sub: 'spike', at: 'session', ref: g.sub().result.receiptId }], 'nothing moves before the human approves');
+  assert.deepEqual([g.sub().stage, !!g.sub().result, reading(g).source], ['review', true, { sub: 'spike', at: 'session', ref: g.sub().result.receiptId, state: 'review/verified' }], 'nothing moves before the human approves');
   await g.tick();
   g.report({ kind: 'plan', plan: g.store.get(g.job.id).plan, actions: [{ type: 'rework', sub: 'spike', note: 'Also check staging' }] }, plannerOf(g));
   g.store.action(g.job.id, 'approve-replan', { proposalId: plannerOf(g).run.id });
@@ -1053,7 +1064,6 @@ test('an idea on a session result reaches its own session through the planner; t
   const f = fixture(t); f.store.action(f.job.id, 'start'); await f.tick();
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web')]) }); await f.tick();
   assert.deepEqual(changeView(f.store.get(f.job.id), null), { at: 'plan', ref: String(f.store.get(f.job.id).revision) });
-  assert.throws(() => f.store.action(f.job.id, 'request-change', { at: 'plan', ref: '0', text: 'x' }), /changed since you looked/);
   change(f, null, 'Just the API');
   assert.equal(f.store.get(f.job.id).feedback, 'Just the API'); assert.equal(f.store.get(f.job.id).plan, null);
 });
@@ -1070,7 +1080,6 @@ test('every idea has one way in: the planner, which takes a step\'s idea into th
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, sso); await f.tick();
   const proposal = f.store.get(f.job.id).replan.proposal;
   assert.deepEqual(changeView(f.store.get(f.job.id), null), { at: 'proposal', ref: proposal.id });
-  assert.throws(() => f.store.action(f.job.id, 'request-change', { at: 'proposal', ref: 'run_other', text: 'x' }), /changed since you looked/);
   f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('sso')]) }, rename);
   const replan = f.store.get(f.job.id).replan;
   assert.equal(replan.previous.subJobs.length, 3, 'the planner reads the proposal it is asked to change');
@@ -1565,7 +1574,7 @@ test('Writes switched to Auto with drafts waiting: release approves each without
   const g = fixture(t, { ...noSessionReview, reviewWrites: true });
   await g.approve(plan([notifier('n'), write('move', 'n', moveTo('In Review'))]));
   g.report({ kind: 'drafts', drafts: [{ id: 'move', to: 'In Review' }] }, g.workerFor('n'));
-  g.store.action(g.job.id, 'set-review', { field: 'reviewWrites', you: false });
+  assert.throws(() => g.store.action(g.job.id, 'set-review', { field: 'reviewWrites', you: false }), /One is waiting at Writes/);
   assert.equal(g.store.get(g.job.id).subJobs[1].stage, 'review', 'a draft already waiting is not let through unasked');
   await g.tick();
   assert.deepEqual(g.mailed, []);
@@ -3613,33 +3622,63 @@ test('a question the wrangler could not answer is said in the conversation; the 
   assert.equal(f.store.get(f.job.id).error, null);
 });
 
-test('dismiss-convo hides a conversation for good, never one whose wrangler is answering or has a plan change in it', async (t) => {
+test('dismiss-convo hides a conversation and stops its work: a queued question, an answering run, a change drawn or waiting in it', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   change(f, null, 'What is left?');
-  const id = f.store.get(f.job.id).convos[0].id;
-  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'queued');
-  await f.tick();
-  const asker = plannerOf(f);
-  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'answering');
-  f.report({ kind: 'reply', text: 'Only web.' }, asker);
-  await f.tick();
-  change(f, null, 'Add a CLI after web', id);
-  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'a change idea is read first');
-  await f.tick();
-  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli')]) }, plannerOf(f)); await f.tick();
-  assert.ok(f.store.get(f.job.id).replan.proposal);
-  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /plan change in progress/, 'a proposal waiting');
-  f.store.action(f.job.id, 'discard-replan');
-  await f.tick();
+  let id = f.store.get(f.job.id).convos.at(-1).id;
   f.store.action(f.job.id, 'dismiss-convo', { convo: id });
-  const job = f.store.get(f.job.id);
-  assert.equal(typeof job.convos[0].dismissedAt, 'number', 'kept on the job, so a reload still hides it');
+  let job = f.store.get(f.job.id);
+  assert.equal(job.convos.at(-1).pending, null, 'a queued question is dropped');
+  assert.equal(typeof job.convos.at(-1).dismissedAt, 'number', 'kept on the job, so a reload still hides it');
   assert.equal(job.moves.at(-1).move, 'dismiss-convo');
+  await f.tick();
+  assert.equal(f.launched.filter((w) => w.run.convo === id).length, 0, 'never launched');
+
+  change(f, null, 'What is left now?'); await f.tick();
+  id = f.store.get(f.job.id).convos.at(-1).id;
+  const asker = plannerOf(f);
+  assert.equal(asker.run.convo, id);
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id }); await f.tick();
+  assert.ok(f.stopped.includes(asker.run.id), 'its ask run is archived');
+  job = f.store.get(f.job.id);
+  assert.equal(job.runs.find((r) => r.id === asker.run.id).error ?? null, null, 'quietly: no missing-receipt error');
+  assert.equal(talk(f).filter((m) => m[1] === 'error').length, 0, 'nothing said in the hidden conversation');
+  assert.throws(() => f.report({ kind: 'reply', text: 'Only web.' }, asker), /has stopped/);
+
+  drawing(f, 'Add a CLI after web'); await f.tick();
+  id = f.store.get(f.job.id).convos.at(-1).id;
+  const drafter = plannerOf(f);
+  drawing(f, 'And docs after that');
+  const other = f.store.get(f.job.id).convos.at(-1).id;
+  f.store.update(f.job.id, (j) => requestReplan(j, 'And a changelog', Date.now(), null, { convo: id }));
+  change(f, null, 'Rename api too', id);
+  assert.deepEqual(f.store.get(f.job.id).replanQueue.map((q) => q.convo), [other, id]);
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  job = f.store.get(f.job.id);
+  assert.equal(job.replan, null, 'the change drawn in it is dropped');
+  assert.equal(job.convos.find((c) => c.id === id).pending, null);
+  assert.deepEqual(job.replanQueue.map((q) => q.convo), [other], 'nothing of it stays queued');
+  await f.tick();
+  assert.ok(f.stopped.includes(drafter.run.id), 'its planner is archived');
+  await f.tick();
+  assert.equal(f.store.get(f.job.id).replan?.convo, other, 'the next change in line starts');
   assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /already gone/);
   assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: 'convo_nope' }), /already gone/);
 });
 
-test('a dismissed conversation comes back when anything new is said in it, by the human or the wrangler', async (t) => {
+test('a proposal waiting in a dismissed conversation is discarded with it', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'Add a CLI after web'); await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli')]) }, plannerOf(f)); await f.tick();
+  let job = f.store.get(f.job.id);
+  const id = job.replan.convo, proposalId = job.replan.proposal.id;
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  job = f.store.get(f.job.id);
+  assert.equal(job.replan, null);
+  assert.equal(job.talk.findLast((m) => m.proposalId === proposalId).outcome, 'discarded');
+});
+
+test('a dismissed conversation comes back only when the human writes in it, never for a Wrangler message alone', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   change(f, null, 'What is left?');
   await f.tick();
@@ -3647,15 +3686,11 @@ test('a dismissed conversation comes back when anything new is said in it, by th
   await f.tick();
   const id = f.store.get(f.job.id).convos[0].id;
   f.store.action(f.job.id, 'dismiss-convo', { convo: id });
-  change(f, null, 'Is web started?', id);
-  assert.equal(f.store.get(f.job.id).convos[0].dismissedAt, undefined, 'the human said something in it');
-  await f.tick();
-  f.report({ kind: 'reply', text: 'Not yet.' }, plannerOf(f));
-  await f.tick();
-  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
   const job = f.store.get(f.job.id);
   say(job, { from: 'wrangler', kind: 'answer', text: 'Web has started.', convo: id }, 9);
-  assert.equal(job.convos[0].dismissedAt, undefined, 'Wrangler said something in it');
+  assert.equal(typeof job.convos[0].dismissedAt, 'number', 'Wrangler alone does not bring it back');
+  change(f, null, 'Is web started?', id);
+  assert.equal(f.store.get(f.job.id).convos[0].dismissedAt, undefined, 'the human said something in it');
 });
 
 // ---- Bug sweep of next: each test fails without its fix ----

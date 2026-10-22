@@ -62,8 +62,10 @@ other action, no alternatives) is sent at once without an approval.
 
 Every idea the human types, in the job's box or a step's, goes to the planner:
 there is no other route. A step's idea says which step and what was on screen
-(its code review, its result, its open PR), and an action on that step is
-refused if that view has moved by approval. A second idea while your proposal
+(its code review, its result, its open PR) when it was typed, beside what it
+is now. An idea is never refused as stale: if the step moved since, judge
+whether the idea still applies and write your actions against the step as it
+is now (each is still refused if its own pin moves by approval). A second idea while your proposal
 waits comes back with the first ("Earlier: … / Now: …") and your earlier
 actions: keep the ones that still stand.
 
@@ -202,24 +204,22 @@ after it are held while you work.
 
 - With Code on **You review**, what the change needs to run (dev server,
   database, worker) is **left running** and listed in the receipt:
-  `running:[{name, url?, pid?, stop?, log?}]`, on `ready` and again on a `reply`
-  that restarts it. The board shows a Running for you bar with the link, Logs
-  and Stop.
+  `running:[{name, url?, pid?, log?}]`, on `ready` and again on a `reply`
+  that changes what is up. The board shows a running chip with an up/down dot,
+  the link, Logs and Stop all.
 - Start each **detached** so it survives your session going dormant:
   `setsid nohup <cmd> > "$JOB_EVIDENCE/<name>.log" 2>&1 &`, then `echo $!`. The
   pid is a process-group leader. Pick free ports (check them first).
-- An entry needs a `url` (where to open it), a `pid` (the setsid leader) or a
-  `stop` command (`docker compose -p sec-412 down`, run in the worktree) for
-  what a pid cannot stop. It runs sandboxed: it may write only the worktree,
-  `$JOB_EVIDENCE`, the job's extra writable folders and temp. `log` is the file you redirected output to, under the
-  worktree or `$JOB_EVIDENCE`; it is what the Logs button reads.
-- **You never tear it down.** Wrangler kills each pid's group, runs each `stop`,
-  and checks each url stopped answering when the human approves or drops the
-  step, when the plan changes it, at cleanup and at boot. It never fails an
-  approval over a leftover, but flags it. A later round's `ready` replaces the
-  list: anything it leaves out is stopped. List what is up **now**.
-- If the mail says an entry is down and asks you to start it again, start it as
-  before and answer with `reply` carrying `running:[…]` for everything now up.
+- An entry needs a `url` (where to open it) or a `pid` (the setsid leader).
+  Killing that group is the only teardown, so run containers in the foreground
+  under it (`docker compose up`, not `-d`). `log` is the file you redirected
+  output to, under the worktree or `$JOB_EVIDENCE`; it is what the Logs button
+  reads.
+- **You never tear it down.** Wrangler kills each pid's process group (SIGTERM,
+  then SIGKILL) when the human approves or drops the step, when the plan
+  changes it, at cleanup and at boot. It never fails an approval over a
+  leftover, but flags it. A later round's `ready` replaces the list: any pid it
+  leaves out is killed. List what is up **now**.
 - Code on **Auto** leaves nothing running: stop what you started, and anything
   you list is torn down at once. A Codex sandbox that stops you listening on a
   port is a `couldNot` on the item, not a failure.

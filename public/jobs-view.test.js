@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isChatSendKey, isPrimaryActionKey, primaryAction } from './jobs-view.js';
-import { wranglerUnread, CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
+import { wranglerUnread, CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, mergeApprovable, youReview, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml, plateAsk } from './job-plates.js';
@@ -105,7 +105,7 @@ test('code review is a stop before anything is committed: the card asks for a re
   f.data.settings.ideApp = 'Rider'; f.view.update(f.data); assert.equal(f.q('#job-ide').textContent, 'In Rider');
   delete f.data.settings.ideApp; f.view.update(f.data);
   const box = f.q('.job-change');
-  assert.deepEqual([box.dataset.changeAt, box.dataset.changeRef], ['code', 'run_1'], 'the idea box is on the review itself, pinned to the receipt that was read');
+  assert.ok(box, 'the idea box is on the review itself'); assert.equal(box.dataset.changeAt, undefined, 'and carries no pin: the wrangler judges a step that moved');
   assert.equal(box.querySelector('textarea').placeholder, 'Ask about this step, or say what to change…');
   assert.equal(box.querySelector('.job-change-to').textContent, 'Wrangler', 'one recipient'); assert.equal(box.querySelector('.job-change-foot').textContent, '↵ send · ⇧↵ new line'); assert.equal(f.q('.job-moves'), null, 'no Moves menu');
   job.runs = [{ id: 'run_1', subJobId: 'api', phase: 'implementation', stopped: false, parkedFor: 'ready' }]; f.view.update(f.data);
@@ -263,7 +263,7 @@ test('the event box names what happened, escaped, and Add idea is the way to ans
   assert.equal(dialog.querySelector('.job-event-move'), null); assert.equal(dialog.querySelector('.job-moves'), null);
   assert.equal(dialog.querySelector('details[data-keep="change"]'), null, 'no fold to open: the box is always there');
   assert.ok(dialog.querySelector('.job-change').classList.contains('is-open'), 'a failing step starts with the box open, its hint showing');
-  assert.equal(dialog.querySelector('.job-change').dataset.changeAt, 'step');
+  assert.ok(dialog.querySelector('.job-change'));
   assert.equal(dialog.querySelector('.job-change-to').textContent, 'Wrangler', 'a step with no agent of its own sends the idea to the planner');
   assert.ok(dialog.querySelector('#job-retry'), 'the plain retry is still there for a transient failure');
 });
@@ -307,7 +307,7 @@ test('watching checks reads as work in progress, apart from a queued sub-job; a 
   assert.deepEqual(jobStatus(job, { ...sub('api'), stage: 'deployment', recoveredBy: 'fix' }), { tone: 'muted', text: 'Awaiting fix' });
 });
 
-test('Request changes sends the text pinned to the PR head that was on screen, and nothing else', (t) => {
+test('Request changes sends the text, and nothing else: a head that landed since does not stop it', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'h1', checkStatus: 'failing', checks: [] } }];
   f.view.update(f.data);
@@ -319,7 +319,7 @@ test('Request changes sends the text pinned to the PR head that was on screen, a
   assert.equal(send.disabled, false);
   job.subJobs[0].pr.head = 'h2';
   send.click();
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', at: 'pr', ref: 'h1', text: 'Pin the client to v3' }, 'pinned to h1, the head that was read, even though a new one has landed since');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', text: 'Pin the client to v3' }, 'no pin to h1: the new head is the wrangler\'s to judge');
 });
 
 test('a change being typed is not redrawn away by a live tick, and an escaped agent title stays escaped', (t) => {
@@ -704,6 +704,34 @@ test('switching to Auto while work waits at the checkpoint asks first, and only 
   assert.equal(f.q('[data-review-undo]'), null, 'released work has no Undo');
 });
 
+test('a board a tick behind is refused, snaps back, and asks once the tick shows what waits; a parked step answering mail counts', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'implementation' }];
+  f.view.update(f.data); f.view.openDetail('job1');
+  footerButton(f, 'reviewCode').click();
+  assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: false }, 'nothing waits on this board, so no question');
+  f.view.reviewFailed({ event: 'job-action-failed', jobId: 'job1', action: 'set-review', field: 'reviewCode', error: 'One is waiting at Local verification. Switch again to let it through.' });
+  assert.equal(footerButton(f, 'reviewCode').getAttribute('aria-pressed'), 'true', 'the server saw a diff waiting: still You review');
+  assert.match(footerHint(f), /Switch again to let it through/);
+  job.subJobs = [{ ...sub('api'), stage: 'review', state: 'verified', ready: { checks: ['Tests pass'], receiptId: 'run_1' }, answering: { id: 'm1', kind: 'ask', round: 1 } }];
+  f.view.update(f.data);
+  const before = f.sent.length;
+  footerButton(f, 'reviewCode').click();
+  assert.equal(f.sent.length, before);
+  assert.match(f.q('#job-review-confirm').textContent, /Switch Local verification to Auto\?/);
+  f.q('#job-review-confirm').dispatchEvent(f.event('submit'));
+  assert.deepEqual(reviewSent(f), { type: 'job-action', id: 'job1', action: 'set-review', field: 'reviewCode', you: false, release: true });
+});
+
+test('a job saved before Merge existed reads it as You review, like the runner: its tile, Needs you and the Merge button', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active'; delete job.reviewMerge;
+  job.subJobs = [{ ...sub('api'), stage: 'pr', state: 'watching', pr: { url: 'https://github.com/o/r/pull/7', head: 'h1', checkStatus: 'passing', checks: [] } }];
+  assert.deepEqual([youReview(job, 'reviewMerge'), mergeApprovable(job, job.subJobs[0]), mergeHeldByComments(job, job.subJobs[0]), jobNeedsReview(job, job.subJobs[0])], [true, true, false, true]);
+  f.view.update(f.data); f.view.openDetail('job1');
+  assert.equal(footerButton(f, 'reviewMerge').getAttribute('aria-pressed'), 'true');
+  assert.ok(f.q('[data-action="approve-merge"]'), 'the PR waits for Approve merge');
+});
+
 test('Plan switched to Auto on a drafted plan approves the draft on display; a delivered job has no checkpoints left to switch', (t) => {
   const f = fixture(t);
   f.data.jobs[0].plan = { ...plan, subJobs: [...plan.subJobs, { id: 'spike', kind: 'session', title: 'Run spike', storyId: 'story', after: [], brief: 'Do it here' }] };
@@ -1062,7 +1090,7 @@ test('a reported session needs you, a running one spins, and approval is pinned 
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'approve-session', head: undefined, sessionReceiptId: 'receipt9' });
   assert.equal(f.q('#job-revise-session'), null, 'Request changes is the box on the review, not a button that opens a dialog');
   const text = f.q('.job-change textarea'); text.value = 'Check staging too'; text.dispatchEvent(f.event('input')); f.q('[data-change-send]').click();
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'request-change', at: 'session', ref: 'receipt9', text: 'Check staging too' });
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'spike', action: 'request-change', text: 'Check staging too' });
 });
 
 test('Approve sends whatever its caret\'s popup holds, as Retry does, on a session result and on code', (t) => {
@@ -1614,7 +1642,7 @@ test('Enter in Request changes sends it; Shift+Enter, a composition or an empty 
   chord(f, f.q('.job-change [data-change-send]'), { metaKey: false });
   assert.equal(f.sent.length, 0, 'plain Enter on another control in the box is that control\u2019s');
   chord(f, text, { metaKey: false });
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', at: 'pr', ref: 'h1', text: 'Pin the client to v3' });
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', text: 'Pin the client to v3' });
   assert.equal(f.sent.length, 1);
 });
 
@@ -1625,7 +1653,7 @@ test('Enter in the job\u2019s Add idea box sends it to the planner', (t) => {
   f.q('[data-board="job1"] .job-plate-open').click();
   const text = f.q('.job-change textarea'); text.value = 'Split web in two'; text.dispatchEvent(f.event('input'));
   chord(f, text, { metaKey: false });
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', at: 'job', ref: 'job', text: 'Split web in two' });
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', text: 'Split web in two' });
 });
 
 test('a second New idea submit before job-created sends one job-create, and both buttons stay held', (t) => {
@@ -1660,7 +1688,7 @@ test('Cmd+Enter in Request changes sends it, and waits for words exactly as the 
   chord(f, text, { shiftKey: true });
   assert.equal(f.sent.length, 0);
   chord(f, text);
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', at: 'pr', ref: 'h1', text: 'Pin the client to v3' });
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', text: 'Pin the client to v3' });
 });
 
 test('the chord carries the primary submitter, so a new job starts planning rather than parking', (t) => {
@@ -1754,7 +1782,7 @@ test('Add idea on a running job asks the planner for a proposal; the sent idea s
   assert.equal(f.q('.job-change textarea').placeholder, 'Ask Wrangler, or say what to change…');
   assert.equal(f.q('.job-change-foot').textContent, '↵ send · ⇧↵ new line');
   const text = f.q('.job-change textarea'); text.value = 'Split web in two'; text.dispatchEvent(f.event('input')); f.q('[data-change-send]').click();
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', at: 'job', ref: 'job', text: 'Split web in two' });
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', text: 'Split web in two' });
 
   job.replan = { feedback: 'Split web in two', at: 1, proposal: null, previous: null };
   job.runs = [{ id: 'plan2', subJobId: null, phase: 'planning', stopped: false }];
@@ -1894,49 +1922,61 @@ test('a failing step opens the box on a new conversation, and dismissing the ope
   assert.equal(box().dataset.changeConvo, '');
 });
 
-test('an idle conversation folds to its title row alone; only the one answering or last asked in is open; a title row opens one in its place and the choice survives a tick', (t) => {
+test('only the human opens a conversation: the most recent one first, and a wrangler at work in another never opens it or moves the box, only marks it unread', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
   job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is <left>?', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Only web.\n\nAnd docs, later.', convo: 'c1' },
     { id: 't3', at: 3, from: 'human', text: 'Fine', convo: 'c1' }, { id: 't4', at: 4, from: 'wrangler', kind: 'answer', text: 'Noted.', convo: 'c1' },
     { id: 't5', at: 5, from: 'human', text: 'Is api deployed?', convo: 'c2' }, { id: 't6', at: 6, from: 'wrangler', kind: 'answer', text: 'Not yet.', convo: 'c2' },
     { id: 't7', at: 7, from: 'human', text: 'Why slow?', convo: 'c3' }];
-  job.convos = [{ id: 'c1', at: 1, pending: null }, { id: 'c2', at: 5, pending: null }, { id: 'c3', at: 7, pending: { at: 7, asks: [{ messageId: 't7', feedback: 'x', sentAt: 7 }] } }];
+  job.convos = [{ id: 'c1', at: 1, pending: null, seenAt: 9 }, { id: 'c2', at: 5, pending: null, seenAt: 9 }, { id: 'c3', at: 7, pending: { at: 7, asks: [{ messageId: 't7', feedback: 'x', sentAt: 7 }] }, seenAt: 7 }];
   job.runs = [{ id: 'a3', subJobId: null, phase: 'planning', stopped: false, ask: 't7', convo: 'c3' }];
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
   const convo = (id) => f.q(`#job-page [data-convo="${id}"]`);
   const folded = () => ['c1', 'c2', 'c3'].filter((id) => convo(id).classList.contains('is-folded'));
-  assert.deepEqual(folded(), ['c1', 'c2'], 'the one answering is open; the others fold');
+  const target = () => f.q('#job-page .job-change').dataset.changeConvo;
+  assert.deepEqual(folded(), ['c1', 'c2'], 'the most recent is open; the others fold');
   assert.deepEqual([...convo('c1').children].map((c) => c.tagName), ['HEADER'], 'folded, nothing but the title row');
   assert.equal(convo('c1').querySelectorAll('[data-talk]').length, 0, 'not even the first message');
   assert.equal(headText(convo('c1')), 'Conversation 14 messages');
-  assert.equal(convo('c3').querySelector('[data-convo-dismiss]'), null, 'no × while it is answering');
-  assert.ok(convo('c3').querySelector('.job-change'), 'the box is at the open one\'s foot');
-
-  job.talk.push({ id: 't8', at: 8, from: 'wrangler', kind: 'answer', text: 'A slow suite.', convo: 'c3' });
-  job.convos[2].pending = null; job.runs = [];
-  f.view.update(f.data);
-  assert.deepEqual(folded(), ['c1', 'c2'], 'answered, it stays open: the human asked in it last');
+  assert.ok(convo('c3').querySelector('[data-convo-dismiss]'), '× even while it is answering');
+  assert.equal(target(), 'c3');
 
   convo('c1').querySelector('.job-talk-convo-head').click();
   assert.deepEqual(folded(), ['c2', 'c3'], 'a click on a title row opens it in place of the other');
-  assert.equal(convo('c1').querySelectorAll('[data-talk]').length, 4);
-  assert.equal(convo('c1').querySelector('.job-talk-fold').getAttribute('aria-expanded'), 'true');
-  assert.ok(convo('c1').querySelector('.job-change'));
+  assert.equal(target(), 'c1');
+  f.q('#job-page .job-change textarea').blur();
+  job.talk.push({ id: 't8', at: 8, from: 'wrangler', kind: 'answer', text: 'A slow suite.', convo: 'c3' });
+  job.convos[2].pending = null; job.runs = [];
   f.view.update(f.data);
-  assert.deepEqual(folded(), ['c2', 'c3'], 'the choice survives a tick');
-  convo('c1').querySelector('.job-talk-convo-head').click();
+  assert.deepEqual(folded(), ['c2', 'c3'], 'Wrangler answering in a folded one never opens it');
+  assert.equal(target(), 'c1', 'nor moves the box');
+  assert.ok(convo('c3').querySelector('.job-talk-unread'), 'its title row is marked unread');
+  assert.equal(convo('c2').querySelector('.job-talk-unread'), null, 'one with nothing new is not');
+  job.convos[1].pending = { at: 9, asks: [{ messageId: 't5', feedback: 'x', sentAt: 9 }] };
+  job.runs = [{ id: 'a2', subJobId: null, phase: 'planning', stopped: false, ask: 't5', convo: 'c2' }];
+  f.view.update(f.data);
+  assert.deepEqual([folded(), target()], [['c2', 'c3'], 'c1'], 'nor its wrangler starting work in one');
+
+  convo('c3').querySelector('.job-talk-convo-head').click();
+  assert.equal(target(), 'c3');
+  assert.equal(convo('c3').querySelector('.job-talk-unread'), null, 'open, it is read');
+  assert.ok(f.sent.some((m) => m.type === 'job-talk-seen' && m.convos.includes('c3')), 'and the server is told');
+  convo('c3').querySelector('.job-talk-convo-head').click();
   assert.deepEqual(folded(), ['c1', 'c2', 'c3'], 'its own header folds it');
   assert.equal(f.q('#job-page .job-change').closest('.job-talk'), null, 'and the box goes below them all');
-  convo('c1').querySelector('.job-talk-convo-head').click();
-  const text = f.q('#job-page .job-change textarea'); text.value = 'And tests?'; text.dispatchEvent(f.event('input')); f.q('#job-page [data-change-send]').click();
-  job.talk.push({ id: 't9', at: 9, from: 'human', text: 'And tests?', convo: 'c1' });
+  f.q('#job-page .job-change textarea').blur();
   f.view.update(f.data);
-  assert.deepEqual(folded(), ['c2', 'c3'], 'just asked in, it is open');
+  assert.deepEqual(folded(), ['c1', 'c2', 'c3'], 'and stays there across a tick');
+  const text = f.q('#job-page .job-change textarea'); text.value = 'And tests?'; text.dispatchEvent(f.event('input')); f.q('#job-page [data-change-send]').click();
+  job.convos.push({ id: 'c4', at: Date.now(), pending: null, seenAt: Date.now() });
+  job.talk.push({ id: 't9', at: Date.now(), from: 'human', text: 'And tests?', convo: 'c4' });
+  f.view.update(f.data);
+  assert.equal(target(), 'c4', 'the conversation the human just started is the open one');
 });
 
-test('× dismisses an idle conversation through dismiss-convo, and one dismissed is drawn nowhere', (t) => {
+test('× is on every conversation, a live one included, and one dismissed is drawn nowhere', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'implementation', state: 'running' }];
   job.talk = [{ id: 't1', at: 1, from: 'human', text: 'What is left?', convo: 'c1' }, { id: 't2', at: 2, from: 'wrangler', kind: 'answer', text: 'Only web.', convo: 'c1' },
@@ -1947,8 +1987,8 @@ test('× dismisses an idle conversation through dismiss-convo, and one dismissed
   f.view.update(f.data);
   f.q('[data-board="job1"] .job-plate-open').click();
   const convo = (id) => f.q(`#job-page [data-convo="${id}"]`);
-  assert.equal(convo('c2').querySelector('[data-convo-dismiss]'), null, 'never while a change is drawn in it');
-  assert.equal(convo('c2').classList.contains('is-folded'), false);
+  assert.match(convo('c2').querySelector('[data-convo-dismiss]').title, /and stop Wrangler's work in it/, 'a change drawn in it says the × stops it');
+  assert.equal(convo('c1').querySelector('[data-convo-dismiss]').title, 'Dismiss this conversation');
   convo('c1').querySelector('[data-convo-dismiss]').click();
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'dismiss-convo', convo: 'c1' });
   assert.equal(convo('c1').classList.contains('is-folded'), true, 'the × does not toggle it');
@@ -2225,7 +2265,7 @@ test('a plan-change proposal locks landed work, marks removed work as cancelled 
   f.q('[data-action="discard-replan"]').click();
   assert.equal(f.sent.at(-1).action, 'discard-replan');
   const text = f.q('.job-change textarea'); text.value = 'Keep web'; text.dispatchEvent(f.event('input')); f.q('[data-change-send]').click();
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', at: 'proposal', ref: 'run_p', text: 'Keep web' }, 'pinned to the proposal that was read');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: undefined, action: 'request-change', text: 'Keep web' }, 'unpinned: it adds to the proposal as it stands');
 });
 
 test('a superseded sub-job reads as superseded, and its open PR stays linked from the job and the sub-job', (t) => {
@@ -2456,7 +2496,7 @@ test('a write waits on its session; a draft needs you, its panel the editor that
   assert.deepEqual([panel.querySelector('[name="on"]'), panel.querySelector('[name="review"]')], [null, null], 'in review only what it writes can change');
   assert.match(f.q('.job-write-spec').textContent, /By\s*Written by Run n-rev/);
   assert.deepEqual([...document.querySelectorAll('.job-actions button')].map((b) => b.textContent.trim()), ['Move in Jira', 'Skip']);
-  assert.equal(f.q('.job-change').dataset.changeAt, 'write', 'a draft takes ideas too, pinned to where it stands'); assert.equal(f.q('.job-moves'), null);
+  assert.ok(f.q('.job-change'), 'a draft takes ideas too'); assert.equal(f.q('.job-moves'), null);
   panel.requestSubmit();
   assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).subJobId, f.sent.at(-1).write], ['approve-write', 'w-rev', undefined], 'nothing changed: a plain approval');
   release(panel.querySelector('button.primary'));
@@ -2923,7 +2963,7 @@ test('New job has no Land on field: the plan chooses each PR\'s branch, so the j
   assert.equal('base' in f.sent[0].job, false);
 });
 
-test('a red PR\'s box is plain words: no Instant or Claude chips, and the idea goes to the planner pinned to the head on screen', (t) => {
+test('a red PR\'s box is plain words: no Instant or Claude chips, and the idea goes to the planner', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'pr', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', checkStatus: 'failing', checks: [] } }, { ...sub('web', ['api']), stage: 'implementation', state: 'queued' }];
   f.view.update(f.data); f.q('.job-plate-graph [data-sub="api"]').dispatchEvent(f.event('click'));
@@ -2933,7 +2973,7 @@ test('a red PR\'s box is plain words: no Instant or Claude chips, and the idea g
   assert.ok(box.querySelector('.job-change-attach input[type="file"]'), 'a picture can be picked as well as pasted or dropped');
   const text = box.querySelector('textarea'); text.value = 'Accept the flaky e2e'; text.dispatchEvent(f.event('input'));
   box.querySelector('[data-change-send]').click();
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', at: 'pr', ref: 'h1', text: 'Accept the flaky e2e' }, 'pinned to the head on screen');
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', text: 'Accept the flaky e2e' });
   f.q('[data-page-back]').click();
   f.q('.job-plate-graph [data-sub="web"]').dispatchEvent(f.event('click'));
   assert.deepEqual([f.q('.job-quick'), f.q('.job-change-to').textContent], [null, 'Wrangler']);
@@ -2943,12 +2983,12 @@ test('a merged sub-job\'s idea goes to the planner; the box stays while the plan
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'deployment', state: 'watching', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', mergeCommit: 'm1' }, deploymentResult: { status: 'failing', runs: [] } }, { ...sub('web'), stage: 'implementation', state: 'queued' }];
   f.view.update(f.data); f.q('.job-plate-graph [data-sub="api"]').dispatchEvent(f.event('click'));
-  assert.deepEqual([f.q('.job-change').dataset.changeAt, f.q('.job-change-to').textContent, f.q('.job-quick')], ['step', 'Wrangler', null]);
+  assert.deepEqual([!!f.q('.job-change'), f.q('.job-change-to').textContent, f.q('.job-quick')], [true, 'Wrangler', null]);
   job.replan = { feedback: 'x', at: 1, proposal: null }; f.view.update(f.data);
   assert.ok(f.q('.job-change textarea'), 'a question can go to a conversation of its own meanwhile');
   job.replan.proposal = { id: 'run_p', plan: job.plan, merged: job.plan, changes: { frozen: [], kept: [], edited: [], added: [], removed: [] }, actions: [] }; f.view.update(f.data);
   assert.equal(f.q('.job-quick'), null);
-  assert.deepEqual([f.q('.job-change').dataset.changeAt, f.q('.job-change-to').textContent], ['step', 'Wrangler']);
+  assert.deepEqual([!!f.q('.job-change'), f.q('.job-change-to').textContent], [true, 'Wrangler']);
 });
 
 test('a plan change reads as one decision card holding both buttons; under it the graph and each edit, unchanged work fading (charlie-ps/wrangler-squared#214)', (t) => {
@@ -3223,7 +3263,7 @@ test('a row opens in place, its shot opens the viewer: where it was taken, a rea
   assert.equal(dialog.querySelector('.job-change textarea').value, 'About “Lists sign-ins”: ', 'typed text survives the tick');
   box.value = `${box.value}is the order right?`; box.dispatchEvent(f.event('input'));
   dialog.querySelector('[data-change-send]').click();
-  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', at: 'code', ref: 'run_1', text: 'About “Lists sign-ins”: is the order right?' });
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', text: 'About “Lists sign-ins”: is the order right?' });
 });
 
 test('asking about a gap asks the agent to try another way', (t) => {
@@ -3393,7 +3433,6 @@ test('approval names its round and tree only in its title, and earlier rounds st
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   assert.equal(f.q('#job-page .job-pinned'), null);
   assert.match(f.q('[data-action="approve-code"]').title, /Approval is tied to round 2 and working tree a71d0e4\./);
-  assert.equal(f.q('#job-page [data-change-ref]').dataset.changeRef, 'run_1#2');
   assert.match(f.q('#job-page .job-history summary').textContent, /Earlier rounds Round 1/);
   assert.equal(f.q('#job-page .job-earlier [data-ev-round="1"]').dataset.evFile, 'l.png');
   f.q('[data-action="approve-code"]').click();
@@ -3416,7 +3455,7 @@ test('a screenshot pasted into the Code review box is staged, held back from Sen
   assert.equal(box.querySelector('[data-change-send]').disabled, false);
   box.querySelector('[data-change-send]').click();
   const sent = f.sent.at(-1);
-  assert.deepEqual([sent.action, sent.at, sent.ref, sent.text, sent.images], ['request-change', 'code', 'run_1', 'Make this a dropdown', ['paste-1700000000000-bbbb2222.png']]);
+  assert.deepEqual([sent.action, sent.text, sent.images], ['request-change', 'Make this a dropdown', ['paste-1700000000000-bbbb2222.png']]);
   assert.equal(f.q('#job-page .job-change-tray').hidden, true, 'the tray empties once sent');
 });
 
@@ -3467,7 +3506,7 @@ test('every idea box takes pictures: one dropped on the job\'s box is staged and
   job.subJobs = [{ ...sub('web'), stage: 'implementation', state: 'queued' }];
   f.view.update(f.data); f.q('[data-board="job1"] .job-plate-open').click();
   const box = f.q('#job-page .job-change'), text = box.querySelector('textarea');
-  assert.equal(box.dataset.changeAt, 'job'); assert.ok(box.querySelector('.job-change-tray'));
+  assert.ok(box.querySelector('.job-change-tray'));
   text.value = 'Match this layout'; text.dispatchEvent(f.event('input'));
   const e = f.event('drop'); e.dataTransfer = { files: [new f.window.File(['x'], 'Mock.png', { type: 'image/png' })], items: [], types: ['Files'], getData: () => '' };
   box.dispatchEvent(e);
@@ -3476,7 +3515,7 @@ test('every idea box takes pictures: one dropped on the job\'s box is staged and
   assert.equal(box.querySelectorAll('.job-change-tray li').length, 1);
   assert.ok(box.classList.contains('has-img'), 'a picture opens the box');
   box.querySelector('[data-change-send]').click();
-  assert.deepEqual([f.sent.at(-1).at, f.sent.at(-1).text, f.sent.at(-1).images], ['job', 'Match this layout', ['paste-1700000000000-aaaa1111.png']]);
+  assert.deepEqual([f.sent.at(-1).text, f.sent.at(-1).images], ['Match this layout', ['paste-1700000000000-aaaa1111.png']]);
   assert.equal(f.q('#job-page .job-sent-imgs').querySelectorAll('img').length, 1, 'the picture rides up into the bubble');
 });
 
@@ -3501,9 +3540,9 @@ test('the sent moment: the idea lifts into a bubble that says sending, ticks to 
   assert.doesNotMatch(sent().textContent, /The planner sends feedback back to this step/, 'the routing hint is the box\'s own footer, not repeated under the bubble');
   assert.ok(sent().querySelector('.job-sent-tick'));
   send('Also bump the lockfile');
-  assert.equal(f.view.changeFailed({ event: 'job-action-failed', jobId: 'job1', subJobId: 'api', action: 'request-change', error: 'This changed since you looked' }), true);
+  assert.equal(f.view.changeFailed({ event: 'job-action-failed', jobId: 'job1', subJobId: 'api', action: 'request-change', error: 'Wait for planning to finish' }), true);
   assert.equal(sent().dataset.sentState, 'failed');
-  assert.match(sent().textContent, /Not sent: This changed since you looked/);
+  assert.match(sent().textContent, /Not sent: Wait for planning to finish/);
   assert.equal(f.q('.job-change textarea').value, 'Also bump the lockfile', 'nothing typed is lost');
   f.view.openDetail('job1', 'api');
   assert.equal(sent(), null, 'a fresh look starts clean');

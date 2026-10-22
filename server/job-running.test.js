@@ -8,7 +8,7 @@ import { JobRunner } from './job-runner.js';
 import { changeView } from './job-change.js';
 import { ensureInbox, inboxDir } from './job-evidence.js';
 import { reportSchema } from './jobs-schema.js';
-import { teardown, readLog, setRunning, owe, holdsRunning, stopSandbox, defaultDeps } from './job-running.js';
+import { teardown, readLog, setRunning, holdsRunning, dueTeardown } from './job-running.js';
 import { jobPrompt, threadMail } from './job-prompts.js';
 import { jobRunningLogsHandler } from './handlers.js';
 
@@ -16,24 +16,27 @@ const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a
 const plan = () => ({ context: 'ctx', stories: [], subJobs: [{ id: 'api', title: 'Audit page', repo: '/repo', after: [], brief: 'Build it', show: ['Lists sign-ins'] }] });
 const shot = { text: 'Lists sign-ins', shots: [{ file: 'list.png' }] };
 const VITE = { name: 'vite dev server', url: 'http://localhost:5174/audit', pid: 48211, log: '/worktree/api/vite.log' };
-const DB = { name: 'postgres', url: 'http://localhost:55432/', stop: 'docker compose -p sec-412 down' };
+const DB = { name: 'postgres', url: 'http://localhost:55432/', pid: 48300 };
 
-// Fake processes, URLs and shell: what is "up" is whatever the test says, and a
-// kill or a stop command makes it not.
-function fakeDeps({ stopFails = false, stubborn = false } = {}) {
-  const calls = { kills: [], runs: [] };
-  const procs = new Map([[48211, 48211]]);
-  const urls = new Set(['http://localhost:5174/audit', 'http://localhost:55432/']);
+// Fake processes and URLs: what is "up" is whatever the test says, and killing a
+// group takes its URL down with it. A `deaf` pid ignores SIGTERM; `immortal` ignores both.
+const URL_OF = { 48211: 'http://localhost:5174/audit', 48300: 'http://localhost:55432/' };
+function fakeDeps({ deaf = [], immortal = [] } = {}) {
+  const calls = { kills: [] };
+  const procs = new Map([[48211, 48211], [48300, 48300]]);
+  const urls = new Set(Object.values(URL_OF));
   const deps = {
     calls, procs, urls,
-    kill: (pid, sig) => { calls.kills.push([pid, sig]); if (!stubborn || sig === 'SIGKILL') { const p = Math.abs(pid); procs.delete(p); urls.delete('http://localhost:5174/audit'); } },
+    kill: (pid, sig) => {
+      calls.kills.push([pid, sig]);
+      const p = Math.abs(pid);
+      if (immortal.includes(p) || (deaf.includes(p) && sig === 'SIGTERM')) return;
+      procs.delete(p); urls.delete(URL_OF[p]);
+    },
     alive: (pid) => procs.has(pid),
     pgidOf: async (pid) => procs.get(pid) ?? null,
     answers: async (url) => urls.has(url),
-    run: async (bin, args, cwd) => { calls.runs.push({ bin, args, cwd }); if (stopFails) throw Object.assign(new Error('boom'), { code: 1 }); urls.delete('http://localhost:55432/'); return ''; },
     sleep: async () => {},
-    exists: () => true,
-    sandboxExec: '/usr/bin/sandbox-exec',
   };
   return deps;
 }
@@ -73,13 +76,13 @@ function fixture(t, { reviewCode = true, deps = fakeDeps() } = {}) {
   return { store, job, runner, mkRunner, launched, mailed, deps, tick, last, report, sub, ready, start };
 }
 
-test('a running entry needs a url, a pid or a stop command, and nothing odd', () => {
+test('a running entry needs a url or a pid, and nothing odd', () => {
   const parse = (running) => reportSchema.safeParse({ kind: 'ready', checks: ['x'], running });
   assert.equal(parse([VITE, DB]).success, true);
   assert.equal(parse([{ name: 'bare' }]).success, false);
   assert.equal(parse([{ name: 'x', url: 'file:///etc/passwd' }]).success, false);
   assert.equal(parse([{ name: 'x', pid: 1 }]).success, false, 'init is never ours to signal');
-  assert.equal(parse([{ name: 'x', stop: 'a\nb' }]).success, false);
+  assert.equal(parse([{ name: 'x', pid: 4000, stop: 'docker compose down' }]).success, false, 'no stop commands: teardown is by process group');
   assert.equal(parse([{ name: 'x', pid: 4000, log: 'relative.log' }]).success, false);
   assert.equal(parse(Array.from({ length: 7 }, (_, i) => ({ name: `p${i}`, pid: 100 + i }))).success, false);
   assert.equal(reportSchema.safeParse({ kind: 'reply', text: 'ok', running: [VITE] }).success, true);
@@ -95,100 +98,41 @@ test('what the agent left running is kept for the review and probed up or down',
   assert.deepEqual(f.deps.calls.kills, [], 'a review that is still open is never torn down');
 });
 
-test('approving tears down: the group is killed, the stop command runs in the worktree, the URLs are checked', async (t) => {
+test('approving kills each recorded process group, and the approval goes through', async (t) => {
   const f = fixture(t); await f.start(); await f.ready([VITE, DB]);
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId });
   await f.tick();
-  assert.deepEqual(f.deps.calls.kills, [[-48211, 'SIGTERM']], 'a setsid leader is killed as its whole group');
-  assert.deepEqual(f.deps.calls.runs.map((r) => [r.bin, r.args.slice(-3), r.cwd]), [['/usr/bin/sandbox-exec', ['sh', '-c', 'docker compose -p sec-412 down'], '/worktree/api']]);
+  assert.deepEqual(f.deps.calls.kills, [[-48211, 'SIGTERM'], [-48300, 'SIGTERM']], 'a setsid leader is killed as its whole group');
   const { running } = f.sub();
-  assert.deepEqual([running.items, running.owed, running.stopped.reason, running.stopped.still], [[], [], 'approved', []]);
-  assert.deepEqual(running.stopped.results.map((r) => [r.name, r.ok]), [['vite dev server', true], ['postgres', true]]);
-  assert.match(running.stopped.results[0].detail, /process group 48211 killed · stopped answering/);
+  assert.deepEqual([running.items, running.stopped.reason, running.stopped.still], [[], 'approved', []]);
+  assert.deepEqual(running.stopped.results.map((r) => [r.name, r.ok, r.detail]), [['vite dev server', true, 'process group 48211 killed'], ['postgres', true, 'process group 48300 killed']]);
   assert.ok(!f.sub().error, 'teardown is not a step failure');
   assert.equal(f.launched.at(-1).run.phase, 'publish', 'and the approval went through');
 });
 
-test('a stop command that fails, or a process that will not die, is flagged and never fails the approval', async (t) => {
-  const f = fixture(t, { deps: fakeDeps({ stopFails: true, stubborn: true }) });
-  f.deps.sleep = async () => {};
+test('a group that ignores SIGTERM gets SIGKILL; one that will not die is flagged and never fails the approval', async (t) => {
+  const f = fixture(t, { deps: fakeDeps({ deaf: [48211], immortal: [48300] }) });
   await f.start(); await f.ready([VITE, DB]);
   f.store.action(f.job.id, 'approve-code', { subJobId: 'api', readyReceiptId: f.sub().ready.receiptId });
   await f.tick();
-  assert.deepEqual(f.deps.calls.kills.map((k) => k[1]), ['SIGTERM', 'SIGKILL'], 'escalates once the group ignores SIGTERM');
+  assert.deepEqual(f.deps.calls.kills, [[-48211, 'SIGTERM'], [-48211, 'SIGKILL'], [-48300, 'SIGTERM'], [-48300, 'SIGKILL']]);
   const { stopped } = f.sub().running;
-  assert.deepEqual(stopped.still, ['postgres'], 'postgres still answers; vite died to SIGKILL');
-  assert.match(stopped.results[1].detail, /docker compose -p sec-412 down · exit 1 · still answering/);
+  assert.deepEqual(stopped.still, ['postgres'], 'vite died to SIGKILL; postgres outlived both');
+  assert.match(stopped.results[1].detail, /process 48300 would not die/);
   assert.ok(!f.sub().error);
   assert.equal(f.launched.at(-1).run.phase, 'publish');
 });
 
+test('an entry with only a url has nothing to kill, and says so', async () => {
+  const out = await teardown([{ name: 'docker', url: 'http://localhost:8080/' }], { deps: fakeDeps() });
+  assert.deepEqual(out, { results: [{ name: 'docker', ok: false, detail: 'no process to stop' }], still: ['docker'] });
+});
+
 test('a pid that does not lead its own group is killed alone, and never our own process', async (t) => {
   const deps = fakeDeps(); deps.procs.set(777, 1);
-  await teardown([{ name: 'child', pid: 777 }, { name: 'us', pid: process.pid }], { deps });
+  const out = await teardown([{ name: 'child', pid: 777 }, { name: 'us', pid: process.pid }, { name: 'parent', pid: process.ppid }], { deps });
   assert.deepEqual(deps.calls.kills, [[777, 'SIGTERM']]);
-});
-
-test('a stop runs under a seatbelt that writes only the worktree, the proof inbox, writableDirs and temp', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-sbx-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const wt = path.join(dir, 'wt'), extra = path.join(dir, 'docker');
-  fs.mkdirSync(wt); fs.mkdirSync(extra);
-  const job = { id: 'job_sbx', agent: 'codex', sandbox: 'auto', writableDirs: [extra, path.join(dir, 'missing')] };
-  const sub = { id: 'api', worktree: { path: wt } };
-  const inbox = ensureInbox(job.id, sub.id);
-  const sandbox = stopSandbox(job, sub);
-  const real = (p) => fs.realpathSync(p);
-  assert.deepEqual(sandbox.writable.slice(0, 3), [real(wt), real(inbox), real(extra)], 'a folder missing on this machine is dropped');
-  assert.ok(sandbox.writable.includes(real(os.tmpdir())) && sandbox.writable.includes(real('/tmp')));
-  const deps = fakeDeps();
-  const { results } = await teardown([DB], { cwd: wt, sandbox, deps });
-  const [{ bin, args, cwd }] = deps.calls.runs;
-  assert.equal(bin, '/usr/bin/sandbox-exec');
-  assert.equal(cwd, wt);
-  assert.equal(args[0], '-p');
-  assert.match(args[1], /\(deny file-write\*\)/);
-  assert.match(args[1], /\(subpath \(param "W0"\)\)/);
-  assert.ok(!args[1].includes(dir), 'paths go in as parameters, never into the profile text');
-  assert.deepEqual(args.slice(2, 4), ['-D', `W0=${real(wt)}`]);
-  assert.deepEqual(args.slice(-3), ['sh', '-c', DB.stop]);
-  assert.equal(results[0].ok, true);
-  assert.equal(stopSandbox({ ...job, agent: 'claude' }, sub).off, undefined, 'a Claude step has no OS sandbox of its own, so its stop gets one');
-});
-
-test('only a Codex job on Full access runs its stop unsandboxed', async () => {
-  const sandbox = stopSandbox({ id: 'j', agent: 'codex', sandbox: 'full' }, { id: 's' });
-  assert.deepEqual(sandbox, { off: true });
-  const deps = fakeDeps();
-  await teardown([DB], { cwd: '/worktree/api', sandbox, deps });
-  assert.deepEqual(deps.calls.runs, [{ bin: 'sh', args: ['-c', DB.stop], cwd: '/worktree/api' }]);
-  assert.equal(stopSandbox({ id: 'j', agent: 'codex', sandbox: 'locked' }, { id: 's' }).off, undefined);
-});
-
-test('with no sandbox on this machine a stop is not run, reported, and never throws', async () => {
-  const deps = { ...fakeDeps(), sandboxExec: null };
-  const out = await teardown([DB], { cwd: '/worktree/api', sandbox: { writable: [] }, deps });
-  assert.deepEqual(deps.calls.runs, [], 'refused, not run');
-  assert.equal(out.results[0].ok, false);
-  assert.match(out.results[0].detail, /docker compose -p sec-412 down · not run: no sandbox to run it in on this machine · still answering/);
-  assert.deepEqual(out.still, ['postgres']);
-  const unsandboxed = fakeDeps(); unsandboxed.sandboxExec = null;
-  await teardown([DB], { sandbox: { off: true }, deps: unsandboxed });
-  assert.equal(unsandboxed.calls.runs.length, 1, 'Full access needs no sandbox');
-});
-
-test('the real seatbelt denies a write outside the worktree and allows one inside', { skip: defaultDeps().sandboxExec ? false : 'no sandbox-exec here' }, async (t) => {
-  const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-sbx-real-'));
-  const escaped = path.join(os.homedir(), `aw-escaped-${process.pid}`);
-  t.after(() => { fs.rmSync(wt, { recursive: true, force: true }); fs.rmSync(escaped, { force: true }); });
-  const deps = defaultDeps();
-  const sandbox = { writable: [fs.realpathSync(wt)] };
-  const out = await teardown([{ name: 'escape', stop: `touch ${escaped}` }, { name: 'inside', stop: 'touch ./stopped' }], { cwd: wt, sandbox, deps });
-  assert.equal(out.results[0].ok, false);
-  assert.match(out.results[0].detail, /exit 1/);
-  assert.equal(fs.existsSync(escaped), false, 'nothing written outside');
-  assert.equal(out.results[1].ok, true);
-  assert.ok(fs.existsSync(path.join(wt, 'stopped')));
+  assert.deepEqual(out.still, ['us', 'parent']);
 });
 
 test('a later round that no longer lists an entry stops it at once and keeps the rest', async (t) => {
@@ -199,11 +143,9 @@ test('a later round that no longer lists an entry stops it at once and keeps the
   const planner = f.launched.at(-1);
   f.report({ kind: 'plan', plan: plan(), actions: [{ type: 'forward', sub: 'api', note: 'Drop the database' }] }, planner);
   await f.tick();
-  f.deps.urls.add('http://localhost:55432/');
   await f.ready([VITE], [shot]);
   assert.deepEqual(f.sub().running.items.map((i) => i.name), ['vite dev server']);
-  assert.equal(f.deps.calls.runs.length, 1, 'postgres was stopped');
-  assert.deepEqual(f.deps.calls.kills, [], 'vite stays up for round 2');
+  assert.deepEqual(f.deps.calls.kills, [[-48300, 'SIGTERM']], 'postgres was killed; vite, listed again by pid, stays up for round 2');
   assert.deepEqual(f.sub().running.stopped.results.map((r) => r.name), ['postgres']);
 });
 
@@ -239,31 +181,22 @@ test('dropping the sub-job, cancelling the job and a replan each tear down; so d
   assert.deepEqual(boot.deps.calls.kills, [[-48211, 'SIGTERM']]);
 });
 
-test('Stop tears down on the next tick; Restart asks the parked session, and its reply replaces the list', async (t) => {
+test('Stop all kills every group on the next tick, and a reply\'s list replaces the one before', async (t) => {
   const f = fixture(t); await f.start(); await f.ready([VITE, DB]);
-  assert.throws(() => f.store.action(f.job.id, 'restart-running', { subJobId: 'api' }), /Everything it left running is up/);
-  f.deps.urls.delete('http://localhost:5174/audit'); f.deps.procs.clear();
-  await f.tick();
-  assert.equal(f.sub().running.items[0].up, false);
-  f.store.action(f.job.id, 'restart-running', { subJobId: 'api', name: 'vite dev server' });
-  assert.equal(f.sub().answering.kind, 'restart');
-  await f.tick();
-  assert.match(f.mailed.at(-1).text, /vite dev server is no longer running/);
-  assert.match(f.mailed.at(-1).text, /running:\[every entry now up/);
   f.deps.procs.set(50000, 50000); f.deps.urls.add('http://localhost:5199/audit');
-  f.report({ kind: 'reply', text: 'Started it again on 5199', running: [{ name: 'vite dev server', url: 'http://localhost:5199/audit', pid: 50000 }, DB] });
+  f.store.update(f.job.id, (j) => { j.runs.find((r) => r.parkedFor === 'ready').mailedAt = Date.now(); });
+  f.report({ kind: 'reply', text: 'Moved it to 5199', running: [{ name: 'vite dev server', url: 'http://localhost:5199/audit', pid: 50000 }, DB] });
   await f.tick();
   assert.deepEqual(f.sub().running.items.map((i) => [i.name, i.url, i.up]), [['vite dev server', 'http://localhost:5199/audit', true], ['postgres', 'http://localhost:55432/', true]]);
-  assert.equal(f.sub().running.owed.length, 0, 'the dead entry it replaced owes nothing: its group is gone, and its stop was already run');
-
-  f.store.action(f.job.id, 'stop-running', { subJobId: 'api', name: 'postgres' });
-  await f.tick();
-  assert.deepEqual(f.sub().running.items.map((i) => i.name), ['vite dev server']);
-  assert.deepEqual(f.deps.calls.runs.at(-1).args.slice(-3), ['sh', '-c', 'docker compose -p sec-412 down']);
+  assert.deepEqual(f.deps.calls.kills, [[-48211, 'SIGTERM']], 'the old vite group it no longer lists is killed');
   f.store.action(f.job.id, 'stop-running', { subJobId: 'api' });
+  assert.deepEqual(f.sub().running.items.map((i) => i.replaced), [true, true], 'nothing shows while it waits for the tick');
   await f.tick();
   assert.equal(f.sub().running.items.length, 0);
+  assert.deepEqual(f.deps.calls.kills.slice(1), [[-50000, 'SIGTERM'], [-48300, 'SIGTERM']]);
+  assert.equal(f.sub().running.stopped.reason, 'stopped during review');
   assert.throws(() => f.store.action(f.job.id, 'stop-running', { subJobId: 'api' }), /Nothing is running/);
+  assert.throws(() => f.store.action(f.job.id, 'restart-running', { subJobId: 'api' }));
 });
 
 test('holdsRunning is true only while the review waits on the human', () => {
@@ -277,14 +210,15 @@ test('holdsRunning is true only while the review waits on the human', () => {
   assert.equal(holdsRunning(job, sub({ stage: 'cleanup' })), false);
 });
 
-test('setRunning and owe keep a record of what is owed, without duplicates', () => {
-  const sub = {};
-  setRunning(sub, [VITE, DB], { round: 1, keep: true, now: 1 });
-  setRunning(sub, [VITE], { round: 2, keep: true, now: 2 });
-  assert.deepEqual(sub.running.owed.map((o) => o.name), ['postgres']);
-  assert.equal(owe(sub, 'nope'), 0);
-  assert.equal(owe(sub), 1);
-  assert.deepEqual([sub.running.items.length, sub.running.owed.map((o) => o.name)], [0, ['postgres', 'vite dev server']]);
+test('setRunning keeps a re-listed pid, leaves the rest replaced, and ignores an older save\'s owed and stop', () => {
+  const sub = { running: { round: 1, items: [{ ...VITE, up: true }, { name: 'old db', stop: 'docker compose down', up: true }], owed: [{ name: 'ghost', pid: 9 }] } };
+  setRunning(sub, [VITE, DB], 2);
+  assert.deepEqual(sub.running.items.map((i) => [i.name, i.up, !!i.replaced]), [['vite dev server', true, false], ['postgres', null, false]], 'an entry with no pid has nothing to kill, so it is just forgotten');
+  assert.equal('owed' in sub.running, false);
+  setRunning(sub, [DB], 3);
+  assert.deepEqual(sub.running.items.map((i) => [i.name, !!i.replaced]), [['postgres', false], ['vite dev server', true]]);
+  assert.deepEqual(dueTeardown({}, { ...sub, stage: 'review', state: 'verified', ready: {} }).map((i) => i.name), ['vite dev server']);
+  assert.deepEqual(dueTeardown({}, { ...sub, stage: 'pr' }).map((i) => i.name), ['postgres', 'vite dev server']);
 });
 
 test('Logs reads the tail of a log under the worktree or the proof folder, and nowhere else', (t) => {
@@ -315,9 +249,11 @@ test('the implementer is told to leave the preview running and the thread mail r
   const sub = { id: 'api', title: 'A', repo: '/repo', brief: 'b', after: [], show: ['Lists sign-ins'], ready: { round: 1 } };
   const text = jobPrompt(job, sub, { id: 'r1', phase: 'implementation' });
   assert.match(text, /LEAVE RUNNING for the human to try, started detached/);
-  assert.match(text, /running:\[\{name, url\?, pid\?, stop\?, log\?\}\]/);
+  assert.match(text, /running:\[\{name, url\?, pid\?, log\?\}\]/);
+  assert.doesNotMatch(text, /stop\?|sandboxed/);
   assert.doesNotMatch(text, /Stop everything you started/);
   assert.match(threadMail(job, { id: 'r1' }, sub, [{ from: 'human', text: 'q', round: 1 }]), /anything the new receipt leaves out is stopped/);
+  assert.doesNotMatch(threadMail(job, { id: 'r1' }, sub, [{ from: 'human', text: 'q', round: 1 }]), /restart/);
 });
 
 test('the Logs handler answers with the tail or the reason, and a missing sub-job', async (t) => {
