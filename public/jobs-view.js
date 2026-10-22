@@ -1395,7 +1395,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const done = job.stage === 'done' && !job.cancelledAt;
     const own = ideaOpen(job) ? '' : sessionsButtonHtml(sessionsOf(job, ''), { step: false });
     const buttons = fab || extra || own || tail ? `<div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${own}${tail}</div>` : '';
-    return `${appbar(job.title, chips)}${eventHtml(job, null, more)}${budgetHtml(job)}${mainNoticeHtml(job)}${body}${conversationHtml(job)}${ask}
+    const kicker = `<button class="job-back" data-close-job title="Back to Jobs">${ICONS.back}<span>Jobs</span></button>`;
+    return `${appbar(job.title, chips, kicker)}${eventHtml(job, null, more)}${budgetHtml(job)}${mainNoticeHtml(job)}${body}${conversationHtml(job)}${ask}
       ${buttons || !done ? `<div class="job-detail-tail">${buttons}${done ? '' : footerHtml(job)}</div>` : ''}`;
   }
   // What a write's state means, in sentences: the chip's tooltip carries them all,
@@ -1859,6 +1860,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     detail.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
     detail.querySelectorAll('[data-open-path]').forEach((b) => b.onclick = () => openPath(b));
     detail.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
+    detail.querySelectorAll('[data-close-job]').forEach((b) => b.onclick = () => closePage());
     // A conversation opens on its title row, folding the one that was open, and the box
     // goes with it; open, its header folds it. × is for good (job-talk.js).
     detail.querySelectorAll('[data-convo-fold]').forEach((el) => el.onclick = (e) => {
