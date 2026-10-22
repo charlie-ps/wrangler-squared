@@ -83,6 +83,20 @@ test('scrollers redrawn keep their sideways offset, matched per plate', (t) => {
   assert.equal(host.querySelector('.job-msg-run').scrollLeft, 30);
 });
 
+test('a refocused box takes its focused look with transitions off, then gets them back', (t) => {
+  const { doc, $ } = page(t, '<div id="host"><div class="job-change" style="transition:border-color .2s"><textarea></textarea></div></div>');
+  const host = $('#host');
+  host.querySelector('textarea').value = 'Typing'; host.querySelector('textarea').focus();
+  const restore = keepFields(host);
+  host.innerHTML = '<div class="job-change" style="transition:border-color .2s"><textarea></textarea></div>';
+  const box = host.querySelector('.job-change'), seen = [];
+  host.addEventListener('focusin', () => seen.push(box.style.transition));
+  restore();
+  assert.ok(doc.activeElement === host.querySelector('textarea'));
+  assert.deepEqual(seen, ['none'], 'no fade in from the unfocused border on a tick');
+  assert.equal(box.style.transition, 'border-color .2s', 'its own transition is back for the next real focus');
+});
+
 test('fields redrawn keep what was typed, the cursor and focus, matched per box; untouched ones take the new markup', (t) => {
   const box = (convo, draft = '') => `<div class="job-change" data-change-convo="${convo}"><textarea>${draft}</textarea></div>`;
   const drawn = (status) => `<p>${status}</p>${box('c1')}${box('')}<details data-keep="approve-note"><textarea data-approve-note></textarea></details><input id="count" value="${status}"><input type="checkbox" id="tick">`;
