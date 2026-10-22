@@ -57,7 +57,7 @@ export function touchedBy(proposal) {
   return ids;
 }
 // A plan change never pauses the job. While the wrangler drafts, only the step
-// the idea was typed on waits (its actions are pinned to what the human read),
+// the idea was typed on waits (so the wrangler drafts against it as it stands),
 // and once its proposal is up so does whatever it touches, so the step it edits
 // is still the one the human approves. A red step's replan also holds that step
 // and the sub-jobs after it from the start. Work past the point of no return

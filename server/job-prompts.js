@@ -3,6 +3,7 @@ import { ATTRIBUTION, targetOf, isHumanSub, reviewCode, placeOf, isMakeWrite, ch
 import { inboxDir, roundDir, ideasDir } from './job-evidence.js';
 import { checkoutsDir, displayPath } from './data-dir.js';
 import { isFrozen, replanStatus } from './job-replan.js';
+import { changeView } from './job-actions.js';
 import { writeBrief, openWrites, draftingFor, WRITE_RESULT_SHAPE } from './job-writes.js';
 import { inConversation, ideaThread, suggestionsOf, createdSuggestions } from './job-idea.js';
 import { talkOf, convosOf, convoById, convoRun } from './job-talk.js';
@@ -156,7 +157,7 @@ export function threadMail(job, run, sub, messages) {
     `${job.title}: you reported ready (round ${round}) and the human has written back. They see your proof and the working tree as you left them.`,
     ...said,
     `A QUESTION: answer it from what you know, changing nothing: ${reportCall(run, 'kind:"reply", text:"your answer", shots?:[...], run?:{cmd,out,exit}')} ${REPLY_RULES} Anything you capture to answer goes in $JOB_EVIDENCE (\`export JOB_EVIDENCE=${dir}\`).`,
-    `A CHANGE: make it in this worktree, leave it UNCOMMITTED, re-verify and answer every Show me item again for this new round: ${reportCall(run, 'kind:"ready", checks:[...], running?:[...]')} List what is running in running again: anything the new receipt leaves out is stopped, and a restart you do not list is not kept. If it needs more than this PR, say so in a reply instead.`,
+    `A CHANGE: make it in this worktree, leave it UNCOMMITTED, re-verify and answer every Show me item again for this new round: ${reportCall(run, 'kind:"ready", checks:[...], running?:[...]')} List what is running in running again: anything the new receipt leaves out is stopped. If it needs more than this PR, say so in a reply instead.`,
     'Then stop and wait: the session stays open for the next message.',
   );
 }
@@ -288,15 +289,16 @@ const thisPr = (sub, job) => `This PR (${sub?.repo ? path.basename(sub.repo) : '
 // TODO(host-api spawn env): $JOB_EVIDENCE cannot be set on the session, so the
 // prompt tells the agent to export it.
 // Proof is required whatever Code is set to: with it on the human reads it; on
-// Auto a sub-job with Show me items still reports ready (the receipt approves
-// itself, job-store.js) so the proof is kept and a short step publishes.
+// Auto a sub-job with Show me items still reports ready so the proof is kept per
+// round on the step, but nothing waits for anyone: the receipt approves itself
+// (job-store.js) and the publish step starts on the runner's next tick.
 export const leavesUncommitted = (job, sub) => reviewCode(job) || !!sub?.show?.length;
 const SHOT_SHAPE = '{file:"name.png", url?:"where it was taken", viewport?:"1280x800", tool?:"Playwright"}';
 // What to do with what the agent started to capture proof. With the human reviewing
 // it is left up for them to try (the extension only tears it down); on Auto nobody
 // tries it, so nothing may be left running.
 const runningLine = (job) => reviewCode(job)
-  ? 'What your change needs to run (dev server, database, worker) you LEAVE RUNNING for the human to try, started detached so it survives your session going dormant (`setsid nohup <cmd> > "$JOB_EVIDENCE/<name>.log" 2>&1 &`, then `echo $!` is the pid of a process-group leader) on ports you checked were free. List each in the receipt as running:[{name, url?, pid?, stop?, log?}]: url is where to open it, pid the setsid leader, stop a command that tears it down from the worktree when a pid is not enough (`docker compose -p <name> down`; it runs sandboxed, writing only the worktree, $JOB_EVIDENCE, the job\'s extra writable folders and temp), log the file you redirected its output to (under the worktree or $JOB_EVIDENCE). Entries need a url, a pid or a stop. Wrangler tears every entry down when the human approves or drops the step, and anything a later round no longer lists; never start something you cannot list. A Codex sandbox that stops you listening on a port is a couldNot, not a failure.'
+  ? 'What your change needs to run (dev server, database, worker) you LEAVE RUNNING for the human to try, started detached so it survives your session going dormant (`setsid nohup <cmd> > "$JOB_EVIDENCE/<name>.log" 2>&1 &`, then `echo $!` is the pid of a process-group leader) on ports you checked were free. List each in the receipt as running:[{name, url?, pid?, log?}]: url is where to open it, pid the setsid leader, log the file you redirected its output to (under the worktree or $JOB_EVIDENCE). Entries need a url or a pid. Wrangler kills each pid\'s process group when the human approves or drops the step, and any a later round no longer lists; never start something you cannot stop that way. A Codex sandbox that stops you listening on a port is a couldNot, not a failure.'
   : 'Stop everything you started before you report: nothing may be left running, because no human reviews this step.';
 const proofBlock = (job, sub) => {
   if (!sub) return '';
@@ -314,12 +316,17 @@ const proofBlock = (job, sub) => {
 // the work is a change to it, and the push goes to the PR that already exists.
 const openPrLine = (sub) => sub?.pr?.url ? `PR ${sub.pr.url} is already open from this worktree's branch; this is a fix to it, requested by the human (see the history below).` : '';
 
-// The view the latest idea was typed on: an action on that step is refused if it
-// has moved by approval (job-actions.js).
+// What the step the latest idea was typed on looked like then, beside what it is
+// now: the idea is never refused as stale, so whether it still applies is the
+// planner's call (only an action's pin is checked at approval, job-actions.js).
 const SOURCE_VIEW = { code: 'its code review', session: 'its result in review', pr: 'its open PR', write: 'the write', step: 'the step' };
+const seen = (v, state) => v ? `${SOURCE_VIEW[v.at] || v.at} (${v.ref}${state && state !== v.ref ? `, ${state}` : ''})` : 'finished';
 const sourceLine = (job, from) => {
   const src = from?.source, sub = src && job.subJobs.find((s) => s.id === src.sub);
-  return sub ? `The latest idea was typed on ${SOURCE_VIEW[src.at] || src.at} of ${sub.id} ${JSON.stringify(sub.title)} (pinned to ${src.ref}).` : '';
+  if (!sub) return '';
+  const view = changeView(job, sub), state = `${sub.stage}/${sub.state}`;
+  const was = seen(src, src.state), now = seen(view, state);
+  return `The latest idea was typed on ${sub.id} ${JSON.stringify(sub.title)}. When the idea was typed: ${was}; now: ${now}.${was === now ? '' : ' It has moved since: judge whether the idea still applies to the step as it is now, and write any action against it as it is now.'}`;
 };
 
 // A human step's brief is all the human reads under "What to do", so it is the
@@ -472,10 +479,10 @@ export function jobPrompt(job, sub, run) {
       // With code review on, the human reads the working tree on the board
       // before anything is committed; a later publish session commits and pushes,
       // so the branch rename waits for it too.
-      leavesUncommitted(job, sub) ? `Leave every change UNCOMMITTED: ${reviewCode(job) ? 'the human reviews the working tree before anything is committed, and a ' : 'a '}later step commits and pushes it${sub?.pr ? ' to the open PR' : ' and opens the PR'}. Do not commit, push or open a PR.` : branchNaming(job, sub),
+      leavesUncommitted(job, sub) ? `Leave every change UNCOMMITTED: ${reviewCode(job) ? 'the human reviews the working tree before anything is committed, and a ' : 'Code is on Auto, so nobody reviews it: your proof is kept on the step and a '}later step commits and pushes it${reviewCode(job) ? '' : ' straight after your receipt'}${sub?.pr ? ' to the open PR' : ' and opens the PR'}. Do not commit, push or open a PR.` : branchNaming(job, sub),
       reviewCode(job) ? 'After you report ready your session stays open, paused, so the human can write to you by mail: a question is answered with job_report kind:"reply" (text, shots?, run?, running?) and changes nothing; a change is made, re-verified and reported ready again as a new round. Do not end the session or clean up the worktree yourself.' : '',
       '',
-      leavesUncommitted(job, sub) ? report(`kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]${reviewCode(job) ? ', running?:[{name, url?, pid?, stop?, log?}]' : ''}`, 'When the working tree is ready to review, ') : publishLine,
+      leavesUncommitted(job, sub) ? report(`kind:"ready", checks:["what you verified", {text:"<a Show me item, verbatim>", shots:[...] | run:{cmd,out,exit} | couldNot:"why"}]${reviewCode(job) ? ', running?:[{name, url?, pid?, log?}]' : ''}`, reviewCode(job) ? 'When the working tree is ready to review, ' : 'When the work is done and every Show me item is proven, ') : publishLine,
     ),
     publish: lines(
       heading(job, sub),
