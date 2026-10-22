@@ -88,7 +88,7 @@ const composer = (text) => `<div class="job-change has-text is-open">
   <div class="job-change-row"><span class="job-change-to"><i>T</i>This session</span><div class="wn-change-text">${text}</div><label class="job-change-attach">${ICONS.image}</label><button type="button" class="job-change-go" tabindex="-1">${ICONS.send}</button></div>
   <div class="job-change-foot"><span>A question gets an answer. A change gets a new round.</span><span>Paste or drop a screenshot</span><kbd>↵ send · ⇧↵ new line</kbd></div></div>`;
 const thread = (msgs, state) => {
-  const head = { waiting: [ICONS.terminal, 'Its session is waiting on your review', 'Paused · no slot · keeps its context'], answering: [ICONS.spin, 'Answering you', 'Working on what you sent'], stopped: [ICONS.terminal, 'Session stopped', 'Approved round 1'] }[state];
+  const head = { waiting: [ICONS.terminal, 'Its session is waiting on your review', 'Paused · no slot · keeps its context'], answering: [ICONS.spin, 'Working on your message', 'Paused again once it reports'], stopped: [ICONS.terminal, 'Session stopped', 'Approved round 1'] }[state];
   const msg = ([from, text, at, att]) => `<div class="job-msg ${from} wn-fade"><span class="job-msg-who">${from === 'human' ? 'You' : 'Session'}</span><div><p>${text}<time>${at}</time></p>${att ? `<div class="job-msg-att"><span class="job-proof-thumb"><img alt="" src="${SHOTS[att]}"></span></div>` : ''}</div></div>`;
   return `<section class="job-thread ${state}"><div class="job-thread-head">${head[0]}<b>${head[1]}</b><small>${head[2]}</small></div>${msgs.map(msg).join('')}</section>`;
 };
@@ -102,7 +102,7 @@ const SEE = scenes([
   { shown: 2 },
   { pr: ['review', 'Ready to verify'], shown: 3, slot: 'bar' },
   { slot: 'ask' },
-  { pr: ['running', 'Answering you'], slot: 'asked' },
+  { pr: ['running', 'Working on your message'], slot: 'asked' },
   { pr: ['review', 'Ready to verify'], slot: 'answered' },
   {},
   { pr: ['running', 'Committing & opening the PR'], slot: 'stopped' },

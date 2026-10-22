@@ -12,7 +12,6 @@ import { workingTreeHash } from './git.js';
 import { threadMail, jobPrompt } from './job-prompts.js';
 import { makeJobActionHandler } from './handlers.js';
 import { _resetForTests, runnerFor } from './jobs.js';
-import { looksLikeQuestion } from './job-parked.js';
 
 // Never a real Haiku run: a conversation an idea opens is named after the action.
 const jobActionHandler = makeJobActionHandler({ run: async () => ({ text: null }) });
@@ -108,7 +107,7 @@ test('a question is mailed to the parked session, answered by a reply, and the r
   const f = fixture(t); await f.start(); await f.ready();
   const receipt = f.sub().ready.receiptId;
   await f.ask('What does it show when nobody has signed in?');
-  assert.equal(f.sub().answering.kind, 'ask');
+  assert.equal(f.sub().answering.kind, undefined, 'nothing guesses a question from the words');
   assert.deepEqual(f.sub().thread.map((m) => [m.from, m.via, m.to, m.sentAt]), [['human', 'planner', 'agent', null]]);
   assert.deepEqual(f.launched.map((w) => w.run.phase), ['planning', 'implementation', 'planning'], 'no new implementer: the open session already has the context');
   await f.tick();
@@ -203,7 +202,7 @@ test('a change is reworked into a fresh ready: a new round, a new receipt, earli
   const f = fixture(t); await f.start(); await f.ready();
   const first = f.sub().ready;
   await f.ask('Make the IP filter a dropdown');
-  assert.equal(f.sub().answering.kind, 'change');
+  assert.equal(f.sub().answering.kind, undefined);
   await f.tick();
   fs.writeFileSync(path.join(ensureInbox(f.job.id, 'api'), 'list2.png'), PNG);
   f.report({ kind: 'ready', checks: [shot('list2.png')] }); await f.tick();
@@ -353,12 +352,6 @@ test('a plan change that reworks the sub-job ends the parked session and starts 
   assert.ok(f.stopped.includes(parked));
   assert.equal(f.last().run.phase, 'implementation'); assert.notEqual(f.last().run.id, parked);
   assert.equal(!!f.sub().error, false);
-});
-
-test('questions are told from changes only to label the card', () => {
-  assert.equal(looksLikeQuestion('What does it show?'), true);
-  assert.equal(looksLikeQuestion('does it handle empty'), true);
-  assert.equal(looksLikeQuestion('Make the filter a dropdown'), false);
 });
 
 test('the planner is told the step\'s session is open and where the idea was typed, and the mail says it came through the planner', async (t) => {
