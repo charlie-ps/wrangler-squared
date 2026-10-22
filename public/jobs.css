@@ -872,7 +872,19 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 .job-change-what small + small::before { content:"· "; }
 /* A proposal is one decision card (jobs-view.js proposalHtml): where it comes from,
    what approving does, why, what it leaves you, the buttons; the rest folds below. */
-.job-decision { display:grid; gap:8px; margin:16px 0 4px; padding:14px 16px; border-radius:12px; background:color-mix(in srgb, var(--st-warn) 9%, var(--surface)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--st-warn) 40%, transparent), inset 4px 0 0 var(--st-warn); }
+.job-decision { --dt:color-mix(in srgb, var(--st-warn) 9%, var(--surface)); --dr:color-mix(in srgb, var(--st-warn) 40%, var(--surface)); margin:16px 0 4px; }
+/* The head pins 12px below the dialog's top (half its padding) as a whole rounded card on an opaque tint; its ::after fills
+   the gap above and the corners' top edge with surface, so nothing scrolls through above it. */
+.job-decision-head { position:sticky; top:-12px; z-index:2; display:grid; gap:8px; padding:14px 16px; }
+.job-decision-head::before { content:""; position:absolute; inset:0; z-index:-1; border-radius:12px; background:var(--dt); box-shadow:inset 0 0 0 1px var(--dr), inset 4px 0 0 var(--st-warn), 0 10px 16px -12px var(--shadow); }
+.job-decision-head::after { content:""; position:absolute; top:-12px; left:0; right:0; height:24px; z-index:-2; background:var(--surface); }
+.job-decision-body { display:grid; gap:8px; padding:12px 16px 0 20px; }
+.job-decision-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; }
+.job-decision-row > .job-decision-title { flex:1 1 280px; min-width:0; }
+@media (max-width:700px) { .job-decision-head { top:-8px; } }
+/* On the job page core's .ext-view scrolls under the 53px sticky .job-page-bar (49px narrow): pin the head 12px below it. */
+.job-page .job-decision-head { top:65px; }
+@media (max-width:700px) { .job-page .job-decision-head { top:61px; } }
 :is(.job-dialog,.job-page) .job-decision-kicker { display:flex; align-items:center; gap:6px; min-width:0; margin:0; font-size:12px; color:var(--st-warn-fg); }
 .job-decision-kicker > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .job-decision-kicker .icon { flex:none; width:14px; height:14px; }
@@ -881,7 +893,7 @@ fieldset.job-options { border:0; background:none; min-width:0; padding:0; margin
 :is(.job-dialog,.job-page) .job-decision-why { margin:0; font-size:13.5px; line-height:1.5; color:var(--fg); max-width:90ch; overflow-wrap:anywhere; }
 :is(.job-dialog,.job-page) .job-decision-leaves { margin:0; font-size:12.5px; color:var(--fg-muted); overflow-wrap:anywhere; }
 .job-decision-leaves b { margin-right:6px; font-weight:600; color:var(--fg); }
-.job-actions.job-proposal-cta { margin:4px 0 0; justify-content:flex-start; }
+.job-actions.job-proposal-cta { margin:0; justify-content:flex-start; }
 .job-actions.job-proposal-cta button.primary { padding:8px 16px; border-radius:10px; }
 .job-decision-foot { display:flex; flex-wrap:wrap; align-items:flex-start; gap:2px 14px; }
 .job-decision-foot > details[open] { flex-basis:100%; }
@@ -1989,9 +2001,9 @@ details.job-talk-card[open] > summary svg { transform:none; }
 .job-talk-goto:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .job-talk-card > summary .job-talk-goto svg { width:13px; height:13px; margin:0; color:inherit; transform:none; }
 .job-talk-card > summary .job-talk-goto + svg { margin-left:0; }
-.job-decision.is-flash { animation:job-decision-flash 1.6s ease-out; }
+.job-decision.is-flash > .job-decision-head::before { animation:job-decision-flash 1.6s ease-out; }
 @keyframes job-decision-flash { 0%, 30% { box-shadow:inset 0 0 0 2px var(--st-warn), inset 4px 0 0 var(--st-warn), 0 0 0 4px color-mix(in srgb, var(--st-warn) 35%, transparent); } }
-@media (prefers-reduced-motion: reduce) { .job-decision.is-flash { animation-duration:.01s; outline:2px solid var(--st-warn); } }
+@media (prefers-reduced-motion: reduce) { .job-decision.is-flash > .job-decision-head::before { animation-duration:.01s; outline:2px solid var(--st-warn); } }
 /* The foot of an open conversation folds it, beside the box. */
 .job-talk-convo-foot { display:flex; justify-content:flex-end; margin-top:-6px; }
 .job-talk-collapse { all:unset; display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:6px; font-size:12px; color:var(--fg-muted); cursor:pointer; }

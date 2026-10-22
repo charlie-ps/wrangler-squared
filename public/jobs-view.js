@@ -1171,11 +1171,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const legend = `<p class="job-diff-legend">${count(changes.added.length, 'added', 'new')}${count(changes.edited.length, 'edited', 'edited')}${count(changes.removed.length, 'removed', 'cancelled')}${count(actions.length, 'rework', actions.length === 1 ? 'action' : 'actions')}${count(kept, 'kept', 'unchanged')}<span class="job-diff-edges"><i class="added"></i>new link<i class="gone"></i>dropped link</span></p>`;
     const planHtml = `${legend}${planGraphHtml(merged, { stateOf: (s) => liveSub(s.id) ? subState(job, liveSub(s.id)) : 'planned', markOf, editsOf: (id) => changes.edited.find((e) => e.id === id)?.fields || [], was: job.plan, openTickets, reviewWrites: job.reviewWrites, base: job.base })}
       <ul class="job-replan-changes">${items.join('')}</ul>${planMoreHtml(job, merged)}`;
-    return `<section class="job-decision${red ? ' is-red' : ''}" aria-label="Plan change waiting for you"><p class="job-decision-kicker">${ICONS.eye}<span>${esc(kicker)}</span>${queuedTag(job)}</p>
-      ${proposal.escalation?.ask ? `<p class="job-decision-ask">${esc(proposal.escalation.ask)}</p>` : ''}<h3 class="job-decision-title">${esc(heading)}${options.length > 1 && picked === 0 ? '<span class="job-option-rec">Recommended</span>' : ''}</h3>
-      ${why ? `<p class="job-decision-why">${esc(why)}</p>` : ''}${option.leaves ? `<p class="job-decision-leaves"><b>Leaves you</b> ${esc(option.leaves)}</p>` : ''}
-      <div class="job-actions job-proposal-cta tone-warn"><button class="primary" data-action="approve-replan" ${blocked ? 'disabled' : ''} title="${blocked ? 'Wrangler is still planning; approve once it stops' : 'Only the steps it changes wait until you approve or discard it'}">${ICONS.check}Approve</button><button data-action="discard-replan">${ICONS.x}Discard</button></div>
-      ${whyMore || others ? `<div class="job-decision-foot">${whyMore}${others}</div>` : ''}</section>${planHtml}`;
+    // Only the head (what it is, the heading, the buttons) pins while the rest of the card and the plan diff scroll under it.
+    const body = `${why ? `<p class="job-decision-why">${esc(why)}</p>` : ''}${option.leaves ? `<p class="job-decision-leaves"><b>Leaves you</b> ${esc(option.leaves)}</p>` : ''}${whyMore || others ? `<div class="job-decision-foot">${whyMore}${others}</div>` : ''}`;
+    return `<section class="job-decision${red ? ' is-red' : ''}" aria-label="Plan change waiting for you"><div class="job-decision-head"><p class="job-decision-kicker">${ICONS.eye}<span>${esc(kicker)}</span>${queuedTag(job)}</p>
+      ${proposal.escalation?.ask ? `<p class="job-decision-ask">${esc(proposal.escalation.ask)}</p>` : ''}<div class="job-decision-row"><h3 class="job-decision-title">${esc(heading)}${options.length > 1 && picked === 0 ? '<span class="job-option-rec">Recommended</span>' : ''}</h3>
+      <div class="job-actions job-proposal-cta tone-warn"><button class="primary" data-action="approve-replan" ${blocked ? 'disabled' : ''} title="${blocked ? 'Wrangler is still planning; approve once it stops' : 'Only the steps it changes wait until you approve or discard it'}">${ICONS.check}Approve</button><button data-action="discard-replan">${ICONS.x}Discard</button></div></div></div>
+      ${body ? `<div class="job-decision-body">${body}</div>` : ''}${planHtml}</section>`;
   }
   // The job dialog's one extended button: the single most urgent thing the job is
   // waiting on. A green PR awaiting approval merges from here, pinned to the head
