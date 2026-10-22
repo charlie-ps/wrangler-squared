@@ -299,14 +299,23 @@ test('Request changes sends the text pinned to the PR head that was on screen, a
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', at: 'pr', ref: 'h1', text: 'Pin the client to v3' }, 'pinned to h1, the head that was read, even though a new one has landed since');
 });
 
-test('a change being typed is not redrawn away by a live tick, and an escaped agent title stays escaped', (t) => {
+test('a live tick redraws the step under a change being typed, keeping the words, cursor, focus and pin, and an escaped agent title stays escaped', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), title: 'Sync <b>protos</b>', stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'h1', checkStatus: 'pending', checks: [] } }];
   f.view.update(f.data); f.q('.job-plate-graph [data-sub="api"]').dispatchEvent(f.event('click'));
-  const text = f.q('.job-change textarea'); text.value = 'Half a thought';
-  job.subJobs[0].pr.checkStatus = 'passing'; f.view.update(f.data);
-  assert.equal(f.q('.job-change textarea').value, 'Half a thought', 'the draft survives the tick');
-  assert.equal(f.q('.job-change textarea'), text, 'the same element: nothing was repainted');
+  const text = f.q('.job-change textarea'); text.value = 'Half a thought'; text.dispatchEvent(f.event('input'));
+  text.focus(); text.setSelectionRange(4, 4);
+  const before = f.q('#job-dialog').innerHTML;
+  job.subJobs[0].pr = { ...job.subJobs[0].pr, head: 'h2', checkStatus: 'failing' }; f.view.update(f.data);
+  const now = f.q('.job-change textarea');
+  assert.ok(now !== text, 'the step was redrawn, not held back by the typing');
+  assert.notEqual(f.q('#job-dialog').innerHTML, before, 'so its status moved on');
+  assert.equal(now.value, 'Half a thought', 'the draft survives the tick');
+  assert.ok(f.window.document.activeElement === now, 'the cursor stays in the box');
+  assert.deepEqual([now.selectionStart, now.selectionEnd], [4, 4], 'where it was');
+  assert.equal(f.q('[data-change-send]').disabled, false, 'and Send is still live');
+  f.q('[data-change-send]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', at: 'pr', ref: 'h1', text: 'Half a thought' }, 'still pinned to the head it was begun against');
   assert.ok(!f.q('#job-dialog').innerHTML.includes('<b>protos</b>'));
 });
 
