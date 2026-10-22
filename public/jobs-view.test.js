@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isChatSendKey, isPrimaryActionKey, primaryAction } from './jobs-view.js';
-import { wranglerUnread, CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, mergeApprovable, youReview, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
+import { wranglerUnread, CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, mergeApprovable, youReview, changeView, eventFor, writeReviewed, heldByReplan, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml, plateAsk } from './job-plates.js';
 import { subState, subLabel, subLine, jobState, jobLabel } from './job-state.js';
+import { heldBy } from '../server/job-red.js';
 
 const sub = (id, after = []) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Implement it and open the PR', sessions: [], repairs: [] });
 const plan = { context: 'Keys live in the vault; every service reads them at boot.', stories: [{ id: 'story', key: 'AUTH-1', title: 'Customers can sign in' }], subJobs: [sub('api'), sub('web', ['api'])] };
@@ -23,7 +24,9 @@ function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value:
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
   const staging = { stage: async () => ({ name: 'paste-1700000000000-aaaa1111.png' }) };
   const sent = [], usualSaves = [], sessions = [], diffs = [], diffContexts = [], onBoard = new Set();
-  const view = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => agents, onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s), ...extra });
+  const board = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => agents, onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s), ...extra });
+  // Every update carries `held` as the graph contributor stamps it (server/job-red.js withHeld), in place.
+  const view = { ...board, update: (d) => { for (const j of d.jobs) for (const s of j.subJobs || []) s.held = heldBy(j, s); board.update(d); } };
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; await window.happyDOM.close(); });
   const job = { id: 'job1', title: 'Sign-in', intent: 'Reliable sign-in', repos: ['/repo'], stage: 'planning', plan, subJobs: [], runs: [], moves: [], revision: 2, reviewMerge: true };
   const data = { jobs: [structuredClone(job)], settings: { concurrency: 2, maxRepairs: 2 } };
@@ -3564,8 +3567,7 @@ test('Fixing is Wrangler\'s: not counted in Needs you, a spinner on the card, an
   f.view.update(f.data);
   assert.deepEqual([jobState(job), jobLabel(job), subState(job, job.subJobs[0]), subLabel(job, job.subJobs[0])], ['running', 'Fixing', 'running', 'Fixing']);
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false, 'red, but handled: not yours');
-  assert.deepEqual(job.subJobs.map((s) => heldByReplan(job, s)), [false, true, false], 'web waits on api; docs carries on');
-  assert.deepEqual([...redScope(job, 'api')], ['api', 'web']);
+  assert.deepEqual(job.subJobs.map((s) => heldByReplan(job, s)), [true, true, false], 'api and web wait on the fix (api still reads Fixing); docs carries on');
   f.q('.job-plate-open[data-job="job1"]').click();
   assert.match(f.q('#job-dialog').textContent, /Fixing/);
   f.view.openDetail('job1', 'api');

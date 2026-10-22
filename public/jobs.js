@@ -534,27 +534,14 @@ export const redDeclared = (job, sub) => !!sub?.error && sub.red?.declared?.ref 
 const redReplan = (job) => (job.replan?.red && !job.cancelledAt ? job.replan.red : null);
 export const redFixing = (job, sub) => !!sub?.error && redReplan(job)?.sub === sub.id && !job.replan.proposal && !redDeclared(job, sub);
 export const redFixReady = (job, sub) => !!sub?.error && redReplan(job)?.sub === sub.id && !!job.replan.proposal && !redDeclared(job, sub);
-// Mirrors server/job-red.js redScope: the step and everything waiting on it.
-export function redScope(job, id) {
-  const scope = new Set([id]);
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const s of job.subJobs) {
-      if (scope.has(s.id) || !(edgesOf(s).some((e) => scope.has(e)) || (isWriteSub(s) && scope.has(s.by)))) continue;
-      scope.add(s.id); grew = true;
-    }
-  }
-  return scope;
-}
 // A plan change on a running job (server/job-replan.js): asked for, then a
-// proposal the human approves or discards. Mirrors the server's isFrozen.
+// proposal the human approves or discards.
 export const replanPending = (job) => !!job.replan && !job.cancelledAt;
 export const replanProposed = (job) => replanPending(job) && !!job.replan.proposal;
 // Changes sent while the wrangler was drafting, each planned in its own round once
 // the one ahead is approved or discarded (server/job-replan.js requestReplan).
 export const replanQueued = (job) => job.cancelledAt ? [] : job.replanQueue || [];
 export const queuedLabel = (job) => { const n = replanQueued(job).length; return n ? `${n} change${n === 1 ? '' : 's'} queued` : ''; };
-export const isFrozen = (sub) => !!sub.cancelledAt || ['deployment', 'cleanup', 'done'].includes(sub.stage) || !!sub.mergedAt || !!sub.deployed;
 // Mirrors server/job-red.js touchedBy: what a waiting proposal edits, cancels or
 // acts on, in any of its options.
 export function touchedBy(proposal) {
@@ -566,13 +553,10 @@ export function touchedBy(proposal) {
   }
   return ids;
 }
-// A plan change never pauses the job (server/job-red.js heldBy): only the step
-// the idea was typed on and the sub-jobs a waiting proposal touches are frozen
-// where they stand (server/job-store.js refuses their approvals and moves, the
-// runner their launches and merges), plus, for a red step's replan, that step
-// and what follows it. One with a step still running carries on.
-export const heldByReplan = (job, sub) => replanPending(job) && !!sub?.stage && !isFrozen(sub) && !sub.error && !liveRun(job, sub)
-  && (job.replan.source?.sub === sub.id || touchedBy(job.replan.proposal).has(sub.id) || (!!redReplan(job) && redScope(job, redReplan(job).sub).has(sub.id)));
+// A plan change never pauses the job: the server stamps `held` on each step its
+// runner will not launch or merge and its store will not approve (server/job-red.js
+// heldBy, withHeld), so the board reads that rather than a copy of the rule.
+export const heldByReplan = (job, sub) => !!sub?.held;
 export function jobNeedsReview(job, sub) {
   if (job.error) return true;
   if (sub?.error) return !redFixing(job, sub);

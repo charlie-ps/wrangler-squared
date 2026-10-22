@@ -3,6 +3,7 @@ import { JobStore } from './job-store.js';
 import { withJobSpend, withRunStatus } from './job-spend.js';
 import { TOOLS, hideTool } from './tools.js';
 import { withSpendLimit } from './job-budget.js';
+import { withHeld } from './job-red.js';
 import { HANDLERS } from './handlers.js';
 import { runnerFor, spendFor, noteGraph, isAutomated, runForSession } from './jobs.js';
 
@@ -84,7 +85,7 @@ export default {
     const spend = spendFor(host);
     spend.noteLive(graph.sessions);
     const snapshot = host.stores.jobs.data;
-    return { jobs: withRunStatus(withSpendLimit(withJobSpend(snapshot, spend.current(snapshot.jobs))), graph.sessions) };
+    return { jobs: withRunStatus(withHeld(withSpendLimit(withJobSpend(snapshot, spend.current(snapshot.jobs)))), graph.sessions) };
   },
 
   session: {

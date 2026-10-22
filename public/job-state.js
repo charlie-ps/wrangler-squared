@@ -37,7 +37,8 @@ export function subState(job, sub) {
   if (!job.error && redFixReady(job, sub)) return 'needs';
   if (job.error || cancelledDependencies(job, sub).length || (eventFor(job, sub) && !deploymentStalled(sub))) return 'failing';
   if (job.paused || budgetHeld(job)) return 'paused';
-  if (heldByReplan(job, sub)) return inProposal(job, sub) ? 'change' : 'paused';
+  // Held, a step whose run is still going shows it going: only its next launch or merge waits.
+  if (heldByReplan(job, sub)) return inProposal(job, sub) ? 'change' : jobStatus(job, sub).tone === 'working' ? 'running' : 'paused';
   if (jobNeedsReview(job, sub)) return 'needs';
   if (wranglerUnread(job, sub).length) return 'read';
   if (jobStatus(job, sub).tone === 'working') return 'running';
@@ -57,9 +58,9 @@ export function jobState(job) {
     return job.stage === 'backlog' ? 'planned' : 'queued';
   }
   // Sub-jobs frozen by a pending plan change roll up to the change itself:
-  // wrangling, then a proposal that needs the human.
+  // wrangling, then a proposal that needs the human. A red one keeps its own state.
   const halted = job.paused || budgetHeld(job);
-  const states = job.subJobs.filter((s) => halted || !heldByReplan(job, s)).map((s) => subState(job, s)).filter((s) => s !== 'dropped');
+  const states = job.subJobs.filter((s) => halted || !heldByReplan(job, s) || s.error).map((s) => subState(job, s)).filter((s) => s !== 'dropped');
   if (replanProposed(job) && !halted) states.push('change');
   else if (replanPending(job) && !halted) states.push('running');
   if (wranglerUnread(job).length) states.push('read');

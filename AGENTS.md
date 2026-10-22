@@ -218,8 +218,12 @@ text as public as the rest of this repo.
   saved with the old single `job.ask` is migrated on load (`migrateTalk`). Open PR #209
   keeps a step's sent ideas on `job.replan.asks`; once both land, the step dialog
   should draw them from the thread, not twice.
-- **A plan change never pauses the job** (`server/job-red.js heldBy`, mirrored as
-  `heldByReplan`). While the wrangler drafts, only the step the idea was typed on
+- **A plan change never pauses the job** (`server/job-red.js heldBy`, the one rule:
+  the graph contributor stamps it on every step as `sub.held` (`withHeld`) and the
+  board's `heldByReplan` only reads that, so never re-derive it client-side). A held
+  step's run carries on but nothing new launches, merges or is approved; a red step is
+  held, a frozen one (`isFrozen`: merged, delivered, a session back for its writes
+  alone) never is. While the wrangler drafts, only the step the idea was typed on
   (`job.replan.source.sub`) waits; once its proposal is up, so does every step it
   edits, cancels or acts on in any option (`touchedBy`); a red replan adds its
   `redScope`. Everything else launches, merges and gets approved, so a proposal
@@ -250,8 +254,8 @@ text as public as the rest of this repo.
   with an `error` is sent to the planner by the runner's `triageRed` when
   `settings.maxReplans` > 0 (0 = the old "red waits for you"), one replan at a
   time, stamped `run.red` and counted per step; the replan carries `job.replan.red
-  = {sub, auto, n}` and holds only that step and its dependants (`heldBy`, mirrored
-  client-side as `heldByReplan`/`redScope`: use them, never `!job.replan`, for
+  = {sub, auto, n}` and holds only that step and its dependants (`heldBy`, read
+  client-side as the stamped `sub.held` through `heldByReplan`: use it, never `!job.replan`, for
   per-sub gates), plus whatever its proposal touches. The prompt lists the other red
   steps so one cause gets one proposal. The sixth checkpoint `reviewRed` (true = "You decide", the
   default) only chooses whether the proposal waits; Accept red, Mark, Recover and
