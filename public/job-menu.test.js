@@ -120,7 +120,7 @@ test('right-clicking a plate opens its menu; Start, Copy and Cancel do what they
   rows = menuOf('job_r');
   row(rows, 'Cancel job').click();
   const dialog = document.getElementById('job-dialog');
-  assert.equal(dialog.querySelector('h2').textContent, 'Cancel this job?', 'asks first');
+  assert.equal(dialog.querySelector('h2').textContent, 'Cancel this job?', 'asks first, in a dialog over the board');
   assert.ok(!sent.some((m) => m.action === 'cancel-job'), 'nothing sent before the confirm');
   dialog.querySelector('[data-cancel-job]').click();
   assert.deepEqual(sent.at(-1), { type: 'job-action', id: 'job_r', action: 'cancel-job' });

@@ -16,7 +16,7 @@ import { createEarlyAdopterGesture } from './early-adopter.js';
 //  - `jobsView.update(graph.jobs)` on every graph  → update(el, session, graph).
 //  - `job-created` / `job-action-complete` replies closed the dialog and toasted
 //    → the server's `host.broadcast` reaches us as an `ext:jobs` frame through
-//    the registrar's `onMessage`, so the dialog closes on the reply again; the
+//    the registrar's `onMessage`, so the job page goes up a level on the reply; the
 //    toast is drawn in the view's own host because the board's is app.js-private.
 //  - "Open session" switched view and selected the card, or sent `resume` for
 //    an archived one → `api.openSession(sid)` (host api 1.8) does exactly that
@@ -98,6 +98,7 @@ export default {
         if (!target) return;
         loc.hash = VIEW_HASH;
         if (target.jobId) view?.openDetail(target.jobId, target.subId);
+        else view?.closeDetail();
       }) });
     }
 
@@ -179,10 +180,10 @@ export default {
       label: 'Jobs',
       icon: ICONS.jobs,
       mount(el, api) {
-        // jobs-view.js finds both by id, as it did in core's index.html. The
-        // dialog goes on <body>, not in the host: a <dialog> under a display:none
-        // ancestor cannot showModal(), and the host is hidden whenever another
-        // view is active.
+        // jobs-view.js finds both by id, as it did in core's index.html. A job is a
+        // page inside #jobs; the dialog (an idea, New idea, Automation settings) goes on
+        // <body>, not in the host: a <dialog> under a display:none ancestor cannot
+        // showModal(), and the host is hidden whenever another view is active.
         el.innerHTML = '<section id="jobs" aria-label="Wrangler²"></section>';
         viewHost = el;
         dialog = document.createElement('dialog');

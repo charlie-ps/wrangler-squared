@@ -378,6 +378,16 @@ text as public as the rest of this repo.
 - **Client modules import their leaves RELATIVELY** (`./util.js`, `./icons.js`,
   vendored) rather than from the board by absolute URL, so the same files load
   under node for `public/*.test.js`. Don't switch them to `/util.js`.
+- **A job is a page, not a dialog** (`public/jobs-view.js` `page`, `#job-page` in
+  `#jobs`): opening one hides the board (`#jobs.jobs-paging`) under a sticky bar
+  with Back and the trail Jobs › job › step; Back and Esc go up one level (Esc
+  stops at the job), and a finished action that closed the old dialog goes up one
+  level too (`up`). `detail` is the old dialog body, so its CSS is
+  `:is(.job-dialog,.job-page)`. An idea not yet a job (`ideaOpen`: in conversation or
+  in the backlog, no plan) still opens on `#job-dialog`, as do New idea, Automation
+  settings and a plate's Cancel; `show` moves it onto the page once it has a plan.
+  `detail` is whichever of the two is drawn on. A reload lands on the board
+  (`TODO(host-api view-path)`, gap 25).
 - **The `<dialog>` is appended to `<body>`, not to the view host**: a dialog under
   a `display:none` ancestor cannot `showModal()`, and the host is hidden whenever
   another view is active.

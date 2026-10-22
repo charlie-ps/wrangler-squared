@@ -186,24 +186,25 @@ test('starting a HUMAN task keeps its output draft open through the board reply 
   const work = job({ stage: 'active', plan: { context: '', stories: [], subJobs: [human] }, subJobs: [human] });
   c.update(el, null, graphWith([work]));
   el.querySelector('.job-plate-graph [data-sub="key"]').dispatchEvent(new window.Event('click', { bubbles: true }));
-  const dialog = window.document.getElementById('job-dialog');
-  dialog.querySelector('textarea[name="output"]').value = 'ssh-ed25519 AAAA\nuser@host';
-  dialog.querySelector('[data-action="start-human"]').click();
+  const page = el.querySelector('#job-page');
+  page.querySelector('textarea[name="output"]').value = 'ssh-ed25519 AAAA\nuser@host';
+  page.querySelector('[data-action="start-human"]').click();
   assert.equal(sent.at(-1).action, 'start-human');
   dispatch({ event: 'job-action-complete', jobId: work.id, subJobId: 'key', action: 'start-human' });
-  assert.equal(dialog.open, true);
+  assert.equal(page.querySelector('.job-page-crumbs [aria-current]').textContent, 'Get key');
   dispatch({ event: 'job-action-complete', jobId: 'another-job', action: 'pause' });
-  assert.equal(dialog.open, true, 'another client action must not discard a HUMAN draft');
+  assert.equal(page.querySelector('.job-page-crumbs [aria-current]').textContent, 'Get key', 'another client action must not discard a HUMAN draft');
   human.state = 'doing'; c.update(el, null, graphWith([work]));
-  assert.equal(dialog.querySelector('textarea[name="output"]').value, 'ssh-ed25519 AAAA\nuser@host');
+  assert.equal(page.querySelector('textarea[name="output"]').value, 'ssh-ed25519 AAAA\nuser@host');
   const originalFormData = globalThis.FormData;
   globalThis.FormData = window.FormData;
-  try { dialog.querySelector('#job-human-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }
+  try { page.querySelector('#job-human-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }
   finally { globalThis.FormData = originalFormData; }
   assert.equal(sent.at(-1).action, 'finish-human');
   assert.equal(sent.at(-1).output, 'ssh-ed25519 AAAA\nuser@host');
   dispatch({ event: 'job-action-complete', jobId: work.id, subJobId: 'key', action: 'finish-human' });
-  assert.equal(dialog.open, false);
+  assert.equal(page.hidden, false);
+  assert.equal(page.querySelector('.job-page-crumbs [aria-current]').textContent, work.title, 'done, the page goes up to the job');
 });
 
 test('a toast clears itself, and a frame arriving while no view is mounted is harmless', (t) => {
@@ -272,13 +273,13 @@ test('Open/Restore session reads the board off the graph and hands the card to a
   const { window, el, c, sent, opened } = mountClient();
   c.update(el, null, graphWith([activeJob()], [{ sessionId: 's1', status: 'idle' }]));
   el.querySelector('[data-sub="api"]').dispatchEvent(new window.Event('click', { bubbles: true }));
-  const dialog = window.document.getElementById('job-dialog');
-  assert.equal(dialog.querySelector('#job-session').textContent, 'Restore session', 'the latest run is archived; an earlier one on the board does not count');
+  const page = el.querySelector('#job-page');
+  assert.equal(page.querySelector('#job-session').textContent, 'Restore session', 'the latest run is archived; an earlier one on the board does not count');
   c.update(el, null, graphWith([activeJob()], [{ sessionId: 's2', status: 'working' }]));
-  assert.equal(dialog.querySelector('#job-session').textContent, 'Open session', 'the open detail re-labels on the next graph');
-  dialog.querySelector('#job-session').dispatchEvent(new window.Event('click', { bubbles: true }));
+  assert.equal(page.querySelector('#job-session').textContent, 'Open session', 'the open detail re-labels on the next graph');
+  page.querySelector('#job-session').dispatchEvent(new window.Event('click', { bubbles: true }));
   assert.deepEqual(opened, ['s2'], 'the latest run, live or archived');
-  assert.equal(dialog.hasAttribute('open'), false);
+  assert.equal(page.hidden, false, 'the page stays, to come back to');
   assert.deepEqual(sent, [], 'no frame of our own: the board navigates');
 });
 
@@ -286,57 +287,55 @@ test('Open/Restore session reads the board off the graph and hands the card to a
 // over the grid, and closing it comes back to this view with the same detail —
 // unless the reader went somewhere else on the way out.
 const tick = () => new Promise((r) => setTimeout(r));
-function reviewFromDialog(sessions = []) {
+function reviewFromPage(sessions = []) {
   const m = mountClient();
   m.c.update(m.el, null, graphWith([activeJob({ worktree: { path: '/wt/api', branch: 'fix/api' } })], sessions));
   m.el.querySelector('[data-sub="api"]').dispatchEvent(new m.window.Event('click', { bubbles: true }));
-  m.dialog = m.window.document.getElementById('job-dialog');
-  m.dialog.querySelector('#job-diff').dispatchEvent(new m.window.Event('click', { bubbles: true }));
+  m.page = m.el.querySelector('#job-page');
+  m.page.querySelector('#job-diff').dispatchEvent(new m.window.Event('click', { bubbles: true }));
   return m;
 }
 
 test('Review code in Wrangler opens the diff through api.openDiff, not openSession', () => {
-  const { dialog, diffs, opened, sent } = reviewFromDialog([{ sessionId: 's1', status: 'idle' }]);
+  const { page, diffs, opened, sent } = reviewFromPage([{ sessionId: 's1', status: 'idle' }]);
   assert.equal(diffs.length, 1);
   assert.equal(diffs[0].sid, 's1', 'the latest run on the board: s2 is archived');
   assert.equal(typeof diffs[0].onClose, 'function');
   assert.deepEqual(opened, []);
   assert.deepEqual(sent, []);
-  assert.equal(dialog.hasAttribute('open'), false);
+  assert.equal(page.hidden, false, 'the page stays under the board');
 });
 
 test('closing the diff returns to the Jobs view and re-opens the same detail', async () => {
-  const { window, dialog, diffs, board } = reviewFromDialog();
+  const { window, page, diffs, board } = reviewFromPage();
   assert.equal(diffs[0].sid, 's2', 'nothing on the board: the latest run');
   window.location.hash = '#session=s2'; board.selected = 's2';
   diffs[0].onClose();
   await tick();
   assert.equal(window.location.hash, '#view=ext:jobs:board');
-  assert.equal(dialog.hasAttribute('open'), true);
-  assert.match(dialog.textContent, /Deliver api/);
+  assert.equal(page.hidden, false);
+  assert.match(page.querySelector('.job-page-main').textContent, /Deliver api/);
 });
 
 test('closing the diff by leaving the grid or picking another card stays where the reader went', async () => {
-  const left = reviewFromDialog();
+  const left = reviewFromPage();
   left.window.location.hash = '#view=search';
   left.diffs[0].onClose();
   await tick();
   assert.equal(left.window.location.hash, '#view=search');
-  assert.equal(left.dialog.hasAttribute('open'), false);
 
-  const other = reviewFromDialog();
+  const other = reviewFromPage();
   other.board.selected = 'elsewhere';
   other.diffs[0].onClose();
   await tick();
   assert.notEqual(other.window.location.hash, '#view=ext:jobs:board');
-  assert.equal(other.dialog.hasAttribute('open'), false);
 });
 
-test('a job gone by the time the diff closes returns to Jobs without a dialog', async () => {
-  const { window, el, c, dialog, diffs } = reviewFromDialog();
+test('a job gone by the time the diff closes returns to the Jobs board', async () => {
+  const { window, el, c, page, diffs } = reviewFromPage();
   c.update(el, null, graphWith([]));
   diffs[0].onClose();
   await tick();
   assert.equal(window.location.hash, '#view=ext:jobs:board');
-  assert.equal(dialog.hasAttribute('open'), false);
+  assert.equal(page.hidden, true);
 });
