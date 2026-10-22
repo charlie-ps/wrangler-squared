@@ -92,7 +92,13 @@ export function keepFields(container, doc = container.ownerDocument) {
         else if (el.value !== v) { el.value = v; el.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true })); }
       }
       if (focus?.key !== key) return;
+      // The redrawn box was already styled unfocused (a layout read in between), so its :focus-within
+      // would fade in from grey on every tick; it takes its focused look with transitions off.
+      const boxes = [];
+      for (let n = el; n && n !== container; n = n.parentElement) { boxes.push([n, n.style.transition]); n.style.transition = 'none'; }
       el.focus({ preventScroll: true });
+      el.getBoundingClientRect();
+      for (const [n, t] of boxes) n.style.transition = t;
       try { if (focus.start != null) el.setSelectionRange(focus.start, focus.end, focus.dir || 'none'); } catch { /* a field type with no selection */ }
       el.scrollTop = focus.top;
     });
