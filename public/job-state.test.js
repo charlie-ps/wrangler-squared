@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, jobNeedsYou, mainWaiting } from './job-state.js';
 import { plateHtml, plateAsk } from './job-plates.js';
 import { jobStatus } from './jobs.js';
+import { heldBy } from '../server/job-red.js';
 
 const sub = (id, over = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after: [], brief: 'b', sessions: [], repairs: [], stage: 'implementation', ...over });
 const job = (over = {}) => ({ id: 'j', title: 'Job', intent: 'x', repos: [], stage: 'active', plan: null, subJobs: [], runs: [], moves: [], reviewMerge: true, ...over });
 const pr = (over = {}) => ({ url: 'https://github.com/org/repo/pull/142', head: 'h1', checkStatus: 'pending', checks: [], ...over });
 const run = (subJobId, over = {}) => ({ id: `r_${subJobId}`, subJobId, phase: 'implementation', stopped: false, status: 'working', ...over });
+// What the graph contributor stamps (server/job-red.js withHeld), in place.
+const stamped = (j) => { for (const s of j.subJobs) s.held = heldBy(j, s); return j; };
 const stateOf = (s, over = {}) => { const j = job({ subJobs: [s], ...over }); return subState(j, s); };
 
 test('every state is a tone, a glyph and a name, and the order puts the urgent first', () => {
@@ -148,7 +151,7 @@ test('a job needs you exactly when its plate asks, once however many of its step
     ['prompt waiting on a paused job', job({ paused: true, subJobs: [sub('a')], runs: [run('a', { status: 'needs-you', sessionId: 'card' })] }), true],
     ['cancelled, cleaning up a red step', job({ cancelledAt: 1, subJobs: [sub('a', { stage: 'cleanup', cancelledAt: 1, error: 'cleanup failed' })] }), false],
     ['finished with a red step', job({ stage: 'done', subJobs: [sub('a', { stage: 'done', error: 'cleanup failed' })] }), false],
-    ['step held by a replan', job({ replan: { at: 1, source: { sub: 'a' } }, subJobs: [review('a')], runs: [run(null, { phase: 'planning' })] }), false],
+    ['step held by a replan', stamped(job({ replan: { at: 1, source: { sub: 'a' } }, subJobs: [review('a')], runs: [run(null, { phase: 'planning' })] })), false],
     ['running', job({ subJobs: [sub('a')], runs: [run('a')] }), false],
   ];
   for (const [name, j, expected] of cases) {
@@ -230,6 +233,7 @@ test('a red job with a plan change waiting is the amber plan change, while its r
   api.red = { declared: { at: 1, ref: `${api.error}|h1||0` } };
   assert.deepEqual([jobState(j), subState(j, api), subLabel(j, api)], ['failing', 'failing', 'Declared red']);
   j.replan = { at: 2, source: { sub: 'api', at: 'pr', ref: 'h1' }, convo: 'c1', proposal: { id: 'run_p', plan: { subJobs: [] }, changes: { added: ['fix'], edited: [], removed: [], kept: ['api', 'web'], frozen: [] }, actions: [] } };
+  stamped(j);
   assert.deepEqual([jobState(j), jobLabel(j), jobNeedsYou(j)], ['change', 'Plan change ready', true]);
   assert.deepEqual([subState(j, api), subLabel(j, api)], ['failing', 'Declared red'], 'the step itself is still red');
   assert.deepEqual([plateAsk(j).tone, plateAsk(j).label, plateAsk(j).button, plateAsk(j).sub], ['warn', 'Plan change ready', 'Review', '']);
@@ -241,10 +245,20 @@ test('a red job with a plan change waiting is the amber plan change, while its r
 
 test('a step a proposal acts on reads as the plan change; one it leaves alone keeps its own ask', () => {
   const touched = sub('a', { kind: 'session' }), merge = sub('m', { stage: 'pr', pr: pr({ checkStatus: 'passing' }) });
-  const j = job({ subJobs: [touched, merge], replan: { at: 1, proposal: { id: 'p', plan: { subJobs: [] }, changes: { added: [], edited: [{ id: 'a' }], removed: [], kept: ['m'], frozen: [] }, actions: [] } } });
+  const j = stamped(job({ subJobs: [touched, merge], replan: { at: 1, proposal: { id: 'p', plan: { subJobs: [] }, changes: { added: [], edited: [{ id: 'a' }], removed: [], kept: ['m'], frozen: [] }, actions: [] } } }));
   assert.deepEqual([subState(j, touched), subLabel(j, touched)], ['change', 'Plan change ready']);
   assert.deepEqual([subState(j, merge), subLabel(j, merge)], ['needs', 'Merge #142'], 'Merge stays amber');
   assert.equal(jobState(j), 'change');
+});
+
+test('the board reads held from the server: a step is held exactly when the server holds it', () => {
+  const writes = sub('w', { kind: 'session', stage: 'done', writesOnly: { from: 'done' } }), working = sub('r');
+  const j = stamped(job({ subJobs: [writes, working], runs: [run('r')], replan: { at: 1, proposal: { id: 'p', plan: { subJobs: [] }, changes: { added: [], edited: [{ id: 'w' }, { id: 'r' }], removed: [], kept: [], frozen: [] }, actions: [] } } }));
+  assert.deepEqual([writes.held, working.held], [false, true], 'a session back for its writes alone launches; a working step merges nothing new');
+  assert.notEqual(subLabel(j, writes), 'Held for the plan change');
+  assert.deepEqual([subState(j, working), subLabel(j, working)], ['change', 'Plan change ready'], 'its run carries on, but the proposal is what to read');
+  delete working.held;
+  assert.equal(subState(j, working), 'running', 'nothing stamped, nothing held: the board never re-derives it');
 });
 
 test('a wrangler answer is to read until its conversation was shown, then the job is what it was', () => {

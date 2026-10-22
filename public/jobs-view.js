@@ -29,7 +29,7 @@ import { mountSandbox } from './job-sandbox.js';
 import { whatsNewHtml } from './updates.js';
 import { tabsHtml, panelHtml, bindTabs } from './settings-tabs.js';
 import { createIdeaCorner } from './idea-corner.js';
-import { createRedrawHold, keepScrollX } from './redraw-hold.js';
+import { createRedrawHold, keepFields, keepScrollX } from './redraw-hold.js';
 import { historyHtml } from './job-thread.js';
 import { replanAsks, latestAsk } from './replan-asks.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
@@ -578,19 +578,26 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const chip = detail.querySelector('.job-appbar .job-chip-state');
       if (chip) chip.outerHTML = stateChip(jobState(reviewed), jobLabel(reviewed));
     }
-    // A picture waiting in a box is as much a draft as words are.
-    const boxes = new Set([...detail.querySelectorAll('.job-change')].map((b) => b.dataset.changeConvo || ''));
-    const typing = askImages.some((i) => boxes.has(i.box)) || [...detail.querySelectorAll('.job-change textarea, [data-approve-note], [data-retry-note]')].some((t) => t.value);
-    // An empty reply box with the cursor in it is someone reading the thread: it redraws, keeping the cursor.
-    const composing = document.activeElement?.closest?.('[data-idea-composer]');
+    // Typing holds nothing: the step's status keeps moving under a half-written idea or note,
+    // and what was typed, the cursor and the pictures are carried into the redrawn fields.
+    // Only an open form (a write, a cancel question) is left alone, being a decision in progress.
     const humanForm = detail.querySelector('#job-human-form');
     const currentSub = humanForm && data.jobs.find((j) => j.id === selected?.jobId)?.subJobs.find((s) => s.id === selected?.subId);
-    if (paged() && selected && !planDraft && !typing && !proofView && (!detail.querySelector('form') && (composing || !detail.contains(document.activeElement?.closest('input, textarea, select')))
-      || humanForm && currentSub && (currentSub.stage !== 'human' || humanForm.dataset.state !== currentSub.state))) {
-      const output = humanForm?.elements.output.value;
-      renderDetail();
-      if (output != null && detail.querySelector('#job-human-form')) detail.querySelector('#job-human-form').elements.output.value = output;
-      if (composing) detail.querySelector('[data-idea-composer] textarea')?.focus();
+    if (paged() && selected && !planDraft && !proofView && !detail.querySelector('form')
+      || humanForm && currentSub && (currentSub.stage !== 'human' || humanForm.dataset.state !== currentSub.state)) {
+      const fields = keepFields(detail);
+      keepBoxes(); renderDetail(); fields();
+    }
+  }
+  // An idea box with something in it keeps its conversation across a tick: a reply landing
+  // elsewhere must not move the words to another target.
+  function keepBoxes() {
+    const subId = selected?.subId || '';
+    for (const box of detail.querySelectorAll('.job-change:not([data-idea-composer])')) {
+      const key = box.dataset.changeConvo || '', text = box.querySelector('textarea').value;
+      if (!text && !boxImages(key).length) continue;
+      boxDrafts.set(`${subId}|${key}`, text);
+      if (!replyTo.has(subId)) replyTo.set(subId, key);
     }
   }
   function show(html) {
@@ -994,8 +1001,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // foot of the conversation it replies to, the only one open (job-talk.js), else
   // below them all for a new one. Its chip says who hears it and where, and its ×
   // folds that conversation to start a new one instead. It is
-  // never refused as stale: the wrangler judges a step that moved since. Not a <form>, so a tick's redraw is held
-  // back only while something is typed (renderBoards), never by a box's presence.
+  // never refused as stale: the wrangler judges a step that moved since. Not a <form>, so a
+  // tick redraws it, carrying over what is typed (keepBoxes), never held by a box's presence.
   // At rest it is one line; focus, words or a picture open it.
   function boxHtml(job, sub, view, key) {
     const convo = key ? convosOf(job).find((c) => c.id === key) || null : null;
@@ -1428,7 +1435,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const held = heldByReplan(job, sub);
     const yours = isHumanSub(sub) && sub.stage === 'human' && !held;
     const hints = [dropped, orphan,
-      held ? (job.replan?.red ? 'Held while Wrangler fixes a red step this one waits on: nothing here starts, merges or can be approved until the fix is in or you decide on it.' : 'Frozen while the plan is being changed: nothing here starts, merges or can be approved until you approve or discard the change on the job.') : '',
+      held ? (job.replan?.red?.sub === sub.id ? 'Held while Wrangler fixes it: nothing here starts, merges or can be approved until the fix is in or you decide on it.' : job.replan?.red ? 'Held while Wrangler fixes a red step this one waits on: nothing here starts, merges or can be approved until the fix is in or you decide on it.' : 'Frozen while the plan is being changed: nothing here starts, merges or can be approved until you approve or discard the change on the job.') : '',
       isSessionSub(sub) && sub.stage === 'review' ? 'Approving marks the session done and lets the work depending on it start.' : '',
       parkedRun(job, sub) ? (draftsWaiting(job, sub).length ? `Paused on ${draftsWaiting(job, sub).length} draft${draftsWaiting(job, sub).length === 1 ? '' : 's'} for your review. Approve, edit or skip each; once all are decided the session is told which to make and carries on.` : 'Every draft is decided: the session is being told which writes to make.') : '',
       sessionDormant(job, sub) ? `${triggerLine(job, sub)}: it is dropped itself once ${trigger?.title || sub.on.sub} lands.` : '',

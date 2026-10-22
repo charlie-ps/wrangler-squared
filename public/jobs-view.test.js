@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { initJobsView, isChatSendKey, isPrimaryActionKey, primaryAction } from './jobs-view.js';
-import { wranglerUnread, CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, mergeApprovable, youReview, changeView, eventFor, writeReviewed, heldByReplan, redScope, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
+import { wranglerUnread, CHECKPOINTS, reviewDefaultsOf, jobCards, jobStatus, jobNeedsReview, dependencyLevels, mergeHeldByComments, mergeApprovable, youReview, changeView, eventFor, writeReviewed, heldByReplan, changeRoute, actionLine, editLine, pinLine } from './jobs.js';
 import { threadHtml } from './job-thread.js';
 import { planGraphHtml, layoutGraphEdges } from './job-graph.js';
 import { plateHtml, plateAsk } from './job-plates.js';
 import { subState, subLabel, subLine, jobState, jobLabel } from './job-state.js';
+import { heldBy } from '../server/job-red.js';
 
 const sub = (id, after = []) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after, brief: 'Implement it and open the PR', sessions: [], repairs: [] });
 const plan = { context: 'Keys live in the vault; every service reads them at boot.', stories: [{ id: 'story', key: 'AUTH-1', title: 'Customers can sign in' }], subJobs: [sub('api'), sub('web', ['api'])] };
@@ -23,7 +24,9 @@ function fixture(t, agents = [{ id: 'claude', label: 'Claude', models: [{ value:
   document.body.innerHTML = '<section id="jobs"></section><dialog id="job-dialog"></dialog>';
   const staging = { stage: async () => ({ name: 'paste-1700000000000-aaaa1111.png' }) };
   const sent = [], usualSaves = [], sessions = [], diffs = [], diffContexts = [], onBoard = new Set();
-  const view = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => agents, onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s), ...extra });
+  const board = initJobsView({ send: (m) => (m.patch?.usualPick ? usualSaves : sent).push(structuredClone(m)), stageImage: (blob) => staging.stage(blob), frameOf: async () => ({ mime: 'image/png', dataBase64: 'cG5n' }), getAgents: () => agents, onSession: (s) => sessions.push(s), onDiff: (s, ctx) => { diffs.push(s); diffContexts.push(ctx); }, onBoard: (s) => onBoard.has(s), ...extra });
+  // Every update carries `held` as the graph contributor stamps it (server/job-red.js withHeld), in place.
+  const view = { ...board, update: (d) => { for (const j of d.jobs) for (const s of j.subJobs || []) s.held = heldBy(j, s); board.update(d); } };
   t.after(async () => { globalThis.document = prevDoc; globalThis.FormData = prevFormData; await window.happyDOM.close(); });
   const job = { id: 'job1', title: 'Sign-in', intent: 'Reliable sign-in', repos: ['/repo'], stage: 'planning', plan, subJobs: [], runs: [], moves: [], revision: 2, reviewMerge: true };
   const data = { jobs: [structuredClone(job)], settings: { concurrency: 2, maxRepairs: 2 } };
@@ -322,14 +325,23 @@ test('Request changes sends the text, and nothing else: a head that landed since
   assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', text: 'Pin the client to v3' }, 'no pin to h1: the new head is the wrangler\'s to judge');
 });
 
-test('a change being typed is not redrawn away by a live tick, and an escaped agent title stays escaped', (t) => {
+test('a live tick redraws the step under a change being typed, keeping the words, cursor and focus, and an escaped agent title stays escaped', (t) => {
   const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), title: 'Sync <b>protos</b>', stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'h1', checkStatus: 'pending', checks: [] } }];
   f.view.update(f.data); f.q('.job-plate-graph [data-sub="api"]').dispatchEvent(f.event('click'));
-  const text = f.q('.job-change textarea'); text.value = 'Half a thought';
-  job.subJobs[0].pr.checkStatus = 'passing'; f.view.update(f.data);
-  assert.equal(f.q('.job-change textarea').value, 'Half a thought', 'the draft survives the tick');
-  assert.equal(f.q('.job-change textarea'), text, 'the same element: nothing was repainted');
+  const text = f.q('.job-change textarea'); text.value = 'Half a thought'; text.dispatchEvent(f.event('input'));
+  text.focus(); text.setSelectionRange(4, 4);
+  const before = f.q('#job-page .job-page-main').innerHTML;
+  job.subJobs[0].pr = { ...job.subJobs[0].pr, head: 'h2', checkStatus: 'failing' }; f.view.update(f.data);
+  const now = f.q('.job-change textarea');
+  assert.ok(now !== text, 'the step was redrawn, not held back by the typing');
+  assert.notEqual(f.q('#job-page .job-page-main').innerHTML, before, 'so its status moved on');
+  assert.equal(now.value, 'Half a thought', 'the draft survives the tick');
+  assert.ok(f.window.document.activeElement === now, 'the cursor stays in the box');
+  assert.deepEqual([now.selectionStart, now.selectionEnd], [4, 4], 'where it was');
+  assert.equal(f.q('[data-change-send]').disabled, false, 'and Send is still live');
+  f.q('[data-change-send]').click();
+  assert.deepEqual(f.sent.at(-1), { type: 'job-action', id: 'job1', subJobId: 'api', action: 'request-change', text: 'Half a thought' }, 'sent as typed, with no pin: the wrangler judges the moved head');
   assert.ok(!f.q('#job-page .job-page-main').innerHTML.includes('<b>protos</b>'));
   assert.deepEqual([f.q('.job-page-crumbs [aria-current]').textContent, f.q('.job-page-crumbs b')], ['Sync <b>protos</b>', null], 'the trail names the step, escaped');
 });
@@ -3589,8 +3601,7 @@ test('Fixing is Wrangler\'s: not counted in Needs you, a spinner on the card, an
   f.view.update(f.data);
   assert.deepEqual([jobState(job), jobLabel(job), subState(job, job.subJobs[0]), subLabel(job, job.subJobs[0])], ['running', 'Fixing', 'running', 'Fixing']);
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false, 'red, but handled: not yours');
-  assert.deepEqual(job.subJobs.map((s) => heldByReplan(job, s)), [false, true, false], 'web waits on api; docs carries on');
-  assert.deepEqual([...redScope(job, 'api')], ['api', 'web']);
+  assert.deepEqual(job.subJobs.map((s) => heldByReplan(job, s)), [true, true, false], 'api and web wait on the fix (api still reads Fixing); docs carries on');
   f.q('.job-plate-open[data-job="job1"]').click();
   assert.match(f.q('#job-page').textContent, /Fixing/);
   f.view.openDetail('job1', 'api');

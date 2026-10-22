@@ -157,8 +157,14 @@ text as public as the rest of this repo.
   `job.replanQueue` with its convo, source and images (`requestReplan` returns `{queued}`, its
   conversation says so), and `startQueued` makes the next one its own replan once the current one is
   approved or discarded and no planner is still drafting (the runner retries it each tick).
-  The box is not a `<form>`, so
-  a tick's redraw is held back only while text is typed in it. Its pictures are
+  Typing never holds a tick's redraw of a step's dialog, so its status stays live:
+  `redraw-hold.js keepFields` carries every edited field's value, the focused one's cursor
+  and focus into the redrawn markup (fields matched by attributes and box, `data-keep`
+  popup or `data-change-convo`), and `jobs-view.js keepBoxes` keeps a box with words or a
+  picture on its conversation (`replyTo`, `boxDrafts`). Only an open `<form>` (a write, a cancel
+  question), a plan draft, the proof viewer, or a press or selection (`createRedrawHold`)
+  still holds the redraw. A test never `assert.equal`s two DOM nodes: a failing diff of
+  two happy-dom elements allocates without bound; use `assert.ok(a === b)`. The box's pictures are
   kept (`handlers.js prepare`: the round's folder, else `ideasDir`) and reach the
   planner as paths in the idea's words; a `forward` to the step it was typed on
   carries that round's pictures as thread images. What was sent stays as a bubble (`askSent`) until the dialog
@@ -218,8 +224,12 @@ text as public as the rest of this repo.
   saved with the old single `job.ask` is migrated on load (`migrateTalk`). Open PR #209
   keeps a step's sent ideas on `job.replan.asks`; once both land, the step dialog
   should draw them from the thread, not twice.
-- **A plan change never pauses the job** (`server/job-red.js heldBy`, mirrored as
-  `heldByReplan`). While the wrangler drafts, only the step the idea was typed on
+- **A plan change never pauses the job** (`server/job-red.js heldBy`, the one rule:
+  the graph contributor stamps it on every step as `sub.held` (`withHeld`) and the
+  board's `heldByReplan` only reads that, so never re-derive it client-side). A held
+  step's run carries on but nothing new launches, merges or is approved; a red step is
+  held, a frozen one (`isFrozen`: merged, delivered, a session back for its writes
+  alone) never is. While the wrangler drafts, only the step the idea was typed on
   (`job.replan.source.sub`) waits; once its proposal is up, so does every step it
   edits, cancels or acts on in any option (`touchedBy`); a red replan adds its
   `redScope`. Everything else launches, merges and gets approved, so a proposal
@@ -250,8 +260,8 @@ text as public as the rest of this repo.
   with an `error` is sent to the planner by the runner's `triageRed` when
   `settings.maxReplans` > 0 (0 = the old "red waits for you"), one replan at a
   time, stamped `run.red` and counted per step; the replan carries `job.replan.red
-  = {sub, auto, n}` and holds only that step and its dependants (`heldBy`, mirrored
-  client-side as `heldByReplan`/`redScope`: use them, never `!job.replan`, for
+  = {sub, auto, n}` and holds only that step and its dependants (`heldBy`, read
+  client-side as the stamped `sub.held` through `heldByReplan`: use it, never `!job.replan`, for
   per-sub gates), plus whatever its proposal touches. The prompt lists the other red
   steps so one cause gets one proposal. The sixth checkpoint `reviewRed` (true = "You decide", the
   default) only chooses whether the proposal waits; Accept red, Mark, Recover and
@@ -307,7 +317,7 @@ text as public as the rest of this repo.
   `after`, `upstreamOf`) to each of its prompts as quoted JSON, capped at 8,000 characters like
   `humanOutputBlock`. A bulk release (a checkpoint switched to Auto) carries none and clears it.
   On the board Approve works like Retry: its caret (`approveSplitHtml`) opens a popup holding only
-  `[data-approve-note]`, which Approve itself sends when non-empty, and typed text holds back a tick's redraw.
+  `[data-approve-note]`, which Approve itself sends when non-empty, and a tick's redraw keeps what is typed in it (`keepFields`).
 - **New idea is a job that may start as a conversation** (`server/job-idea.js`, `public/job-idea.js`).
   Only the board's form sets `idea` (`job-create` `idea:true` → `job.idea.thread`); `create_job` never does.
   Its planning run either reports `plan` as any job's does, or `reply {text, suggest?}`, one `{title, plan}`
@@ -322,7 +332,7 @@ text as public as the rest of this repo.
   idea itself into its job, and settle() then ends the parked run quietly because the job is no longer
   `inConversation`. `leave-idea` cancels an idea once one job was created from it. A fresh planning run
   (a retry) reads the whole thread from its prompt, so `claim` marks unsent messages sent. The chat
-  dialog redraws on ticks even with the cursor in its empty reply box; only new messages fade in.
+  dialog redraws on ticks whatever its reply box holds (`keepFields`); only new messages fade in.
   Before planning starts a Backlog idea's title and words are the human's: `edit-idea {title?, text}` (`editIdea`,
   mirrored as `ideaEditable` in `public/jobs.js`) is refused once it leaves the backlog, has a plan or
   thread or runs, or is cancelled, caps text at `IDEA_TEXT_MAX`, keeps `images`, records a move and drops
