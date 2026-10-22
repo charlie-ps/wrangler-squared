@@ -3130,6 +3130,15 @@ test('the decision card pins only its head over the plan: kicker, heading and bo
   assert.ok(section.querySelector(':scope > .job-diff-legend') && section.querySelector('.job-graph'), 'the plan diff shares the head\'s section, so the head stays pinned while it scrolls');
 });
 
+test('the job page bar and the decision head it pins under are opaque: no transparent fill, opacity or backdrop blur', async () => {
+  const css = (await import('node:fs')).readFileSync(new URL('./jobs.css', import.meta.url), 'utf8');
+  for (const sel of ['.job-page-bar', '.job-decision-head', '.job-decision-head::before', '.job-decision-head::after']) {
+    const rule = css.match(new RegExp(`^${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))[1];
+    assert.ok(!/transparent|opacity|backdrop-filter/.test(rule), `${sel} is opaque`);
+  }
+  assert.match(css.match(/^\.job-page-bar \{([^}]*)\}/m)[1], /background:var\(--surface\);/, 'the bar is the surface itself');
+});
+
 test('the decision card leads with the option: its label, why and what it leaves you; a red step names the step and its failure, never an ask', (t) => {
   const f = fixture(t); const [job] = f.data.jobs; job.stage = 'active';
   job.subJobs = [{ ...sub('api'), stage: 'deployment', state: 'watching', error: 'Post-merge run failed: Sync next', pr: { url: 'https://github.com/org/repo/pull/7', head: 'h1', mergeCommit: 'm1' } }];
