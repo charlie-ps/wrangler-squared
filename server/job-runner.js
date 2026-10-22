@@ -3,7 +3,7 @@ import { runnable, dependencySatisfied, dependenciesSatisfied, MERGE_IS_DELIVERY
 import { summariseComments, commentsBlockMerge } from './job-comments.js';
 import { awaitsTicket, settingsSchema, reviewOf } from './jobs-schema.js';
 import { logWarn } from './log.js';
-import { isFrozen, startQueued, queuedReady, replanQueue } from './job-replan.js';
+import { startQueued, queuedReady, replanQueue } from './job-replan.js';
 import { heldBy, needsTriage, triesOn, triesAllowed, startRed, failRedReplan } from './job-red.js';
 import { advanceWrite, triggerStatus, draftsDecided, inReview, awaitsKeys } from './job-writes.js';
 import { dropSub } from './job-sub-ops.js';
@@ -297,7 +297,7 @@ export class JobRunner {
     // edit, cancel or act on (job-red.js heldBy): no new step, no merge, no human
     // approval (job-store.js). Everything else carries on, steps already running
     // finish, and work past the point of no return lands as it would have.
-    if (sub && heldBy(this.store.get(job.id), sub) && !isFrozen(sub)) return;
+    if (sub && heldBy(this.store.get(job.id), sub)) return;
     const run = this.store.claim(job.id, sub?.id || null, phase, extra);
     if (!run) return;
     try {

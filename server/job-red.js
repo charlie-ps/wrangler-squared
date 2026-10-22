@@ -1,5 +1,6 @@
 import { isPrSub, isHumanSub, isWriteSub, isSessionSub, reviewRed } from './jobs-schema.js';
 import { LEGACY_WRITE } from './job-writes.js';
+import { isFrozen } from './job-replan.js';
 
 // Red steps: what happens to a sub-job that has gone red (its `error`). With
 // `settings.maxReplans` above 0 the planner is sent after it automatically: it
@@ -59,9 +60,13 @@ export function touchedBy(proposal) {
 // the idea was typed on waits (so the wrangler drafts against it as it stands),
 // and once its proposal is up so does whatever it touches, so the step it edits
 // is still the one the human approves. A red step's replan also holds that step
-// and the sub-jobs after it from the start.
-export const heldBy = (job, sub) => !!job.replan && (job.replan.source?.sub === sub.id || touchedBy(job.replan.proposal).has(sub.id)
-  || (!!job.replan.red && redScope(job, job.replan.red.sub).has(sub.id)));
+// and the sub-jobs after it from the start. Work past the point of no return
+// lands as it would have, so a frozen step is never held; a red one or one with a
+// run still going is (its run finishes, nothing new starts, merges or is approved).
+export const heldBy = (job, sub) => !!job.replan && !job.cancelledAt && !isFrozen(sub)
+  && (job.replan.source?.sub === sub.id || touchedBy(job.replan.proposal).has(sub.id) || (!!job.replan.red && redScope(job, job.replan.red.sub).has(sub.id)));
+// The board's copy: each step's `held`, so it never re-derives the rule.
+export const withHeld = (snapshot) => ({ ...snapshot, jobs: (snapshot?.jobs || []).map((job) => ({ ...job, subJobs: (job.subJobs || []).map((sub) => ({ ...sub, held: heldBy(job, sub) })) })) });
 
 const note = (sub, entry) => { sub.red = { ...(sub.red || {}), attempts: [...(sub.red?.attempts || []), entry] }; };
 export const noteAttempt = (sub, run, summary, outcome, now) => note(sub, { at: now, run: run?.id || null, summary: oneLine(summary, 400), outcome });
