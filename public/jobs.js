@@ -488,6 +488,7 @@ function eventTitle(sub) {
   if (sub.cleanupRefusal) return 'Worktree kept';
   if (sub.blocked?.summary && sub.blocked.summary === sub.error) return 'Worker blocked';
   if (/closed without merging/i.test(sub.error)) return 'PR was closed';
+  if (/conflict repair limit/i.test(sub.error)) return prNumber(sub) ? `Conflicts on #${prNumber(sub)}` : 'Merge conflicts';
   if (/repair limit/i.test(sub.error)) return prNumber(sub) ? `Checks failing on #${prNumber(sub)}` : 'Checks failing';
   if (/^Post-merge run failed/i.test(sub.error)) return 'Post-merge run failed';
   if (/without a receipt/i.test(sub.error)) return 'Session stopped early';
