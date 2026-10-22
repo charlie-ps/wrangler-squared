@@ -98,7 +98,7 @@ export function redFeedback(job, sub, n, limit) {
     `What it says: ${sub.error}`,
     sub.blocked ? `Its own agent ${sub.blocked.kind === 'replan' ? 'said it needs more than its step' : 'reported it is blocked'}: ${sub.blocked.summary}${sub.blocked.why ? ` (${sub.blocked.why})` : ''}` : '',
     isPrSub(sub) && sub.pr?.url ? `PR ${sub.pr.url}${sub.pr.head ? ` at head ${sub.pr.head}` : ''}${sub.pr.dirty ? ' · merge conflicts' : ''}${checks.length ? ` · failing checks: ${checks.join(', ')}` : ''}${sub.stage === 'deployment' ? ` · post-merge run FAILING at merge ${sub.pr.mergeCommit}${runs.length ? ` (${runs.join(', ')})` : ''}` : ''}` : '',
-    (sub.repairs || []).length ? `CI repairs already tried: ${sub.repairs.map((r) => (r.changes || []).join(' · ')).join(' | ')}` : '',
+    (sub.repairs || []).length ? `CI repairs already tried: ${sub.repairs.map((r) => `${r.conflict ? '(merge conflicts) ' : ''}${(r.changes || []).join(' · ')}`).join(' | ')}` : '',
     (sub.red?.attempts || []).length ? `Your earlier tries on this step: ${triedLines(sub).join(' | ')}` : '',
     othersRed(job, sub).length ? `Also red right now: ${othersRed(job, sub).map((s) => `${s.id} ${quoted(s.title)}: ${oneLine(s.error)}`).join(' | ')}. Any that fail for the same cause belong in this one proposal: put them after the same fix.` : '',
     job.reviewRed ?? true ? 'Red steps is "You decide": whatever you propose waits for the human.' : 'Red steps is "Wrangler replans": a rework of the step (and, only if the job\'s Plan checkpoint is Auto, plan edits that touch no PR) applies by itself. accept-red, mark, recover and retry never do, so propose them only when they are the honest answer and cite the evidence.',
