@@ -1,7 +1,7 @@
 import { esc, tildify } from './util.js';
 import { ICONS, wranglerMark } from './icons.js';
-import { wranglerUnread, convoGroups, convosOf, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, uncreatedSuggestions, ideaEditable, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel, leadSentence } from './jobs.js';
-import { talkHtml, convoTitle, defaultTarget } from './job-talk.js';
+import { convoGroups, convosOf, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, uncreatedSuggestions, ideaEditable, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel, leadSentence } from './jobs.js';
+import { talkHtml, convoTitle, latestConvo, unreadIn } from './job-talk.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml, ideaEditHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener, fieldName } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, askActs, plateAsk } from './job-plates.js';
@@ -571,24 +571,20 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const currentSub = humanForm && data.jobs.find((j) => j.id === selected?.jobId)?.subJobs.find((s) => s.id === selected?.subId);
     if (dialog.open && selected && !planDraft && !proofView && !dialog.querySelector('form')
       || humanForm && currentSub && (currentSub.stage !== 'human' || humanForm.dataset.state !== currentSub.state)) {
-      const fields = keepFields(dialog), boxes = keepBoxes();
-      renderDetail();
-      boxes(); fields();
+      const fields = keepFields(dialog);
+      keepBoxes(); renderDetail(); fields();
     }
   }
-  // An idea box with something in it keeps its conversation and its pin across a tick: a
-  // reply landing elsewhere must not move the words to another target, and the idea stays
-  // pinned to the view it was begun against, so a moved head still refuses it (server/job-change.js).
+  // An idea box with something in it keeps its conversation across a tick: a reply landing
+  // elsewhere must not move the words to another target.
   function keepBoxes() {
-    const subId = selected?.subId || '', kept = new Map();
+    const subId = selected?.subId || '';
     for (const box of dialog.querySelectorAll('.job-change:not([data-idea-composer])')) {
       const key = box.dataset.changeConvo || '', text = box.querySelector('textarea').value;
       if (!text && !boxImages(key).length) continue;
       boxDrafts.set(`${subId}|${key}`, text);
       if (!replyTo.has(subId)) replyTo.set(subId, key);
-      kept.set(key, { changeAt: box.dataset.changeAt, changeRef: box.dataset.changeRef });
     }
-    return () => { for (const box of dialog.querySelectorAll('.job-change:not([data-idea-composer])')) Object.assign(box.dataset, kept.get(box.dataset.changeConvo || '') || {}); };
   }
   function show(html) {
     detailShown = null;
@@ -895,10 +891,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // What was sent, above the box it came from: the words and pictures lift into a
   // bubble, and the line under it says who has it once the server took it. Once the
   // conversation shows the message itself, even before the ack, its row there is the receipt instead.
+  const sentHeld = (m) => m.from === 'human' && m.text === askSent.text && m.at >= askSent.at - 60000;
   function askSentHtml(job, sub, key = '') {
     if (!askSent || askSent.subId !== (sub?.id ?? null) || (askSent.convo || '') !== key) return '';
-    const held = (m) => m.from === 'human' && m.text === askSent.text && m.at >= askSent.at - 60000;
-    if (askSent.state !== 'failed' && (sub?.thread?.some(held) || talkFor(job, sub).some(held))) return '';
+    if (askSent.state !== 'failed' && (sub?.thread?.some(sentHeld) || talkFor(job, sub).some(sentHeld))) return '';
     const s = askSent, fresh = s.drawn !== s.state; s.drawn = s.state;
     const pics = s.images.length ? `<span class="job-sent-imgs">${s.images.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
     const n = s.images.length ? ` with ${s.images.length} image${s.images.length > 1 ? 's' : ''}` : '';
@@ -907,23 +903,32 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       : `<span class="job-sent-meta"><span class="job-sent-sending">Sending to ${esc(s.to)}…</span></span>`;
     return `<div class="job-sent ${s.state}${fresh ? ' fresh' : ''}" data-sent-state="${s.state}"><div class="job-sent-bubble">${pics}<span>${esc(s.text)}</span></div>${meta}</div>`;
   }
-  // The conversation the box writes to: the human's pick while it is still in
-  // view, else the one spoken in last (job-talk.js defaultTarget). A failing step
-  // opens on a new one, since what to do about it is a new decision (openDetail);
-  // once that is sent, its follow-ups go to the conversation it started.
+  // The conversation the box writes to is only ever the human's pick: with none yet
+  // the most recent conversation (job-talk.js latestConvo), kept as the pick so
+  // nothing a wrangler does moves it. A failing step opens on a new one, since what
+  // to do about it is a new decision (openDetail); once the human sends there, the
+  // conversation it started is theirs.
   function replyTarget(job, sub, view) {
     if (view.at === 'plan') return '';
-    const picked = replyTo.get(sub?.id || '');
-    if (picked === '' || picked && convoGroups(job, sub).some((g) => g.convo?.id === picked)) return picked;
-    return defaultTarget(job, sub);
+    const key = sub?.id || '', picked = replyTo.get(key);
+    const shown = (id) => convoGroups(job, sub).some((g) => g.convo?.id === id);
+    if (picked === '') {
+      const landed = askSent && askSent.state !== 'failed' && askSent.subId === (sub?.id ?? null) && !askSent.convo ? talkFor(job, sub).find(sentHeld) : null;
+      if (!landed?.convo || !shown(landed.convo)) return '';
+      askSent.convo = landed.convo; replyTo.set(key, landed.convo);
+      return landed.convo;
+    }
+    if (picked && shown(picked)) return picked;
+    const first = latestConvo(job, sub);
+    replyTo.set(key, first);
+    return first;
   }
   // The one box an idea goes in through, on every step, review and proposal: at the
   // foot of the conversation it replies to, the only one open (job-talk.js), else
   // below them all for a new one. Its chip says who hears it and where, and its ×
   // folds that conversation to start a new one instead. It is
-  // pinned to the thing in view (`at`, `ref`, read when this was drawn): the server
-  // refuses it if that has since changed. Not a <form>, so a tick redraws it, carrying
-  // over what is typed and its pin (keepBoxes), never held by a box's presence.
+  // never refused as stale: the wrangler judges a step that moved since. Not a <form>, so a
+  // tick redraws it, carrying over what is typed (keepBoxes), never held by a box's presence.
   // At rest it is one line; focus, words or a picture open it.
   function boxHtml(job, sub, view, key) {
     const convo = key ? convosOf(job).find((c) => c.id === key) || null : null;
@@ -937,7 +942,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const sent = convo ? '' : askSentHtml(job, sub);
     const open = !convo && sub && subState(job, sub) === 'failing';
     const mine = boxImages(key);
-    return `${sent}<div class="job-change${open ? ' is-open' : ''}" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}" data-change-convo="${esc(key)}" data-change-to="${esc(route.to)}">
+    return `${sent}<div class="job-change${open ? ' is-open' : ''}" data-change-convo="${esc(key)}" data-change-to="${esc(route.to)}">
       <ul class="job-change-tray" ${mine.length ? '' : 'hidden'}>${askTrayHtml(key)}</ul>
       <p class="job-change-error" role="alert" ${askErrorText(key) ? '' : 'hidden'}>${esc(askErrorText(key))}</p>
       <div class="job-change-row"><span class="job-change-to" title="Who hears it">${wranglerMark('small')}${esc(route.to)}${where ? `<small>${esc(where)}</small>` : ''}${fresh}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="${convo ? `Reply in ${esc(convoTitle(job, convo))}` : `Add idea for ${esc(route.to)}`}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to)}" title="Send (↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
@@ -1382,7 +1387,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const chips = stateChip(state, status.text, hints)
       + (sub.pr ? `<a class="job-chip job-pipeline-status ${checkTone(sub.pr.checkStatus)}" ${/^https:\/\/github\.com\//.test(sub.pr.url || '') ? `href="${esc(sub.pr.url)}" target="_blank" rel="noopener noreferrer"` : ''} title="Pull request · checks ${esc(sub.pr.checkStatus)}${sub.pr.head ? ` · ${esc(sub.pr.head.slice(0, 8))}` : ''}">${ICONS.pr}<span>${n ? `#${esc(n)}` : 'PR'}</span></a>` : '')
       + (deploys ? chip(ICONS.rocket, sub.deploys.expected === false ? 'No deploy' : 'Deploys', { cls: 'job-deploys', title: deploys }) : '')
-      + (sub.stage === 'review' ? runningChipHtml(job, sub, { open: openMore.has('running'), logs: runLogs.get(sub.id) }) : '');
+      + (sub.stage === 'review' ? runningChipHtml(sub, { open: openMore.has('running'), logs: runLogs.get(sub.id) }) : '');
     const kicker = `<button class="job-back" data-open-job title="Back to the job">${ICONS.back}<span>${esc(job.title)}</span></button>`;
     const session = sub.sessions.length ? sessionSplitHtml(job, sub, runStatus(job, sub) === 'needs-you') : '';
     // Wrangler's own turn (Fixing) or a fix for you (Fix ready, a declared red's options)
@@ -1430,7 +1435,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         ${yours ? `<form id="job-human-form" data-state="${esc(sub.state)}"><label>Result for dependent work <small title="Up to 8,000 characters, passed to dependent agents">optional</small><textarea name="output" maxlength="8000" rows="4"></textarea></label><div class="job-actions tone-${STATES[state].tone}"><button class="primary" type="submit" title="${esc(hints.find((h) => h.startsWith('No agent')) || '')}">${ICONS.check}Mark done</button>${sub.state === 'doing' ? '' : '<button type="button" data-action="start-human">Mark in progress</button>'}</div></form>` : ''}`;
       actions = retry;
     } else {
-      body = `${sub.ready ? (hasProof(sub) ? proofListHtml(job, sub, { isOpen: (k) => openMore.has(k), ask: sub.stage === 'review', stale: !!readyRun(job, sub) && !!reworkRound(sub) }) : `<h3>${sub.stage === 'review' ? 'Ready for review' : 'Verified'}</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${stoppedHtml(sub)}${historyHtml(job, sub, { open: openMore.has('history') })}` : ''}
+      body = `${sub.ready ? (hasProof(sub) ? proofListHtml(job, sub, { isOpen: (k) => openMore.has(k), ask: sub.stage === 'review' }) : `<h3>${sub.stage === 'review' ? 'Ready for review' : 'Verified'}</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${stoppedHtml(sub)}${historyHtml(job, sub, { open: openMore.has('history') })}` : ''}
         ${sub.pr?.checks?.length ? `<h3>Checks</h3><ul class="job-checks">${sub.pr.checks.map((c) => `<li class="${checkTone(c.state)}">${checkMark(c.state)} ${esc(c.name)} <small>${esc(c.state.toLowerCase())}</small></li>`).join('')}</ul>` : ''}
         ${sub.pr ? commentsHtml(sub, commentsShown) : ''}
         ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
@@ -1560,13 +1565,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     shotZoom.showModal();
     paintShotBox();
   }
-  // The wrangler's answers this dialog draws are read once it is open on them: tell the
-  // server once per answer, so the job leaves the to-read state on its next tick. A
-  // folded conversation draws none of its answers, so it is read only once unfolded.
+  // What the wrangler said that this dialog draws is read once it is open on it: tell the
+  // server once per message, so the job leaves the to-read state and the title row its
+  // unread mark on the next tick. A folded conversation draws none of it, so it is read
+  // only once the human opens it.
   const seenSent = new Set();
   function markSeen(job, sub) {
     const drawn = new Set([...dialog.querySelectorAll('.job-talk-convo[data-convo]:not(.is-folded)')].map((e) => e.dataset.convo));
-    const unread = wranglerUnread(job, sub || null).filter((m) => !seenSent.has(m.id) && drawn.has(m.convo));
+    const unread = convoGroups(job, sub || null).filter((g) => g.convo && drawn.has(g.convo.id)).flatMap((g) => unreadIn(g.convo, g.messages)).filter((m) => !seenSent.has(m.id));
     if (!unread.length) return;
     for (const m of unread) seenSent.add(m.id);
     send({ type: 'job-talk-seen', id: job.id, convos: [...new Set(unread.map((m) => m.convo))] });
@@ -1661,7 +1667,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     dialog.querySelectorAll('.job-run-pop').forEach((d) => d.addEventListener('toggle', fitRunning));
     fitRunning();
     dialog.querySelectorAll('[data-running-stop]').forEach((b) => b.onclick = () => { if (!pressBusy(b)) return; detailShown = null; runLogs.delete(sub.id); action('stop-running'); });
-    dialog.querySelectorAll('[data-running-restart]').forEach((b) => b.onclick = () => { if (!pressBusy(b)) return; detailShown = null; action('restart-running', b.dataset.runningRestart ? { name: b.dataset.runningRestart } : {}); });
     dialog.querySelectorAll('[data-running-logs]').forEach((b) => b.onclick = () => {
       if (runLogs.get(sub.id)?.name === b.dataset.runningLogs) { runLogs.delete(sub.id); renderDetail(); return; }
       send({ type: 'job-running-logs', id: job.id, subJobId: sub.id, name: b.dataset.runningLogs });
@@ -1717,7 +1722,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         if (!text.value.trim() || send.disabled) return;
         const key = box.dataset.changeConvo || '', mine = askImages.filter((i) => i.box === key);
         const images = mine.map((i) => i.name).filter(Boolean);
-        action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim(), ...(box.dataset.changeConvo ? { convo: box.dataset.changeConvo } : {}), ...(images.length ? { images } : {}) });
+        action('request-change', { text: text.value.trim(), ...(box.dataset.changeConvo ? { convo: box.dataset.changeConvo } : {}), ...(images.length ? { images } : {}) });
         clearAskSent();
         askSent = { jobId: job.id, subId: sub?.id ?? null, convo: key, text: text.value.trim(), items: mine, images: mine.map((i) => i.url), to: box.dataset.changeTo, at: Date.now(), state: 'sending' };
         askImages = askImages.filter((i) => i.box !== key); text.value = ''; convoFold.delete(key); boxDrafts.delete(`${sub?.id || ''}|${key}`);

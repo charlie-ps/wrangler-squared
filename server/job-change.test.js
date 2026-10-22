@@ -22,3 +22,16 @@ test('the conversation keeps which pictures an idea carried, so the thread can d
   requestChange(plain, null, { ...changeView(plain, null), text: 'No pictures' }, { now: 1000 });
   assert.equal('images' in plain.talk.at(-1), false);
 });
+
+test('an idea typed on a step whose run started or stopped since is accepted, never refused as stale', () => {
+  const j = job(); const api = j.subJobs[0];
+  Object.assign(api, { stage: 'implementation', state: 'queued' });
+  const typed = changeView(j, api);
+  assert.deepEqual(typed, { at: 'step', ref: 'implementation/queued' });
+  api.state = 'running'; j.runs.push({ id: 'run_w', subJobId: 'api', stopped: false });
+  assert.equal(requestChange(j, api, { ...typed, text: 'Use the v2 client' }, { now: 1000 }).route, 'planner', 'its run started: still accepted');
+  Object.assign(api, { stage: 'review', state: 'verified' }); j.runs[0].stopped = true;
+  assert.equal(requestChange(j, api, { ...typed, text: 'And log the retries' }, { now: 1001 }).route, 'planner', 'and stopped: still accepted');
+  assert.deepEqual(j.talk.map((m) => [m.from, m.sub, m.text]), [['human', 'api', 'Use the v2 client'], ['human', 'api', 'And log the retries']]);
+  assert.deepEqual(j.convos.map((c) => c.pending.source), [{ sub: 'api', at: 'step', ref: 'implementation/running', state: 'implementation/running' }, { sub: 'api', at: 'step', ref: 'review/verified', state: 'review/verified' }], 'each keeps what the step was when it arrived, for the planner to judge');
+});

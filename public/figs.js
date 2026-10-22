@@ -40,7 +40,7 @@ export function proofFigure(shown = ITEMS.length, round = 1) {
 export const runningBar = (state = 'on') => {
   if (state === 'none') return '';
   const sub = { id: 'csv-pr', ready: { round: 1 },
-    running: state === 'stopped' ? { items: [], stopped: { reason: 'you approved round 1', results: [{ name: 'web', ok: true, detail: 'process group 48121 stopped' }, { name: 'api', ok: true, detail: 'docker compose down' }] } }
-      : { items: [{ name: 'web', url: 'http://localhost:5173', pid: 48121, log: 'web.log' }, { name: 'api', url: 'http://localhost:8787', stop: 'docker compose down' }] } };
-  return state === 'stopped' ? stoppedHtml(sub) : runningChipHtml(JOB, sub, { open: true });
+    running: state === 'stopped' ? { items: [], stopped: { reason: 'you approved round 1', results: [{ name: 'web', ok: true, detail: 'process group 48121 stopped' }, { name: 'api', ok: true, detail: 'process group 48122 stopped' }] } }
+      : { items: [{ name: 'web', url: 'http://localhost:5173', pid: 48121, log: 'web.log' }, { name: 'api', url: 'http://localhost:8787', pid: 48122 }] } };
+  return state === 'stopped' ? stoppedHtml(sub) : runningChipHtml(sub, { open: true });
 };

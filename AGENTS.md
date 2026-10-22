@@ -136,21 +136,23 @@ text as public as the rest of this repo.
   idle rule reach a parked run. A stored write with no `by` predates this and is
   failed on load (`job-store.js migrateSessionWrites`), never run;
   `validatePlan` looks past it so a plan edit still works on that job.
-- **One action brings an idea in: `request-change {subJobId?, at, ref, text}`**
+- **One action brings an idea in: `request-change {subJobId?, convo?, text}`**
   (`server/job-change.js`), from the Add idea box (`changeBoxHtml`, plain words
   plus pictures, no chips) on every step, review and proposal; it replaced `revise-session`, both `replan` forms, `fix-here`
-  and the seven moves (Retry stays a button). `at`/`ref` pin it to what the
-  human read (`changeView`, mirrored client-side in `public/jobs.js`): a moved
-  head, receipt, revision or proposal refuses it. Every idea goes to ONE
-  recipient, the planner (`requestReplan`, with `replan.source = {sub, at, ref}`
-  and the idea's `images`), unless it reads as a question (an ask run, below), and
-  except a first plan (redrawn via `job.feedback`); a
+  and the seven moves (Retry stays a button). It is NEVER refused as stale:
+  liveness is the planner's call. `changeView` (mirrored client-side in
+  `public/jobs.js`) only routes it (`plan` redraws, `code` keeps pictures by round)
+  and is kept as `replan.source = {sub, at, ref, state}`, what the step was when the
+  idea arrived, which the planner's prompt sets beside the step now
+  (`job-prompts.js sourceLine`: "When the idea was typed: …; now: …"). Every idea goes to ONE
+  recipient, the planner (`requestReplan`, with that source
+  and the idea's `images`; on an active job an ask run first, below), except a
+  first plan (redrawn via `job.feedback`); a
   declared red still goes up with what was tried. The planner sorts it into
   actions on live steps (`forward` to a session parked on review, `rework`) and
   plan edits, and the human approves that proposal (one of `forward`s alone is
-  applied at once, `forwardsOnly`): an action on the source step
-  is refused at stamp and approval once its view has moved (`job-actions.js
-  sourceHolds`). A second idea while a proposal waits adds to it (`Earlier: … /
+  applied at once, `forwardsOnly`). The one guard is each action's own pin (below),
+  checked at approval. A second idea while a proposal waits adds to it (`Earlier: … /
   Now: …`, `previousActions`); while the planner is drawing one, another change (or an ask run's hand-over) joins the FIFO
   `job.replanQueue` with its convo, source and images (`requestReplan` returns `{queued}`, its
   conversation says so), and `startQueued` makes the next one its own replan once the current one is
@@ -159,8 +161,7 @@ text as public as the rest of this repo.
   `redraw-hold.js keepFields` carries every edited field's value, the focused one's cursor
   and focus into the redrawn markup (fields matched by attributes and box, `data-keep`
   popup or `data-change-convo`), and `jobs-view.js keepBoxes` keeps a box with words or a
-  picture on its conversation (`replyTo`, `boxDrafts`) and on the `at`/`ref` it was begun
-  against, so a moved head still refuses it. Only an open `<form>` (a write, a cancel
+  picture on its conversation (`replyTo`, `boxDrafts`). Only an open `<form>` (a write, a cancel
   question), a plan draft, the proof viewer, or a press or selection (`createRedrawHold`)
   still holds the redraw. A test never `assert.equal`s two DOM nodes: a failing diff of
   two happy-dom elements allocates without bound; use `assert.ok(a === b)`. The box's pictures are
@@ -179,8 +180,8 @@ text as public as the rest of this repo.
   discarded, revised) `approveReplan`, `discardReplan` and `requestReplan` stamp.
   Several conversations answer AT ONCE, each with its own ASK run (`run.convo`,
   `run.ask`): `claim` lets one run per conversation stand beside the plan run, and
-  `activeFor`, `requestReplan` and `triageRed` look past ask runs. An idea that
-  `looksLikeQuestion` sets `convo.pending = {asks, source, images}`; ANYTHING said in
+  `activeFor`, `requestReplan` and `triageRed` look past ask runs. Every idea, question
+  or change alike (`job-change.js` never guesses which), sets `convo.pending = {asks, source, images}`; ANYTHING said in
   that conversation before its run replies is one more ask for the SAME run: queued
   before launch it rides in the prompt (`claim` marks it sent), after launch the
   runner mails it (`deliverAsks`, `askMail`), never a new run. An ask run never sets
@@ -195,10 +196,14 @@ text as public as the rest of this repo.
   conversation (`askFailed`), never `job.error`. `planningRun` (client) ignores ask
   runs, so Approve stays live while one answers. ONE box, and ONE
   conversation open at a time, with the box at its foot (`boxHtml`, `data-change-convo`):
-  `replyTarget` is the human's pick (a title row opens that one and folds the other, the
-  open one's header or the chip's × folds it), else `defaultTarget`, the one at work or
-  spoken in last; '' (none open, and where a failing step's dialog opens, until its first message starts one) puts the box below them all
-  for a new one. Drafts are kept per target (`boxDrafts`), pasted pictures by
+  Which one is open is ONLY the human's choice: `replyTarget` is the human's pick (a title
+  row opens that one and folds the other, the open one's header or the chip's × folds it),
+  and with none yet `latestConvo` (the one the human started or wrote in last), stored as
+  the pick so no wrangler activity ever opens, folds or retargets one; '' (none open, and
+  where a failing step's dialog opens) puts the box below them all for a new one, and the
+  conversation the human's send there starts becomes the pick. A folded one with something
+  newer than its `seenAt` draws an unread dot on its title row (`unreadIn`); opening it
+  sends `job-talk-seen` (`markSeen`). Drafts are kept per target (`boxDrafts`), pasted pictures by
   `askImages[].box`, and the sent bubble lands at the end of its conversation
   (`askSent.convo`) or above the box. Haiku names each new conversation from its
   first message after the send (`handlers.js nameConvo`, `convo.titlePending` drawn
@@ -208,11 +213,14 @@ text as public as the rest of this repo.
   (`stepConvoLine`), and it shows ONLY on that step's dialog until the wrangler
   escalates it (`reply {escalate:true}`, or any proposal it draws, `escalate` →
   `convo.escalatedAt`); then the job's list shows it too (`talkFor`, client-side
-  only). A step's dialog shows only what was said on it. Where the view takes no reply, a conversation not at work
-  and not the one the human spoke in last folds to its title row (`convoOpen`; clicks are client-side, per id). Its ×
-  (`dismiss-convo`, refused while it answers or holds a plan change) stamps `convo.dismissedAt`,
-  which hides it everywhere until anything new is said in it (`say` clears it, so a reply
-  from a stale box or a wrangler's message brings it back). A job
+  only). A step's dialog shows only what was said on it. Where the view takes no reply, every conversation but `latestConvo`
+  folds to its title row (`convoOpen`; clicks are client-side, per id). Its ×, on every
+  conversation, live ones included (`dismiss-convo`), stops its work and stamps
+  `convo.dismissedAt`: `dismissConvo` drops its asks and its `replanQueue` entries, the
+  store discards a plan change drawn or waiting in it (`discardReplan`, `holdRed` as
+  Discard does), and settle() then archives its ask run or planner quietly. It stays hidden
+  everywhere until the HUMAN writes in it again (`say` clears it only for `from: 'human'`;
+  a wrangler's message never brings it back). A job
   saved with the old single `job.ask` is migrated on load (`migrateTalk`). Open PR #209
   keeps a step's sent ideas on `job.replan.asks`; once both land, the step dialog
   should draw them from the thread, not twice.
@@ -265,7 +273,11 @@ text as public as the rest of this repo.
   (merged/done, `evidence` required), `rework` and `recover {fix}` on a live
   sub-job. The server stamps each with a pin (PR head, merge commit, stage or, for
   a retry, the failure's `redRef`) at
-  proposal time and `approve-replan` refuses if it moved; the planner never
+  proposal time, and `checkActions` at `approve-replan` is the ONLY staleness check:
+  a moved pin is never applied. Approval then sends the proposal back to the
+  planner told what moved (`sendBack`, also for an edit under a step that has since
+  landed; the source is not re-pinned), so the human never has to re-ask; a refusal
+  nothing moved into (a step still running) stays the human's to read. The planner never
   writes a pin (the schema is strict). Options are the receipt's own plan first,
   then `alternatives` (max 2), each merged and stamped when the receipt lands, so
   one bad option refuses the whole receipt; approve takes `option`. An action is
@@ -275,7 +287,9 @@ text as public as the rest of this repo.
   it sets `run.readyReport`, `parkedFor: 'ready'`, `parkedAt` and clears `mailedAt`, like a
   drafts park (no slot, `settle()` holds it only to its card existing) but never matched by
   `draftsDecided`. The run waits on `waitsOnReview`; approve, a rework, drop or a retry end
-  it quietly and the publish run then claims the sub-job. An approved `forward {sub, note}`
+  it quietly and the publish run then claims the sub-job. While a message is in flight the card reads "Working on your message"
+  (`answering.kind` is only one a caller names: `retell`, `restart`); what it was shows from the
+  session's report. An approved `forward {sub, note}`
   action (pinned to `{at:'round', ref: ready.receiptId}`; one made while it is `answering` queues behind
   that reply, mailed one at a time to a waiting run, `answered` moving `answering` on; a `rework`
   of a parked step is refused in its favour) writes a `sub.thread` message (`askAgent`,
@@ -320,17 +334,18 @@ text as public as the rest of this repo.
   thread or runs, or is cancelled, caps text at `IDEA_TEXT_MAX`, keeps `images`, records a move and drops
   `titlePending` when the title changed; the board sends `title` only if the human changed it.
 - **What the agent leaves running is the agent's; tearing it down is ours** (`server/job-running.js`).
-  `ready` (and a restarting `reply`) may carry `running: [{name, url?, pid?, stop?, log?}]`, the
-  agent's own detached (`setsid`) dev server, database, worker; the extension never starts one. It is kept
-  as `sub.running` (`items` with a probed `up`, `owed` for entries a later round dropped, `stopped` after a
-  teardown). The runner's `sweepRunning` runs FIRST each tick (so before cleanup removes the worktree a
-  `stop` command runs in, and at boot): it tears down `dueTeardown` (owed, plus everything once
-  `holdsRunning` is false: approve, drop, cancel, replan, cleanup, retry), probes the rest, and writes only
-  when up/down flips. Teardown kills the pid's group (just the pid if it does not lead one; never our own
-  process), runs each `stop` in the worktree, then checks the URLs stopped answering, and NEVER fails an
-  approval: a leftover is `stopped.still`, drawn amber. Code on Auto owes everything at once. Logs reads only
-  from under the worktree or the proof inbox (symlinks resolved). `restart-running` mails the parked session
-  via `askAgent` (`kind: 'restart'`); `stop-running` just owes. The bar and dot are `public/job-running.js`.
+  `ready` (and a `reply`) may carry `running: [{name, url?, pid?, log?}]`, the agent's own detached
+  (`setsid`) dev server, database, worker; the extension never starts one. It is kept as `sub.running`
+  (`items` with a probed `up`, `stopped` after a teardown). A new list replaces the old: an old entry whose
+  pid it does not list again stays only as `replaced` (hidden), and Stop all (`stop-running`) replaces the
+  list with nothing. The runner's `sweepRunning` runs FIRST each tick and at boot: it kills `dueTeardown`
+  (the replaced entries, plus everything once `holdsRunning` is false: approve, drop, cancel, replan,
+  cleanup, retry), probes the rest, and writes only when up/down flips. Teardown is SIGTERM to the pid's
+  group (just the pid if it does not lead one; never our own pid or parent), a short wait, then SIGKILL,
+  and NEVER fails an approval: a survivor or a pid-less entry is `stopped.still`, drawn amber. Code on Auto
+  approves at once, so everything is killed on the next tick. Logs reads only from under the worktree or the
+  proof inbox (symlinks resolved). Fields an older save carries beyond these are ignored. The chip and dot are
+  `public/job-running.js`.
 - **A PR's `show` list is answered with proof, not claims** (`server/job-evidence.js`).
   The implementer saves files into one inbox per sub-job (`$JOB_EVIDENCE`, given in
   its prompt and granted as `addDirs`); the `ready` receipt names them per check
@@ -340,7 +355,22 @@ text as public as the rest of this repo.
   (history and the old list read it); the proof lives beside it as `ready.proof`.
   The board gets bytes only as `job-evidence` frames (thumbnails via `sips`), cached
   in `public/job-proof.js`. A sub-job with `show` items reports `ready` even with
-  Code on Auto (`leavesUncommitted`), so the proof is kept.
+  Code on Auto (`leavesUncommitted`), so the proof is kept per round, but **Auto means
+  auto**: that receipt never parks, approves itself as it lands (as does one from a session
+  launched under You review whose Code went to Auto mid-run), and on the next tick whatever it listed as
+  running is killed and the publish session starts. Nothing waits in review.
+- **Switching a checkpoint to Auto lets through what waits at it** (`job-store.js setReview`,
+  `waitingAt`, `releaseWaiting`). The board asks first (`public/jobs-view.js`, counted by
+  `checkpointWaiting`) and sends `release`; a switch WITHOUT `release` while something waits
+  is refused, so a board a tick behind never releases what nobody saw, and Auto never sits
+  beside work stuck behind it. Released under Code, a step parked on `ready` is approved, its
+  session ends quietly and what it left running is torn down; one still answering mail
+  (`sub.answering`) is left to land its answer, and that `reply` (or new round) lands approved.
+  Kept on purpose: a write's own `review: true` beats Auto, a pending replan refuses a release,
+  Plan locks once approved, and only the single `approve-code` is pinned to `treeHash` (a bulk
+  release has no tree the human read). An unset flag is read through `reviewOf`
+  (`jobs-schema.js`, mirrored in `public/jobs.js`) everywhere: its `REVIEW_DEFAULTS` value, so an
+  old job with no `reviewMerge` waits for Approve merge in the store, the runner and the board.
 - **Fast-forward main never blocks a sub-job** (`server/job-main.js`). The global
   `settings.updateMain` ("Keep local main updated", on by default; a job's old `updateMain` is
   ignored) is handed to cleanup by the runner, and the update returns, never throws: a clean

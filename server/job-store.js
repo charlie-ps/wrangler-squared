@@ -2,11 +2,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR } from './data-dir.js';
 import { readJsonOrLoud, writeJsonAtomic } from './atomic-json.js';
-import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode, checkText, unansweredShow } from './jobs-schema.js';
+import { jobInputSchema, settingsSchema, REVIEW_DEFAULTS, reviewOf, planSchema, reportSchema, isSessionSub, isHumanSub, isPrSub, isWriteSub, withStoryCreates, reviewCode, checkText, unansweredShow } from './jobs-schema.js';
 import { migrateTheme } from '../public/theme-ids.js';
 import { adoptEvidence } from './job-evidence.js';
 import { parkedReadyRun, askAgent, answered, sayInThread } from './job-parked.js';
-import { setRunning, owe, runningOf } from './job-running.js';
+import { setRunning, runningOf } from './job-running.js';
 import { COMMENT_SETTLE_MS } from './job-comments.js';
 import { fallbackTitle } from './job-title.js';
 import { dropSub, retrySub } from './job-sub-ops.js';
@@ -104,32 +104,43 @@ function cancelJob(j, now) {
 }
 // A running job's review checkpoints, switched from the detail footer. Every gate
 // reads its flag when the job reaches it (a receipt landing, a merge poll), so
-// writing the field is the whole of "from the next gate on". Work already WAITING
-// at a gate is released only when the human confirmed exactly that (`release`):
-// a board a tick behind must never let through something nobody saw waiting.
-// Merge has nothing to release here: the runner's next poll merges a green PR
-// once the flag is off. Plan locks once approved: a replan always waits anyway.
-// Writes is only the default: a write's own `review` (true or false) beats it
-// (`writeReviewed`), so only writes without one are released, and a session
-// already drafting under it lands its drafts approved (job-writes.js applyDrafts).
+// writing the field is the whole of "from the next gate on". Switching to Auto
+// also lets through everything WAITING at that gate, so Auto never sits beside
+// work stuck behind it; the board asks first and sends `release`, and a switch
+// without it while something waits is refused, so a board a tick behind never
+// lets through something nobody saw waiting. Merge has nothing to release here:
+// the runner's next poll merges a green PR once the flag is off. Plan locks once
+// approved: a replan always waits anyway. Writes is only the default: a write's
+// own `review` (true or false) beats it (`writeReviewed`), so only writes without
+// one are released, and a session already drafting under it lands its drafts
+// approved (job-writes.js applyDrafts).
 export const REVIEW_POINTS = { reviewPlan: 'Plan', reviewCode: 'Local verification', reviewMerge: 'Merge', reviewSessions: 'Session results', reviewWrites: 'Writes', reviewRed: 'Red steps' };
 const checkpointWord = (field, you) => field === 'reviewRed' ? (you ? 'You decide' : 'Wrangler replans') : you ? 'You review' : 'Auto';
-const flagOf = (j, field) => field === 'reviewCode' ? reviewCode(j) : field === 'reviewMerge' || field === 'reviewWrites' ? !!j[field] : j[field] ?? true;
+const flagOf = (j, field) => reviewOf(j, field);
+function waitingAt(j, field) {
+  if (field === 'reviewPlan') return j.stage === 'planning' && j.plan && !j.runs.some(runnable) ? [null] : [];
+  return j.subJobs.filter((s) => !s.error && s.stage === 'review' && (field === 'reviewCode'
+    ? isPrSub(s) && s.state === 'verified' && s.ready && !s.ready.approvedAt
+    : field === 'reviewWrites' ? isWriteSub(s) && !s.cancelledAt && s.review !== true
+      : field === 'reviewSessions' && isSessionSub(s) && s.result));
+}
+// A step parked on its ready receipt (job-parked.js) is approved here and its
+// session ends quietly on the next settle, which also tears down what it left
+// running. One still answering the human's mail is left to land its answer: its
+// tree may be mid-change, and the reply or new round lands approved under Auto.
+const approveCode = (j, s, now, detail) => { s.ready = { ...s.ready, approvedAt: now }; s.state = 'approved'; s.approvalNote = null; record(j, s, 'approve-code', null, detail); };
 function releaseWaiting(j, field, { plan, revision }, now) {
+  const waiting = waitingAt(j, field);
   if (field === 'reviewPlan') {
-    if (j.stage !== 'planning' || !j.plan || j.runs.some(runnable)) return 0;
+    if (!waiting.length) return 0;
     if (revision != null && j.revision !== revision) throw new Error('The plan changed. Review the latest version before approving.');
     approve(j, plan || j.plan);
     return 1;
   }
-  const waiting = j.subJobs.filter((s) => !s.error && s.stage === 'review' && (field === 'reviewCode'
-    ? isPrSub(s) && s.state === 'verified' && s.ready && !s.ready.approvedAt
-    : field === 'reviewWrites' ? isWriteSub(s) && !s.cancelledAt && s.review !== true
-      : field === 'reviewSessions' && isSessionSub(s) && s.result));
   if (waiting.length && j.replan) throw new Error('A plan change is pending. Approve or discard it first.');
   for (const s of waiting) {
     // A bulk release carries no words, so it clears any an earlier approval left.
-    if (field === 'reviewCode') { s.ready = { ...s.ready, approvedAt: now }; s.state = 'approved'; s.approvalNote = null; record(j, s, 'approve-code', null, `Approved the working tree of ${quoted(s.title)}`); }
+    if (field === 'reviewCode') { if (!s.answering) approveCode(j, s, now, `Approved the working tree of ${quoted(s.title)}`); }
     else if (field === 'reviewWrites') record(j, s, 'approve-write', null, approveWrite(j, s, now));
     else { s.sessionApprovedAt = now; s.stage = 'cleanup'; s.state = 'queued'; s.approvalNote = null; record(j, s, 'approve-session', null, `Approved the result of ${quoted(s.title)}`); }
   }
@@ -140,6 +151,10 @@ function setReview(j, { field, you, release, plan, revision }, now) {
   if (!name || typeof you !== 'boolean') throw new Error('Unknown review checkpoint');
   if (j.stage === 'done') throw new Error('The job is finished: there is nothing left to review');
   if (field === 'reviewPlan' && !['backlog', 'planning'].includes(j.stage)) throw new Error('The plan is already approved. A replan always waits for you');
+  if (!you && !release) {
+    const n = waitingAt(j, field).length;
+    if (n) throw new Error(`${n === 1 ? 'One is' : `${n} are`} waiting at ${name}. Switch again to let ${n === 1 ? 'it' : 'them'} through.`);
+  }
   const released = !you && release ? releaseWaiting(j, field, { plan, revision }, now) : 0;
   if (flagOf(j, field) === you && !released) return;
   j[field] = you;
@@ -386,23 +401,16 @@ export class JobStore {
       }
       if (action === 'dismiss-convo') {
         dismissConvo(j, payload.convo, Date.now());
+        if (j.replan && j.replan.convo === payload.convo) { if (j.replan.red) holdRed(j, j.replan.red.sub); discardReplan(j); }
         record(j, s, 'dismiss-convo', null, 'Dismissed a conversation with Wrangler');
         return;
       }
-      // The preview the agent left running (job-running.js): Stop owes its teardown
-      // to the runner's next tick; Restart mails the parked session to start it again.
+      // The preview the agent left running (job-running.js): Stop all replaces the
+      // list with nothing, so the runner's next tick kills every group it recorded.
       if (action === 'stop-running') {
-        if (!s || !owe(s, payload.name || null)) throw new Error('Nothing is running for this step');
+        if (!s || !runningOf(s).length) throw new Error('Nothing is running for this step');
+        setRunning(s, [], Date.now());
         record(j, s, 'stop-running', null, `Stopped what the agent left running on ${quoted(s.title)}`);
-        return;
-      }
-      if (action === 'restart-running') {
-        const run = s && parkedReadyRun(j, s);
-        const down = s ? runningOf(s).filter((i) => i.up === false && (!payload.name || i.name === payload.name)) : [];
-        if (!run || !s.ready) throw new Error('Its session is no longer open to ask: start it by hand, or ask for a change');
-        if (!down.length) throw new Error('Everything it left running is up');
-        askAgent(s, { from: 'system', text: `${down.map((i) => i.name).join(', ')} ${down.length === 1 ? 'is' : 'are'} no longer running and the human wants to try it. Start ${down.length === 1 ? 'it' : 'them'} again as before (detached with setsid, free ports) and answer with job_report kind:"reply", text:"…", running:[every entry now up, with its url, pid and stop]. Change nothing else.`, kind: 'restart' }, Date.now());
-        record(j, s, 'restart-running', null, `Asked the session to start ${down.map((i) => i.name).join(', ')} again`);
         return;
       }
       // New idea's conversation (job-idea.js): the human's answer to the planner, and
@@ -720,8 +728,11 @@ export class JobStore {
     const [kept] = report.shots || report.run ? adoptEvidence({ jobId: j.id, subId: s.id, round, prefix: `${id}-`, proof: [{ text: report.text, shots: report.shots, run: report.run }] }) : [null];
     sayInThread(s, { id, at: now, from: 'agent', text: report.text, round, ...(kept?.shots ? { shots: kept.shots } : {}), ...(report.run ? { run: report.run } : {}) });
     answered(s);
-    if (report.running) setRunning(s, report.running, { round, keep: true, now });
+    if (report.running) setRunning(s, report.running, now);
     Object.assign(r, { lastReply: report, parkedAt: now, mailedAt: null, idleSince: null });
+    // Code went to Auto while it answered: with nothing more queued for it, the
+    // round it answered about goes on to publish as a ready under Auto would.
+    if (!reviewCode(j) && !s.answering && s.state === 'verified' && !s.ready.approvedAt) approveCode(j, s, now, `Approved the working tree of ${quoted(s.title)}: Local verification is on Auto`);
   }
   // The Show me list is answered item by item, each by a check carrying shots, a
   // run or couldNot; the files named are copied into this round's folder. A round
@@ -804,9 +815,9 @@ export class JobStore {
       s.ready = { checks: report.checks.map(checkText), ...(proof?.proof.length ? { proof: proof.proof } : {}), ...(proof ? { round: proof.round } : {}), ...(meta.treeHash ? { treeHash: meta.treeHash } : {}), receiptId, at: Date.now() }; s.note = null; s.stage = 'review'; s.state = 'verified';
       if (proof) s.rounds = proof.round;
       answered(s);
-      // What it left running is kept only for a human to try: Code on Auto, or a
-      // receipt that did not park, owes it all straight to teardown.
-      if (report.running || runningOf(s).length) setRunning(s, report.running || [], { round: s.ready.round || 1, keep: reviewCode(j) && r.parkedFor === 'ready', now: Date.now() });
+      // What it left running is kept only while a human reviews it: approved at once
+      // (Code on Auto), the runner's next tick kills it all.
+      if (report.running || runningOf(s).length) setRunning(s, report.running || [], Date.now());
       if (r.parkedFor === 'ready' && proof?.round > 1) sayInThread(s, { id: `msg_${Date.now().toString(36)}r`, at: Date.now(), from: 'system', text: `Ready again with new proof.`, round: proof.round });
       if (!reviewCode(j)) { s.ready.approvedAt = s.ready.at; s.state = 'approved'; }
     }
