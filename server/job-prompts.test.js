@@ -352,3 +352,15 @@ test('a job with a base tells the planner and the publisher; one without is unch
   assert.doesNotMatch(jobPrompt(based, open, { ...run, phase: 'repair' }), /--base/, 'a repair pushes to the existing PR');
   assert.doesNotMatch(jobPrompt(based, open, run), /gh pr create/);
 });
+
+test('Code on Auto with Show me items asks for proof and a ready receipt, but never for a review: publish follows at once', () => {
+  const shown = { ...briefed, show: ['Lists sign-ins'] };
+  const auto = jobPrompt({ ...planned, reviewCode: false }, shown, run);
+  assert.match(auto, /Code is on Auto, so nobody reviews it: your proof is kept on the step and a later step commits and pushes it straight after your receipt and opens the PR/);
+  assert.match(auto, /When the work is done and every Show me item is proven, job_report \{runId:"run1", kind:"ready"/);
+  assert.match(auto, /Stop everything you started before you report/);
+  assert.doesNotMatch(auto, /ready to review|the human reviews|stays open, paused|running\?:/);
+  const reviewed = jobPrompt(planned, shown, run);
+  assert.match(reviewed, /When the working tree is ready to review, job_report/);
+  assert.match(reviewed, /the human reviews the working tree before anything is committed/);
+});
