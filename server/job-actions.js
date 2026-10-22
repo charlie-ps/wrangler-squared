@@ -27,10 +27,9 @@ function redPin(sub) {
 }
 
 // What a human looking at this job (or sub-job) is looking at, and the exact
-// thing in it. The client mirrors this (public/jobs.js changeView): an idea is
-// pinned to it (job-change.js), and so is every action the planner writes on the
-// step the idea came from, so a head, receipt, revision or proposal that moved
-// refuses it rather than applying it to something the human never read.
+// thing in it. The client mirrors this (public/jobs.js changeView). It routes an
+// idea (job-change.js) and is kept on it as what the human saw, never a gate: the
+// planner judges a step that moved since, and the action pins below are the guard.
 export function changeView(job, sub) {
   if (job.cancelledAt) return null;
   if (!sub) {
@@ -110,19 +109,8 @@ export function stampActions(job, actions = [], plan, changes) {
     if (seen.has(a.sub)) throw new Error(`${a.sub} has two actions; one sub-job takes one`);
     seen.add(a.sub);
     if (changes?.removed.includes(a.sub)) throw new Error(`${a.type} acts on ${a.sub}, which this plan cancels`);
-    const { sub, pin } = gateAction(job, a, plan);
-    sourceHolds(job, sub);
-    return { ...a, pin };
+    return { ...a, pin: gateAction(job, a, plan).pin };
   });
-}
-
-// The step the idea was typed on must still be what the human read there: a new
-// round, receipt or head since means the idea was about something else.
-export function sourceHolds(job, sub) {
-  const source = job.replan?.source;
-  if (source?.sub !== sub.id) return;
-  const view = changeView(job, sub);
-  if (view?.at !== source.at || view?.ref !== source.ref) throw new Error(`${quoted(sub.title)} has moved since the idea about it was sent (${source.at} ${short(source.ref)} is now ${view ? `${view.at} ${short(view.ref)}` : 'finished'}). Ask again.`);
 }
 
 // Approval: every pin must still be true. Something that moved (a new push, a
@@ -130,7 +118,6 @@ export function sourceHolds(job, sub) {
 export function checkActions(job, actions = [], plan) {
   for (const a of actions) {
     const { sub, pin } = gateAction(job, a, plan);
-    sourceHolds(job, sub);
     if (pin.at !== a.pin?.at || pin.ref !== a.pin?.ref) throw new Error(`${quoted(sub.title)} has moved since this was proposed (${PIN_NOUN[a.pin?.at] || 'state'} ${short(a.pin?.ref)} is now ${short(pin.ref)}). Ask again.`);
   }
 }
@@ -160,7 +147,7 @@ export function movedActions(job, actions = [], plan) {
     const was = `${PIN_NOUN[a.pin?.at] || 'state'} ${short(a.pin?.ref)}`;
     const at = { head: sub.pr?.head, merge: sub.pr?.mergeCommit, stage: sub.stage, round: sub.ready?.receiptId }[a.pin?.at];
     const how = pin && (pin.at !== a.pin?.at || pin.ref !== a.pin?.ref) ? `has moved (${was} is now ${short(pin.ref)})`
-      : pin ? (() => { try { sourceHolds(job, sub); return null; } catch { return 'has moved since the idea about it was sent'; } })()
+      : pin ? null
       : landedAs(sub) || (at !== undefined && String(at ?? '') !== String(a.pin?.ref ?? '') ? `has moved (${was} is now ${short(at)})` : null)
         || (a.type === 'accept-red' && !liveRun(job, sub.id) && !redPin(sub) ? 'has no red pipeline left to accept' : null);
     if (how) moved.push({ sub, how });

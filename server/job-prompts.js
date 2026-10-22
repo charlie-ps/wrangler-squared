@@ -3,6 +3,7 @@ import { ATTRIBUTION, targetOf, isHumanSub, reviewCode, placeOf, isMakeWrite, ch
 import { inboxDir, roundDir, ideasDir } from './job-evidence.js';
 import { checkoutsDir, displayPath } from './data-dir.js';
 import { isFrozen, replanStatus } from './job-replan.js';
+import { changeView } from './job-actions.js';
 import { writeBrief, openWrites, draftingFor, WRITE_RESULT_SHAPE } from './job-writes.js';
 import { inConversation, ideaThread, suggestionsOf, createdSuggestions } from './job-idea.js';
 import { talkOf, convosOf, convoById, convoRun } from './job-talk.js';
@@ -315,12 +316,17 @@ const proofBlock = (job, sub) => {
 // the work is a change to it, and the push goes to the PR that already exists.
 const openPrLine = (sub) => sub?.pr?.url ? `PR ${sub.pr.url} is already open from this worktree's branch; this is a fix to it, requested by the human (see the history below).` : '';
 
-// The view the latest idea was typed on: an action on that step is refused if it
-// has moved by approval (job-actions.js).
+// What the step the latest idea was typed on looked like then, beside what it is
+// now: the idea is never refused as stale, so whether it still applies is the
+// planner's call (only an action's pin is checked at approval, job-actions.js).
 const SOURCE_VIEW = { code: 'its code review', session: 'its result in review', pr: 'its open PR', write: 'the write', step: 'the step' };
+const seen = (v, state) => v ? `${SOURCE_VIEW[v.at] || v.at} (${v.ref}${state && state !== v.ref ? `, ${state}` : ''})` : 'finished';
 const sourceLine = (job, from) => {
   const src = from?.source, sub = src && job.subJobs.find((s) => s.id === src.sub);
-  return sub ? `The latest idea was typed on ${SOURCE_VIEW[src.at] || src.at} of ${sub.id} ${JSON.stringify(sub.title)} (pinned to ${src.ref}).` : '';
+  if (!sub) return '';
+  const view = changeView(job, sub), state = `${sub.stage}/${sub.state}`;
+  const was = seen(src, src.state), now = seen(view, state);
+  return `The latest idea was typed on ${sub.id} ${JSON.stringify(sub.title)}. When the idea was typed: ${was}; now: ${now}.${was === now ? '' : ' It has moved since: judge whether the idea still applies to the step as it is now, and write any action against it as it is now.'}`;
 };
 
 // A human step's brief is all the human reads under "What to do", so it is the

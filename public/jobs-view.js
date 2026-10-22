@@ -910,8 +910,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // foot of the conversation it replies to, the only one open (job-talk.js), else
   // below them all for a new one. Its chip says who hears it and where, and its ×
   // folds that conversation to start a new one instead. It is
-  // pinned to the thing in view (`at`, `ref`, read when this was drawn): the server
-  // refuses it if that has since changed. Not a <form>, so a tick's redraw is held
+  // never refused as stale: the wrangler judges a step that moved since. Not a <form>, so a tick's redraw is held
   // back only while something is typed (renderBoards), never by a box's presence.
   // At rest it is one line; focus, words or a picture open it.
   function boxHtml(job, sub, view, key) {
@@ -926,7 +925,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const sent = convo ? '' : askSentHtml(job, sub);
     const open = !convo && sub && subState(job, sub) === 'failing';
     const mine = boxImages(key);
-    return `${sent}<div class="job-change${open ? ' is-open' : ''}" data-change-at="${esc(view.at)}" data-change-ref="${esc(view.ref)}" data-change-convo="${esc(key)}" data-change-to="${esc(route.to)}">
+    return `${sent}<div class="job-change${open ? ' is-open' : ''}" data-change-convo="${esc(key)}" data-change-to="${esc(route.to)}">
       <ul class="job-change-tray" ${mine.length ? '' : 'hidden'}>${askTrayHtml(key)}</ul>
       <p class="job-change-error" role="alert" ${askErrorText(key) ? '' : 'hidden'}>${esc(askErrorText(key))}</p>
       <div class="job-change-row"><span class="job-change-to" title="Who hears it">${wranglerMark('small')}${esc(route.to)}${where ? `<small>${esc(where)}</small>` : ''}${fresh}</span><textarea rows="1" maxlength="8000" placeholder="${esc(route.placeholder)}" aria-label="${convo ? `Reply in ${esc(convoTitle(job, convo))}` : `Add idea for ${esc(route.to)}`}">${esc(draft)}</textarea><label class="job-change-attach" title="Attach a screenshot (or paste or drop one)">${ICONS.image}<input type="file" accept="image/*" multiple aria-label="Attach a screenshot"></label><button type="button" class="job-change-go" data-change-send aria-label="Send to ${esc(route.to)}" title="Send (↵)" ${draft ? '' : 'disabled'}>${ICONS.send}</button></div>
@@ -1705,7 +1704,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
         if (!text.value.trim() || send.disabled) return;
         const key = box.dataset.changeConvo || '', mine = askImages.filter((i) => i.box === key);
         const images = mine.map((i) => i.name).filter(Boolean);
-        action('request-change', { at: box.dataset.changeAt, ref: box.dataset.changeRef, text: text.value.trim(), ...(box.dataset.changeConvo ? { convo: box.dataset.changeConvo } : {}), ...(images.length ? { images } : {}) });
+        action('request-change', { text: text.value.trim(), ...(box.dataset.changeConvo ? { convo: box.dataset.changeConvo } : {}), ...(images.length ? { images } : {}) });
         clearAskSent();
         askSent = { jobId: job.id, subId: sub?.id ?? null, convo: key, text: text.value.trim(), items: mine, images: mine.map((i) => i.url), to: box.dataset.changeTo, at: Date.now(), state: 'sending' };
         askImages = askImages.filter((i) => i.box !== key); text.value = ''; convoFold.delete(key); boxDrafts.delete(`${sub?.id || ''}|${key}`);
