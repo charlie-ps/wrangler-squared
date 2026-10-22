@@ -4,7 +4,7 @@ Developer notes for Wrangler² — a new way of working with AI (work broken int
 AI sessions and PRs, with proof that changes work) as an installable Agent
 Wrangler extension. Only the non-obvious, durable things; point at code rather
 than re-deriving it. **Read `docs/PORTING.md` first**: the port is functionally
-complete on host API 1.39.0, and that file is the map (what came from where, what
+complete on host API 1.42.0, and that file is the map (what came from where, what
 stands in for what, and which of the eight open host-API gaps block which
 feature).
 
@@ -33,7 +33,7 @@ text as public as the rest of this repo.
 ## What this is
 
 - An **external extension** for agent-wrangler's extensions API, which is on
-  agent-wrangler `main` (host API 1.39.0). Spec:
+  agent-wrangler `main` (host API 1.42.0). Spec:
   `docs/superpowers/specs/2026-09-11-extensions-api-design.md` in that repo.
 - The wrangler clones this repo into `<DATA_DIR>/extensions/jobs/`, runs
   `npm ci --ignore-scripts`, and imports `index.js`. **The manifest `id` (`jobs`)
@@ -42,24 +42,21 @@ text as public as the rest of this repo.
   human consents to BEFORE any code runs, so it and `server/manifest.js` are
   duplicated by design and must agree (`id`, and `requires` in the manifest may
   not be WIDER than the block's). `requires` is the six `sessions:*` (read, spawn,
-  archive, bill, wake, interrupt) plus `mail:send`, `tasks:read`/`tasks:write`, `usage:read`,
-  `board:rebuild`/`board:broadcast`, `images:keep` and `files:view`. Task read/write lets New job validate a
-  selected Task or create one; spawn's `taskId` still binds task memory and
-  assigns the card itself. `mail:send` and `sessions:wake` (both host API 1.0)
-  resume a session parked on its drafts once the human has decided them:
-  mail carries the final writes, and a card gone dormant meanwhile is woken
+  archive, bill, wake, interrupt) plus `mail:send`, `usage:read`,
+  `board:rebuild`/`board:broadcast`, `images:keep` and `files:view`. A job has
+  no Task: its sessions are off the board, so a Task would only count them where
+  nobody sees them (and archiving it would kill parked steps); no spawn passes
+  `taskId`, and `jobs-schema.js` keeps the field only so old jobs parse.
+  `mail:send` and `sessions:wake` (both host API 1.0) resume a session parked
+  on its drafts once the human has decided them: mail carries the final writes, and a card gone dormant meanwhile is woken
   first. `engines.wranglerApi` is
-  `^1.39.0`: 1.4 added the worktree/`addDirs`/`taskId`/PR-automation spawn
+  `^1.42.0`: 1.4 added the worktree/`addDirs`/PR-automation spawn
   options this repo depends on, 1.6 the `usage:read`/`sessions:bill` pair the
-  Jobs board's prices and triage billing depend on, 1.8 the client
-  `api.openSession(sid)` behind the sub-job dialog's Open/Restore session button
-  (the board resumes a card the human opens; `sessions:wake` is only the
-  drafts resume above),
-  1.7 the `view` `badge()` core draws the needs-you count from, 1.25 the
+  Jobs board's prices and triage billing depend on, 1.7 the `view` `badge()` core draws the needs-you count from, 1.25 the
   client `api.agents()` the New job form reads its models and efforts from,
-  1.27 the client `api.openDiff` behind Review code in Wrangler, and 1.31 the
+  and 1.31 the
   `images:keep` capability plus the `images` spawn option behind a job's attached
-  images (client `api.images.stage` stages them; the job keeps its own copies; the New job tray is `public/job-images.js`, built on a vendored `public/clipboard-images.js`), and 1.38 the `files:view` capability plus client `api.openFile`/`api.files` behind Open on a file place (`server/job-files.js` registers each reported path; `public/job-graph.js filePathHtml` shows Open only when `api.files?.canOpen(path)`), and 1.39 the manifest's `earlyAdopter: {branch: 'next'}` (mirrored in the `wranglerExtension` block, which is what is consented to) plus client `api.earlyAdopter` behind the hidden early-adopter switch (`public/early-adopter.js`: Wrangler²'s own theme swapped back and forth between the same two themes within 10s (off yours, on, off, on) opens a small dialog; the host draws no UI for it and follows the branch only from the next update).
+  images (client `api.images.stage` stages them; the job keeps its own copies; the New job tray is `public/job-images.js`, built on a vendored `public/clipboard-images.js`), and 1.38 the `files:view` capability plus client `api.openFile`/`api.files` behind Open on a file place (`server/job-files.js` registers each reported path; `public/job-graph.js filePathHtml` shows Open only when `api.files?.canOpen(path)`), and 1.39 the manifest's `earlyAdopter: {branch: 'next'}` (mirrored in the `wranglerExtension` block, which is what is consented to) plus client `api.earlyAdopter` behind the hidden early-adopter switch (`public/early-adopter.js`: Wrangler²'s own theme swapped back and forth between the same two themes within 10s (off yours, on, off, on) opens a small dialog; the host draws no UI for it and follows the branch only from the next update), and 1.41 the `offBoard` spawn option plus 1.42 the client `api.mountSession` behind a step's Sessions (below).
 - **`package-lock.json` is mandatory** — the wrangler refuses to install without
   one. Regenerate it after any dependency change.
 
@@ -360,7 +357,8 @@ text as public as the rest of this repo.
   `inConversation`. The board sends `accept-idea` the moment a strip is pressed (one press per dialog,
   `ideaFiring`) and plays the 900ms flare alongside, then 700ms of green (`done`); only closing onto the board waits for
   both (`ideaFiring.shown`, `ideaSettled`), so a dialog closed mid-flare never loses the accept. Until then the dialog draws the job
-  as pressed (`ideaFiring.job`), so a tick that already holds the created job cannot cut the flare short. `leave-idea` cancels an idea once one job was created from it. A fresh planning run
+  as pressed (`ideaFiring.job`), so a tick that already holds the created job cannot cut the flare short
+  or move it onto the job page (`show` picks the surface from the same job). `leave-idea` cancels an idea once one job was created from it. A fresh planning run
   (a retry) reads the whole thread from its prompt, so `claim` marks unsent messages sent. The chat
   dialog redraws on ticks whatever its reply box holds (`keepFields`); only new messages fade in.
   Before planning starts a Backlog idea's title and words are the human's: `edit-idea {title?, text}` (`editIdea`,
@@ -452,6 +450,29 @@ text as public as the rest of this repo.
 - **Client modules import their leaves RELATIVELY** (`./util.js`, `./icons.js`,
   vendored) rather than from the board by absolute URL, so the same files load
   under node for `public/*.test.js`. Don't switch them to `/util.js`.
+- **A job is a page, not a dialog** (`public/jobs-view.js` `page`, `#job-page` in
+  `#jobs`): opening one hides the board (`#jobs.jobs-paging`) under a sticky bar
+  with Back and the trail Jobs › job › step; Back and Esc go up one level (Esc
+  first closes an open split popup), and a finished action that closed the old dialog goes up one
+  level too (`up`). `detail` is the old dialog body, so its CSS is
+  `:is(.job-dialog,.job-page)`. An idea not yet a job (`ideaOpen`: in conversation or
+  in the backlog, no plan) still opens on `#job-dialog`, as do New idea, Automation
+  settings and a plate's Cancel; `show` moves it onto the page once it has a plan.
+  `detail` is whichever of the two is drawn on. A reload lands on the board
+  (`TODO(host-api view-path)`, gap 25).
+- **A job's sessions live on the job page, never on the board** (`public/job-sessions.js`). Every
+  spawn passes `offBoard: true` (host API 1.41), so the board's grid never shows a job card, and
+  nothing opens a session on the board any more (`api.openSession`/`api.openDiff` are unused). A
+  step's Sessions button (`[data-sessions]`, also Review code, Answer prompt, a plate's Answer and a
+  local-main fix's Show session) opens `pageAt.sessions`: Jobs › job › step › Sessions, that step's
+  sessions only (the job's own, with no step: planning, conversations, local-main fixes), with the
+  picked card shown in `.job-mc-host` through `api.mountSession` (1.42), core's whole panel moved in.
+  `paintSessions` builds that skeleton ONCE per scope and afterwards repaints only the head and list:
+  redrawing the host would yank the panel from under a human typing in it. Leaving (`show` of any
+  other markup, `forget`, `leavePage`) `unmount`s the handle. Esc and the page's primary-action chord
+  ignore keys from inside the host, and every generic `:is(.job-dialog,.job-page) <element>` rule in
+  `jobs.css` is fenced with `:where(:not(.job-mc-host *))` so core's panel keeps core's styles; a new
+  element rule there needs the same fence.
 - **The `<dialog>` is appended to `<body>`, not to the view host**: a dialog under
   a `display:none` ancestor cannot `showModal()`, and the host is hidden whenever
   another view is active.

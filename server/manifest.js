@@ -55,10 +55,10 @@ export default {
   // `sessions:interrupt` stops a job's sessions at its spend limit (job-budget.js).
   requires: [
     'sessions:read', 'sessions:spawn', 'sessions:archive', 'sessions:bill', 'sessions:wake', 'sessions:interrupt',
-    'mail:send', 'tasks:read', 'tasks:write',
+    'mail:send',
     'usage:read', 'board:rebuild', 'board:broadcast', 'images:keep', 'files:view',
   ],
-  engines: { wranglerApi: '^1.39.0' },
+  engines: { wranglerApi: '^1.42.0' },
   // Early builds an install may opt into (host API 1.39) from the hidden
   // switch in public/early-adopter.js; mirrored in package.json so it is consented to.
   earlyAdopter: { branch: 'next' },

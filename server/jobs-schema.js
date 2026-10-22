@@ -412,6 +412,8 @@ export const jobInputSchema = z.object({
   // (an integration branch for multi-PR work). Absent on a job saved before it,
   // and then everything keeps targeting the default.
   base: branchName.optional(),
+  // Read by nothing: a job has no Task (its sessions are off the board). Kept so
+  // a job saved with one still parses.
   taskId: z.string().nullable().default(null),
   // Names of images the job keeps in the host's per-extension store (`images:keep`),
   // already staged by the client's `api.images.stage`. `shareImages` decides whether
