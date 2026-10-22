@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { STATES, STATE_ORDER, stateIconHtml, stateSolid, subState, subLabel, subLine, jobState, jobLabel, leadSub, sortJobs, jobNeedsYou, mainWaiting } from './job-state.js';
 import { plateHtml, plateAsk } from './job-plates.js';
-import { jobStatus } from './jobs.js';
+import { jobStatus, eventFor } from './jobs.js';
 import { heldBy } from '../server/job-red.js';
 
 const sub = (id, over = {}) => ({ id, title: `Deliver ${id}`, repo: '/repo', storyId: 'story', jiraKey: 'AUTH-1', after: [], brief: 'b', sessions: [], repairs: [], stage: 'implementation', ...over });
@@ -274,4 +274,53 @@ test('a wrangler answer is to read until its conversation was shown, then the jo
   const review = sub('r', { stage: 'review', state: 'verified', ready: { checks: [] } });
   const both = job({ subJobs: [review], convos: [{ id: 'c3', at: 1, sub: 'r', pending: null, seenAt: 0 }], talk: [{ ...answer, convo: 'c3', sub: 'r' }] });
   assert.deepEqual([subState(both, review), subLabel(both, review)], ['needs', 'Review code'], 'Review code stays amber');
+});
+
+test('a code review the human sent an idea on is Wrangler\'s until it answers or the session reports back', () => {
+  const review = sub('r', { stage: 'review', state: 'verified', ready: { checks: [], round: 1 } });
+  const j = job({ subJobs: [review], runs: [run('r', { parkedFor: 'ready', parkedAt: 1 })], talk: [{ id: 't1', at: 2, from: 'human', text: 'Does it handle an empty list?', convo: 'c1', sub: 'r' }],
+    convos: [{ id: 'c1', at: 2, sub: 'r', seenAt: 2, pending: { at: 2, asks: [{ messageId: 't1', sentAt: null }], source: { sub: 'r', at: 'code', ref: 'r_r#1', state: 'review/verified' } } }] });
+  assert.deepEqual([subState(j, review), subLabel(j, review), jobStatus(j, review).tone], ['running', 'Working on your feedback', 'working'], 'its ask run reads it');
+  assert.deepEqual([jobState(j), jobLabel(j), jobNeedsYou(j), plateAsk(j)], ['running', 'Working on your feedback', false, null]);
+  // The ask run proposes: the plan change drawn from it holds the step, still Wrangler's.
+  j.convos[0].pending = null;
+  j.replan = { at: 3, feedback: 'x', source: j.convos[0].pending?.source || { sub: 'r', at: 'code', ref: 'r_r#1' }, convo: 'c1', proposal: null };
+  stamped(j);
+  assert.deepEqual([subState(j, review), subLabel(j, review), jobNeedsYou(j)], ['running', 'Working on your feedback', false], 'drafting a plan change from it');
+  delete j.replan; stamped(j);
+  j.replanQueue = [{ feedback: 'x', at: 3, source: { sub: 'r', at: 'code' }, convo: 'c1' }];
+  assert.deepEqual([subState(j, review), jobNeedsYou(j)], ['running', false], 'queued behind another change');
+  delete j.replanQueue;
+  // Forwarded to the session: its own answering line until it reports back.
+  review.answering = { at: 4 };
+  assert.deepEqual([subState(j, review), subLabel(j, review), jobNeedsYou(j)], ['running', 'Working on your message', false]);
+  delete review.answering;
+  assert.deepEqual([subState(j, review), subLabel(j, review), jobNeedsYou(j), plateAsk(j).label], ['needs', 'Review code', true, 'Review code'], 'back to the human');
+  // An idea typed on another step leaves this review the human's.
+  j.convos[0].pending = { at: 5, asks: [], source: { sub: 'other', at: 'pr' } };
+  assert.deepEqual([subState(j, review), jobNeedsYou(j)], ['needs', true]);
+});
+
+test('a declared red the human sent an idea on reads as worked on until Wrangler proposes', () => {
+  const api = sub('api', { stage: 'pr', error: 'Automatic repair limit reached', pr: pr({ checkStatus: 'failing' }) });
+  const j = job({ subJobs: [api, sub('web', { after: ['api'] })] });
+  api.red = { declared: { at: 1, ref: `${api.error}|h1||0`, summary: 'The test is flaky.', ask: 'Accept it?' } };
+  stamped(j);
+  assert.deepEqual([subState(j, api), subLabel(j, api), jobNeedsYou(j), plateAsk(j).label], ['failing', 'Declared red', true, 'Declared red']);
+  // job-change.js: a declared red's idea goes straight to the planner.
+  j.convos = [{ id: 'c1', at: 2, sub: 'api', seenAt: 2, pending: null }];
+  j.replan = { at: 2, feedback: 'x', source: { sub: 'api', at: 'pr', ref: 'h1' }, convo: 'c1', red: { sub: 'api', auto: false, human: true }, proposal: null };
+  stamped(j);
+  assert.deepEqual([subState(j, api), subLabel(j, api), jobStatus(j, api).tone], ['running', 'Working on your feedback', 'working']);
+  assert.deepEqual([jobState(j), jobLabel(j), jobNeedsYou(j), plateAsk(j)], ['running', 'Working on your feedback', false, null]);
+  assert.equal(eventFor(j, api).fix.kind, 'fixing', 'no Declared red banner while Wrangler has it');
+  assert.equal(eventFor(j, api).fix.title, 'Working on your feedback');
+  // The proposal lands: the usual asks take over.
+  j.replan.proposal = { id: 'p', plan: { subJobs: [] }, changes: { added: [], edited: [], removed: [], kept: ['api', 'web'], frozen: [] }, actions: [{ type: 'accept-red', sub: 'api' }] };
+  stamped(j);
+  assert.deepEqual([jobState(j), jobLabel(j), jobNeedsYou(j)], ['change', 'Fix proposed', true]);
+  assert.equal(eventFor(j, api).fix.kind, 'declared');
+  // Dropped (replanFailed, discard): Declared red again.
+  delete j.replan; stamped(j);
+  assert.deepEqual([subState(j, api), subLabel(j, api), jobNeedsYou(j)], ['failing', 'Declared red', true]);
 });

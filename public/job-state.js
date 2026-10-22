@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, budgetHeld, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, touchedBy, wranglerUnread, ideaStage, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber, worktreeKept, promptsWaiting } from './jobs.js';
+import { isPrSub, isSessionSub, isHumanSub, isWriteSub, writeWaiting, triggerDropped, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, workingOnFeedback, FEEDBACK_LABEL, budgetHeld, jobStatus, jobNeedsReview, eventFor, redPipeline, cancelledDependencies, touchedBy, wranglerUnread, ideaStage, pendingDependencies, deploymentStalled, codeAwaitingReview, runStatus, prNumber, worktreeKept, promptsWaiting } from './jobs.js';
 
 // The one state vocabulary every surface draws: a tone (the colour, see the
 // .tone-* rules in jobs.css), a glyph and a short name. Every stage, run status,
@@ -33,7 +33,7 @@ export function subState(job, sub) {
   if (sub.cancelledAt) return worktreeKept(sub) ? 'needs' : 'dropped';
   if (sub.stage === 'done') return 'done';
   // Red, but Wrangler has it (Fixing), or has a fix for you (Fix ready): neither is the failing red you act on.
-  if (!job.error && redFixing(job, sub)) return 'running';
+  if (!job.error && (redFixing(job, sub) || workingOnFeedback(job, sub))) return 'running';
   if (!job.error && redFixReady(job, sub)) return 'needs';
   if (job.error || cancelledDependencies(job, sub).length || (eventFor(job, sub) && !deploymentStalled(sub))) return 'failing';
   if (job.paused || budgetHeld(job)) return 'paused';
@@ -125,6 +125,7 @@ export function jobLabel(job) {
   if (state === 'paused') return 'Paused';
   if (state === 'change') return job.replan.proposal.escalation ? 'Options ready' : job.replan.red ? 'Fix proposed' : 'Plan change ready';
   if (state === 'read' && wranglerUnread(job).length) return 'Wrangler replied';
+  if (state === 'running' && job.subJobs.some((s) => workingOnFeedback(job, s))) return FEEDBACK_LABEL;
   if (state === 'running' && replanPending(job) && !replanProposed(job)) return job.replan.red ? 'Fixing' : 'Wrangling';
   const peers = job.subJobs.filter((s) => subState(job, s) === state);
   if (!peers.length) return jobStatus(job, null).text;

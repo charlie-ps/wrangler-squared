@@ -2312,12 +2312,12 @@ test('a plan change about a sub-job awaiting review freezes it: held, not needs-
   assert.equal(jobNeedsReview(job, job.subJobs[0]), true, 'an idea typed on the job holds no step');
   job.replan = { feedback: 'Rethink api', at: 1, proposal: null, previous: null, source: { sub: 'api', at: 'code', ref: 'r1' } };
   f.view.update(f.data);
-  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Wrangling');
+  assert.equal(f.q('[data-board="job1"] .job-status').textContent, 'Working on your feedback', 'the human answered its review: Wrangler has it (#295)');
   assert.equal(jobNeedsReview(job, job.subJobs[0]), false); assert.equal(f.q('#jobs-review-count').textContent, '');
   f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
   assert.equal(f.q('[data-action="approve-code"]'), null);
   assert.ok(f.q('.job-change textarea'), 'a question about it can still be asked: it holds nothing');
-  assert.match(f.q('#job-page').textContent, /Held for the plan change/);
+  assert.match(f.q('#job-page').textContent, /Working on your feedback/);
   job.runs = [{ id: 'w', subJobId: 'api', phase: 'implementation', stopped: false, status: 'running' }];
   assert.notEqual(jobStatus(job, job.subJobs[0]).text, 'Held for the plan change', 'a step already running carries on');
 });
