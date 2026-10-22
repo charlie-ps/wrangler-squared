@@ -29,7 +29,7 @@ import { mountSandbox } from './job-sandbox.js';
 import { whatsNewHtml } from './updates.js';
 import { tabsHtml, panelHtml, bindTabs } from './settings-tabs.js';
 import { createIdeaCorner } from './idea-corner.js';
-import { createRedrawHold, keepScrollX } from './redraw-hold.js';
+import { createRedrawHold, keepFields, keepScrollX } from './redraw-hold.js';
 import { historyHtml } from './job-thread.js';
 import { replanAsks, latestAsk } from './replan-asks.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
@@ -564,19 +564,26 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       const chip = dialog.querySelector('.job-appbar .job-chip-state');
       if (chip) chip.outerHTML = stateChip(jobState(reviewed), jobLabel(reviewed));
     }
-    // A picture waiting in a box is as much a draft as words are.
-    const boxes = new Set([...dialog.querySelectorAll('.job-change')].map((b) => b.dataset.changeConvo || ''));
-    const typing = askImages.some((i) => boxes.has(i.box)) || [...dialog.querySelectorAll('.job-change textarea, [data-approve-note], [data-retry-note]')].some((t) => t.value);
-    // An empty reply box with the cursor in it is someone reading the thread: it redraws, keeping the cursor.
-    const composing = document.activeElement?.closest?.('[data-idea-composer]');
+    // Typing holds nothing: the step's status keeps moving under a half-written idea or note,
+    // and what was typed, the cursor and the pictures are carried into the redrawn fields.
+    // Only an open form (a write, a cancel question) is left alone, being a decision in progress.
     const humanForm = dialog.querySelector('#job-human-form');
     const currentSub = humanForm && data.jobs.find((j) => j.id === selected?.jobId)?.subJobs.find((s) => s.id === selected?.subId);
-    if (dialog.open && selected && !planDraft && !typing && !proofView && (!dialog.querySelector('form') && (composing || !dialog.contains(document.activeElement?.closest('input, textarea, select')))
-      || humanForm && currentSub && (currentSub.stage !== 'human' || humanForm.dataset.state !== currentSub.state))) {
-      const output = humanForm?.elements.output.value;
-      renderDetail();
-      if (output != null && dialog.querySelector('#job-human-form')) dialog.querySelector('#job-human-form').elements.output.value = output;
-      if (composing) dialog.querySelector('[data-idea-composer] textarea')?.focus();
+    if (dialog.open && selected && !planDraft && !proofView && !dialog.querySelector('form')
+      || humanForm && currentSub && (currentSub.stage !== 'human' || humanForm.dataset.state !== currentSub.state)) {
+      const fields = keepFields(dialog);
+      keepBoxes(); renderDetail(); fields();
+    }
+  }
+  // An idea box with something in it keeps its conversation across a tick: a reply landing
+  // elsewhere must not move the words to another target.
+  function keepBoxes() {
+    const subId = selected?.subId || '';
+    for (const box of dialog.querySelectorAll('.job-change:not([data-idea-composer])')) {
+      const key = box.dataset.changeConvo || '', text = box.querySelector('textarea').value;
+      if (!text && !boxImages(key).length) continue;
+      boxDrafts.set(`${subId}|${key}`, text);
+      if (!replyTo.has(subId)) replyTo.set(subId, key);
     }
   }
   function show(html) {
@@ -920,8 +927,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // foot of the conversation it replies to, the only one open (job-talk.js), else
   // below them all for a new one. Its chip says who hears it and where, and its ×
   // folds that conversation to start a new one instead. It is
-  // never refused as stale: the wrangler judges a step that moved since. Not a <form>, so a tick's redraw is held
-  // back only while something is typed (renderBoards), never by a box's presence.
+  // never refused as stale: the wrangler judges a step that moved since. Not a <form>, so a
+  // tick redraws it, carrying over what is typed (keepBoxes), never held by a box's presence.
   // At rest it is one line; focus, words or a picture open it.
   function boxHtml(job, sub, view, key) {
     const convo = key ? convosOf(job).find((c) => c.id === key) || null : null;
