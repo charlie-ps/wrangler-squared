@@ -3613,33 +3613,63 @@ test('a question the wrangler could not answer is said in the conversation; the 
   assert.equal(f.store.get(f.job.id).error, null);
 });
 
-test('dismiss-convo hides a conversation for good, never one whose wrangler is answering or has a plan change in it', async (t) => {
+test('dismiss-convo hides a conversation and stops its work: a queued question, an answering run, a change drawn or waiting in it', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   change(f, null, 'What is left?');
-  const id = f.store.get(f.job.id).convos[0].id;
-  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'queued');
-  await f.tick();
-  const asker = plannerOf(f);
-  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'answering');
-  f.report({ kind: 'reply', text: 'Only web.' }, asker);
-  await f.tick();
-  change(f, null, 'Add a CLI after web', id);
-  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /still answering/, 'a change idea is read first');
-  await f.tick();
-  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli')]) }, plannerOf(f)); await f.tick();
-  assert.ok(f.store.get(f.job.id).replan.proposal);
-  assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /plan change in progress/, 'a proposal waiting');
-  f.store.action(f.job.id, 'discard-replan');
-  await f.tick();
+  let id = f.store.get(f.job.id).convos.at(-1).id;
   f.store.action(f.job.id, 'dismiss-convo', { convo: id });
-  const job = f.store.get(f.job.id);
-  assert.equal(typeof job.convos[0].dismissedAt, 'number', 'kept on the job, so a reload still hides it');
+  let job = f.store.get(f.job.id);
+  assert.equal(job.convos.at(-1).pending, null, 'a queued question is dropped');
+  assert.equal(typeof job.convos.at(-1).dismissedAt, 'number', 'kept on the job, so a reload still hides it');
   assert.equal(job.moves.at(-1).move, 'dismiss-convo');
+  await f.tick();
+  assert.equal(f.launched.filter((w) => w.run.convo === id).length, 0, 'never launched');
+
+  change(f, null, 'What is left now?'); await f.tick();
+  id = f.store.get(f.job.id).convos.at(-1).id;
+  const asker = plannerOf(f);
+  assert.equal(asker.run.convo, id);
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id }); await f.tick();
+  assert.ok(f.stopped.includes(asker.run.id), 'its ask run is archived');
+  job = f.store.get(f.job.id);
+  assert.equal(job.runs.find((r) => r.id === asker.run.id).error ?? null, null, 'quietly: no missing-receipt error');
+  assert.equal(talk(f).filter((m) => m[1] === 'error').length, 0, 'nothing said in the hidden conversation');
+  assert.throws(() => f.report({ kind: 'reply', text: 'Only web.' }, asker), /has stopped/);
+
+  drawing(f, 'Add a CLI after web'); await f.tick();
+  id = f.store.get(f.job.id).convos.at(-1).id;
+  const drafter = plannerOf(f);
+  drawing(f, 'And docs after that');
+  const other = f.store.get(f.job.id).convos.at(-1).id;
+  f.store.update(f.job.id, (j) => requestReplan(j, 'And a changelog', Date.now(), null, { convo: id }));
+  change(f, null, 'Rename api too', id);
+  assert.deepEqual(f.store.get(f.job.id).replanQueue.map((q) => q.convo), [other, id]);
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  job = f.store.get(f.job.id);
+  assert.equal(job.replan, null, 'the change drawn in it is dropped');
+  assert.equal(job.convos.find((c) => c.id === id).pending, null);
+  assert.deepEqual(job.replanQueue.map((q) => q.convo), [other], 'nothing of it stays queued');
+  await f.tick();
+  assert.ok(f.stopped.includes(drafter.run.id), 'its planner is archived');
+  await f.tick();
+  assert.equal(f.store.get(f.job.id).replan?.convo, other, 'the next change in line starts');
   assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: id }), /already gone/);
   assert.throws(() => f.store.action(f.job.id, 'dismiss-convo', { convo: 'convo_nope' }), /already gone/);
 });
 
-test('a dismissed conversation comes back when anything new is said in it, by the human or the wrangler', async (t) => {
+test('a proposal waiting in a dismissed conversation is discarded with it', async (t) => {
+  const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
+  change(f, null, 'Add a CLI after web'); await f.tick();
+  f.report({ kind: 'plan', plan: plan([spec('api'), spec('web'), spec('cli')]) }, plannerOf(f)); await f.tick();
+  let job = f.store.get(f.job.id);
+  const id = job.replan.convo, proposalId = job.replan.proposal.id;
+  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
+  job = f.store.get(f.job.id);
+  assert.equal(job.replan, null);
+  assert.equal(job.talk.findLast((m) => m.proposalId === proposalId).outcome, 'discarded');
+});
+
+test('a dismissed conversation comes back only when the human writes in it, never for a Wrangler message alone', async (t) => {
   const f = fixture(t); await f.approve(plan([spec('api'), spec('web')]));
   change(f, null, 'What is left?');
   await f.tick();
@@ -3647,15 +3677,11 @@ test('a dismissed conversation comes back when anything new is said in it, by th
   await f.tick();
   const id = f.store.get(f.job.id).convos[0].id;
   f.store.action(f.job.id, 'dismiss-convo', { convo: id });
-  change(f, null, 'Is web started?', id);
-  assert.equal(f.store.get(f.job.id).convos[0].dismissedAt, undefined, 'the human said something in it');
-  await f.tick();
-  f.report({ kind: 'reply', text: 'Not yet.' }, plannerOf(f));
-  await f.tick();
-  f.store.action(f.job.id, 'dismiss-convo', { convo: id });
   const job = f.store.get(f.job.id);
   say(job, { from: 'wrangler', kind: 'answer', text: 'Web has started.', convo: id }, 9);
-  assert.equal(job.convos[0].dismissedAt, undefined, 'Wrangler said something in it');
+  assert.equal(typeof job.convos[0].dismissedAt, 'number', 'Wrangler alone does not bring it back');
+  change(f, null, 'Is web started?', id);
+  assert.equal(f.store.get(f.job.id).convos[0].dismissedAt, undefined, 'the human said something in it');
 });
 
 // ---- Bug sweep of next: each test fails without its fix ----

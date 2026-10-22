@@ -188,10 +188,14 @@ text as public as the rest of this repo.
   conversation (`askFailed`), never `job.error`. `planningRun` (client) ignores ask
   runs, so Approve stays live while one answers. ONE box, and ONE
   conversation open at a time, with the box at its foot (`boxHtml`, `data-change-convo`):
-  `replyTarget` is the human's pick (a title row opens that one and folds the other, the
-  open one's header or the chip's × folds it), else `defaultTarget`, the one at work or
-  spoken in last; '' (none open, and where a failing step's dialog opens, until its first message starts one) puts the box below them all
-  for a new one. Drafts are kept per target (`boxDrafts`), pasted pictures by
+  Which one is open is ONLY the human's choice: `replyTarget` is the human's pick (a title
+  row opens that one and folds the other, the open one's header or the chip's × folds it),
+  and with none yet `latestConvo` (the one the human started or wrote in last), stored as
+  the pick so no wrangler activity ever opens, folds or retargets one; '' (none open, and
+  where a failing step's dialog opens) puts the box below them all for a new one, and the
+  conversation the human's send there starts becomes the pick. A folded one with something
+  newer than its `seenAt` draws an unread dot on its title row (`unreadIn`); opening it
+  sends `job-talk-seen` (`markSeen`). Drafts are kept per target (`boxDrafts`), pasted pictures by
   `askImages[].box`, and the sent bubble lands at the end of its conversation
   (`askSent.convo`) or above the box. Haiku names each new conversation from its
   first message after the send (`handlers.js nameConvo`, `convo.titlePending` drawn
@@ -201,11 +205,14 @@ text as public as the rest of this repo.
   (`stepConvoLine`), and it shows ONLY on that step's dialog until the wrangler
   escalates it (`reply {escalate:true}`, or any proposal it draws, `escalate` →
   `convo.escalatedAt`); then the job's list shows it too (`talkFor`, client-side
-  only). A step's dialog shows only what was said on it. Where the view takes no reply, a conversation not at work
-  and not the one the human spoke in last folds to its title row (`convoOpen`; clicks are client-side, per id). Its ×
-  (`dismiss-convo`, refused while it answers or holds a plan change) stamps `convo.dismissedAt`,
-  which hides it everywhere until anything new is said in it (`say` clears it, so a reply
-  from a stale box or a wrangler's message brings it back). A job
+  only). A step's dialog shows only what was said on it. Where the view takes no reply, every conversation but `latestConvo`
+  folds to its title row (`convoOpen`; clicks are client-side, per id). Its ×, on every
+  conversation, live ones included (`dismiss-convo`), stops its work and stamps
+  `convo.dismissedAt`: `dismissConvo` drops its asks and its `replanQueue` entries, the
+  store discards a plan change drawn or waiting in it (`discardReplan`, `holdRed` as
+  Discard does), and settle() then archives its ask run or planner quietly. It stays hidden
+  everywhere until the HUMAN writes in it again (`say` clears it only for `from: 'human'`;
+  a wrangler's message never brings it back). A job
   saved with the old single `job.ask` is migrated on load (`migrateTalk`). Open PR #209
   keeps a step's sent ideas on `job.replan.asks`; once both land, the step dialog
   should draw them from the thread, not twice.

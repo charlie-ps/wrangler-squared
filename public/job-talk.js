@@ -10,8 +10,9 @@ import { shotButtonHtml } from './job-proof.js';
 // it. A forward is no plan change: it is one line saying where the words went,
 // followed by what that step's session answered, read from its thread. Several
 // can be answering at once, but only one is open: the one the box writes to,
-// which is drawn at its foot. A click on another's title row opens that one in
-// its place; with none open the box sits below them all and starts a new one.
+// which is drawn at its foot. Only the human moves it: a click on another's title
+// row opens that one in its place; with none open the box sits below them all and
+// starts a new one. A folded one marks what was said in it since (unreadIn).
 // Each is named by Haiku from its first message (server titlePending), else
 // "Conversation N". The job dialog shows all of them, a step's
 // dialog only what was said on that step: a conversation started there shows on
@@ -121,43 +122,44 @@ function workingHtml(job, convo) {
   return text ? `<div class="job-idea-thinking job-talk-working">${wranglerMark('small', true)}<span class="job-idea-shine">${text}</span></div>` : '';
 }
 
-// A conversation stays open while its wrangler is at it (answering, queued, a
-// change drawn or waiting in it) and when the human spoke in it last; the rest
-// fold to their title row. `fold` holds the human's own clicks, which win.
-const liveIn = (job, convo) => askPending(job, convo) || convoRunning(job, convo) || (!job.cancelledAt && !!job.replan && job.replan.convo === convo.id);
-export function convoOpen(job, group, groups, fold = null) {
+// Which conversations are open is only ever the human's choice: what their wrangler
+// does never opens, folds or retargets one. With no choice made yet, the one rule is
+// the most recent conversation: the one the human started or wrote in last, which
+// only the human can change. `fold` holds the human's own clicks where the view takes
+// no reply.
+const lastHuman = (g) => Math.max(g.convo.at || 0, g.messages.findLast((m) => m.from === 'human')?.at ?? -Infinity);
+const latestOf = (groups) => groups.filter((g) => g.convo).reduce((best, g) => !best || lastHuman(g) >= lastHuman(best) ? g : best, null)?.convo.id || '';
+export const latestConvo = (job, sub) => latestOf(convoGroups(job, sub));
+export function convoOpen(group, groups, fold = null) {
   const { convo } = group;
   if (!convo) return true;
   if (fold?.has(convo.id)) return fold.get(convo.id);
-  if (liveIn(job, convo)) return true;
-  const lastHuman = (g) => g.messages.findLast((m) => m.from === 'human')?.at ?? -Infinity;
-  const latest = Math.max(...groups.map(lastHuman));
-  return latest > -Infinity && lastHuman(group) === latest;
+  return convo.id === latestOf(groups);
 }
+// What its wrangler said that the human has not had open in front of them: a folded
+// conversation's title row marks it, and opening it reads it (jobs-view.js markSeen).
+export const unreadIn = (convo, messages) => messages.filter((m) => m.from !== 'human' && m.at > (convo.seenAt || 0));
 
 // What the box and a header call a conversation: Haiku's name, else its number.
 export const convoTitle = (job, convo) => convo.title || `Conversation ${convoNumber(job, convo)}`;
-// Which open conversation the box writes to when the human has not picked one: the
-// one spoken in last among those open, ignoring folds so folding never moves it.
-export function defaultTarget(job, sub) {
-  const groups = convoGroups(job, sub).filter((g) => g.convo && convoOpen(job, g, convoGroups(job, sub)));
-  return groups.sort((a, b) => (b.messages.at(-1)?.at || 0) - (a.messages.at(-1)?.at || 0))[0]?.convo.id || '';
-}
 
 function groupHtml(job, group, groups, sub, boxFor, fold, kept, target) {
   const { convo, messages } = group;
   const onJob = !sub;
   // Where the box writes, one at a time: the open conversation is its target.
-  const open = target != null && convo ? convo.id === target : convoOpen(job, group, groups, fold);
+  const open = target != null && convo ? convo.id === target : convoOpen(group, groups, fold);
   const step = onJob && convo?.sub ? job.subJobs.find((s) => s.id === convo.sub)?.title || convo.sub : '';
   const state = convo && askPending(job, convo) ? `<span class="job-talk-tag tone-working">${convoRunning(job, convo) ? 'Answering' : 'Queued'}</span>` : '';
   const raised = convo?.sub && convo.escalatedAt ? `<span class="job-talk-tag" title="Wrangler judged it the whole job's, so the job's list shows it too">${onJob ? 'Escalated' : 'Also on the job'}</span>` : '';
   const title = convo ? convoTitle(job, convo) : 'From Wrangler';
   const name = convo?.titlePending ? titleLoaderHtml('small') : esc(title);
   const more = !open && messages.length > 2 ? `<small class="job-talk-count">${messages.length} messages</small>` : '';
-  const tools = convo ? `<span class="job-talk-convo-tools"><button type="button" class="job-talk-fold" aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} ${esc(title)}">${ICONS.caret}</button>${liveIn(job, convo) ? '' : `<button type="button" class="job-talk-dismiss" data-convo-dismiss title="Dismiss this conversation" aria-label="Dismiss ${esc(title)}">${ICONS.x}</button>`}</span>` : '';
+  const unread = !open && convo && unreadIn(convo, messages).length ? `<span class="job-talk-unread" title="New from ${WRANGLER_NAME}" role="img" aria-label="New from ${WRANGLER_NAME}"></span>` : '';
+  // × is always there: on a conversation at work it also stops that work (server/job-talk.js dismissConvo).
+  const busy = convo && (askPending(job, convo) || convoRunning(job, convo) || (!job.cancelledAt && job.replan?.convo === convo.id));
+  const tools = convo ? `<span class="job-talk-convo-tools"><button type="button" class="job-talk-fold" aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} ${esc(title)}">${ICONS.caret}</button><button type="button" class="job-talk-dismiss" data-convo-dismiss title="${busy ? `Dismiss this conversation and stop ${WRANGLER_NAME}'s work in it` : 'Dismiss this conversation'}" aria-label="Dismiss ${esc(title)}">${ICONS.x}</button></span>` : '';
   // Folded, a conversation is its title row alone.
-  const head = `<header class="job-talk-convo-head"${convo ? ' data-convo-fold' : ''}><b>${name}</b>${step && open ? `<small>on ${esc(step)}</small>` : ''}${raised}${state}${more}${tools}</header>`;
+  const head = `<header class="job-talk-convo-head"${convo ? ' data-convo-fold' : ''}>${unread}<b>${name}</b>${step && open ? `<small>on ${esc(step)}</small>` : ''}${raised}${state}${more}${tools}</header>`;
   // The header names the step once; its messages never say it again.
   const here = convo?.sub || sub?.id || null;
   // A long one folds from its foot too, so the human need not scroll back up to its header.

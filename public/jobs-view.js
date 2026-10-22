@@ -1,7 +1,7 @@
 import { esc, tildify } from './util.js';
 import { ICONS, wranglerMark } from './icons.js';
-import { wranglerUnread, convoGroups, convosOf, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, uncreatedSuggestions, ideaEditable, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel, leadSentence } from './jobs.js';
-import { talkHtml, convoTitle, defaultTarget } from './job-talk.js';
+import { convoGroups, convosOf, CHECKPOINTS, checkpoint, reviewDefaultsOf, youReview, checkpointLabel, checkpointHint, checkpointButtonHtml, checkpointLock, checkpointWaiting, checkpointToggleHtml, syncCheckpointToggle, codeAwaitingReview, jobCostLabel, JOB_COST_TITLE, SUB_COST_TITLE, storyLabel, isSessionSub, isHumanSub, isPrSub, targetOf, offBase, hasSessionSubs, reviewedSession, kindChipHtml, kindLabel, KIND_TITLE, kindClass, dependencySatisfied, pendingDependencies, noteReaders, jobCards, jobStatus, receiptHtml, cancelledDependencies, commentVerdict, mergeHeldByComments, deploymentStalled, mergeApprovable, COMMENT_TONE_LABEL, deploysLine, eventFor, changeView, changeRoute, proposalOptions, actionMark, actionLine, editLine, pinLine, prNumber, runStatus, promptsWaiting, promptWhere, replanPending, replanProposed, heldByReplan, redFixing, redFixReady, redDeclared, isWriteSub, isStoryCreate, isMakeWrite, isJiraWrite, placeOf, PLACES, webUrl, placesOf, writeSession, sessionTrigger, triggerLine, writeTarget, milestoneLabel, workflowFor, triggerDropped, sessionDormant, parkedRun, draftsWaiting, writeAwaitingReview, writeReviewed, writeVerb, placeShort, hasWrites, dependencyLine, storyProject, inConversation, ideaThread, ideaOpen, uncreatedSuggestions, ideaEditable, readyRun, reworkRound, budgetHeld, budgetLine, topUpLabel, dollars, DEFAULT_SPEND_LIMIT, talkFor, askPending, planningRun, replanQueued, queuedLabel, leadSentence } from './jobs.js';
+import { talkHtml, convoTitle, latestConvo, unreadIn } from './job-talk.js';
 import { TITLE_FADE_MS, ideaViewHtml, ideaThreadHtml, imageStripHtml, ideaEditHtml } from './job-idea.js';
 import { planGraphHtml, layoutGraphEdges, filePathHtml, setFileOpener, fieldName } from './job-graph.js';
 import { assignScenes, plateHtml, placePopHtml, askActs, plateAsk } from './job-plates.js';
@@ -884,10 +884,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // What was sent, above the box it came from: the words and pictures lift into a
   // bubble, and the line under it says who has it once the server took it. Once the
   // conversation shows the message itself, even before the ack, its row there is the receipt instead.
+  const sentHeld = (m) => m.from === 'human' && m.text === askSent.text && m.at >= askSent.at - 60000;
   function askSentHtml(job, sub, key = '') {
     if (!askSent || askSent.subId !== (sub?.id ?? null) || (askSent.convo || '') !== key) return '';
-    const held = (m) => m.from === 'human' && m.text === askSent.text && m.at >= askSent.at - 60000;
-    if (askSent.state !== 'failed' && (sub?.thread?.some(held) || talkFor(job, sub).some(held))) return '';
+    if (askSent.state !== 'failed' && (sub?.thread?.some(sentHeld) || talkFor(job, sub).some(sentHeld))) return '';
     const s = askSent, fresh = s.drawn !== s.state; s.drawn = s.state;
     const pics = s.images.length ? `<span class="job-sent-imgs">${s.images.map((u) => `<img src="${esc(u)}" alt="">`).join('')}</span>` : '';
     const n = s.images.length ? ` with ${s.images.length} image${s.images.length > 1 ? 's' : ''}` : '';
@@ -896,15 +896,25 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       : `<span class="job-sent-meta"><span class="job-sent-sending">Sending to ${esc(s.to)}…</span></span>`;
     return `<div class="job-sent ${s.state}${fresh ? ' fresh' : ''}" data-sent-state="${s.state}"><div class="job-sent-bubble">${pics}<span>${esc(s.text)}</span></div>${meta}</div>`;
   }
-  // The conversation the box writes to: the human's pick while it is still in
-  // view, else the one spoken in last (job-talk.js defaultTarget). A failing step
-  // opens on a new one, since what to do about it is a new decision (openDetail);
-  // once that is sent, its follow-ups go to the conversation it started.
+  // The conversation the box writes to is only ever the human's pick: with none yet
+  // the most recent conversation (job-talk.js latestConvo), kept as the pick so
+  // nothing a wrangler does moves it. A failing step opens on a new one, since what
+  // to do about it is a new decision (openDetail); once the human sends there, the
+  // conversation it started is theirs.
   function replyTarget(job, sub, view) {
     if (view.at === 'plan') return '';
-    const picked = replyTo.get(sub?.id || '');
-    if (picked === '' || picked && convoGroups(job, sub).some((g) => g.convo?.id === picked)) return picked;
-    return defaultTarget(job, sub);
+    const key = sub?.id || '', picked = replyTo.get(key);
+    const shown = (id) => convoGroups(job, sub).some((g) => g.convo?.id === id);
+    if (picked === '') {
+      const landed = askSent && askSent.state !== 'failed' && askSent.subId === (sub?.id ?? null) && !askSent.convo ? talkFor(job, sub).find(sentHeld) : null;
+      if (!landed?.convo || !shown(landed.convo)) return '';
+      askSent.convo = landed.convo; replyTo.set(key, landed.convo);
+      return landed.convo;
+    }
+    if (picked && shown(picked)) return picked;
+    const first = latestConvo(job, sub);
+    replyTo.set(key, first);
+    return first;
   }
   // The one box an idea goes in through, on every step, review and proposal: at the
   // foot of the conversation it replies to, the only one open (job-talk.js), else
@@ -1549,13 +1559,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     shotZoom.showModal();
     paintShotBox();
   }
-  // The wrangler's answers this dialog draws are read once it is open on them: tell the
-  // server once per answer, so the job leaves the to-read state on its next tick. A
-  // folded conversation draws none of its answers, so it is read only once unfolded.
+  // What the wrangler said that this dialog draws is read once it is open on it: tell the
+  // server once per message, so the job leaves the to-read state and the title row its
+  // unread mark on the next tick. A folded conversation draws none of it, so it is read
+  // only once the human opens it.
   const seenSent = new Set();
   function markSeen(job, sub) {
     const drawn = new Set([...dialog.querySelectorAll('.job-talk-convo[data-convo]:not(.is-folded)')].map((e) => e.dataset.convo));
-    const unread = wranglerUnread(job, sub || null).filter((m) => !seenSent.has(m.id) && drawn.has(m.convo));
+    const unread = convoGroups(job, sub || null).filter((g) => g.convo && drawn.has(g.convo.id)).flatMap((g) => unreadIn(g.convo, g.messages)).filter((m) => !seenSent.has(m.id));
     if (!unread.length) return;
     for (const m of unread) seenSent.add(m.id);
     send({ type: 'job-talk-seen', id: job.id, convos: [...new Set(unread.map((m) => m.convo))] });

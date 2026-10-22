@@ -386,6 +386,7 @@ export class JobStore {
       }
       if (action === 'dismiss-convo') {
         dismissConvo(j, payload.convo, Date.now());
+        if (j.replan && j.replan.convo === payload.convo) { if (j.replan.red) holdRed(j, j.replan.red.sub); discardReplan(j); }
         record(j, s, 'dismiss-convo', null, 'Dismissed a conversation with Wrangler');
         return;
       }
