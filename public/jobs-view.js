@@ -804,6 +804,10 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const items = sub.sessions.map((sid, i) => { const run = job.runs?.find((r) => r.sessionId === sid); return `<button type="button" data-step-session="${esc(sid)}">${ICONS.terminal}<span>${esc(PHASE_LABEL[run?.phase] || `Session ${i + 1}`)}${run?.startedAt ? ` · ${esc(when(run.startedAt))}` : ''}</span><span class="job-split-hint">${onBoard(sid) ? 'Open' : 'Restore'}</span></button>`; }).reverse().join('');
     return `<span class="job-split job-session-split">${button}<details class="job-split-more" data-keep="session-menu" ${openMore.has('session-menu') ? 'open' : ''}><summary aria-label="Open an earlier session of this step" title="Open an earlier session of this step">${ICONS.caret}</summary><div class="job-split-menu">${items}</div></details></span>`;
   };
+  // Squash is the default and says nothing; only a worker's explicit suggestion is drawn.
+  const mergeMethodOf = (sub) => (sub.pr ? sub.merge : sub.ready?.merge) || null;
+  const MERGE_METHOD_LABEL = { merge: 'a merge commit', rebase: 'a rebase' };
+  const mergeMethodHtml = (sub) => { const m = mergeMethodOf(sub); return m ? `<p class="job-merge-method">${ICONS.merge}<span><strong>Lands by ${esc(MERGE_METHOD_LABEL[m.method] || m.method)}, not squash.</strong> ${esc(m.why)}</span></p>` : ''; };
   const approvalNoteFor = (sub) => sub.approvalNote ? `<h3>Context for later steps</h3><p class="job-approval-note">${esc(sub.approvalNote)}</p>` : '';
   // What a whole-job cancel did and what it left: the sub-job nodes say Dropped
   // one by one, this is the sentence that says why all of them do.
@@ -1437,11 +1441,12 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       actions = retry;
     } else {
       body = `${sub.ready ? (hasProof(sub) ? proofListHtml(job, sub, { isOpen: (k) => openMore.has(k), ask: sub.stage === 'review' }) : `<h3>${sub.stage === 'review' ? 'Ready for review' : 'Verified'}</h3>${receiptHtml(sub.ready.checks)}`) : ''}${sub.stage === 'review' ? `${stoppedHtml(sub)}${historyHtml(job, sub, { open: openMore.has('history') })}` : ''}
+        ${sub.stage !== 'done' ? mergeMethodHtml(sub) : ''}
         ${sub.pr?.checks?.length ? `<h3>Checks</h3><ul class="job-checks">${sub.pr.checks.map((c) => `<li class="${checkTone(c.state)}">${checkMark(c.state)} ${esc(c.name)} <small>${esc(c.state.toLowerCase())}</small></li>`).join('')}</ul>` : ''}
         ${sub.pr ? commentsHtml(sub, commentsShown) : ''}
         ${sub.deploymentResult ? `<h3>Deployment pipelines</h3><ul class="job-checks">${sub.deploymentResult.runs.map((r) => `<li class="${checkTone(r.status)}">${checkMark(r.status)} ${link(r.url, r.workflow)} <small>${esc(r.status)}${r.supersedes ? ` · on ${esc(String(r.commit || '').slice(0, 8))}, which replaced the cancelled run` : ''}</small></li>`).join('')}</ul>` : ''}
         ${sub.deployed ? `<h3>Landed</h3>${receiptHtml(sub.deployed.checks)}` : ''}${noteFor(sub)}${approvalNoteFor(sub)}${refusalHtml(sub)}`;
-      actions = `${codeAwaitingReview(sub) && !sub.error && !held ? approveSplitHtml('approve-code', [hints.find((h) => h.startsWith('Uncommitted')) || '', sub.ready?.round ? `Approval is tied to round ${sub.ready.round}${sub.ready.treeHash ? ` and working tree ${sub.ready.treeHash.slice(0, 7)}` : ''}.` : ''].filter(Boolean).join(' · '), `Approve &amp; ${sub.pr ? 'push' : 'open PR'}`, 'pr') : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="Merge head ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
+      actions = `${codeAwaitingReview(sub) && !sub.error && !held ? approveSplitHtml('approve-code', [hints.find((h) => h.startsWith('Uncommitted')) || '', sub.ready?.round ? `Approval is tied to round ${sub.ready.round}${sub.ready.treeHash ? ` and working tree ${sub.ready.treeHash.slice(0, 7)}` : ''}.` : ''].filter(Boolean).join(' · '), `Approve &amp; ${sub.pr ? 'push' : 'open PR'}`, 'pr') : ''}${mergeApprovable(job, sub) && !held ? `<button class="primary" data-action="approve-merge" title="${mergeMethodOf(sub) ? `${esc(mergeMethodOf(sub).method === 'rebase' ? 'Rebase' : 'Merge-commit')} head` : 'Squash head'} ${esc((sub.pr.head || '').slice(0, 8))}">${ICONS.merge}Merge${n ? ` #${esc(n)}` : ''}</button>` : ''}
         ${sub.worktree && sub.stage !== 'done' ? reviewCodeHtml(sub) : ''}${session}${retry}${sub.cleanupRefusal && sub.cleanupRefusal.pinned !== false && sub.stage === 'cleanup' && !sub.discard ? `<button class="danger" id="job-discard">${ICONS.x}${sub.cleanupRefusal.cause === 'unremovable' ? 'Discard' : 'Discard anyway'}</button>` : ''}
         ${sub.recoveredBy ? `<button data-open-sub="${esc(sub.recoveredBy)}" title="${esc(hints.at(-1))}">${ICONS.wrench}Open fix sub-job</button>` : ''}`;
     }

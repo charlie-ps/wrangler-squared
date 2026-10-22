@@ -171,6 +171,12 @@ after it are held while you work.
   Exclude secrets and unrelated or generated files.
 - Push explicitly to your worktree branch on origin; never rely on an inherited
   upstream.
+- **Wrangler squash-merges every PR unless you say otherwise.** Keep squash
+  unless there is an explicit reason not to: the PR deliberately preserves
+  history (a main → next sync), its commits are meant to stay separate, or the
+  repository disallows squash. Only then add `merge:{method:"merge"|"rebase",
+  why:"one line"}` to your `ready` or `published` receipt; the board shows it
+  beside the PR before it merges.
 - **Look for an existing PR for the branch before creating one**, so a retried
   step doesn't open a duplicate.
 
