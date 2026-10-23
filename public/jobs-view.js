@@ -34,7 +34,7 @@ import { historyHtml } from './job-thread.js';
 import { replanAsks, latestAsk } from './replan-asks.js';
 import { runningChipHtml, stoppedHtml } from './job-running.js';
 import { pressBusy, isBusy, submitterOf } from './busy-button.js';
-import { guardOpen } from './dialog-backdrop.js';
+import { guardOpen, OPEN_GUARD_MS } from './dialog-backdrop.js';
 import { sessionsOf, sessionsListHtml, sessionsButtonHtml, sessionsCountLabel } from './job-sessions.js';
 import { EvidenceCache, hasProof, proofListHtml, proofViewerHtml, shotBoxHtml, proofItems, shotsOf, hydrateEvidence, showOf, proofRound } from './job-proof.js';
 // Mirrors server/jobs-schema.js MAX_SHOW.
@@ -465,20 +465,22 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       <div class="jobs-tools"><label class="jobs-ghost" title="Agents at once. Waiting for pipelines, dependencies and reviews uses none.">${ICONS.robot}<input id="jobs-concurrency" type="number" min="1" max="16" value="8" aria-label="Agents at once"></label><button id="jobs-pause" class="jobs-ghost"></button><button id="jobs-intro-open" class="jobs-icon" title="How Jobs works" aria-label="How Jobs works">${ICONS.info}</button><button id="jobs-settings" class="jobs-icon" title="Automation settings" aria-label="Automation settings">${ICONS.gear}</button><button class="jobs-newjob" id="job-new">${ICONS.plus}New idea</button></div></div>
       <nav class="jobs-rail" aria-label="Show jobs">${FILTERS.map(([key, label]) => `<button type="button" data-filter="${key}" aria-pressed="${key === filter}">${label}<span class="jobs-rail-n" ${key === 'needs' ? 'id="jobs-review-count"' : ''}></span></button>`).join('')}</nav></header>
     <div id="jobs-boards" class="jobs-plates" aria-live="polite"></div>
-    <section id="job-page" class="job-page" aria-label="Job" hidden><nav class="job-page-bar" aria-label="Where you are"></nav><div class="job-page-main"></div></section>`;
+    <section id="job-page" class="job-page" aria-label="Job" tabindex="-1" hidden><nav class="job-page-bar" aria-label="Where you are"></nav><div class="job-page-main"></div></section>`;
   // Outside #jobs-boards, so a graph tick's redraw never touches a half-typed idea.
   const idea = createIdeaCorner({ send });
   root.appendChild(idea.el);
   const q = (s) => root.querySelector(s);
-  // A job opens as a page in place of the board, under a bar with the way back; an idea not yet
-  // a job (`ideaOpen`) keeps the dialog. `detail` is whichever of the two is drawn on, and
-  // `pageAt` the job and step it is on.
-  // TODO(host-api view-path): the view's route is only #view=ext:jobs:board, so a reload or the browser's
-  // Back lands on the board, not on this job; a path in the hash handed to mount() would let it come back.
+  // A job opens as a page in place of the board, its card on the view's own background, under a trail
+  // that is its one way up (#320). A press that starts and ends off the card (the background around and
+  // below it) goes up a level like the old dialog's backdrop, as do Esc and the browser's Back.
+  // An idea not yet a job (`ideaOpen`) keeps the dialog. `detail` is whichever of the two is drawn on,
+  // and `pageAt` the job and step it is on.
+  // TODO(host-api view-path): the view's route is only #view=ext:jobs:board, so a reload lands on the
+  // board, not on this job; a path in the hash handed to mount() would let it come back.
   const page = q('#job-page'), bar = page.querySelector('.job-page-bar'), pageMain = page.querySelector('.job-page-main');
   wireDeps(pageMain);
   const markOpened = guardOpen(page, { now });
-  let detail = pageMain, pageAt = null, boardScroll = 0;
+  let detail = pageMain, pageAt = null, boardScroll = 0, pageOpenedAt = -Infinity, offPress = false;
   // A step's Sessions (`pageAt.sessions`, job-sessions.js): the card picked in its list, the host's
   // handle on the session panel it lends us (api.mountSession), and whether that panel's
   // Fullscreen folded the list away. What the head and list were last drawn as, so a tick
@@ -637,33 +639,86 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       return;
     }
     const entering = page.hidden;
-    if (entering) { boardScroll = scroller().scrollTop; page.hidden = false; root.classList.add('jobs-paging'); }
+    if (entering) { boardScroll = scroller().scrollTop; page.hidden = false; root.classList.add('jobs-paging'); pushPage(); }
     paintBar();
     detail.innerHTML = html;
     keepMore();
-    if (entering) { markOpened(); scroller().scrollTop = 0; bar.querySelector('[data-page-back]')?.focus({ preventScroll: true }); }
+    if (entering) { markOpened(); pageOpenedAt = now(); scroller().scrollTop = 0; focusPage(); }
   }
-  // Back is one level up (Sessions to its step, a step to its job, the job to the board); the trail jumps to any.
+  // Up is one level (Sessions to its step, a step to its job, the job to the board): Esc, the browser's
+  // Back, a click off the card, and the trail's last link. The trail jumps to any level; at a phone's width its middle folds
+  // into one … link up. Each level focuses the page itself, which draws no ring, so Tab reaches the trail first.
   const upTo = () => (pageAt?.sessions ? (pageAt.subId ? 'step' : 'job') : pageAt?.subId ? 'job' : 'board');
-  const BACK = { step: ['Step', 'Back to the step (Esc)'], job: ['Job', 'Back to the job (Esc)'], board: ['Jobs', 'Back to Jobs (Esc)'] };
+  const UP_HINT = { step: 'up to the step', job: 'up to the job', board: 'back to Jobs' };
+  const focusPage = () => page.focus({ preventScroll: true });
+  function goUp() {
+    const to = upTo();
+    if (to === 'board') return closePage();
+    openDetail(pageAt.jobId, to === 'step' ? pageAt.subId : ''); focusPage();
+  }
+  // One history entry (same URL, so core's hashchange never sees it) stands for the open page: Back pops it
+  // and goes up a level, re-pushing while a level is left; closing any other way pops it so Back is not wasted.
+  const win = document.defaultView;
+  const PAGE_STATE = 'jobs-page';
+  const pushPage = () => { if (win?.history && win.history.state?.[PAGE_STATE] !== true) win.history.pushState({ ...win.history.state, [PAGE_STATE]: true }, ''); };
+  win?.addEventListener('popstate', (e) => {
+    if (e.state?.[PAGE_STATE] || detail === modal || !paged() || !root.isConnected || root.closest('.hidden')) return;
+    goUp();
+    if (paged()) pushPage();
+  });
+  // Off the card: the view's background around and below it. Both ends of the press must land there, so a
+  // selection dragged out of the card never closes it, and a double-click that opened the page never does either.
+  const offCard = (e) => e.target === root || e.target === page;
+  root.addEventListener('mousedown', (e) => { offPress = e.button === 0 && paged() && detail === pageMain && offCard(e); });
+  root.addEventListener('click', (e) => {
+    const was = offPress; offPress = false;
+    if (was && offCard(e) && paged() && detail === pageMain && now() - pageOpenedAt >= OPEN_GUARD_MS) { goUp(); offCue(e); }
+  });
+  // What a click off the card does is said OUT there, never on the card: a light back arrow, fixed in
+  // the middle of whichever stretch of background the pointer is over (left or right of the card, below
+  // it, or between it and the trail), titled with where it goes.
+  const cue = document.createElement('div');
+  cue.className = 'job-off-cue'; cue.hidden = true; cue.setAttribute('aria-hidden', 'true'); cue.innerHTML = ICONS.back;
+  root.appendChild(cue);
+  const UP_CUE = { step: 'Up to the step', job: 'Up to the job', board: 'Back to Jobs' };
+  function offCue(e) {
+    const on = !!e && paged() && detail === pageMain && offCard(e);
+    cue.hidden = !on;
+    if (!on) { delete cue.dataset.side; return; }
+    cue.title = UP_CUE[upTo()];
+    const card = pageMain.getBoundingClientRect(), view = (root.closest('.ext-view') || root).getBoundingClientRect();
+    const top = Math.max(view.top, bar.getBoundingClientRect().bottom), bottom = Math.min(view.bottom, win?.innerHeight || view.bottom);
+    const x = e.clientX, y = e.clientY, midY = (top + bottom) / 2, midX = (card.left + card.right) / 2;
+    const [side, cx, cy] = x < card.left ? ['left', (view.left + card.left) / 2, midY]
+      : x > card.right ? ['right', (card.right + view.right) / 2, midY]
+      : y > card.bottom ? ['bottom', midX, (Math.max(card.bottom, top) + bottom) / 2]
+      : ['top', midX, (top + Math.min(card.top, bottom)) / 2];
+    cue.dataset.side = side;
+    cue.style.left = `${cx}px`; cue.style.top = `${cy}px`;
+  }
+  root.addEventListener('mousemove', offCue);
+  root.addEventListener('mouseleave', () => offCue(null));
   function paintBar() {
     const job = data.jobs.find((j) => j.id === pageAt?.jobId);
     const sub = job?.subJobs.find((s) => s.id === pageAt.subId);
-    const title = job?.title || 'Job', sessions = !!pageAt?.sessions;
+    const title = job?.title || 'Job', sessions = !!pageAt?.sessions, up = upTo();
     const crumbs = [['board', 'Jobs'], [sub || sessions ? 'job' : null, title], ...(sub ? [[sessions ? 'step' : null, sub.title]] : []), ...(sessions ? [[null, 'Sessions']] : [])];
-    const [label, hint] = BACK[upTo()];
-    const html = `<button type="button" class="job-page-back" data-page-back title="${hint}">${ICONS.back}<span>${label}</span></button>
-      <ol class="job-page-crumbs">${crumbs.map(([to, t]) => `<li>${to ? `<button type="button" data-page-crumb="${to}" title="${esc(t)}">${esc(t)}</button>` : `<span aria-current="page" title="${esc(t)}">${esc(t)}</span>`}</li>`).join('')}</ol>`;
+    const item = ([to, t], i) => `<li${i && i < crumbs.length - 1 ? ' class="job-page-mid"' : ''}>${to
+      ? `<button type="button" data-page-crumb="${to}"${to === up ? ' data-page-up' : ''} title="${to === 'board' ? 'Back to Jobs' : esc(t)}${to === up ? ' (Esc)' : ''}">${esc(t)}</button>`
+      : `<span aria-current="page" title="${esc(t)}">${esc(t)}</span>`}</li>`;
+    const fold = crumbs.length > 2 ? `<li class="job-page-fold"><button type="button" data-page-crumb="${up}" title="${UP_HINT[up]} (Esc)" aria-label="${UP_HINT[up]}">…</button></li>` : '';
+    const html = `<ol class="job-page-crumbs">${item(crumbs[0], 0)}${fold}${crumbs.slice(1).map((c, i) => item(c, i + 1)).join('')}</ol>
+      <span class="job-page-hint"><kbd>Esc</kbd> or click outside: ${UP_HINT[up]}</span>`;
     // Sessions repaints it on every tick; the same bar is left as it is, focus and all.
     if (bar.dataset.drawn !== html) { bar.innerHTML = html; bar.dataset.drawn = html; }
   }
   bar.onclick = (e) => {
-    const b = e.target.closest('[data-page-back], [data-page-crumb]');
+    const b = e.target.closest('[data-page-crumb]');
     if (!b) return;
-    const to = b.dataset.pageCrumb || upTo();
+    const to = b.dataset.pageCrumb;
     if (to === 'board') return closePage();
     openDetail(pageAt.jobId, to === 'step' ? pageAt.subId : '');
-    bar.querySelector('[data-page-back]')?.focus();
+    focusPage();
   };
   const keepMore = () => detail.querySelectorAll('details[data-keep]').forEach((d) => d.ontoggle = () => { if (d.open) openMore.add(d.dataset.keep); else openMore.delete(d.dataset.keep); });
   function forget() {
@@ -675,8 +730,9 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (page.hidden) return;
     releaseEmbed();
     pageMain.innerHTML = ''; bar.innerHTML = ''; delete bar.dataset.drawn;
-    page.hidden = true; root.classList.remove('jobs-paging');
+    page.hidden = true; root.classList.remove('jobs-paging'); offCue(null);
     (root.closest('.ext-view') || root).scrollTop = boardScroll;
+    if (win?.history?.state?.[PAGE_STATE]) win.history.back();
   }
   function closePage() {
     if (!paged()) return;
@@ -1409,8 +1465,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const done = job.stage === 'done' && !job.cancelledAt;
     const own = ideaOpen(job) ? '' : sessionsButtonHtml(sessionsOf(job, ''), { step: false });
     const buttons = fab || extra || own || tail ? `<div class="job-actions tone-${STATES[state].tone}">${fab}${extra}${own}${tail}</div>` : '';
-    const kicker = `<button class="job-back" data-close-job title="Back to Jobs">${ICONS.back}<span>Jobs</span></button>`;
-    return `${appbar(job.title, chips, kicker)}${eventHtml(job, null, more)}${budgetHtml(job)}${mainNoticeHtml(job)}${body}${conversationHtml(job)}${ask}
+    return `${appbar(job.title, chips)}${eventHtml(job, null, more)}${budgetHtml(job)}${mainNoticeHtml(job)}${body}${conversationHtml(job)}${ask}
       ${buttons || !done ? `<div class="job-detail-tail">${buttons}${done ? '' : footerHtml(job)}</div>` : ''}`;
   }
   // What a write's state means, in sentences: the chip's tooltip carries them all,
@@ -1518,7 +1573,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
       + (sub.pr ? `<a class="job-chip job-pipeline-status ${checkTone(sub.pr.checkStatus)}" ${/^https:\/\/github\.com\//.test(sub.pr.url || '') ? `href="${esc(sub.pr.url)}" target="_blank" rel="noopener noreferrer"` : ''} title="Pull request · checks ${esc(sub.pr.checkStatus)}${sub.pr.head ? ` · ${esc(sub.pr.head.slice(0, 8))}` : ''}">${ICONS.pr}<span>${n ? `#${esc(n)}` : 'PR'}</span></a>` : '')
       + (deploys ? chip(ICONS.rocket, sub.deploys.expected === false ? 'No deploy' : 'Deploys', { cls: 'job-deploys', title: deploys }) : '')
       + (sub.stage === 'review' ? runningChipHtml(sub, { open: openMore.has('running'), logs: runLogs.get(sub.id) }) : '');
-    const kicker = `<button class="job-back" data-open-job title="Back to the job">${ICONS.back}<span>${esc(job.title)}</span></button>`;
     // Primary only when a prompt waits and nothing else in the row is the step's next move: a bare
     // primary button is pulled to the front (jobs.css), ahead of Approve or Retry.
     const sessionRows = sessionsOf(job, sub.id);
@@ -1584,7 +1638,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const detailsOpen = openMore.has('details');
     if (session && /class="primary"/.test(actions.replace(session, ''))) actions = actions.replace(session, sessionsButtonHtml(sessionRows));
     if (!isWriteSub(sub)) actions += `<button type="button" class="job-details-toggle" data-details-toggle aria-expanded="${detailsOpen}">${ICONS.doc}Details</button>`;
-    return `${appbar(sub.title, chips, kicker, line)}${depsHtml(job, sub)}
+    return `${appbar(sub.title, chips, '', line)}${depsHtml(job, sub)}
       ${job.error && !sub.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${eventHtml(job, sub, more)}
       ${sub.observationError ? `<p class="job-error">${esc(sub.observationError)} · Retrying automatically</p>` : ''}${body}
       ${reviewing ? changeBoxHtml(job, sub) : ''}${actions.trim() ? `<div class="job-actions tone-${STATES[state].tone}">${actions}</div>` : ''}${reviewing ? '' : changeBoxHtml(job, sub)}
@@ -1729,16 +1783,14 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     if (!rows.some((r) => r.sid === sessionPick)) sessionPick = rows.at(-1).sid;
     const scope = `${job.id}|${sub?.id || ''}`, solo = rows.length === 1;
     const state = sub ? subState(job, sub) : jobState(job);
-    const kicker = `<button class="job-back" data-sessions-up title="Back to the ${sub ? 'step' : 'job'}">${ICONS.back}<span>${esc(sub?.title || job.title)}</span></button>`;
     const head = appbar('Sessions', stateChip(state, sub ? jobStatus(job, sub).text : jobLabel(job))
-      + chip(ICONS.terminal, sub ? sessionsCountLabel(rows.length) : `${rows.length} session${rows.length === 1 ? '' : 's'} · Wrangler’s own`, { cls: 'job-chip-quiet' }), kicker);
+      + chip(ICONS.terminal, sub ? sessionsCountLabel(rows.length) : `${rows.length} session${rows.length === 1 ? '' : 's'} · Wrangler’s own`, { cls: 'job-chip-quiet' }));
     const list = sessionsListHtml(rows, { selected: sessionPick, sessionOf, title: sub?.title || job.title, step: !!sub });
     let wrap = detail.querySelector('.job-sessions');
     if (wrap?.dataset.scope !== scope) {
       releaseEmbed();
       show(`<section class="job-sessions" data-scope="${esc(scope)}"><div class="job-sessions-head"></div><div class="job-mc"><div class="job-mc-list"></div><div class="job-mc-host"></div></div></section>`, { sessions: true });
       wrap = detail.querySelector('.job-sessions');
-      wrap.querySelector('.job-sessions-head').onclick = (e) => { if (e.target.closest('[data-sessions-up]')) openDetail(pageAt.jobId, pageAt.subId || ''); };
       const listEl = wrap.querySelector('.job-mc-list');
       listEl.onclick = (e) => { const b = e.target.closest('[data-pick-session]'); if (b) pickSession(b.dataset.pickSession); };
       listEl.onkeydown = (e) => {
@@ -1874,7 +1926,6 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     detail.querySelectorAll('[data-copy-path]').forEach((b) => b.onclick = () => copyPath(b));
     detail.querySelectorAll('[data-open-path]').forEach((b) => b.onclick = () => openPath(b));
     detail.querySelectorAll('[data-open-job]').forEach((b) => b.onclick = () => openDetail(job.id));
-    detail.querySelectorAll('[data-close-job]').forEach((b) => b.onclick = () => closePage());
     // A conversation opens on its title row, folding the one that was open, and the box
     // goes with it; open, its header folds it. × is for good (job-talk.js).
     detail.querySelectorAll('[data-convo-fold]').forEach((el) => el.onclick = (e) => {
@@ -2162,9 +2213,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     e.preventDefault();
     const more = detail.querySelector('.job-split-more[open]');
     if (more) { more.open = false; openMore.delete(more.dataset.keep); return more.querySelector('summary')?.focus(); }
-    const to = upTo();
-    if (to === 'board') return closePage();
-    openDetail(pageAt.jobId, to === 'step' ? pageAt.subId : ''); bar.querySelector('[data-page-back]')?.focus();
+    goUp();
   });
   render();
   // openDetail and closeDetail open a job, a step or its Sessions as a board card's click would, or go

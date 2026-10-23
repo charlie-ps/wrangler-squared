@@ -256,7 +256,7 @@ test('a step’s Sessions mount the latest card in the page through api.mountSes
   assert.ok(mounted[0].host === page.querySelector('.job-mc-host'));
   assert.match(page.querySelector('[data-pick-session="s2"]').textContent, /Working$/, 'its state read off the graph, off-board card and all');
   assert.match(page.querySelector('[data-pick-session="s1"]').textContent, /Archived/);
-  page.querySelector('[data-page-back]').click();
+  page.querySelector('[data-page-up]').click();
   page.querySelector('#job-diff').dispatchEvent(new window.Event('click', { bubbles: true }));
   assert.equal(mounted.at(-1).sid, 's2', 'Review code is the same Sessions, on the latest card');
   assert.deepEqual(opened, [], 'never out to the board');
