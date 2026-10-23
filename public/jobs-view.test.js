@@ -1815,6 +1815,52 @@ test('the chord fires a detail\u2019s primary action, and stops at a disabled or
   assert.equal(f.sent.length, before); assert.equal(!f.q('#job-page').hidden, true, 'the chord neither submits nor closes it');
 });
 
+test('unsent words in the wrangler box make the first chord outside it a hint, and a second one soon after fires the primary', (t) => {
+  const clock = { t: 1000 }, toasts = [];
+  const f = fixture(t, undefined, { now: () => clock.t, toast: (m) => toasts.push(m) }); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'head1', checkStatus: 'passing', checks: [] } }];
+  f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const text = f.q('.job-change textarea'), merge = () => f.q('[data-action="approve-merge"]');
+  const title = merge().title, label = merge().textContent.trim();
+  text.value = '   \n '; text.dispatchEvent(f.event('input'));
+  chord(f, f.q('#job-page'));
+  assert.equal(f.sent.at(-1).action, 'approve-merge', 'a blank box changes nothing');
+  assert.equal(toasts.length, 0);
+  release(merge());
+  let before = f.sent.length;
+  text.value = 'Rename the flag first'; text.dispatchEvent(f.event('input'));
+  assert.deepEqual([merge().disabled, merge().title], [false, title], 'the button is neither greyed nor retitled');
+  chord(f, f.q('#job-page'));
+  assert.equal(f.sent.length, before, 'the first chord fires nothing');
+  assert.equal(toasts.at(-1), `You have an unsent message to the wrangler. Press ⌘↵ again to ${label.charAt(0).toLowerCase()}${label.slice(1)} anyway`);
+  clock.t += 1500; chord(f, f.q('#job-page'));
+  assert.equal(f.sent.at(-1).action, 'approve-merge', 'a second chord soon after fires it');
+  assert.equal(toasts.length, 1);
+  release(merge()); before = f.sent.length;
+  clock.t += 1000; chord(f, f.q('#job-page'), { metaKey: false, ctrlKey: true });
+  assert.equal(f.sent.length, before, 'a fire disarms: the next chord asks again');
+  assert.match(toasts.at(-1), /Press Ctrl\+Enter again/, 'named as the key pressed');
+  clock.t += 10_000; chord(f, f.q('#job-page'));
+  assert.equal(f.sent.length, before, 'too late: it only asks again');
+  assert.equal(toasts.length, 3);
+  merge().click();
+  assert.equal(f.sent.at(-1).action, 'approve-merge', 'a click is deliberate and never asked');
+  assert.equal(toasts.length, 3);
+});
+
+test('the chord inside the wrangler box still sends the draft, with no hint', (t) => {
+  const toasts = [];
+  const f = fixture(t, undefined, { toast: (m) => toasts.push(m) }); const job = f.data.jobs[0]; job.stage = 'active';
+  job.subJobs = [{ ...sub('api'), stage: 'pr', pr: { url: 'https://github.com/org/repo/pull/1', head: 'head1', checkStatus: 'passing', checks: [] } }];
+  f.view.update(f.data); f.q('[data-sub="api"]').dispatchEvent(f.event('click'));
+  const text = f.q('.job-change textarea');
+  text.value = 'Rename the flag first'; text.dispatchEvent(f.event('input'));
+  chord(f, text);
+  assert.deepEqual([f.sent.at(-1).action, f.sent.at(-1).text], ['request-change', 'Rename the flag first']);
+  assert.ok(!f.sent.some((m) => m.action === 'approve-merge'));
+  assert.equal(toasts.length, 0);
+});
+
 test('a disabled primary stays disabled to the keyboard', (t) => {
   const f = fixture(t); const job = f.data.jobs[0];
   job.runs = [{ id: 'r1', phase: 'planning', stopped: false }]; f.view.update(f.data);
