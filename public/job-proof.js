@@ -164,11 +164,21 @@ export function shotBoxHtml(job, sub, box, cache) {
     <div class="job-shotbox-bar">${n > 1 ? `${go(-1, ICONS.back, 'Previous shot')}<b>${at + 1} of ${n}</b>${go(1, ICONS.next, 'Next shot')}` : ''}<span>${esc(file)} · Round ${Number(box.round) || 1}</span><button type="button" class="job-shotbox-btn" data-shotbox-close aria-label="Close" title="Close (Esc)">${ICONS.x}</button></div></div>`;
 }
 
-// The board plate's filmstrip: the first shots of what is waiting to be verified.
+// Where each file opens in the step's viewer ({ i, j } of proofViewerHtml): the
+// first item and shot naming it, since filmFiles drops a file named again.
+export function filmSpots(sub) {
+  const spots = new Map();
+  proofItems(sub).forEach((p, i) => shotsOf(p).forEach((s, j) => { if (!spots.has(s.file)) spots.set(s.file, { i, j }); }));
+  return spots;
+}
+// The board plate's filmstrip: the first shots of what is waiting to be verified,
+// each opening the step's viewer on itself, and +N on the first shot not drawn.
 export function filmHtml(job, sub) {
   const files = filmFiles(sub), total = proofItems(sub).reduce((n, p) => n + shotsOf(p).length, 0);
   if (!files.length) return '';
-  return `<div class="job-plate-film" aria-hidden="true">${files.map((f) => thumbHtml(job, sub, f)).join('')}${total > files.length ? `<small>+${total - files.length}</small>` : ''}</div>`;
+  const spots = filmSpots(sub), more = [...spots].find(([f]) => !files.includes(f))?.[1] || spots.get(files[0]);
+  const shot = (at, label, body, cls = '') => `<button type="button" class="job-plate-shot${cls}" data-film="${at.i}:${at.j}" data-film-job="${esc(job.id)}" data-film-sub="${esc(sub.id)}" title="${label}" aria-label="${label}">${body}</button>`;
+  return `<div class="job-plate-film">${files.map((f, k) => shot(spots.get(f), `Open this shot (${k + 1} of ${total})`, thumbHtml(job, sub, f))).join('')}${total > files.length ? shot(more, `Open the other ${total - files.length} shots`, `<small>+${total - files.length}</small>`, ' more') : ''}</div>`;
 }
 
 // Fill every evidence slot under `root` from the cache and ask the server for what
