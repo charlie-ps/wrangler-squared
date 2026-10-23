@@ -357,11 +357,24 @@ export const isChatSendKey = (e) => e.key === 'Enter' && !e.altKey && !e.shiftKe
 // behave exactly as the click does — or, on a detail, the lone primary
 // [data-action]. A confirmation whose only buttons are destructive (Drop, Cancel
 // job) has neither and stays keyboard-inert: those are for the mouse to say.
-export function primaryAction(surface) {
+const primaryButton = (surface) => {
   const form = surface.querySelector('form');
-  const button = form ? form.querySelector('button.primary:not([type="button"])') : surface.querySelector('button.primary[data-action]');
+  return form ? form.querySelector('button.primary:not([type="button"])') : surface.querySelector('button.primary[data-action]');
+};
+export function primaryAction(surface) {
+  const button = primaryButton(surface);
   if (!button || button.disabled) return null;
+  const form = surface.querySelector('form');
   return form ? () => form.requestSubmit(button) : () => button.click();
+}
+// Unsent words in a wrangler box would be skipped by the primary, so the first
+// chord outside the box only says so and a second within PRESS_AGAIN_MS fires it.
+// A click is deliberate and never asked; the hint names the key that was pressed.
+export const PRESS_AGAIN_MS = 4000;
+export const hasDraft = (dialog) => [...dialog.querySelectorAll('.job-change textarea')].some((t) => t.value.trim());
+export function pressAgainHint(dialog, e) {
+  const label = primaryButton(dialog)?.textContent.trim() || 'continue';
+  return `You have an unsent message to the wrangler. Press ${e.metaKey ? '⌘↵' : 'Ctrl+Enter'} again to ${label.charAt(0).toLowerCase()}${label.slice(1)} anyway`;
 }
 
 const MAX_ASK_IMAGES = 4;
@@ -376,6 +389,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   // Ideas on the board at the last render, and those forming into a job since (id → { start, ms, stage }):
   // `stage` is the idea's sky as last drawn, so the painted cloud is kept rather than drawn again.
   let ideasShown = new Set();
+  let chordArmed = 0;
   const forming = new Map();
   let filter = 'all', selected = null, planDraft = null, revision = null, basePlan = null, writeEdit = null;
   // A story create in review: its summary and fields as the panel holds them,
@@ -653,7 +667,7 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   };
   const keepMore = () => detail.querySelectorAll('details[data-keep]').forEach((d) => d.ontoggle = () => { if (d.open) openMore.add(d.dataset.keep); else openMore.delete(d.dataset.keep); });
   function forget() {
-    shotZoom?.close(); releaseSkies(detail); releaseEmbed(); sessionPick = null;
+    chordArmed = 0; shotZoom?.close(); releaseSkies(detail); releaseEmbed(); sessionPick = null;
     ideaEdit = null; ideaSent = null; ideaFiring = null; ideaSeen = null; selected = null; pageAt = null; planDraft = null; proofView = null; askDraft = null; replyTo.clear(); boxDrafts.clear(); clearAskImages(); clearAskSent(); commentsShown.clear(); openDeps.clear(); openShow.clear(); openTickets.clear(); openMore.clear(); resetFlags();
     detailShown = null;
   }
@@ -2131,6 +2145,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
     const run = primaryAction(surface);
     if (!run) return;
     e.preventDefault();
+    if (hasDraft(surface) && !(chordArmed && now() - chordArmed < PRESS_AGAIN_MS)) { chordArmed = now(); toast(pressAgainHint(surface, e)); return; }
+    chordArmed = 0;
     run();
   };
   modal.addEventListener('keydown', onKey(modal));
