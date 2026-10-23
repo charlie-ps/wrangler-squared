@@ -3491,6 +3491,27 @@ test('the board plate says Ready to verify with a filmstrip, only for a sub-job 
   assert.equal(f.q('[data-board="job1"] .job-plate-film'), null);
 });
 
+test('a plate thumbnail opens its step\'s proof viewer on that shot, +N on the first shot left out, and the rest of the plate still opens the job', (t) => {
+  const f = fixture(t); const job = f.data.jobs[0]; job.stage = 'active';
+  const pic = (file) => ({ file, mime: 'image/png', at: 1700000000000 });
+  job.subJobs = [proofSub({ show: [], ready: { round: 1, receiptId: 'run_1', checks: ['A', 'B'], proof: [{ text: 'A', shots: [pic('a.png')] }, { text: 'B', shots: ['b', 'c', 'd', 'e'].map((n) => pic(`${n}.png`)) }] } })];
+  f.view.update(f.data);
+  const thumbs = () => f.q('[data-board="job1"]').querySelectorAll('.job-plate-film button');
+  assert.equal(thumbs().length, 4, 'three shots and +2');
+  assert.equal(thumbs()[1].getAttribute('title'), 'Open this shot (2 of 5)');
+  thumbs()[1].click();
+  assert.match(f.q('#job-page .job-proof-viewer .job-proof-stage').dataset.evFile, /^b\.png$/, 'the second thumbnail opens on b.png');
+  assert.match(f.q('#job-page h2').textContent, /Shown working · 2 of 2/);
+  assert.ok(f.q('#job-page .job-proof-pick.sel[data-proof-shot="0"]'));
+  f.q('[data-proof-back]').click();
+  f.view.update(f.data);
+  thumbs()[3].click();
+  assert.equal(f.q('#job-page .job-proof-stage').dataset.evFile, 'd.png', '+N opens the first shot not drawn');
+  f.view.update(f.data);
+  f.q('[data-board="job1"] .job-plate-stub').click();
+  assert.equal(f.q('#job-page .job-proof-viewer'), null, 'the stub still opens the job page');
+});
+
 // --- Design B step 2: the session stays open after ready ---
 
 const parkedJob = (f, extra = {}, subExtra = {}) => {

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { showOf, shotsOf, proofItems, hasProof, proofSummary, summaryText, alsoChecked, verdictOf, verdictText, filmFiles, proofListHtml, proofViewerHtml, shotBoxHtml, shotButtonHtml, filmHtml, hydrateEvidence, EvidenceCache } from './job-proof.js';
+import { showOf, shotsOf, proofItems, hasProof, proofSummary, summaryText, alsoChecked, verdictOf, verdictText, filmFiles, filmSpots, proofListHtml, proofViewerHtml, shotBoxHtml, shotButtonHtml, filmHtml, hydrateEvidence, EvidenceCache } from './job-proof.js';
 
 const job = { id: 'job1' };
 const shot = (file, extra = {}) => ({ file, mime: 'image/png', at: 1700000000000, url: 'http://localhost:5174/audit', viewport: '1280x800', tool: 'Playwright', ...extra });
@@ -166,6 +166,15 @@ test('the plate filmstrip is the first three shots and how many more there are',
   const many = sub({ ready: { round: 1, checks: ['A'], proof: [{ text: 'A', shots: ['1', '2', '3', '4'].map((n) => shot(`${n}.png`)) }] } });
   assert.match(filmHtml(job, many), /<small>\+1<\/small>/);
   assert.equal(filmHtml(job, sub({ ready: { round: 1, checks: ['x'], proof: [{ text: 'x', couldNot: 'no' }] } })), '', 'no shots, no strip');
+});
+
+test('each filmstrip thumbnail opens the step\'s viewer on its own shot, and +N on the first shot not drawn', () => {
+  const html = filmHtml(job, sub());
+  assert.deepEqual([...html.matchAll(/<button type="button" class="job-plate-shot" data-film="(\d+:\d+)" data-film-job="job1" data-film-sub="api" title="Open this shot/g)].map((m) => m[1]), ['0:0', '1:0', '1:1'], 'l.png, f.png, f2.png in viewer order');
+  assert.doesNotMatch(html, /<(div|button)[^>]*aria-hidden/, 'the strip and its buttons are not hidden');
+  const dup = sub({ ready: { round: 1, checks: ['A', 'B'], proof: [{ text: 'A', shots: [shot('a.png')] }, { text: 'B', shots: [shot('a.png'), shot('b.png'), shot('c.png'), shot('d.png')] }] }, show: [] });
+  assert.deepEqual(Object.fromEntries(filmSpots(dup)), { 'a.png': { i: 0, j: 0 }, 'b.png': { i: 1, j: 1 }, 'c.png': { i: 1, j: 2 }, 'd.png': { i: 1, j: 3 } }, 'a file named again opens where it first appears');
+  assert.match(filmHtml(job, dup), /data-film="1:3"[^>]*title="Open the other 2 shots"[^>]*><small>\+2<\/small><\/button>/, '+N opens the first shot the strip left out');
 });
 
 test('hydrating fills a slot from the cache and asks the server once per round for what it lacks', async (t) => {

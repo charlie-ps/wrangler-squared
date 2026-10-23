@@ -1696,6 +1696,12 @@ body.light .job-dialog:not([data-scheme="dark"]) :is(.job-pick,.pick-cabinet) { 
 .job-plate-film .job-proof-thumb { flex:1; min-width:0; aspect-ratio:16/10; border-radius:5px; background:color-mix(in srgb, var(--bg) 80%, transparent); }
 .job-plate-film .job-proof-thumb svg { width:14px; height:14px; }
 .job-plate-film small { align-self:center; font-size:10px; color:var(--fg-muted); padding-left:2px; }
+.job-plate-shot { flex:1; min-width:0; display:flex; padding:0; margin:0; border:0; border-radius:5px; background:none; color:inherit; font:inherit; cursor:pointer; }
+.job-plate-shot.more { flex:none; align-self:center; }
+.job-plate-shot .job-proof-thumb { transition:border-color .15s, box-shadow .15s; }
+.job-plate-shot:is(:hover,:focus-visible) .job-proof-thumb { border-color:var(--fg); box-shadow:0 0 0 1px var(--fg); }
+.job-plate-shot.more:is(:hover,:focus-visible) small { color:var(--fg); text-decoration:underline; }
+.job-plate-shot:focus-visible { outline:none; }
 .job-plate-film + .job-plate-stub { margin-top:0; }
 
 /* The conversation under a Code review step (job-thread.js). */
