@@ -2063,6 +2063,8 @@ export function initJobsView({ send, stageImage, frameOf = sourceToFrame, getAge
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !placePop.hidden) closePlacePop(); }, true);
   q('#jobs-boards').onclick = (e) => {
     const chip = e.target.closest('[data-place]'); if (chip) return openPlacePop(chip);
+    const film = e.target.closest('[data-film]');
+    if (film) { const [i, j] = film.dataset.film.split(':').map(Number); openDetail(film.dataset.filmJob, film.dataset.filmSub); proofView = { i, j }; return renderDetail(); }
     const go = e.target.closest('[data-ask]');
     // One click per decision: a sent one holds the stub busy until the next tick redraws it.
     if (go) { if (askActs(go.dataset.ask)) { if (!pressBusy(go, { also: go.parentElement.querySelectorAll('button') })) return; boardHtml = null; } return runAsk(go.dataset.job, go.dataset.sub, go.dataset.ask, go.dataset.session); }
