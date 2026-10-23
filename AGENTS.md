@@ -451,10 +451,21 @@ text as public as the rest of this repo.
   vendored) rather than from the board by absolute URL, so the same files load
   under node for `public/*.test.js`. Don't switch them to `/util.js`.
 - **A job is a page, not a dialog** (`public/jobs-view.js` `page`, `#job-page` in
-  `#jobs`): opening one hides the board (`#jobs.jobs-paging`) under a sticky bar
-  with Back and the trail Jobs › job › step; Back and Esc go up one level (Esc
-  first closes an open split popup), and a finished action that closed the old dialog goes up one
-  level too (`up`). `detail` is the old dialog body, so its CSS is
+  `#jobs`, #320): opening one hides the board (`#jobs.jobs-paging`) and draws the job's card on
+  the view's own background (a style's wallpaper shows once, around it; never a board or sheet
+  behind it) under a sticky trail Jobs › job › step › Sessions. The trail is the ONE way up: no
+  Back pill, no `.job-back` kicker over a heading (the proof viewer's own back is a view inside a
+  step, not a level). Its last link (`data-page-up`) is one level up; each level focuses the page
+  itself (no ring, Tab reaches the trail first); at a phone's width (720px) its middle folds into
+  one … link up (`.job-page-fold`). Esc goes up one level (first closing an open split popup), as
+  does the browser's Back: the open page holds ONE same-URL history entry (`jobs-page` state, so
+  core's hashchange never sees it), popped and re-pushed per level, and popped by any other close.
+  A finished action that closed the old dialog goes up one level too (`up`). A press that starts
+  and ends off the card (`#jobs` or `#job-page` itself: the background around and below it) goes up
+  one level too, held for `OPEN_GUARD_MS` after opening; hovering there says so OUTSIDE the card
+  (`offCue`: the pointer, and a light back arrow fixed mid-way along the stretch of background it is
+  over, left, right, below or above the card; it never follows the pointer, and the card itself
+  never changes). Closing focuses the job's plate. `detail` is the old dialog body, so its CSS is
   `:is(.job-dialog,.job-page)`. An idea not yet a job (`ideaOpen`: in conversation or
   in the backlog, no plan) still opens on `#job-dialog`, as do New idea, Automation
   settings and a plate's Cancel; `show` moves it onto the page once it has a plan.
